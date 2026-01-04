@@ -85,7 +85,7 @@ async function connectToWA() {
         ownerNumber[0] + "@s.whatsapp.net",
         {
           image: {
-            url: "https://github.com/nadithmalindu-source/Malindu-AI-BOT/blob/main/image/Gemini_Generated_Image_unjbleunjbleunjb.png?raw=true"
+            url: "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_unjbleunjbleunjb.png"
           },
           caption: "MALIYA-MD connected successfully ⚡"
         }
