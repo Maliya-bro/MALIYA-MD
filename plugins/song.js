@@ -1,6 +1,7 @@
+// plugins/song.js  (FINAL – repo‑compatible, buttons added)
+
 const { cmd } = require("../command");
 const yts = require("yt-search");
-const { ytmp3 } = require("@vreden/youtube_scraper");
 
 cmd(
   {
@@ -10,73 +11,56 @@ cmd(
     category: "download",
     filename: __filename,
   },
-  async (bot, mek, m, { from, body, q, reply }) => {
+  async (bot, mek, m, { from, q, reply }) => {
     try {
-      if (!q) return reply("❌ *Please provide a song name or YouTube link*");
+      if (!q) return reply("❌ *Please provide a song name*");
 
-      // Search YouTube
       const search = await yts(q);
       const data = search.videos[0];
-      if (!data) return reply("❌ *No results found!*");
+      if (!data) return reply("❌ *Song not found*");
 
-      // Song info
-      const desc = `
-🎬 *Title:* ${data.title}
-⏱️ *Duration:* ${data.timestamp}
-👀 *Views:* ${data.views.toLocaleString()}
-🔗 *Watch:* ${data.url}
-      `;
-
-      // Prepare buttons
-      const buttons = [
-        {
-          buttonId: `getSong|${data.url}`,
-          buttonText: { displayText: "🎵 Get Song" },
-          type: 1,
-        },
-      ];
-
-      const buttonMessage = {
-        image: { url: data.thumbnail },
-        caption: desc,
-        footer: "MALIYA-MD Bot 🎶",
-        buttons: buttons,
-        headerType: 4, // 4 = image header
+      global.songCache = global.songCache || {};
+      global.songCache[from] = {
+        url: data.url,
+        title: data.title,
       };
 
-      await bot.sendMessage(from, buttonMessage, { quoted: mek });
+      const caption = `
+🎵 *Title:* ${data.title}
+⏱️ *Duration:* ${data.timestamp}
+👀 *Views:* ${data.views.toLocaleString()}
+📅 *Uploaded:* ${data.ago}
+`;
+
+      await bot.sendMessage(
+        from,
+        {
+          image: { url: data.thumbnail },
+          caption,
+          footer: "MALIYA‑MD SONG",
+          buttonText: "Click Here ↴",
+          sections: [
+            {
+              title: "DOWNLOAD OPTIONS",
+              rows: [
+                {
+                  title: "🎧 Get Audio File",
+                  description: "MP3 audio format",
+                  rowId: "song_audio",
+                },
+                {
+                  title: "📁 Get Document File",
+                  description: "MP3 as document",
+                  rowId: "song_doc",
+                },
+              ],
+            },
+          ],
+        },
+        { quoted: mek }
+      );
     } catch (e) {
-      console.log(e);
-      reply(`❌ *Error:* ${e.message}`);
-    }
-  }
-);
-
-// Separate handler for button click
-cmd(
-  {
-    pattern: "getSong",
-    desc: "Download song from button",
-    filename: __filename,
-    category: "download",
-  },
-  async (bot, mek, m, { from, body, args, reply }) => {
-    try {
-      const url = args[0];
-      if (!url) return reply("❌ *URL not found!*");
-
-      const quality = "192";
-      const songData = await ytmp3(url, quality);
-
-      await bot.sendMessage(from, {
-        document: { url: songData.download.url },
-        mimetype: "audio/mpeg",
-        fileName: `${songData.title}.mp3`,
-        caption: "🎶 *Here is your song!*",
-      });
-    } catch (e) {
-      console.log(e);
-      reply(`❌ *Error:* ${e.message}`);
+      reply("❌ *Error occurred*");
     }
   }
 );
