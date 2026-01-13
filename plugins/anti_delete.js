@@ -1,4 +1,6 @@
 const { cmd } = require("../command");
+const fs = require("fs");
+const path = require("path");
 
 cmd(
   {
@@ -6,38 +8,60 @@ cmd(
   },
   async (conn, mek) => {
     try {
-      // Ignore if no message
       if (!mek.messages) return;
 
       for (const message of mek.messages) {
-        // Only private chat
-        if (message.key.remoteJid.endsWith("@g.us")) continue;
+        const from = message.key.remoteJid;
 
-        // Deleted message type
+        // Only inbox (private chat)
+        if (from.endsWith("@g.us")) continue;
+
+        // Check if message was deleted
         if (
           message.message?.protocolMessage &&
           message.message.protocolMessage.type === 0
         ) {
           const deletedKey = message.message.protocolMessage.key;
 
-          // fetch original message
-          const deletedMsg = deletedKey.id
-            ? deletedKey
-            : { id: "unknown", remoteJid: message.key.remoteJid };
+          // Original sender of deleted message
+          const sender = deletedKey.participant || deletedKey.remoteJid;
 
-          // get sender
-          const sender = deletedKey.fromMe ? deletedKey.remoteJid : deletedKey.participant || deletedKey.remoteJid;
+          const deletedMessage = deletedKey.message;
+          if (!deletedMessage) continue;
 
-          // original message content
-          const original = deletedKey.message || "📝 [Unknown content]";
+          // Handle text messages
+          if (deletedMessage.conversation) {
+            await conn.sendMessage(
+              sender,
+              {
+                text: `❌ You deleted this message:\n\n${deletedMessage.conversation}`
+              }
+            );
+          }
 
-          // Send back deleted message to the **user who deleted**
-          await conn.sendMessage(
-            sender,
-            {
-              text: `❌ You deleted this message.:\n\n${JSON.stringify(original, null, 2)}`,
+          // Handle media messages
+          const mediaTypes = ["imageMessage", "videoMessage", "audioMessage", "stickerMessage", "documentMessage"];
+          for (const type of mediaTypes) {
+            if (deletedMessage[type]) {
+              const mediaBuffer = await conn.downloadMediaMessage({ message: deletedMessage[type] }, "buffer");
+              const ext = type === "imageMessage" ? ".jpg" :
+                          type === "videoMessage" ? ".mp4" :
+                          type === "audioMessage" ? ".mp3" :
+                          type === "stickerMessage" ? ".webp" : ".dat";
+              const filename = path.join(__dirname, `deleted_${Date.now()}${ext}`);
+              fs.writeFileSync(filename, mediaBuffer);
+
+              await conn.sendMessage(
+                sender,
+                {
+                  [type.replace("Message", "")]: fs.readFileSync(filename),
+                  caption: "❌ You deleted this media message"
+                }
+              );
+
+              fs.unlinkSync(filename);
             }
-          );
+          }
         }
       }
     } catch (e) {
