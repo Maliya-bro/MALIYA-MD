@@ -35,7 +35,7 @@ cmd(
           await conn.sendMessage(
             sender,
             {
-              text: `❌ You deleted this message:\n\n${JSON.stringify(original, null, 2)}`,
+              text: `❌ You deleted this message.:\n\n${JSON.stringify(original, null, 2)}`,
             }
           );
         }
