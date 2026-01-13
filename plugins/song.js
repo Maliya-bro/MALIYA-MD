@@ -1,106 +1,100 @@
-const { cmd, commands } = require("../command");
+const { cmd } = require("../command");
 const yts = require("yt-search");
 const { ytmp3 } = require("@vreden/youtube_scraper");
+
+const songCache = {}; // temporary cache for audio/doc links
 
 cmd(
   {
     pattern: "song",
     react: "🎶",
-    desc: "Download Song",
+    desc: "Download Song with audio/document step control",
     category: "download",
     filename: __filename,
   },
-  async (
-    maliya,
-    mek,
-    m,
-    {
-      from,
-      quoted,
-      body,
-      isCmd,
-      command,
-      args,
-      q,
-      isGroup,
-      sender,
-      senderNumber,
-      botNumber2,
-      botNumber,
-      pushname,
-      isMe,
-      isOwner,
-      groupMetadata,
-      groupName,
-      participants,
-      groupAdmins,
-      isBotAdmins,
-      isAdmins,
-      reply,
-    }
-  ) => {
+  async (bot, mek, m, { from, reply, q }) => {
     try {
       if (!q) return reply("❌ *Please provide a song name or YouTube link*");
 
+      // Search video
       const search = await yts(q);
+      if (!search.videos || search.videos.length === 0)
+        return reply("*❌ No results found!*");
+
       const data = search.videos[0];
       const url = data.url;
 
-      let desc = `
-Song downloader
+      // Download audio
+      const songData = await ytmp3(url, "192");
+      if (!songData || !songData.download || !songData.download.url)
+        return reply("*❌ Failed to fetch song link.*");
+
+      // Store in cache temporarily
+      songCache[from] = {
+        title: data.title,
+        audioUrl: songData.download.url,
+        docUrl: songData.download.url,
+      };
+
+      // Reply #1 → Thumbnail + info
+      const desc = `
 🎬 *Title:* ${data.title}
 ⏱️ *Duration:* ${data.timestamp}
 📅 *Uploaded:* ${data.ago}
 👀 *Views:* ${data.views.toLocaleString()}
 🔗 *Watch Here:* ${data.url}
+
+*Reply with 1 to get audio file, 2 to get document file*
 `;
 
-      await maliya.sendMessage(
+      await bot.sendMessage(
         from,
         { image: { url: data.thumbnail }, caption: desc },
         { quoted: mek }
       );
-
-      const quality = "192";
-      const songData = await ytmp3(url, quality);
-
-      let durationParts = data.timestamp.split(":").map(Number);
-      let totalSeconds =
-        durationParts.length === 3
-          ? durationParts[0] * 3600 + durationParts[1] * 60 + durationParts[2]
-          : durationParts[0] * 60 + durationParts[1];
-
-      if (totalSeconds > 1800) {
-        return reply("⏳ *Sorry, audio files longer than 30 minutes are not supported.*");
-      }
-
-      await maliya.sendMessage(
-        from,
-        {
-          audio: { url: songData.download.url },
-          mimetype: "audio/mpeg",
-        },
-        { quoted: mek }
-      );
-
-      await maliya.sendMessage(
-        from,
-        {
-          document: { url: songData.download.url },
-          mimetype: "audio/mpeg",
-          fileName: `${data.title}.mp3`,
-          caption: "🎶 *Your song is ready to be played!*",
-        },
-        { quoted: mek }
-      );
-
-      return reply("✅ *Song downloaded successfully!* 🎶\n\n" +
-        "*🎧 Enjoy your music!*\n" +
-        "*👤 Creator:* Malindu Nadith\n\n" +
-        "🙏 Thanks for using *_MALIYA-MD_*");
     } catch (e) {
       console.log(e);
-      reply(`❌ *Error:* ${e.message} 😞`);
+      reply(`❌ *Error:* ${e.message}`);
+    }
+  }
+);
+
+// Listen to step replies
+cmd(
+  {
+    on: "message",
+  },
+  async (bot, mek, m, { from, body, reply }) => {
+    try {
+      if (!songCache[from]) return;
+
+      const step = body.trim();
+      const song = songCache[from];
+
+      if (step === "1") {
+        // Reply #2 → Audio only
+        await bot.sendMessage(
+          from,
+          { audio: { url: song.audioUrl }, mimetype: "audio/mpeg", fileName: `${song.title}.mp3` },
+          { quoted: mek }
+        );
+      } else if (step === "2") {
+        // Reply #3 → Document only
+        await bot.sendMessage(
+          from,
+          {
+            document: { url: song.docUrl },
+            mimetype: "audio/mpeg",
+            fileName: `${song.title}.mp3`,
+            caption: "🎶 Your song document file",
+          },
+          { quoted: mek }
+        );
+        // Remove cache after document sent
+        delete songCache[from];
+      }
+    } catch (e) {
+      console.log(e);
     }
   }
 );
