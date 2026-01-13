@@ -1,8 +1,8 @@
 const { cmd } = require("../command");
 const yts = require("yt-search");
-const { ytmp3 } = require("@vreden/youtube_scraper");
+const ytdl = require("ytdl-core");
 
-const songCache = {}; // temporary cache for audio/doc links
+const songCache = {}; // temporary cache for step replies
 
 cmd(
   {
@@ -16,40 +16,50 @@ cmd(
     try {
       if (!q) return reply("❌ *Please provide a song name or YouTube link*");
 
-      // Search video
-      const search = await yts(q);
-      if (!search.videos || search.videos.length === 0)
-        return reply("*❌ No results found!*");
+      // Check if direct YouTube link or search term
+      let url = q.match(/(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+/);
+      let videoInfo;
 
-      const data = search.videos[0];
-      const url = data.url;
+      if (url) {
+        // Direct link
+        videoInfo = await ytdl.getInfo(q);
+      } else {
+        // Search YouTube
+        const search = await yts(q);
+        if (!search.videos || search.videos.length === 0)
+          return reply("*❌ No results found!*");
 
-      // Download audio
-      const songData = await ytmp3(url, "192");
-      if (!songData || !songData.download || !songData.download.url)
-        return reply("*❌ Failed to fetch song link.*");
+        const data = search.videos[0];
+        url = data.url;
+        videoInfo = await ytdl.getInfo(url);
+      }
 
-      // Store in cache temporarily
+      const title = videoInfo.videoDetails.title;
+      const lengthSec = parseInt(videoInfo.videoDetails.lengthSeconds);
+      if (lengthSec > 1800)
+        return reply("⏳ *Sorry, audio files longer than 30 minutes are not supported.*");
+
+      const thumbnail = videoInfo.videoDetails.thumbnails.slice(-1)[0].url;
+
+      // Store in cache
       songCache[from] = {
-        title: data.title,
-        audioUrl: songData.download.url,
-        docUrl: songData.download.url,
+        title,
+        url,
       };
 
-      // Reply #1 → Thumbnail + info
+      // Reply #1 → thumbnail + info
       const desc = `
-🎬 *Title:* ${data.title}
-⏱️ *Duration:* ${data.timestamp}
-📅 *Uploaded:* ${data.ago}
-👀 *Views:* ${data.views.toLocaleString()}
-🔗 *Watch Here:* ${data.url}
+🎬 *Title:* ${title}
+⏱️ *Duration:* ${Math.floor(lengthSec / 60)}:${lengthSec % 60}
+👤 *Uploader:* ${videoInfo.videoDetails.author.name}
+🔗 *Watch Here:* ${url}
 
 *Reply with 1 to get audio file, 2 to get document file*
 `;
 
       await bot.sendMessage(
         from,
-        { image: { url: data.thumbnail }, caption: desc },
+        { image: { url: thumbnail }, caption: desc },
         { quoted: mek }
       );
     } catch (e) {
@@ -71,26 +81,37 @@ cmd(
       const step = body.trim();
       const song = songCache[from];
 
+      if (!song) return;
+
       if (step === "1") {
-        // Reply #2 → Audio only
-        await bot.sendMessage(
-          from,
-          { audio: { url: song.audioUrl }, mimetype: "audio/mpeg", fileName: `${song.title}.mp3` },
-          { quoted: mek }
-        );
-      } else if (step === "2") {
-        // Reply #3 → Document only
+        // Reply #2 → audio only
         await bot.sendMessage(
           from,
           {
-            document: { url: song.docUrl },
+            audio: {
+              url: song.url,
+            },
+            mimetype: "audio/mpeg",
+            fileName: `${song.title}.mp3`,
+          },
+          { quoted: mek }
+        );
+      } else if (step === "2") {
+        // Reply #3 → document only
+        await bot.sendMessage(
+          from,
+          {
+            document: {
+              url: song.url,
+            },
             mimetype: "audio/mpeg",
             fileName: `${song.title}.mp3`,
             caption: "🎶 Your song document file",
           },
           { quoted: mek }
         );
-        // Remove cache after document sent
+
+        // Remove cache
         delete songCache[from];
       }
     } catch (e) {
