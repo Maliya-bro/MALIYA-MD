@@ -73,7 +73,7 @@ cmd({
         await conn.sendMessage(
             from,
             {
-                image: { url: config.MENU_IMAGE_URL || 'https://github.com/nadithmalindu-source/Malindu-AI-BOT/blob/main/image/Gemini_Generated_Image_unjbleunjbleunjb.png?raw=true' },
+                image: { url: config.MENU_IMAGE_URL || 'https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_unjbleunjbleunjb.png?raw=true' },
                 caption: menuText,
                 contextInfo: {
                     mentionedJid: [m.sender],
