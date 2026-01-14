@@ -39,6 +39,7 @@
     "@xaviabot/fb-downloader": "latest",
     "@vreden/youtube_scraper": "latest",
     "yt-search": "latest",
-    "ytdl-core": "latest"
+    "ytdl-core": "latest",
+    "sadaslk-dlcore": "latest"
   }
 }
