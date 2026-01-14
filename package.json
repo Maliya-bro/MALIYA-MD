@@ -40,6 +40,7 @@
     "@vreden/youtube_scraper": "latest",
     "yt-search": "latest",
     "ytdl-core": "latest",
-    "sadaslk-dlcore": "latest"
+    "sadaslk-dlcore": "latest",
+    "abir-photo360-apis": "latest"
   }
 }
