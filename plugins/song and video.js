@@ -20,9 +20,9 @@ async function getYoutube(query) {
 
 cmd(
   {
-    pattern: "ytmp3",
-    alias: ["yta", "song"],
-    desc: "Download YouTube MP3 by name or link",
+    pattern: "song",
+    alias: ["yta", "ytmp3", "yts"],
+    desc: "Download YouTube MP3 by name or link using MALIYA-MD",
     category: "download",
     filename: __filename,
   },
@@ -50,7 +50,7 @@ cmd(
         { quoted: mek }
       );
 
-      reply("⬇️ Downloading MP3...");
+      reply("⬇️ Downloading MP3 using MALIYA-MD...");
 
       const data = await ytmp3(video.url);
       if (!data?.url) return reply("❌ Failed to download MP3");
@@ -72,8 +72,8 @@ cmd(
 
 cmd(
   {
-    pattern: "ytmp4",
-    alias: ["ytv", "video", "vid"],
+    pattern: "video",
+    alias: ["ytv", "ytmp4", "vid"],
     desc: "Download YouTube MP4 by name or link",
     category: "download",
     filename: __filename,
@@ -103,7 +103,7 @@ cmd(
         { quoted: mek }
       );
 
-      reply("⬇️ Downloading video...");
+      reply("⬇️ Downloading video using MALIYA-MD...");
 
       const data = await ytmp4(video.url, {
         format: "mp4",
@@ -118,7 +118,7 @@ await bot.sendMessage(
     video: { url: data.url },
     mimetype: "video/mp4",
     fileName: data.filename || "youtube_video.mp4",
-    caption: "🎬 YouTube video",
+    caption: "🎬 YouTube video download sucessfully! Thanks for using MALIYA-MD",
     gifPlayback: false,
   },
   { quoted: mek }
@@ -143,14 +143,14 @@ cmd(
     try {
       if (!q) return reply("📱 Send TikTok link");
 
-      reply("⬇️ Downloading TikTok video...");
+      reply("⬇️ Downloading TikTok video using MALIYA-MD...");
 
       const data = await tiktok(q);
       if (!data?.no_watermark)
         return reply("❌ Failed to download TikTok video");
 
       const caption =
-        `🎵 *${data.title || "TikTok Video"}*\n\n` +
+        `🎵 *${data.title || "TikTok Video download sucessfully! .Thanks for using MALIYA-MD"}*\n\n` +
         `👤 Author: ${data.author || "Unknown"}\n` +
         `⏱ Duration: ${data.runtime}s`;
 
