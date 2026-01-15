@@ -5,9 +5,11 @@ const {
   jidNormalizedUser,
   getContentType,
   fetchLatestBaileysVersion,
-  Browsers,
-  makeInMemoryStore
+  Browsers
 } = require('@whiskeysockets/baileys')
+
+// 🔥 IMPORTANT (old baileys fix)
+const { makeInMemoryStore } = require('@whiskeysockets/baileys/lib')
 
 const fs = require('fs')
 const P = require('pino')
@@ -33,7 +35,7 @@ const prefix = '.'
 const ownerNumber = ['94701369636']
 const credsPath = path.join(__dirname, '/auth_info_baileys/creds.json')
 
-/* ================= SESSION CHECK ================= */
+/* ================= SESSION ================= */
 
 async function ensureSessionFile() {
   if (!fs.existsSync(credsPath)) {
@@ -72,7 +74,7 @@ async function connectToWA() {
   )
   const { version } = await fetchLatestBaileysVersion()
 
-  // 🔥 MESSAGE STORE (ANTI DELETE REQUIREMENT)
+  // 🔥 MESSAGE STORE (ANTI DELETE REQUIRED)
   const store = makeInMemoryStore({
     logger: P({ level: 'silent' })
   })
@@ -100,10 +102,7 @@ async function connectToWA() {
       console.log("✅ MALIYA-MD connected!")
 
       await bot.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
-        image: {
-          url: "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_unjbleunjbleunjb.png"
-        },
-        caption: "MALIYA-MD connected successfully ⚡"
+        text: "MALIYA-MD connected successfully ⚡"
       })
 
       console.log("🔄 Loading plugins...")
