@@ -4,7 +4,7 @@ const config = require('../config');
 cmd({
     pattern: "alive",
     desc: "Check MALIYA-MD bot online or no.",
-    react: "🔥"
+    react: "🔥",
     category: "main",
     filename: __filename
 },
