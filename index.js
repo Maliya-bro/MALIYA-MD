@@ -2,29 +2,21 @@ const {
   default: makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
-  jidNormalizedUser,
   getContentType,
   fetchLatestBaileysVersion,
   Browsers
 } = require('@whiskeysockets/baileys')
 
-// 🔥 IMPORTANT (old baileys fix)
-const { makeInMemoryStore } = require('@whiskeysockets/baileys/lib')
+// 🔥 FINAL FIX (THIS LINE IS THE KEY)
+const makeInMemoryStore = require('@whiskeysockets/baileys/lib/store')
 
 const fs = require('fs')
 const P = require('pino')
 const express = require('express')
-const axios = require('axios')
 const path = require('path')
-const qrcode = require('qrcode-terminal')
 
 const config = require('./config')
 const { sms } = require('./lib/msg')
-const {
-  getBuffer, getGroupAdmins, getRandom, h2k, isUrl,
-  Json, runtime, sleep, fetchJson
-} = require('./lib/functions')
-
 const { File } = require('megajs')
 const { commands, replyHandlers } = require('./command')
 
@@ -74,55 +66,33 @@ async function connectToWA() {
   )
   const { version } = await fetchLatestBaileysVersion()
 
-  // 🔥 MESSAGE STORE (ANTI DELETE REQUIRED)
+  // 🔥 MESSAGE STORE (ANTI DELETE)
   const store = makeInMemoryStore({
     logger: P({ level: 'silent' })
   })
 
   const bot = makeWASocket({
     logger: P({ level: 'silent' }),
-    printQRInTerminal: false,
     browser: Browsers.macOS("Firefox"),
     auth: state,
     version
   })
 
-  // 🔥 VERY IMPORTANT
+  // 🔥 MUST
   store.bind(bot.ev)
   bot.store = store
 
-  /* ========== CONNECTION UPDATE ========== */
-
-  bot.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
+  bot.ev.on("connection.update", ({ connection, lastDisconnect }) => {
     if (connection === "close") {
       if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
         connectToWA()
       }
     } else if (connection === "open") {
       console.log("✅ MALIYA-MD connected!")
-
-      await bot.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
-        text: "MALIYA-MD connected successfully ⚡"
-      })
-
-      console.log("🔄 Loading plugins...")
-      fs.readdirSync("./plugins/")
-        .filter(file => file.endsWith(".js"))
-        .forEach(file => {
-          try {
-            require(`./plugins/${file}`)
-            console.log("✔ Plugin Loaded:", file)
-          } catch (e) {
-            console.log("❌ Plugin Error:", file, e)
-          }
-        })
-      console.log("✅ All plugins loaded!")
     }
   })
 
   bot.ev.on("creds.update", saveCreds)
-
-  /* ========== MESSAGE HANDLER ========== */
 
   bot.ev.on("messages.upsert", async ({ messages }) => {
     const mek = messages[0]
@@ -155,13 +125,10 @@ async function connectToWA() {
         : mek.key.participant || mek.key.remoteJid
 
     const senderNumber = sender.split("@")[0]
-    const isGroup = from.endsWith("@g.us")
     const isOwner = ownerNumber.includes(senderNumber)
 
     const reply = (txt) =>
       bot.sendMessage(from, { text: txt }, { quoted: mek })
-
-    /* ===== COMMAND HANDLER ===== */
 
     if (isCmd) {
       const cmd = commands.find(
@@ -171,23 +138,13 @@ async function connectToWA() {
 
       if (cmd) {
         try {
-          if (cmd.react) {
-            bot.sendMessage(from, {
-              react: { text: cmd.react, key: mek.key }
-            })
-          }
-
           cmd.function(bot, mek, m, {
             from,
-            quoted: mek,
-            body,
-            command: commandName,
-            args,
-            q,
-            isGroup,
             sender,
             senderNumber,
             isOwner,
+            args,
+            q,
             reply
           })
         } catch (e) {
@@ -196,17 +153,10 @@ async function connectToWA() {
       }
     }
 
-    /* ===== REPLY HANDLERS ===== */
-
     for (const handler of replyHandlers) {
       try {
         if (handler.filter(body, { sender, message: mek })) {
-          await handler.function(bot, mek, m, {
-            from,
-            body,
-            sender,
-            reply
-          })
+          await handler.function(bot, mek, m, { from, body, sender, reply })
           break
         }
       } catch (err) {
