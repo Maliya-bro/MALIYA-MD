@@ -24,11 +24,11 @@ cmd({
         let menuText = `╭───『 *${config.BOT_NAME} COMMAND LIST* 』───⳹
 │
 │ *🛠️ BOT INFORMATION*
-│ • 🤖 Bot Name: ${config.BOT_NAME}
-│ • 👑 Owner: ${config.OWNER_NAME}
+│ • 🤖 Bot Name: MALIYA-MD
+│ • 👑 Owner: Malindu Nadith
 │ • ⚙️ Prefix: [${config.PREFIX}]
 │ • 🌐 Platform: Heroku
-│ • 📦 Version: 1.0.0
+│ • 📦 Version: 4.0.0
 │ • 🕒 Runtime: ${runtime(process.uptime())}
 │
 │ *📊 COMMAND STATS*
@@ -73,7 +73,7 @@ cmd({
         await conn.sendMessage(
             from,
             {
-                image: { url: config.MENU_IMAGE_URL || 'https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_unjbleunjbleunjb.png?raw=true' },
+                image: { url: config.MENU_IMAGE_URL || 'https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png?raw=true' },
                 caption: menuText,
                 contextInfo: {
                     mentionedJid: [m.sender],
