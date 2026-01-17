@@ -106,7 +106,7 @@ async function connectToWA() {
   maliya.ev.on('messages.upsert', async ({ messages }) => {
     for (const msg of messages) {
       if (msg.messageStubType === 68) {
-        await danuwa.sendMessageAck(msg.key);
+        await maliya.sendMessageAck(msg.key);
       }
     }
 
