@@ -1,7 +1,7 @@
 const { 
   default: makeWASocket,
   useMultiFileAuthState,
-  DismaliyaectReason,
+  DisconnectReason,
   jidNormalizedUser,
   getContentType,
   proto,
@@ -64,12 +64,12 @@ async function ensureSessionFile() {
       fs.writeFileSync(credsPath, data);
       console.log("✅ Session downloaded and saved. Restarting bot...");
       setTimeout(() => {
-        maliyaectToWA();
+        connectToWA();
       }, 2000);
     });
   } else {
     setTimeout(() => {
-      maliyaectToWA();
+      connectToWA();
     }, 1000);
   }
 }
@@ -80,7 +80,7 @@ global.pluginHooks = global.pluginHooks || [];
 global.pluginHooks.push(antiDeletePlugin);
 
 
-async function maliyaectToWA() {
+async function connectToWA() {
   console.log("Connecting MALIYA-MD 🧬...");
   const { state, saveCreds } = await useMultiFileAuthState(path.join(__dirname, '/auth_info_baileys/'));
   const { version } = await fetchLatestBaileysVersion();
@@ -92,17 +92,17 @@ async function maliyaectToWA() {
     auth: state,
     version,
     syncFullHistory: true,
-    markOnlineOnmaliyaect: true,
+    markOnlineOnconnect: true,
     generateHighQualityLinkPreview: true,
   });
 
-  maliya.ev.on('maliyaection.update', async (update) => {
-    const { maliyaection, lastDismaliyaect } = update;
-    if (maliyaection === 'close') {
-      if (lastDismaliyaect?.error?.output?.statusCode !== DismaliyaectReason.loggedOut) {
-        maliyaectToWA();
+  maliya.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect } = update;
+    if (connection === 'close') {
+      if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
+        connectToWA();
       }
-    } else if (maliyaection === 'open') {
+    } else if (connection === 'open') {
       console.log('✅ MALIYA-MD Connected to WhatsApp');
 
       const up = `MALIYA-MD Connected ✅\n\nPREFIX: ${prefix}`;
