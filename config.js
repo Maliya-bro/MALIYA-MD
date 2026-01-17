@@ -11,6 +11,8 @@ ALIVE_MSG: process.env.ALIVE_MSG || "*Hello👋 MALIYA-MD BOT Is Alive Now😍*"
 BOT_OWNER: '94701369636',
 AUTO_STATUS_SEEN: 'true',
 AUTO_STATUS_REACT: 'true',
+MODE: process.env.MODE || "public",
+
 
 
 };
