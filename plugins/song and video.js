@@ -23,7 +23,7 @@ async function downloadToBuffer(url) {
   return Buffer.from(res.data);
 }
 
-/* ================= YOUTUBE MP3 ================= */
+/* ================= YOUTUBE MP3 (UNCHANGED) ================= */
 
 cmd(
   {
@@ -51,10 +51,7 @@ cmd(
 
       await bot.sendMessage(
         from,
-        {
-          image: { url: video.thumbnail },
-          caption,
-        },
+        { image: { url: video.thumbnail }, caption },
         { quoted: mek }
       );
 
@@ -65,10 +62,7 @@ cmd(
 
       await bot.sendMessage(
         from,
-        {
-          audio: { url: data.url },
-          mimetype: "audio/mpeg",
-        },
+        { audio: { url: data.url }, mimetype: "audio/mpeg" },
         { quoted: mek }
       );
     } catch (e) {
@@ -78,13 +72,13 @@ cmd(
   }
 );
 
-/* ================= YOUTUBE VIDEO (FIXED 🔥) ================= */
+/* ================= YOUTUBE VIDEO (FINAL FIX 🔥 DOCUMENT METHOD) ================= */
 
 cmd(
   {
     pattern: "video",
     alias: ["ytv", "ytmp4", "vid"],
-    desc: "Download YouTube MP4 by name or link",
+    desc: "Download YouTube MP4 (safe for Android)",
     category: "download",
     react: "📺",
     filename: __filename,
@@ -107,10 +101,7 @@ cmd(
 
       await bot.sendMessage(
         from,
-        {
-          image: { url: video.thumbnail },
-          caption,
-        },
+        { image: { url: video.thumbnail }, caption },
         { quoted: mek }
       );
 
@@ -123,17 +114,18 @@ cmd(
 
       if (!data?.url) return reply("❌ Failed to download video");
 
-      reply("⚙️ Processing video...");
+      reply("⚙️ Processing video (Android safe)...");
 
       const videoBuffer = await downloadToBuffer(data.url);
 
       await bot.sendMessage(
         from,
         {
-          video: videoBuffer,
+          document: videoBuffer,
           mimetype: "video/mp4",
+          fileName: `${video.title}.mp4`,
           caption:
-            "🎬 YouTube video download successfully!\nThanks for using *MALIYA-MD* ❤️",
+            "🎬 YouTube video download successfully!\n(Android safe mode)\nThanks for using *MALIYA-MD* ❤️",
         },
         { quoted: mek }
       );
@@ -144,7 +136,7 @@ cmd(
   }
 );
 
-/* ================= TIKTOK (UNCHANGED ✅) ================= */
+/* ================= TIKTOK (UNCHANGED & WORKING) ================= */
 
 cmd(
   {
@@ -172,10 +164,7 @@ cmd(
 
       await bot.sendMessage(
         from,
-        {
-          video: { url: data.no_watermark },
-          caption,
-        },
+        { video: { url: data.no_watermark }, caption },
         { quoted: mek }
       );
     } catch (e) {
