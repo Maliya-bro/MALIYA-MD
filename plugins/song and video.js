@@ -1,8 +1,9 @@
-
 const { cmd } = require("../command");
 const { ytmp3, ytmp4, tiktok } = require("sadaslk-dlcore");
 const yts = require("yt-search");
+const axios = require("axios");
 
+/* ================= HELPERS ================= */
 
 async function getYoutube(query) {
   const isUrl = /(youtube\.com|youtu\.be)/i.test(query);
@@ -17,6 +18,12 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
+async function downloadToBuffer(url) {
+  const res = await axios.get(url, { responseType: "arraybuffer" });
+  return Buffer.from(res.data);
+}
+
+/* ================= YOUTUBE MP3 ================= */
 
 cmd(
   {
@@ -71,6 +78,8 @@ cmd(
   }
 );
 
+/* ================= YOUTUBE VIDEO (FIXED 🔥) ================= */
+
 cmd(
   {
     pattern: "video",
@@ -114,17 +123,20 @@ cmd(
 
       if (!data?.url) return reply("❌ Failed to download video");
 
-await bot.sendMessage(
-  from,
-  {
-    video: { url: data.url },
-    mimetype: "video/mp4",
-    fileName: data.filename || "youtube_video.mp4",
-    caption: "🎬 YouTube video download sucessfully! Thanks for using MALIYA-MD",
-    gifPlayback: false,
-  },
-  { quoted: mek }
-);
+      reply("⚙️ Processing video...");
+
+      const videoBuffer = await downloadToBuffer(data.url);
+
+      await bot.sendMessage(
+        from,
+        {
+          video: videoBuffer,
+          mimetype: "video/mp4",
+          caption:
+            "🎬 YouTube video download successfully!\nThanks for using *MALIYA-MD* ❤️",
+        },
+        { quoted: mek }
+      );
     } catch (e) {
       console.log("YTMP4 ERROR:", e);
       reply("❌ Error while downloading video");
@@ -132,6 +144,7 @@ await bot.sendMessage(
   }
 );
 
+/* ================= TIKTOK (UNCHANGED ✅) ================= */
 
 cmd(
   {
@@ -153,7 +166,7 @@ cmd(
         return reply("❌ Failed to download TikTok video");
 
       const caption =
-        `🎵 *${data.title || "TikTok Video download sucessfully! .Thanks for using MALIYA-MD"}*\n\n` +
+        `🎵 *${data.title || "TikTok Video"}*\n\n` +
         `👤 Author: ${data.author || "Unknown"}\n` +
         `⏱ Duration: ${data.runtime}s`;
 
@@ -171,5 +184,3 @@ cmd(
     }
   }
 );
-
-
