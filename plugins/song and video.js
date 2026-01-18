@@ -32,15 +32,6 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// convert timestamp (3:42 / 1:02:10) → seconds
-function durationToSeconds(time) {
-  if (!time) return 0;
-  const parts = time.split(":").map(Number);
-  return parts.length === 3
-    ? parts[0] * 3600 + parts[1] * 60 + parts[2]
-    : parts[0] * 60 + parts[1];
-}
-
 // auto progress bar
 function generateProgressBar(duration) {
   const totalBars = 15;
@@ -74,15 +65,19 @@ cmd(
         from,
         {
           image: { url: video.thumbnail },
-          caption:
-            `🎵 *${video.title}*\n\n` +
-            `👤 *Channel:* ${video.author.name}\n` +
-            `⏱ *Duration:* ${duration}\n` +
-            `👀 *Views:* ${video.views.toLocaleString()}\n` +
-            `📅 *Uploaded:* ${video.ago}\n\n` +
-            `${progressBar}\n\n` +
-            `🍀ENJOY YOUR SONG🍀\n\n`,
-            `>USE HEADPHONES FOR THE BEST EXPERIENCE🎧\n`,
+          caption: `
+🎵 *${video.title}*
+
+👤 *Channel:* ${video.author.name}
+⏱ *Duration:* ${duration}
+👀 *Views:* ${video.views.toLocaleString()}
+📅 *Uploaded:* ${video.ago}
+
+${progressBar}
+
+🍀 *ENJOY YOUR SONG* 🍀
+> USE HEADPHONES FOR THE BEST EXPERIENCE 🎧
+          `,
         },
         { quoted: mek }
       );
@@ -131,11 +126,13 @@ cmd(
         from,
         {
           image: { url: video.thumbnail },
-          caption:
-            `🎬 *${video.title}*\n\n` +
-            `👤 Channel: ${video.author.name}\n` +
-            `⏱ Duration: ${video.timestamp}\n` +
-            `👀 Views: ${video.views.toLocaleString()}`,
+          caption: `
+🎬 *${video.title}*
+
+👤 Channel: ${video.author.name}
+⏱ Duration: ${video.timestamp}
+👀 Views: ${video.views.toLocaleString()}
+          `,
         },
         { quoted: mek }
       );
