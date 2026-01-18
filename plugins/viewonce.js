@@ -40,6 +40,35 @@ function detectMedia(m) {
   return null;
 }
 
+/**
+ * ✅ View Once detect for BOTH styles:
+ * 1) wrapper: viewOnceMessage / viewOnceMessageV2 (incoming)
+ * 2) flag: imageMessage.viewOnce === true / videoMessage.viewOnce === true (quotedMessage often)
+ */
+function isViewOnceMessage(rawQuoted) {
+  if (!rawQuoted) return false;
+
+  // wrapper forms
+  if (rawQuoted.viewOnceMessage || rawQuoted.viewOnceMessageV2) return true;
+
+  // quotedMessage sometimes keeps it inside ephemeral
+  const ep = rawQuoted.ephemeralMessage?.message;
+  if (ep?.viewOnceMessage || ep?.viewOnceMessageV2) return true;
+
+  // direct flag forms (common in reply/quote)
+  if (rawQuoted.imageMessage?.viewOnce) return true;
+  if (rawQuoted.videoMessage?.viewOnce) return true;
+  if (rawQuoted.audioMessage?.viewOnce) return true;
+
+  // sometimes nested after unwrap too
+  const clean = unwrapMessage(rawQuoted);
+  if (clean?.imageMessage?.viewOnce) return true;
+  if (clean?.videoMessage?.viewOnce) return true;
+  if (clean?.audioMessage?.viewOnce) return true;
+
+  return false;
+}
+
 cmd(
   {
     pattern: "vv",
@@ -50,7 +79,7 @@ cmd(
   },
   async (conn, mek, m, { from, isGroup, reply }) => {
     try {
-      // ===== get quoted message (raw Baileys way) =====
+      // ✅ get quoted message from contextInfo (reliable)
       const ctx =
         mek.message?.extendedTextMessage?.contextInfo ||
         mek.message?.imageMessage?.contextInfo ||
@@ -67,18 +96,12 @@ cmd(
         return reply("❌ *View Once msg ekata reply karala `.vv` danna.*");
       }
 
-      // ===== check view once =====
-      const isVO =
-        !!quotedMessage?.viewOnceMessage ||
-        !!quotedMessage?.viewOnceMessageV2 ||
-        !!quotedMessage?.ephemeralMessage?.message?.viewOnceMessage ||
-        !!quotedMessage?.ephemeralMessage?.message?.viewOnceMessageV2;
-
-      if (!isVO) {
+      // ✅ fixed VO detection
+      if (!isViewOnceMessage(quotedMessage)) {
         return reply("❌ *Oya reply kare View Once msg ekakata nemei.*");
       }
 
-      // ===== unwrap =====
+      // unwrap to get image/video/audio node
       const clean = unwrapMessage(quotedMessage);
       const media = detectMedia(clean);
 
@@ -86,54 +109,41 @@ cmd(
         return reply("❌ *Image / Video / Audio / Voice witharai support.*");
       }
 
+      // prevent "Cannot derive from empty media key"
       if (!media.node?.mediaKey) {
-        return reply("❌ *Me View Once media eka download karanna ba.*");
+        return reply("❌ *Me media eka download karanna ba (mediaKey missing).*");
       }
 
-      // ===== build quoted key =====
-      const quotedKey = {
-        remoteJid: from,
-        fromMe: false,
-        id: stanzaId,
-      };
+      // build correct key for quoted message
+      const quotedKey = { remoteJid: from, fromMe: false, id: stanzaId };
       if (isGroup && participant) quotedKey.participant = participant;
 
-      // ===== download =====
+      // download
       const buffer = await downloadMediaMessage(
         { key: quotedKey, message: clean },
         "buffer",
         {}
       );
 
-      if (!buffer || !buffer.length) {
-        return reply("❌ *Download fail una.*");
-      }
+      if (!buffer || !buffer.length) return reply("❌ *Download fail una.*");
 
-      const filePath = path.join(
-        tempFolder,
-        `vv_${stanzaId}_${Date.now()}${media.ext}`
-      );
-
+      const filePath = path.join(tempFolder, `vv_${stanzaId}_${Date.now()}${media.ext}`);
       await fs.promises.writeFile(filePath, buffer);
 
-      // ===== send =====
+      // send as normal
       if (media.type === "image") {
         await conn.sendMessage(
           from,
           { image: { url: filePath }, caption: media.node.caption || undefined },
           { quoted: mek }
         );
-      }
-
-      if (media.type === "video") {
+      } else if (media.type === "video") {
         await conn.sendMessage(
           from,
           { video: { url: filePath }, caption: media.node.caption || undefined },
           { quoted: mek }
         );
-      }
-
-      if (media.type === "audio") {
+      } else if (media.type === "audio") {
         await conn.sendMessage(
           from,
           {
