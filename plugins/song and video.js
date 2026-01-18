@@ -73,7 +73,7 @@ cmd(
       await bot.sendMessage(
         from,
         {
-          image: { url: video.th"umbnail },
+          image: { url: video.thumbnail },
           caption:
             `🎵 *${video.title}*\n\n` +
             `👤 *Channel:* ${video.author.name}\n` +
