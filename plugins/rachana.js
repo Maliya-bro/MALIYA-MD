@@ -1,6 +1,21 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 
+// ✅ safe reaction function (work if baileys supports)
+async function sendReact(conn, m, emoji) {
+  try {
+    // Some bots keep message key in mek / m
+    const key = m?.key || m?.msg?.key || m;
+    if (!conn?.sendMessage || !key) return;
+
+    await conn.sendMessage(key.remoteJid, {
+      react: { text: emoji, key }
+    });
+  } catch (e) {
+    // ignore reaction errors
+  }
+}
+
 async function askAI(prompt) {
   const apiUrl = `https://vapis.my.id/api/openai?q=${encodeURIComponent(prompt)}`;
   const { data } = await axios.get(apiUrl, { timeout: 20000 });
@@ -13,10 +28,9 @@ cmd(
     pattern: "dec",
     desc: "සිංහල රචනා ලියන්න",
     category: "ai",
-    react: "📝",
     filename: __filename,
   },
-  async (conn, mek, m, { q, reply, react }) => {
+  async (conn, mek, m, { q, reply }) => {
     try {
       if (!q) {
         return reply(
@@ -27,7 +41,7 @@ cmd(
         );
       }
 
-      await react("⏳");
+      await sendReact(conn, mek, "⏳");
 
       const prompt =
         `ඔබ සිංහල ගුරුතුමා/ගුරුතුමියෙක් වගේ රචනා ලියන්න.\n` +
@@ -41,15 +55,15 @@ cmd(
       const result = await askAI(prompt);
 
       if (!result) {
-        await react("❌");
+        await sendReact(conn, mek, "❌");
         return reply("⚠️ AI එකෙන් පිළිතුරක් ආවේ නැහැ. පොඩ්ඩක් පස්සේ try කරන්න.");
       }
 
-      await react("✅");
+      await sendReact(conn, mek, "✅");
       return reply(`📝 *සිංහල රචනාව*\n\n${result}`);
     } catch (e) {
       console.error("DEC ERROR:", e);
-      await react("❌");
+      await sendReact(conn, mek, "❌");
       return reply("❌ රචනාව ලියද්දි දෝෂයක් ආවා. (API/Internet issue වෙන්න පුළුවන්)");
     }
   }
@@ -61,10 +75,9 @@ cmd(
     pattern: "decen",
     desc: "Write an English essay",
     category: "ai",
-    react: "📝",
     filename: __filename,
   },
-  async (conn, mek, m, { q, reply, react }) => {
+  async (conn, mek, m, { q, reply }) => {
     try {
       if (!q) {
         return reply(
@@ -75,7 +88,7 @@ cmd(
         );
       }
 
-      await react("⏳");
+      await sendReact(conn, mek, "⏳");
 
       const prompt =
         `Write a clear school-level English essay.\n` +
@@ -88,17 +101,16 @@ cmd(
       const result = await askAI(prompt);
 
       if (!result) {
-        await react("❌");
-        return reply("⚠️ OpenAI didn't respond. Please try again later.");
+        await sendReact(conn, mek, "❌");
+        return reply("⚠️ AI didn't respond. Please try again later.");
       }
 
-      await react("✅");
+      await sendReact(conn, mek, "✅");
       return reply(`📝 *English Essay*\n\n${result}`);
     } catch (e) {
       console.error("DECEN ERROR:", e);
-      await react("❌");
+      await sendReact(conn, mek, "❌");
       return reply("❌ An error occurred while writing the essay. (API/Internet issue)");
     }
   }
 );
-
