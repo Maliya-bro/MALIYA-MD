@@ -225,6 +225,21 @@ async function connectToWA() {
       }
     }
   });
+
+  /* ================= DELETE HANDLER (FIXED) ================= */
+  test.ev.on("messages.update", async (updates) => {
+    if (!global.pluginHooks) return;
+
+    for (const plugin of global.pluginHooks) {
+      if (typeof plugin.onDelete === "function") {
+        try {
+          await plugin.onDelete(test, updates);
+        } catch (e) {
+          console.log("AntiDelete onDelete error:", e?.message);
+        }
+      }
+    }
+  });
 }
 
 /* ================= SERVER ================= */
