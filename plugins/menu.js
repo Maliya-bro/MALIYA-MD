@@ -41,7 +41,7 @@ cmd(
       if (!cachedMenu) cachedMenu = generateMenu();
 
       // React
-      await bot.sendMessage(from, { react: { text: "🗒️", key: mek.key } });
+      await bot.sendMessage(from, { react: { text: "📜", key: mek.key } });
 
       // Image + Cached Menu send
       await bot.sendMessage(
@@ -61,3 +61,4 @@ cmd(
     }
   }
 );
+
