@@ -43,7 +43,7 @@
     "sadaslk-dlcore": "latest",
     "abir-photo360-apis": "latest",
     "puppeteer": "latest",
-    "yt-dlp-wrap": "latest"
+    "yt-dlp-wrap": "latest",
     "gtts": "latest"
   }
 }
