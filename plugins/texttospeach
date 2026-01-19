@@ -1,0 +1,129 @@
+const { cmd } = require("../command");
+const gTTS = require("gtts");
+const fs = require("fs");
+const path = require("path");
+
+// 🌍 Language map (20+)
+const LANGS = {
+  si: "Sinhala",
+  en: "English",
+  hi: "Hindi",
+  ta: "Tamil",
+  te: "Telugu",
+  ml: "Malayalam",
+  kn: "Kannada",
+  fr: "French",
+  de: "German",
+  es: "Spanish",
+  it: "Italian",
+  pt: "Portuguese",
+  ru: "Russian",
+  ar: "Arabic",
+  tr: "Turkish",
+  id: "Indonesian",
+  th: "Thai",
+  ja: "Japanese",
+  ko: "Korean",
+  zh: "Chinese",
+  bn: "Bengali",
+  ur: "Urdu",
+};
+
+// helper
+async function makeTTS(conn, mek, m, reply, text, lang) {
+  const outDir = path.join(process.cwd(), "tmp");
+  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+
+  const outFile = path.join(outDir, `${Date.now()}.mp3`);
+
+  const gtts = new gTTS(text, lang);
+  await new Promise((res, rej) => {
+    gtts.save(outFile, (err) => (err ? rej(err) : res()));
+  });
+
+  await conn.sendMessage(
+    m.chat,
+    {
+      audio: fs.readFileSync(outFile),
+      mimetype: "audio/mpeg",
+      ptt: true, // voice note style
+      caption: `🗣️ TTS (${LANGS[lang] || lang})`,
+    },
+    { quoted: mek }
+  );
+
+  fs.unlinkSync(outFile);
+}
+
+/* ================= SINHALA ================= */
+cmd(
+  {
+    pattern: "ttssi",
+    alias: ["voicesi"],
+    desc: "Text to Speech (Sinhala)",
+    category: "utility",
+    react: "🗣️",
+    filename: __filename,
+  },
+  async (conn, mek, m, { q, reply }) => {
+    if (!q) return reply("❌ Please provide Sinhala text.\nExample: .ttssi මට සින්හල කථා කරන්න");
+    try {
+      await makeTTS(conn, mek, m, reply, q, "si");
+    } catch (e) {
+      reply("❌ Failed to convert Sinhala text to voice.");
+    }
+  }
+);
+
+/* ================= ENGLISH ================= */
+cmd(
+  {
+    pattern: "ttsen",
+    alias: ["voiceen"],
+    desc: "Text to Speech (English)",
+    category: "utility",
+    react: "🗣️",
+    filename: __filename,
+  },
+  async (conn, mek, m, { q, reply }) => {
+    if (!q) return reply("❌ Please provide English text.\nExample: .ttsen Hello how are you");
+    try {
+      await makeTTS(conn, mek, m, reply, q, "en");
+    } catch (e) {
+      reply("❌ Failed to convert English text to voice.");
+    }
+  }
+);
+
+/* ================= MULTI LANGUAGE ================= */
+cmd(
+  {
+    pattern: "tts",
+    alias: ["voice"],
+    desc: "Text to Speech (multi-language)",
+    category: "utility",
+    react: "🗣️",
+    filename: __filename,
+  },
+  async (conn, mek, m, { args, reply }) => {
+    if (args.length < 2) {
+      return reply(
+        "❌ Usage:\n.tts <lang> <text>\n\nExample:\n.tts fr Bonjour\n.tts ja こんにちは\n\nAvailable langs:\n" +
+        Object.keys(LANGS).join(", ")
+      );
+    }
+
+    const lang = args[0].toLowerCase();
+    const text = args.slice(1).join(" ");
+
+    if (!LANGS[lang]) {
+      return reply("❌ Unsupported language code.\nAvailable:\n" + Object.keys(LANGS).join(", "));
+    }
+
+    try {
+      await makeTTS(conn, mek, m, reply, text, lang);
+    } catch (e) {
+      reply("❌ Failed to convert text to voice.");
+    }
+  }
+);
