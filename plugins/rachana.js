@@ -1,116 +1,116 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 
-// ✅ safe reaction function (work if baileys supports)
-async function sendReact(conn, m, emoji) {
-  try {
-    // Some bots keep message key in mek / m
-    const key = m?.key || m?.msg?.key || m;
-    if (!conn?.sendMessage || !key) return;
+// 50 Most Useful Languages
+const LANGUAGES = {
+  si: "Sinhala",
+  en: "English",
+  ta: "Tamil",
+  hi: "Hindi",
+  ja: "Japanese",
+  zh: "Chinese",
+  ko: "Korean",
+  fr: "French",
+  de: "German",
+  es: "Spanish",
+  it: "Italian",
+  pt: "Portuguese",
+  ru: "Russian",
+  ar: "Arabic",
+  bn: "Bengali",
+  ur: "Urdu",
+  fa: "Persian",
+  tr: "Turkish",
+  nl: "Dutch",
+  sv: "Swedish",
+  no: "Norwegian",
+  da: "Danish",
+  fi: "Finnish",
+  pl: "Polish",
+  cs: "Czech",
+  ro: "Romanian",
+  hu: "Hungarian",
+  el: "Greek",
+  he: "Hebrew",
+  th: "Thai",
+  vi: "Vietnamese",
+  id: "Indonesian",
+  ms: "Malay",
+  tl: "Filipino",
+  sw: "Swahili",
+  zu: "Zulu",
+  af: "Afrikaans",
+  uk: "Ukrainian",
+  sr: "Serbian",
+  hr: "Croatian",
+  sk: "Slovak",
+  sl: "Slovenian",
+  lt: "Lithuanian",
+  lv: "Latvian",
+  et: "Estonian",
+  is: "Icelandic",
+  ga: "Irish",
+  mt: "Maltese",
+  km: "Khmer"
+};
 
-    await conn.sendMessage(key.remoteJid, {
-      react: { text: emoji, key }
-    });
-  } catch (e) {
-    // ignore reaction errors
-  }
-}
+// Auto-generate commands like .decsi .decen .decja ...
+Object.entries(LANGUAGES).forEach(([code, language]) => {
+  cmd(
+    {
+      pattern: "dec" + code,
+      desc: `Generate an essay in ${language}`,
+      category: "AI",
+      react: "📝",
+      filename: __filename
+    },
+    async (conn, mek, m, { from, q, reply }) => {
+      try {
+        if (!q) {
+          return reply(
+            `Usage error.\nExample:\n.dec${code} The beauty of Sri Lanka`
+          );
+        }
 
-async function askAI(prompt) {
-  const apiUrl = `https://vapis.my.id/api/openai?q=${encodeURIComponent(prompt)}`;
-  const { data } = await axios.get(apiUrl, { timeout: 20000 });
-  return data?.result || null;
-}
+        const hasLatinLetters = /[a-zA-Z]/.test(q);
+        let extraInstruction = "";
 
-// ====================== .dec (Sinhala Rachana) ======================
-cmd(
-  {
-    pattern: "dec",
-    desc: "සිංහල රචනා ලියන්න",
-    category: "ai",
-    filename: __filename,
-  },
-  async (conn, mek, m, { q, reply }) => {
-    try {
-      if (!q) {
-        return reply(
-          "❗ *රචනා මාතෘකාව දෙන්න*\n\n" +
-          "උදාහරණ:\n" +
-          "`.dec මගේ පාසල`\n" +
-          "`.dec පරිසරය රැකගැනීම`"
-        );
+        if (language === "Sinhala" && hasLatinLetters) {
+          extraInstruction =
+            "IMPORTANT: The topic may be written in Singlish. Convert it to proper Sinhala before writing the essay.\n";
+        }
+
+        const prompt = `
+Write a well-structured essay in ${language}.
+- Include introduction, body, and conclusion
+- Use clear and simple language
+- Medium length
+${extraInstruction}
+TOPIC: ${q}
+        `.trim();
+
+        reply(`Generating ${language} essay...`);
+
+        const api = `https://lance-frank-asta.onrender.com/api/gpt?q=${encodeURIComponent(prompt)}`;
+        const { data } = await axios.get(api);
+
+        if (!data || !data.message) {
+          return reply("Failed to generate the essay. Please try again.");
+        }
+
+        const text =
+`📝 ${language} Essay
+
+Topic: ${q}
+
+${data.message}`;
+
+        await conn.sendMessage(from, { text }, { quoted: mek });
+
+      } catch (err) {
+        console.error(err);
+        reply("An error occurred while generating the essay.");
       }
-
-      await sendReact(conn, mek, "⏳");
-
-      const prompt =
-        `ඔබ සිංහල ගුරුතුමා/ගුරුතුමියෙක් වගේ රචනා ලියන්න.\n` +
-        `මාතෘකාව: "${q}"\n\n` +
-        `අවශ්‍යතා:\n` +
-        `- සම්පූර්ණයෙන්ම සිංහල අකුරු වලින් (Singlish නෙමෙයි)\n` +
-        `- පාසල් මට්ටමේ (Grade 6-11) තේරුම් ගන්න ලේසි\n` +
-        `- වචන ~200-300 අතර\n` +
-        `- නිගමනයක් එක්කරන්න\n`;
-
-      const result = await askAI(prompt);
-
-      if (!result) {
-        await sendReact(conn, mek, "❌");
-        return reply("⚠️ AI එකෙන් පිළිතුරක් ආවේ නැහැ. පොඩ්ඩක් පස්සේ try කරන්න.");
-      }
-
-      await sendReact(conn, mek, "✅");
-      return reply(`📝 *සිංහල රචනාව*\n\n${result}`);
-    } catch (e) {
-      console.error("DEC ERROR:", e);
-      await sendReact(conn, mek, "❌");
-      return reply("❌ රචනාව ලියද්දි දෝෂයක් ආවා. (API/Internet issue වෙන්න පුළුවන්)");
     }
-  }
-);
-
-// ====================== .decen (English Essay) ======================
-cmd(
-  {
-    pattern: "decen",
-    desc: "Write an English essay",
-    category: "ai",
-    filename: __filename,
-  },
-  async (conn, mek, m, { q, reply }) => {
-    try {
-      if (!q) {
-        return reply(
-          "❗ *Please provide an essay topic*\n\n" +
-          "Examples:\n" +
-          "`.decen My School`\n" +
-          "`.decen Protecting the Environment`"
-        );
-      }
-
-      await sendReact(conn, mek, "⏳");
-
-      const prompt =
-        `Write a clear school-level English essay.\n` +
-        `Topic: "${q}"\n\n` +
-        `Requirements:\n` +
-        `- 200 to 300 words\n` +
-        `- Simple and easy vocabulary\n` +
-        `- Include an introduction, body, and conclusion\n`;
-
-      const result = await askAI(prompt);
-
-      if (!result) {
-        await sendReact(conn, mek, "❌");
-        return reply("⚠️ AI didn't respond. Please try again later.");
-      }
-
-      await sendReact(conn, mek, "✅");
-      return reply(`📝 *English Essay*\n\n${result}`);
-    } catch (e) {
-      console.error("DECEN ERROR:", e);
-      await sendReact(conn, mek, "❌");
-      return reply("❌ An error occurred while writing the essay. (API/Internet issue)");
-    }
-  }
-);
+  );
+});
