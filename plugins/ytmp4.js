@@ -1,7 +1,7 @@
 const { cmd } = require('../command')
 const yts = require('youtube-scraper')
 
-// auto progress bar
+// progress bar
 function generateProgressBar(duration) {
     const totalBars = 10
     const bar = "─".repeat(totalBars)
@@ -26,20 +26,25 @@ async (conn, mek, m, { from, q, reply }) => {
 
         reply("🔍 Searching YouTube...")
 
-        const data = await yts(q)
+        // 🔎 SEARCH
+        const search = await yts.search(q)
+        if (!search || !search.videos || !search.videos.length) {
+            return reply("No results found.")
+        }
 
-        if (!data || !data.download || !data.download.mp4) {
+        const data = search.videos[0]
+
+        if (!data.download || !data.download.mp4) {
             return reply("MP4 download link not found.")
         }
 
-        // Best quality MP4
         const mp4List = data.download.mp4
         const video = mp4List[mp4List.length - 1]
 
         const duration = data.duration || "0:00"
         const progressBar = generateProgressBar(duration)
 
-        // ===== Thumbnail + details =====
+        // preview
         await conn.sendMessage(
             from,
             {
@@ -59,9 +64,7 @@ ${progressBar}
             { quoted: mek }
         )
 
-        reply("▶️ downloading video from MALIYA-MD...")
-
-        // ===== Send video =====
+        // send video
         await conn.sendMessage(
             from,
             {
