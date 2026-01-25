@@ -1,5 +1,5 @@
 const { cmd } = require('../command')
-const yts = require('youtube_scraper')
+const yts = require('youtube-scraper')
 
 // auto progress bar
 function generateProgressBar(duration) {
