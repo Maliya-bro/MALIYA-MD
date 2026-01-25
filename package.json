@@ -44,6 +44,7 @@
     "abir-photo360-apis": "latest",
     "puppeteer": "latest",
     "yt-dlp-wrap": "latest",
-    "google-tts-api": "latest"
+    "google-tts-api": "latest",
+    "vreden/youtube_scraper": "latest"
   }
 }
