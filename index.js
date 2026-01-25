@@ -1,4 +1,4 @@
-// index.js (FULL CODE) ✅ Status Auto Seen + React FIXED (Baileys)
+// index.js (FULL CODE) ✅ Status Auto Seen + React FIXED (Baileys latest)
 // ---------------------------------------------------------------
 
 const {
@@ -7,19 +7,7 @@ const {
   DisconnectReason,
   jidNormalizedUser,
   getContentType,
-  proto,
-  generateWAMessageContent,
-  generateWAMessage,
-  AnyMessageContent,
-  prepareWAMessageMedia,
-  areJidsSameUser,
   downloadContentFromMessage,
-  MessageRetryMap,
-  generateForwardMessageContent,
-  generateWAMessageFromContent,
-  generateMessageID,
-  makeInMemoryStore,
-  jidDecode,
   fetchLatestBaileysVersion,
   Browsers,
 } = require("@whiskeysockets/baileys");
@@ -27,23 +15,10 @@ const {
 const fs = require("fs");
 const P = require("pino");
 const express = require("express");
-const axios = require("axios");
 const path = require("path");
-const qrcode = require("qrcode-terminal");
 
 const config = require("./config");
-const { sms, downloadMediaMessage } = require("./lib/msg");
-const {
-  getBuffer,
-  getGroupAdmins,
-  getRandom,
-  h2k,
-  isUrl,
-  Json,
-  runtime,
-  sleep,
-  fetchJson,
-} = require("./lib/functions");
+const { sms } = require("./lib/msg");
 const { File } = require("megajs");
 const { commands, replyHandlers } = require("./command");
 
@@ -96,7 +71,6 @@ async function connectToWA() {
   console.log("Connecting MALIYA-MD 🧬...");
 
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
-
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
@@ -182,9 +156,7 @@ async function connectToWA() {
       // load plugins
       try {
         fs.readdirSync("./plugins/").forEach((plugin) => {
-          if (plugin.endsWith(".js")) {
-            require(`./plugins/${plugin}`);
-          }
+          if (plugin.endsWith(".js")) require(`./plugins/${plugin}`);
         });
       } catch (e) {
         console.log("⚠️ Plugin load error:", e?.message || e);
@@ -196,184 +168,221 @@ async function connectToWA() {
 
   /* ================= MESSAGE HANDLER ================= */
   sock.ev.on("messages.upsert", async ({ messages }) => {
-    const mek = messages[0];
-    if (!mek?.message) return;
+    if (!messages || !messages.length) return;
 
-    // unwrap ephemeral
-    mek.message =
-      getContentType(mek.message) === "ephemeralMessage"
-        ? mek.message.ephemeralMessage.message
-        : mek.message;
+    // ✅ IMPORTANT: handle ALL messages (not only messages[0])
+    for (const mek0 of messages) {
+      const mek = mek0;
+      if (!mek?.message) continue;
 
-    // ✅ plugins onMessage
-    if (global.pluginHooks) {
-      for (const plugin of global.pluginHooks) {
-        if (plugin.onMessage) {
-          try {
-            await plugin.onMessage(sock, mek);
-          } catch {}
+      // unwrap ephemeral
+      mek.message =
+        getContentType(mek.message) === "ephemeralMessage"
+          ? mek.message.ephemeralMessage.message
+          : mek.message;
+
+      // ✅ plugins onMessage
+      if (global.pluginHooks) {
+        for (const plugin of global.pluginHooks) {
+          if (plugin.onMessage) {
+            try {
+              await plugin.onMessage(sock, mek);
+            } catch {}
+          }
         }
       }
-    }
 
-    /* ============================================================
-       ✅✅✅ STATUS AUTO SEEN + REACT + FORWARD (FIXED)
-       ============================================================ */
-    if (mek.key?.remoteJid === "status@broadcast") {
-      const participant = mek.key.participant; // status owner
-      const id = mek.key.id;
+      /* ============================================================
+         ✅✅✅ STATUS AUTO SEEN + REACT + FORWARD (FIXED)
+         ============================================================ */
+      if (mek.key?.remoteJid === "status@broadcast") {
+        const participantRaw = mek.key.participant; // status owner
+        const id = mek.key.id;
 
-      // some statuses may not contain participant/id
-      if (!participant || !id) return;
+        if (!participantRaw || !id) continue;
 
-      const mentionJid = participant.includes("@s.whatsapp.net")
-        ? participant
-        : participant + "@s.whatsapp.net";
+        // normalize jids
+        const participant = jidNormalizedUser(participantRaw);
+        const myJid = jidNormalizedUser(sock.user?.id || "");
 
-      // ✅ IMPORTANT: build a proper key for status reactions/reads
-      const statusKey = {
-        remoteJid: "status@broadcast",
-        id,
-        participant,
-        fromMe: false,
-      };
+        const mentionJid = participant.includes("@s.whatsapp.net")
+          ? participant
+          : participant + "@s.whatsapp.net";
 
-      // ✅ Seen (Most reliable for status)
-      if (String(config.AUTO_STATUS_SEEN).toLowerCase() === "true") {
-        try {
-          // best method
-          await sock.sendReadReceipt("status@broadcast", participant, [id]);
+        // ✅ Proper status key
+        const statusKey = {
+          remoteJid: "status@broadcast",
+          id,
+          participant,
+          fromMe: false,
+        };
 
-          // fallback (some builds accept this)
+        // ✅ Seen
+        if (String(config.AUTO_STATUS_SEEN).toLowerCase() === "true") {
           try {
+            // Most reliable in latest builds:
             await sock.readMessages([statusKey]);
-          } catch {}
 
-          console.log(`[✓] Status seen: ${id}`);
-        } catch (e) {
-          console.error("❌ Failed to mark status as seen:", e?.message || e);
+            // Fallback:
+            try {
+              await sock.sendReadReceipt("status@broadcast", participant, [id]);
+            } catch {}
+
+            console.log(`[✓] Status seen: ${id} (${participant})`);
+          } catch (e) {
+            console.error("❌ Failed to mark status as seen:", e?.message || e);
+          }
         }
-      }
 
-      // ✅ React
-      if (String(config.AUTO_STATUS_REACT).toLowerCase() === "true") {
-        try {
-          const emojis = [
-            "❤️","💸","😇","🍂","💥","💯","🔥","💫","💎","💗","🤍","🖤","👀","🙌","🙆","🚩",
-            "🥰","💐","😎","🤎","✅","🫀","🧡","😁","😄","🌸","🕊️","🌷","⛅","🌟","🗿",
-            "💜","💙","🌝","💚"
-          ];
-          const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-
-          await sock.sendMessage("status@broadcast", {
-            react: { text: randomEmoji, key: statusKey },
-          });
-
-          console.log(`[✓] Reacted to status of ${participant} with ${randomEmoji}`);
-        } catch (e) {
-          console.error("❌ Failed to react to status:", e?.message || e);
-        }
-      }
-
-      // ✅ Forward text-only status to owner
-      if (
-        mek.message?.extendedTextMessage &&
-        !mek.message.imageMessage &&
-        !mek.message.videoMessage
-      ) {
-        const text = mek.message.extendedTextMessage.text || "";
-        if (text.trim().length > 0) {
+        // ✅ React (needs statusJidList)
+        if (String(config.AUTO_STATUS_REACT).toLowerCase() === "true") {
           try {
+            const emojis = [
+              "❤️","💸","😇","🍂","💥","💯","🔥","💫","💎","💗","🤍","🖤","👀","🙌","🙆","🚩",
+              "🥰","💐","😎","🤎","✅","🫀","🧡","😁","😄","🌸","🕊️","🌷","⛅","🌟","🗿",
+              "💜","💙","🌝","💚"
+            ];
+            const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+
+            await sock.sendMessage(
+              "status@broadcast",
+              { react: { text: randomEmoji, key: statusKey } },
+              // ✅ THIS is the important part for status reactions
+              { statusJidList: [participant, myJid].filter(Boolean) }
+            );
+
+            console.log(`[✓] Reacted to status of ${participant} with ${randomEmoji}`);
+          } catch (e) {
+            console.error("❌ Failed to react to status:", e?.message || e);
+          }
+        }
+
+        // ✅ Forward text-only status to owner
+        if (
+          mek.message?.extendedTextMessage &&
+          !mek.message.imageMessage &&
+          !mek.message.videoMessage
+        ) {
+          const text = mek.message.extendedTextMessage.text || "";
+          if (text.trim().length > 0) {
+            try {
+              await sock.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
+                text: `📝 *Text Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${text}`,
+                mentions: [mentionJid],
+              });
+              console.log(`✅ Text-only status from ${mentionJid} forwarded.`);
+            } catch (e) {
+              console.error("❌ Failed to forward text status:", e?.message || e);
+            }
+          }
+        }
+
+        // ✅ Forward image/video status to owner
+        if (mek.message?.imageMessage || mek.message?.videoMessage) {
+          try {
+            const msgType = mek.message.imageMessage ? "imageMessage" : "videoMessage";
+            const mediaMsg = mek.message[msgType];
+
+            const stream = await downloadContentFromMessage(
+              mediaMsg,
+              msgType === "imageMessage" ? "image" : "video"
+            );
+
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+
+            const mimetype =
+              mediaMsg.mimetype || (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
+            const captionText = mediaMsg.caption || "";
+
             await sock.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
-              text: `📝 *Text Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${text}`,
+              [msgType === "imageMessage" ? "image" : "video"]: buffer,
+              mimetype,
+              caption: `📥 *Forwarded Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${captionText}`,
               mentions: [mentionJid],
             });
-            console.log(`✅ Text-only status from ${mentionJid} forwarded.`);
-          } catch (e) {
-            console.error("❌ Failed to forward text status:", e?.message || e);
+
+            console.log(`✅ Media status from ${mentionJid} forwarded.`);
+          } catch (err) {
+            console.error("❌ Failed to download or forward media status:", err?.message || err);
+          }
+        }
+
+        // ✅ status වලට normal command handler run නොවෙන්න
+        continue;
+      }
+      /* ===================== END STATUS BLOCK ===================== */
+
+      const m = sms(sock, mek);
+      const type = getContentType(mek.message);
+
+      const body =
+        type === "conversation"
+          ? mek.message.conversation
+          : mek.message[type]?.text || mek.message[type]?.caption || "";
+
+      const isCmd = body.startsWith(prefix);
+      const commandName = isCmd
+        ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase()
+        : "";
+
+      const args = body.trim().split(/ +/).slice(1);
+      const q = args.join(" ");
+
+      const from = mek.key.remoteJid;
+      const sender = mek.key.fromMe ? sock.user.id : mek.key.participant || mek.key.remoteJid;
+      const senderNumber = (sender || "").split("@")[0];
+
+      const isGroup = (from || "").endsWith("@g.us");
+      const isOwner = ownerNumber.includes(senderNumber);
+
+      const reply = (text) => sock.sendMessage(from, { text }, { quoted: mek });
+
+      // ===================== REPLY HANDLERS (NO PREFIX) =====================
+      if (!isCmd && replyHandlers && replyHandlers.length) {
+        for (const h of replyHandlers) {
+          if (typeof h.filter !== "function") continue;
+
+          let ok = false;
+          try {
+            ok = h.filter(body, { sender, from, isGroup, senderNumber });
+          } catch {
+            ok = false;
+          }
+
+          if (ok) {
+            if (h.react) {
+              sock.sendMessage(from, { react: { text: h.react, key: mek.key } });
+            }
+
+            await h.function(sock, mek, m, {
+              from,
+              body,
+              args,
+              q,
+              sender,
+              senderNumber,
+              isGroup,
+              isOwner,
+              reply,
+            });
+            break;
           }
         }
       }
 
-      // ✅ Forward image/video status to owner
-      if (mek.message?.imageMessage || mek.message?.videoMessage) {
-        try {
-          const msgType = mek.message.imageMessage ? "imageMessage" : "videoMessage";
-          const mediaMsg = mek.message[msgType];
+      // ===================== COMMAND HANDLER =====================
+      if (isCmd) {
+        const cmd = commands.find(
+          (c) => c.pattern === commandName || c.alias?.includes(commandName)
+        );
 
-          const stream = await downloadContentFromMessage(
-            mediaMsg,
-            msgType === "imageMessage" ? "image" : "video"
-          );
-
-          let buffer = Buffer.from([]);
-          for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-
-          const mimetype =
-            mediaMsg.mimetype || (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
-          const captionText = mediaMsg.caption || "";
-
-          await sock.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
-            [msgType === "imageMessage" ? "image" : "video"]: buffer,
-            mimetype,
-            caption: `📥 *Forwarded Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${captionText}`,
-            mentions: [mentionJid],
-          });
-
-          console.log(`✅ Media status from ${mentionJid} forwarded.`);
-        } catch (err) {
-          console.error("❌ Failed to download or forward media status:", err?.message || err);
-        }
-      }
-
-      // ✅ status වලට normal command handler run නොවෙන්න
-      return;
-    }
-    /* ===================== END STATUS BLOCK ===================== */
-
-    const m = sms(sock, mek);
-    const type = getContentType(mek.message);
-
-    const body =
-      type === "conversation"
-        ? mek.message.conversation
-        : mek.message[type]?.text || mek.message[type]?.caption || "";
-
-    const isCmd = body.startsWith(prefix);
-    const commandName = isCmd
-      ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase()
-      : "";
-
-    const args = body.trim().split(/ +/).slice(1);
-    const q = args.join(" ");
-
-    const from = mek.key.remoteJid;
-    const sender = mek.key.fromMe ? sock.user.id : mek.key.participant || mek.key.remoteJid;
-    const senderNumber = sender.split("@")[0];
-
-    const isGroup = from.endsWith("@g.us");
-    const isOwner = ownerNumber.includes(senderNumber);
-
-    const reply = (text) => sock.sendMessage(from, { text }, { quoted: mek });
-
-    // ===================== REPLY HANDLERS (NO PREFIX) =====================
-    if (!isCmd && replyHandlers && replyHandlers.length) {
-      for (const h of replyHandlers) {
-        if (typeof h.filter !== "function") continue;
-
-        let ok = false;
-        try {
-          ok = h.filter(body, { sender, from, isGroup, senderNumber });
-        } catch {
-          ok = false;
-        }
-
-        if (ok) {
-          if (h.react) {
-            sock.sendMessage(from, { react: { text: h.react, key: mek.key } });
+        if (cmd) {
+          if (cmd.react) {
+            sock.sendMessage(from, { react: { text: cmd.react, key: mek.key } });
           }
 
-          return h.function(sock, mek, m, {
+          await cmd.function(sock, mek, m, {
             from,
             body,
             args,
@@ -385,31 +394,6 @@ async function connectToWA() {
             reply,
           });
         }
-      }
-    }
-
-    // ===================== COMMAND HANDLER =====================
-    if (isCmd) {
-      const cmd = commands.find(
-        (c) => c.pattern === commandName || c.alias?.includes(commandName)
-      );
-
-      if (cmd) {
-        if (cmd.react) {
-          sock.sendMessage(from, { react: { text: cmd.react, key: mek.key } });
-        }
-
-        return cmd.function(sock, mek, m, {
-          from,
-          body,
-          args,
-          q,
-          sender,
-          senderNumber,
-          isGroup,
-          isOwner,
-          reply,
-        });
       }
     }
   });
