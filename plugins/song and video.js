@@ -1,5 +1,5 @@
 const { cmd } = require("../command");
-const { ytmp3, ytmp4, tiktok } = require("sadaslk-dlcore");
+const { ytmp3, tiktok } = require("sadaslk-dlcore");
 const yts = require("yt-search");
 const fs = require("fs");
 const axios = require("axios");
@@ -60,7 +60,7 @@ cmd(
       const duration = video.timestamp || "0:00";
       const progressBar = generateProgressBar(duration);
 
-      // ===== Thumbnail + full details =====
+      // ===== Thumbnail + FULL original caption =====
       await bot.sendMessage(
         from,
         {
@@ -105,63 +105,6 @@ ${progressBar}
   }
 );
 
-/* ================= VIDEO ================= */
-
-cmd(
-  {
-    pattern: "video",
-    react: "🎬",
-    category: "download",
-    filename: __filename,
-  },
-  async (bot, mek, m, { from, q, reply }) => {
-    try {
-      if (!q) return reply("Please send a YouTube link or video name.");
-
-      reply("Searching YouTube...");
-      const video = await getYoutube(q);
-      if (!video) return reply("No results found.");
-
-      await bot.sendMessage(
-        from,
-        {
-          image: { url: video.thumbnail },
-          caption: `
-🎬 *${video.title}*
-
-👤 Channel: ${video.author.name}
-⏱ Duration: ${video.timestamp}
-👀 Views: ${video.views.toLocaleString()}
-          `,
-        },
-        { quoted: mek }
-      );
-
-      reply("Downloading video (WhatsApp safe)...");
-      const data = await ytmp4(video.url, { videoQuality: "360" });
-
-      const filePath = path.join(__dirname, `${Date.now()}.mp4`);
-      await downloadFile(data.url, filePath);
-
-      await bot.sendMessage(
-        from,
-        {
-          document: fs.readFileSync(filePath),
-          mimetype: "video/mp4",
-          fileName: `${video.title}.mp4`,
-          caption: "YouTube video downloaded successfully.\nMALIYA-MD ❤️",
-        },
-        { quoted: mek }
-      );
-
-      fs.unlinkSync(filePath);
-    } catch (e) {
-      console.log(e);
-      reply("Error while downloading video.");
-    }
-  }
-);
-
 /* ================= TIKTOK ================= */
 
 cmd(
@@ -178,6 +121,7 @@ cmd(
 
       reply("Downloading TikTok video...");
       const data = await tiktok(q);
+
       if (!data?.no_watermark)
         return reply("Failed to download TikTok video.");
 
