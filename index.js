@@ -26,7 +26,7 @@ const app = express();
 const port = process.env.PORT || 8000;
 
 const prefix = ".";
-const ownerNumber = ["94702135392"];
+const ownerNumber = ["94701369636"];
 const authDir = path.join(__dirname, "/auth_info_baileys/");
 const credsPath = path.join(authDir, "creds.json");
 
@@ -122,16 +122,16 @@ async function connectToWA() {
       }).format(now);
 
       const up = `
-🌈━━━━━━━━━━━━━━━━━━━━🌈
-🔥🤖    *MALIYA-MD*   🤖🔥
-🌈━━━━━━━━━━━━━━━━━━━━🌈
+ 🌈━━━━━━━━━━━━━🌈
+🔥🤖 *MALIYA-MD* 🤖🔥
+ 🌈━━━━━━━━━━━━━🌈
 
 ✅✨ Connection : CONNECTED & ONLINE
 ⚡🧬 System     : STABLE | FAST | SECURE
 🛡️🔐 Mode       : PUBLIC
 🎯🧩 Prefix     : ${prefix}
 
-🧑‍💻👑 Owner     : ${OWNER_NAME}
+🧑‍💻👑 Owner      : ${OWNER_NAME}
 🚀📦 Version    : ${BOT_VERSION}
 
 🕒⏳ Time       : ${time}
@@ -139,7 +139,7 @@ async function connectToWA() {
 
 💬📖 Type  .menu  to start
 🔥🚀 Powered by MALIYA-MD Engine
-🌈━━━━━━━━━━━━━━━━━━━🌈
+🌈━━━━━━━━━━━🌈
 `.trim();
 
       try {
