@@ -1,5 +1,5 @@
 // index.js (FULL CODE) ✅ Status Auto Seen + React FIXED (Baileys latest)
-// ---------------------------------------------------------------
+// ------------------------------------------------------------
 
 const {
   default: makeWASocket,
