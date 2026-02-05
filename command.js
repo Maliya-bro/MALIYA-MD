@@ -11,7 +11,7 @@ function cmd(info, func) {
         commands.push(data);
     }
 
-    // Reply handlers without prefix (also allow commands that have both pattern + filter)
+    // Reply handlers without prefix (also allow commands that have both pattern + filter.)
     if (typeof data.filter === "function") {
         replyHandlers.push(data);
     }
