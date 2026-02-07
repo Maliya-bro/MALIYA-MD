@@ -46,8 +46,7 @@
     "yt-dlp-wrap": "latest",
     "google-tts-api": "latest",
     "youtube-scraper": "latest",
-    "@distube/ytdl-core": "latest",
-    "yt-dlp-exec": "latest",
-    "yt-dlp": "latest"
+    "@distube/ytdl-core": "latest"
+    
   }
 }
