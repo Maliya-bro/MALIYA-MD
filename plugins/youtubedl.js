@@ -1,81 +1,76 @@
 const { cmd } = require("../command");
 const yts = require("yt-search");
-const ytdl = require("@distube/ytdl-core");
+const ytDlp = require("yt-dlp-exec");
 const fs = require("fs");
 const path = require("path");
 
-/* ================= VIDEO (MP4) ================= */
+/* ================= VIDEO DOWNLOADER (2026 STABLE) ================= */
 
 cmd(
   {
     pattern: "video",
-    alias: ["mp4", "ytmp4", "movie"],
+    alias: ["mp4", "ytmp4"],
     react: "🎥",
     category: "download",
     filename: __filename,
   },
   async (bot, mek, m, { from, q, reply }) => {
     try {
-      if (!q) return reply("🎬 Please send a video name or YouTube link.");
+      if (!q) return reply("🎬 කරුණාකර වීඩියෝවේ නම හෝ YouTube Link එකක් ලබා දෙන්න.");
 
-      reply("🔍 Searching YouTube Video...");
-      
-      // Search logic (ඔයාගේ code එකේ විදිහටම)
+      reply("🔍 Searching YouTube...");
       const search = await yts(q);
       const video = search.videos[0];
-      if (!video) return reply("❌ No results found.");
 
-      const duration = video.timestamp || "0:00";
+      if (!video) return reply("❌ වීඩියෝව සොයාගත නොහැකි විය.");
 
-      // ===== Video Info Message =====
-      await bot.sendMessage(
-        from,
-        {
-          image: { url: video.thumbnail },
-          caption: `
+      const infoMsg = `
 🎥 *${video.title}*
 
 👤 *Channel:* ${video.author.name}
-⏱ *Duration:* ${duration}
+⏱ *Duration:* ${video.timestamp}
 👀 *Views:* ${video.views.toLocaleString()}
 📅 *Uploaded:* ${video.ago}
 
-📥 *Downloading your video... Please wait.*
+📥 *Downloading MP4...*
+      `;
 
-🍀 *MALIYA-MD VIDEO DOWNLOADER* 🍀
-          `,
+      await bot.sendMessage(from, { image: { url: video.thumbnail }, caption: infoMsg }, { quoted: mek });
+
+      // Temp file path එකක් සාදා ගැනීම
+      const filePath = path.join(__dirname, `../${Date.now()}.mp4`);
+
+      // yt-dlp මගින් download කිරීම
+      await ytDlp(video.url, {
+        output: filePath,
+        format: "best[ext=mp4]/best", // හොඳම mp4 quality එක
+        noCheckCertificates: true,
+        noWarnings: true,
+        addHeader: [
+          'referer:https://www.google.com/',
+          'user-agent:googlebot'
+        ],
+      });
+
+      // වීඩියෝ එක යැවීම
+      await bot.sendMessage(
+        from,
+        {
+          video: fs.readFileSync(filePath),
+          mimetype: "video/mp4",
+          caption: `*${video.title}*\n\n> MALIYA-MD 🧬`,
         },
         { quoted: mek }
       );
 
-      // ===== Download MP4 Logic =====
-      const filePath = path.join(__dirname, `${Date.now()}.mp4`);
-      
-      // High quality (video + audio) download කිරීම
-      const stream = ytdl(video.url, {
-        filter: "buffer", // සරලව buffer එකක් විදිහට හෝ direct stream එකක් ගන්න පුළුවන්
-        quality: "highestvideo",
-      }).pipe(fs.createWriteStream(filePath));
-
-      stream.on("finish", async () => {
-        // ===== Send Video to WhatsApp =====
-        await bot.sendMessage(
-          from,
-          {
-            video: fs.readFileSync(filePath),
-            mimetype: "video/mp4",
-            caption: `*${video.title}*\n\nDownloaded by MALIYA-MD ❤️`,
-          },
-          { quoted: mek }
-        );
-
-        // Temp file එක delete කිරීම
+      // වැඩේ ඉවර වුනාම file එක delete කිරීම
+      if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
-      });
+      }
 
     } catch (e) {
       console.log(e);
-      reply("❌ Error while downloading video: " + e.message);
+      reply("❌ වීඩියෝව Download කිරීමේදී දෝෂයක් ඇති විය: " + e.message);
     }
   }
 );
