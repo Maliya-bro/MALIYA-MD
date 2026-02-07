@@ -22,10 +22,10 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: "npm"
 
-      # YT-DLP Install කිරීම (මේක නැති නිසයි කලින් Error එක ආවේ)
+      # YT-DLP සර්වර් එකට හරියටම Install කිරීම (NPM එකෙන් නෙවෙයි)
       - name: Install yt-dlp
         run: |
-          sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
       - name: Install Dependencies
@@ -35,6 +35,6 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
-          FORCE_COLOR: true  # පාටවල් ලස්සනට පේන්න
-        # PM2 නැතුව කෙලින්ම node එකෙන් run කරමු (එතකොට Logs ලස්සනට පේනවා)
+          FORCE_COLOR: "1"  # ලස්සනට පාටවල් පේන්න මේක දාන්න
+        # PM2 නැතුව කෙලින්ම node එකෙන් run කරමු (එතකොට පාටවල් හරියට පේනවා)
         run: node index.js
