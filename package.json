@@ -45,6 +45,7 @@
     "puppeteer": "latest",
     "yt-dlp-wrap": "latest",
     "google-tts-api": "latest",
-    "youtube-scraper": "latest"
+    "youtube-scraper": "latest",
+    "@distube/ytdl-core": "latest"
   }
 }
