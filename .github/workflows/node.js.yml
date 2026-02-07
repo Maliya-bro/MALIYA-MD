@@ -9,6 +9,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
     strategy:
       matrix:
         node-version: [20.x]
@@ -22,19 +25,5 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: "npm"
 
-      # YT-DLP සර්වර් එකට හරියටම Install කිරීම (NPM එකෙන් නෙවෙයි)
-      - name: Install yt-dlp
-        run: |
-          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
-          sudo chmod a+rx /usr/local/bin/yt-dlp
-
-      - name: Install Dependencies
-        run: npm install
-
-      - name: Start Bot
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          YT_COOKIES: ${{ secrets.YT_COOKIES }}
-          FORCE_COLOR: "1"  # ලස්සනට පාටවල් පේන්න මේක දාන්න
-        # PM2 නැතුව කෙලින්ම node එකෙන් run කරමු (එතකොට පාටවල් හරියට පේනවා)
-        run: node index.js
+      - run: npm install
+      - run: npm run start
