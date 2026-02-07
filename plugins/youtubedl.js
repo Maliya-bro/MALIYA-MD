@@ -20,44 +20,62 @@ cmd(
       const video = search.videos[0];
       if (!video) return reply("❌ වීඩියෝව සොයාගත නොහැකි විය.");
 
-      const infoMsg = `
-🎥 *${video.title}*
+      await bot.sendMessage(from, { 
+          image: { url: video.thumbnail }, 
+          caption: `🎥 *${video.title}*\n\n⏱ *Duration:* ${video.timestamp}\n\n📥 *Downloading... Please wait.*` 
+      }, { quoted: mek });
 
-👤 *Channel:* ${video.author.name}
-⏱ *Duration:* ${video.timestamp}
-👀 *Views:* ${video.views.toLocaleString()}
+      const videoUrl = video.url;
+      let downloadUrl = null;
+      let successApi = "";
 
-📥 *Downloading via API...*
-      `;
+      // 2. API List (එකක් පස්සේ එකක් Try කරන්න)
+      const apis = [
+        `https://api.giftedtech.my.id/api/download/ytmp4?url=${encodeURIComponent(videoUrl)}&apikey=gifted`,
+        `https://api.guruapi.tech/api/ytmp4?url=${encodeURIComponent(videoUrl)}`,
+        `https://api.shizoke.site/api/download/ytmp4?url=${encodeURIComponent(videoUrl)}`,
+        `https://api.vreden.my.id/api/ytmp4?url=${encodeURIComponent(videoUrl)}`,
+        `https://widipe.com/download/ytdl?url=${encodeURIComponent(videoUrl)}&type=video`
+      ];
 
-      await bot.sendMessage(from, { image: { url: video.thumbnail }, caption: infoMsg }, { quoted: mek });
+      // 3. ලූප් එකක් මගින් API එකින් එක පරීක්ෂා කිරීම
+      for (let i = 0; i < apis.length; i++) {
+        try {
+          console.log(`Trying API ${i + 1}...`);
+          const response = await axios.get(apis[i]);
+          
+          // විවිධ APIs වල දත්ත ලැබෙන ආකාරය වෙනස් නිසා ඒවා පරීක්ෂා කිරීම
+          const resData = response.data;
+          downloadUrl = resData.result?.download_url || resData.result?.url_video || resData.url || resData.result?.url;
 
-      // 2. API එක හරහා Download Link එක ලබා ගැනීම
-      // මම මෙතන පහසු API එකක් පාවිච්චි කරනවා (මෙය වැඩ නොකළොත් ඉහත ලැයිස්තුවේ වෙනත් එකක් උත්සාහ කරන්න)
-      const apiUrl = `https://api.dandrv.me/download/ytmp4?url=${encodeURIComponent(video.url)}`;
-      const response = await axios.get(apiUrl);
-      const data = response.data;
-
-      if (!data.success || !data.result.download_url) {
-        return reply("❌ වීඩියෝව ලබා ගැනීමට නොහැකි විය. පසුව උත්සාහ කරන්න.");
+          if (downloadUrl) {
+            successApi = `API ${i + 1}`;
+            break; // Link එක හමු වූ සැනින් Loop එක නතර කරන්න
+          }
+        } catch (err) {
+          console.log(`API ${i + 1} failed, moving to next...`);
+          continue; // ඊළඟ API එකට යන්න
+        }
       }
 
-      const downloadUrl = data.result.download_url;
-
-      // 3. වීඩියෝ එක WhatsApp වෙත යැවීම
-      await bot.sendMessage(
-        from,
-        {
-          video: { url: downloadUrl },
-          mimetype: "video/mp4",
-          caption: `*${video.title}*\n\n> MALIYA-MD ❤️`,
-        },
-        { quoted: mek }
-      );
+      // 4. වීඩියෝව යැවීම
+      if (downloadUrl) {
+        await bot.sendMessage(
+          from,
+          {
+            video: { url: downloadUrl },
+            mimetype: "video/mp4",
+            caption: `*${video.title}*\n\nFetched by: ${successApi}\n\n> MALIYA-MD ❤️`,
+          },
+          { quoted: mek }
+        );
+      } else {
+        reply("❌ ක්ෂණික දෝෂයක්! ලබාදුන් සියලුම APIs දැනට කාර්යබහුලයි. කරුණාකර පසුව උත්සාහ කරන්න.");
+      }
 
     } catch (e) {
       console.log(e);
-      reply("❌ Error: " + (e.response?.data?.message || e.message));
+      reply("❌ Error: " + e.message);
     }
   }
 );
