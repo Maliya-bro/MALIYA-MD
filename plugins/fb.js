@@ -5,7 +5,7 @@ cmd(
   {
     pattern: "fb",
     alias: ["facebook"],
-    react: "✅",
+    react: "❤️",
     desc: "Download Facebook Video",
     category: "download",
     filename: __filename,
@@ -67,7 +67,7 @@ Your fb video
         from,
         {
           image: {
-            url: "https://github.com/nadithmalindu-source/Malindu-AI-BOT/blob/main/image/Gemini_Generated_Image_unjbleunjbleunjb.png?raw=true",
+            url: "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_unjbleunjbleunjb.png?raw=true",
           },
           caption: desc,
         },
