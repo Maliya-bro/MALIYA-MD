@@ -35,38 +35,34 @@ cmd(
       let downloadUrl = null;
       let successApi = "";
 
-      // 2. 2026 සක්‍රීය API ලැයිස්තුව (එකක් බැරි නම් තව එකක්)
+   // 2. වඩාත් ස්ථාවර Global API ලැයිස්තුව (2026 Feb Active)
       const apis = [
-        `https://api.siputzx.my.id/api/d/ytmp4?url=${encodeURIComponent(videoUrl)}`,
-        `https://bk9.fun/download/youtube?url=${encodeURIComponent(videoUrl)}`,
-        `https://api.vreden.my.id/api/ytmp4?url=${encodeURIComponent(videoUrl)}`,
-        `https://api.zenkey.my.id/api/download/ytmp4?url=${encodeURIComponent(videoUrl)}`,
-        `https://api.agungnyarto.my.id/api/youtube/mp4?url=${encodeURIComponent(videoUrl)}`
+        `https://api.darkyz.my.id/api/download/ytdl?url=${encodeURIComponent(videoUrl)}&type=mp4`,
+        `https://api.widipe.com/download/ytdl?url=${encodeURIComponent(videoUrl)}&type=video`,
+        `https://api.botcahx.eu.org/api/dowloader/ytpv2?url=${encodeURIComponent(videoUrl)}&apikey=neyo`,
+        `https://api.tioxy.my.id/api/download/ytmp4?url=${encodeURIComponent(videoUrl)}`,
+        `https://sk-fast-rest-api.vercel.app/api/ytdl?url=${encodeURIComponent(videoUrl)}&type=video`
       ];
 
-      // 3. API Loop එක - එකින් එක පරීක්ෂා කිරීම
       for (let i = 0; i < apis.length; i++) {
         try {
           console.log(`Trying API ${i + 1}...`);
-          
-          // තත්පර 20කට වඩා වැඩි නම් ඊළඟ API එකට මාරු වෙන්න (Timeout)
-          const response = await axios.get(apis[i], { timeout: 20000 });
+          const response = await axios.get(apis[i], { timeout: 25000 });
           const resData = response.data;
 
-          // විවිධ API වලින් දත්ත ලැබෙන විදි (Handling response formats)
-          downloadUrl = resData.result?.download?.url || 
-                        resData.result?.url || 
+          // මේ APIs වල Response එක එන විදිහට මේක හදලා තියෙන්නේ
+          downloadUrl = resData.result?.url || 
+                        resData.result?.download || 
                         resData.data?.url || 
-                        resData.result?.video ||
                         resData.url;
 
           if (downloadUrl && downloadUrl.startsWith('http')) {
             successApi = `Server ${i + 1}`;
-            break; // සාර්ථක නම් Loop එකෙන් ඉවත් වෙන්න
+            break;
           }
         } catch (err) {
           console.log(`API ${i + 1} Error: ${err.message}`);
-          continue; // ඊළඟ එකට යන්න
+          continue;
         }
       }
 
