@@ -1,85 +1,65 @@
 const axios = require("axios");
-const FormData = require('form-data');
-const fs = require('fs');
-const os = require('os');
+const FormData = require("form-data");
+const fs = require("fs");
+const os = require("os");
 const path = require("path");
+const { downloadMediaMessage } = require("../lib/msg"); // <- වැදගත්
 const { cmd } = require("../command");
-
-// Helper function to format bytes
-function formatBytes(bytes) {
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
 
 cmd({
   pattern: "wanted",
   alias: ["wantededit"],
-  react: '📸',
-  desc: "Scan and remove bg from images",
+  react: "📸",
+  desc: "Wanted poster edit",
   category: "img_edit",
-  use: ".wanted [reply to image]",
+  use: ".wanted (reply to image)",
   filename: __filename
-}, async (conn, message, m,  { reply, mek }) => {
+}, async (conn, mek, m, { reply }) => {
   try {
-    // Check if quoted message exists and has media
-    const quotedMsg = message.quoted ? message.quoted : message;
-    const mimeType = (quotedMsg.msg || quotedMsg).mimetype || '';
-    
-    if (!mimeType || !mimeType.startsWith('image/')) {
-      return reply("Please reply to an image file (JPEG/PNG)");
+    const quoted = mek.quoted ? mek.quoted : mek;
+    const mime = quoted.mimetype || "";
+
+    if (!mime.startsWith("image/")) {
+      return reply("🖼️ Please reply to an image.");
     }
 
-    // Download the media
-    const mediaBuffer = await quotedMsg.download();
-    const fileSize = formatBytes(mediaBuffer.length);
-    
-    // Get file extension based on mime type
-    let extension = '';
-    if (mimeType.includes('image/jpeg')) extension = '.jpg';
-    else if (mimeType.includes('image/png')) extension = '.png';
-    else {
-      return reply("Unsupported image format. Please use JPEG or PNG");
-    }
+    // Download media using baileys helper
+    const buffer = await downloadMediaMessage(quoted, "buffer", {}, { logger: console });
+    if (!buffer) return reply("❌ Failed to download image.");
 
-    const tempFilePath = path.join(os.tmpdir(), `imgscan_${Date.now()}${extension}`);
-    fs.writeFileSync(tempFilePath, mediaBuffer);
+    // Save temp file
+    const ext = mime.includes("png") ? ".png" : ".jpg";
+    const tempPath = path.join(os.tmpdir(), `wanted_${Date.now()}${ext}`);
+    fs.writeFileSync(tempPath, buffer);
 
     // Upload to Catbox
     const form = new FormData();
-    form.append('fileToUpload', fs.createReadStream(tempFilePath), `image${extension}`);
-    form.append('reqtype', 'fileupload');
+    form.append("fileToUpload", fs.createReadStream(tempPath));
+    form.append("reqtype", "fileupload");
 
-    const uploadResponse = await axios.post("https://catbox.moe/user/api.php", form, {
+    const upload = await axios.post("https://catbox.moe/user/api.php", form, {
       headers: form.getHeaders()
     });
 
-    const imageUrl = uploadResponse.data;
-    fs.unlinkSync(tempFilePath); // Clean up temp file
+    fs.unlinkSync(tempPath);
 
-    if (!imageUrl) {
-      throw "Failed to upload image to Catbox";
-    }
+    if (!upload.data) return reply("❌ Upload failed.");
 
-    // Scan the image using the API
-    const apiUrl = `https://api.popcat.xyz/v2/wanted?image=${encodeURIComponent(imageUrl)}`;
-    const response = await axios.get(apiUrl, { responseType: "arraybuffer" });
+    const imageUrl = upload.data.trim();
 
-    if (!response || !response.data) {
-      return reply("Error: The API did not return a valid image. Try again later.");
-    }
+    // Wanted API
+    const api = `https://api.popcat.xyz/v2/wanted?image=${encodeURIComponent(imageUrl)}`;
+    const res = await axios.get(api, { responseType: "arraybuffer" });
 
-    const imageBuffer = Buffer.from(response.data, "binary");
+    if (!res.data) return reply("❌ API error.");
 
     await conn.sendMessage(m.chat, {
-      image: imageBuffer,
-      caption: `> *Powered by MALINDU*`
-    });
+      image: Buffer.from(res.data),
+      caption: "> *Powered by MALINDU*"
+    }, { quoted: mek });
 
-  } catch (error) {
-    console.error("Wanted Error:", error);
-    reply(`An error occurred: ${error.response?.data?.message || error.message || "Unknown error"}`);
+  } catch (err) {
+    console.log("Wanted Error:", err);
+    reply("❌ Error processing image.");
   }
 });
