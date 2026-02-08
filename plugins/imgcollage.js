@@ -34,7 +34,7 @@ async function makeCollage(images, columns, rows, outFile) {
 cmd({
   pattern: "collage",
   react: "🖼️",
-  alias: ["back", "background", "edit"]
+  alias: ["back", "background", "edit"],
   desc: "Create collage from multiple images",
   category: "edit",
   use: ".collage <Reply/send 2-6 images>",
