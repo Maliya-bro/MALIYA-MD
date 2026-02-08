@@ -6,7 +6,7 @@ const API_BASE = "https://ai-proxy-server-smoky.vercel.app/";
 cmd(
   {
     pattern: "ai",
-    alias: ["gemini", "please", "gg"]
+    alias: ["gemini", "please", "gg"],
     react: "✨",
     desc: "Chat with Gemini AI",
     category: "ai",
