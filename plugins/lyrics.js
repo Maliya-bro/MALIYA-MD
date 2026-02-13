@@ -1,70 +1,47 @@
 const { cmd } = require("../command");
 const axios = require("axios");
+const cheerio = require("cheerio");
 
-cmd(
-  {
-    pattern: "lyr",
-    react: "🎶",
-    desc: "Get lyrics for a song (artist - title)",
-    category: "music",
-    filename: __filename,
-  },
-  async (
-    danuwa,
-    mek,
-    m,
-    {
-      from,
-      quoted,
-      body,
-      isCmd,
-      command,
-      args,
-      q,
-      isGroup,
-      sender,
-      senderNumber,
-      botNumber2,
-      botNumber,
-      pushname,
-      isMe,
-      isOwner,
-      groupMetadata,
-      groupName,
-      participants,
-      groupAdmins,
-      isBotAdmins,
-      isAdmins,
-      reply,
+cmd({
+  pattern: "lyrics",
+  alias: ["ly", "lyric", "lyr","l"],
+  desc: "Get Sinhala song lyrics",
+  category: "search",
+  react: "🎼",
+  filename: __filename
+},
+async (conn, mek, m, { from, q, reply }) => {
+  try {
+    if (!q) return reply("❌ *enter song name*!\nExample: .lyrics api kawuruda");
+
+    // search page
+    const searchUrl = `https://sinhalasongbook.com/?s=${encodeURIComponent(q)}`;
+    const searchRes = await axios.get(searchUrl);
+    const $ = cheerio.load(searchRes.data);
+
+    let songLink = $("h2.entry-title a").attr("href");
+    if (!songLink) return reply("❌ *Song not found!*");
+
+    // open song page
+    const songRes = await axios.get(songLink);
+    const $$ = cheerio.load(songRes.data);
+
+    let title = $$("h1.entry-title").text().trim();
+    let lyrics = $$("div.entry-content").text().trim();
+
+    if (!lyrics) return reply("❌ *Lyrics not found!*");
+
+    // trim long lyrics
+    if (lyrics.length > 3500) {
+      lyrics = lyrics.slice(0, 3500) + "\n\n...Lyrics Too Long";
     }
-  ) => {
-    try {
-      if (!q) return reply("❌ Please provide artist and song: artist - song");
 
-      // Split input
-      let input = q.split("-");
-      if (input.length < 2) return reply("⚠️ Format: artist - song");
+    const msg = `🎶 *${title}*\n\n${lyrics}`;
 
-      let artist = input[0].trim();
-      let title = input[1].trim();
+    await conn.sendMessage(from, { text: msg }, { quoted: mek });
 
-      // Call lyrics.ovh API
-      const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`;
-      const { data } = await axios.get(url);
-
-      if (!data || !data.lyrics) return reply("❌ Lyrics not found!");
-
-      const lyrics = data.lyrics;
-
-      // Split long lyrics into chunks (WhatsApp limit safe)
-      const chunkSize = 3000;
-      for (let i = 0; i < lyrics.length; i += chunkSize) {
-        await reply(lyrics.slice(i, i + chunkSize));
-      }
-
-    } catch (err) {
-      console.error("LYRICS ERROR:", err.message);
-      reply("⚠️ Could not fetch lyrics right now");
-    }
+  } catch (e) {
+    console.log(e);
+    reply("⚠️ Error downloading lyrics!");
   }
-);
+});
