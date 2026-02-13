@@ -53,7 +53,7 @@ async function getSinhala(q) {
 cmd({
   pattern: "lyrics",
   alias: ["l", "lyr"],
-  react: "🎼"
+  react: "🎼",
   desc: "Lyrics search",
   category: "search",
   filename: __filename
