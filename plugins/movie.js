@@ -8,79 +8,89 @@ const pendingQuality = {};
 // Quality Normalize
 // -----------------------------
 function normalizeQuality(text) {
-  if (!text) return null;
+  if (!text) return "Unknown";
   text = text.toUpperCase();
   if (/1080|FHD/.test(text)) return "1080p";
   if (/720|HD/.test(text)) return "720p";
   if (/480|SD/.test(text)) return "480p";
+  if (/360/.test(text)) return "360p";
   return text;
 }
 
 // -----------------------------
 // Google Drive Direct Link Generator
 // -----------------------------
-function getDirectDownloadUrl(url) {
+function getDirectGoogleDriveUrl(url) {
   if (!url) return null;
   
-  // Google Drive
-  if (url.includes("drive.google.com")) {
-    const fileId = url.match(/\/d\/(.*?)\/|\/file\/d\/(.*?)\/|id=(.*?)&|id=(.*?)$/)?.[1] || 
-                  url.match(/\/d\/(.*?)\/|\/file\/d\/(.*?)\/|id=(.*?)&|id=(.*?)$/)?.[2] ||
-                  url.match(/\/d\/(.*?)\/|\/file\/d\/(.*?)\/|id=(.*?)&|id=(.*?)$/)?.[3] ||
-                  url.match(/\/d\/(.*?)\/|\/file\/d\/(.*?)\/|id=(.*?)&|id=(.*?)$/)?.[4];
-    
-    if (fileId) {
-      return `https://drive.google.com/uc?export=download&id=${fileId}`;
-    }
-  }
+  // Google Drive URLs
+  const patterns = [
+    /\/d\/(.*?)\//,
+    /\/file\/d\/(.*?)\//,
+    /id=(.*?)&/,
+    /id=(.*?)$/,
+    /\/open\?id=(.*)/
+  ];
   
-  // Direct Links (cinesubz.lk own download)
-  if (url.includes("cinesubz.lk/download") || url.includes("direct")) {
-    return url;
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[1]) {
+      return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+    }
   }
   
   return url;
 }
 
 // -----------------------------
-// Search Movies from Cinesubz.lk
+// Search Movies
 // -----------------------------
 async function searchMovies(query) {
-  const searchUrl = `https://cinesubz.lk/?s=${encodeURIComponent(query)}`;
   const browser = await puppeteer.launch({ 
     headless: true, 
-    args: ["--no-sandbox", "--disable-setuid-sandbox"] 
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"] 
   });
   
-  const page = await browser.newPage();
-  await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 60000 });
-  
-  const results = await page.$$eval(".display-item .item-box", boxes =>
-    boxes.slice(0, 10).map((box, index) => {
-      const a = box.querySelector("a");
-      const img = box.querySelector(".thumb");
-      const lang = box.querySelector(".item-desc-giha .language")?.textContent || "";
-      const quality = box.querySelector(".item-desc-giha .quality")?.textContent || "";
-      const qty = box.querySelector(".item-desc-giha .qty")?.textContent || "";
-      
-      return {
-        id: index + 1,
-        title: a?.title?.trim() || "",
-        movieUrl: a?.href || "",
-        thumb: img?.src || "",
-        language: lang.trim(),
-        quality: quality.trim(),
-        qty: qty.trim(),
-      };
-    }).filter(m => m.title && m.movieUrl)
-  );
-  
-  await browser.close();
-  return results;
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    
+    const searchUrl = `https://cinesubz.lk/?s=${encodeURIComponent(query)}`;
+    await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 60000 });
+    
+    await page.waitForSelector(".display-item .item-box", { timeout: 10000 }).catch(() => null);
+    
+    const results = await page.$$eval(".display-item .item-box", boxes =>
+      boxes.slice(0, 10).map((box, index) => {
+        const a = box.querySelector("a");
+        const img = box.querySelector(".thumb img, img");
+        const lang = box.querySelector(".language, .item-desc-giha .language")?.textContent || "";
+        const quality = box.querySelector(".quality, .item-desc-giha .quality")?.textContent || "";
+        const qty = box.querySelector(".qty, .item-desc-giha .qty")?.textContent || "";
+        
+        return {
+          id: index + 1,
+          title: a?.title?.trim() || a?.textContent?.trim() || "",
+          movieUrl: a?.href || "",
+          thumb: img?.src || img?.getAttribute('data-src') || "",
+          language: lang.trim(),
+          quality: quality.trim(),
+          qty: qty.trim(),
+        };
+      }).filter(m => m.title && m.movieUrl)
+    );
+    
+    return results;
+  } catch (error) {
+    console.error("Search error:", error);
+    return [];
+  } finally {
+    await browser.close();
+  }
 }
 
 // -----------------------------
-// Get Movie Metadata (Details)
+// Get Movie Metadata
 // -----------------------------
 async function getMovieMetadata(url) {
   const browser = await puppeteer.launch({ 
@@ -88,172 +98,190 @@ async function getMovieMetadata(url) {
     args: ["--no-sandbox", "--disable-setuid-sandbox"] 
   });
   
-  const page = await browser.newPage();
-  await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
-  
-  const metadata = await page.evaluate(() => {
-    const getText = el => el?.textContent?.trim() || "";
-    const getList = selector => Array.from(document.querySelectorAll(selector)).map(el => el.textContent.trim());
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+    await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
     
-    const title = getText(document.querySelector(".info-details .details-title h3"));
-    let language = "", directors = [], stars = [];
-    
-    document.querySelectorAll(".info-col p").forEach(p => {
-      const strong = p.querySelector("strong");
-      if (!strong) return;
-      const txt = strong.textContent.trim();
+    const metadata = await page.evaluate(() => {
+      const getText = (el) => el?.textContent?.trim() || "";
       
-      if (txt.includes("Language:")) {
-        language = strong.nextSibling?.textContent?.trim() || "";
-      }
-      if (txt.includes("Director:")) {
-        directors = Array.from(p.querySelectorAll("a")).map(a => a.textContent.trim());
-      }
-      if (txt.includes("Stars:")) {
-        stars = Array.from(p.querySelectorAll("a")).map(a => a.textContent.trim());
-      }
-    });
-    
-    const duration = getText(document.querySelector(".info-details .data-views[itemprop='duration']"));
-    const imdb = getText(document.querySelector(".info-details .data-imdb"))?.replace("IMDb:", "").trim();
-    const genres = getList(".details-genre a");
-    const thumbnail = document.querySelector(".splash-bg img")?.src || "";
-    
-    return { title, language, duration, imdb, genres, directors, stars, thumbnail };
-  });
-  
-  await browser.close();
-  return metadata;
-}
-
-// -----------------------------
-// Get Download Links (Google Drive + Direct)
-// -----------------------------
-async function getDownloadLinks(movieUrl) {
-  const browser = await puppeteer.launch({ 
-    headless: true, 
-    args: ["--no-sandbox", "--disable-setuid-sandbox"] 
-  });
-  
-  const page = await browser.newPage();
-  await page.goto(movieUrl, { waitUntil: "networkidle2", timeout: 60000 });
-
-  // cinesubz.lk නව Layout එකට අනුව Selectors
-  const linksData = await page.$$eval(".link-box, .download-links tbody tr, .pixeldrain-link, .drive-link", (boxes) => {
-    return boxes.map(box => {
-      // Quality
-      let quality = box.querySelector(".quality")?.textContent?.trim() || 
-                   box.querySelector("td:nth-child(1)")?.textContent?.trim() || "";
+      // Title
+      const title = getText(document.querySelector("h1, .details-title h3, .info-details .details-title h3, .post-title"));
       
-      // Size
-      let size = box.querySelector(".size")?.textContent?.trim() || 
-                box.querySelector("td:nth-child(3) span")?.textContent?.trim() ||
-                box.querySelector("td:nth-child(2)")?.textContent?.trim() || "";
-      
-      // Links - Google Drive, Direct, etc.
-      let pageLink = "";
-      const selectors = [
-        "a[href*='drive.google.com']",
-        "a[href*='docs.google.com']",
-        "a[href*='cinesubz.lk/download']",
-        "a[href*='direct']",
-        ".link-opt a",
-        "td:nth-child(2) a"
-      ];
-      
-      for (const sel of selectors) {
-        const a = box.querySelector(sel);
-        if (a?.href) {
-          pageLink = a.href;
-          break;
+      // Thumbnail
+      let thumbnail = "";
+      const thumbSelectors = [".splash-bg img", ".post-thumbnail img", "meta[property='og:image']"];
+      for (const sel of thumbSelectors) {
+        const el = document.querySelector(sel);
+        if (el) {
+          thumbnail = el.src || el.content || "";
+          if (thumbnail) break;
         }
       }
       
-      return {
-        quality,
-        size,
-        pageLink
-      };
-    }).filter(item => item.pageLink);
-  });
-
-  const downloadLinks = [];
-
-  for (const l of linksData) {
-    try {
-      let finalUrl = null;
-      let sizeMB = 0;
+      // Language, Directors, Stars
+      let language = "", directors = [], stars = [], duration = "", imdb = "", genres = [];
       
-      // Size Parse කරලා MB වලට හරවන්න
-      const sizeText = l.size.toUpperCase();
+      // Get all paragraphs
+      document.querySelectorAll("p, .info-col p, .info-col div").forEach(p => {
+        const text = p.textContent || "";
+        
+        if (text.includes("Language:")) {
+          language = text.replace("Language:", "").trim();
+        }
+        if (text.includes("Director:")) {
+          directors = text.replace("Director:", "").split(",").map(d => d.trim());
+        }
+        if (text.includes("Stars:")) {
+          stars = text.replace("Stars:", "").split(",").map(s => s.trim());
+        }
+        if (text.includes("Duration:")) {
+          duration = text.replace("Duration:", "").trim();
+        }
+        if (text.includes("IMDb:")) {
+          imdb = text.replace("IMDb:", "").trim();
+        }
+        if (text.includes("Genre:")) {
+          genres = text.replace("Genre:", "").split(",").map(g => g.trim());
+        }
+      });
+      
+      return { title, language, duration, imdb, genres, directors, stars, thumbnail };
+    });
+    
+    return metadata;
+  } catch (error) {
+    console.error("Metadata error:", error);
+    return { title: "", language: "", duration: "", imdb: "", genres: [], directors: [], stars: [], thumbnail: "" };
+  } finally {
+    await browser.close();
+  }
+}
+
+// -----------------------------
+// IMPORTANT: Get Google Drive Download Links
+// -----------------------------
+async function getGoogleDriveLinks(movieUrl) {
+  const browser = await puppeteer.launch({ 
+    headless: true, 
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"] 
+  });
+  
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+    await page.goto(movieUrl, { waitUntil: "networkidle2", timeout: 60000 });
+    
+    // Method 1: Look for Google Drive links directly on the page
+    const driveLinks = await page.$$eval('a[href*="drive.google.com"], a[href*="docs.google.com"]', links => {
+      return links.map(link => {
+        // Find parent row for quality and size
+        let quality = "Unknown";
+        let size = "Unknown";
+        
+        // Try to find quality in same row/container
+        const row = link.closest('tr, .link-box, .download-item, li, div');
+        if (row) {
+          const qualityEl = row.querySelector('.quality, td:nth-child(1), .link-quality');
+          const sizeEl = row.querySelector('.size, td:nth-child(3) span, .link-size');
+          
+          if (qualityEl) quality = qualityEl.textContent.trim();
+          if (sizeEl) size = sizeEl.textContent.trim();
+        }
+        
+        return {
+          link: link.href,
+          quality: quality,
+          size: size
+        };
+      });
+    });
+    
+    // Method 2: Look for download buttons that lead to Google Drive
+    const downloadPageLinks = await page.$$eval('a[href*="cinesubz.lk/download"], a.download-btn, .link-opt a', links => {
+      return links.map(link => ({
+        pageLink: link.href,
+        quality: link.closest('tr, div')?.querySelector('.quality, td:nth-child(1)')?.textContent?.trim() || "Unknown",
+        size: link.closest('tr, div')?.querySelector('.size, td:nth-child(3) span')?.textContent?.trim() || "Unknown"
+      }));
+    });
+    
+    let allLinks = [...driveLinks];
+    
+    // If no direct Drive links, check download pages
+    if (driveLinks.length === 0 && downloadPageLinks.length > 0) {
+      for (const item of downloadPageLinks) {
+        try {
+          const subPage = await browser.newPage();
+          await subPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+          await subPage.goto(item.pageLink, { waitUntil: "networkidle2", timeout: 30000 });
+          await new Promise(r => setTimeout(r, 3000));
+          
+          // Look for Google Drive link on the download page
+          const driveLink = await subPage.$eval('a[href*="drive.google.com"], a[href*="docs.google.com"]', el => el.href).catch(() => null);
+          
+          if (driveLink) {
+            allLinks.push({
+              link: driveLink,
+              quality: item.quality,
+              size: item.size
+            });
+          }
+          
+          await subPage.close();
+        } catch (e) {
+          console.log("Subpage error:", e.message);
+        }
+      }
+    }
+    
+    // Process and filter links
+    const processedLinks = [];
+    const seen = new Set();
+    
+    for (const link of allLinks) {
+      if (!link.link || seen.has(link.link)) continue;
+      
+      // Parse size to check if <2GB
+      let sizeMB = 0;
+      const sizeText = link.size.toUpperCase();
       if (sizeText.includes("GB")) {
         sizeMB = parseFloat(sizeText) * 1024;
       } else if (sizeText.includes("MB")) {
         sizeMB = parseFloat(sizeText);
-      }
-      
-      // 2GB ට අඩු Links පමණක් ගන්න
-      if (sizeMB > 0 && sizeMB > 2048) {
-        console.log(`Skipping ${l.quality} - ${l.size} (>2GB)`);
-        continue;
-      }
-
-      // Google Drive or Direct Link
-      if (l.pageLink.includes("drive.google.com") || l.pageLink.includes("docs.google.com")) {
-        finalUrl = l.pageLink;
       } else {
-        // Sub Page එකට ගිහින් Link එක හොයන්න
-        const subPage = await browser.newPage();
-        await subPage.goto(l.pageLink, { waitUntil: "networkidle2", timeout: 60000 });
-        await new Promise(r => setTimeout(r, 5000)); // Wait for page load
-        
-        // Google Drive Link එක හොයන්න
-        finalUrl = await subPage.$eval("a[href*='drive.google.com']", el => el.href).catch(() => null);
-        
-        // Direct Link එක හොයන්න
-        if (!finalUrl) {
-          finalUrl = await subPage.$eval("a[href*='cinesubz.lk/download'], a[href*='direct']", el => el.href).catch(() => null);
-        }
-        
-        await subPage.close();
-      }
-
-      if (finalUrl) {
-        downloadLinks.push({
-          link: finalUrl,
-          quality: normalizeQuality(l.quality || "Unknown"),
-          size: l.size || "Unknown"
-        });
+        // If size unknown, still include (might be small)
+        sizeMB = 500; // Assume 500MB
       }
       
-    } catch (e) {
-      console.log("Link extraction error:", e.message);
-      continue;
+      // Only include if size < 2GB
+      if (sizeMB <= 2048) {
+        processedLinks.push({
+          link: link.link,
+          quality: normalizeQuality(link.quality),
+          size: link.size || "~500MB"
+        });
+        seen.add(link.link);
+      }
     }
+    
+    return processedLinks;
+    
+  } catch (error) {
+    console.error("Get links error:", error);
+    return [];
+  } finally {
+    await browser.close();
   }
-
-  await browser.close();
-  
-  // Remove duplicates
-  const uniqueLinks = [];
-  const seen = new Set();
-  
-  for (const link of downloadLinks) {
-    if (!seen.has(link.link)) {
-      seen.add(link.link);
-      uniqueLinks.push(link);
-    }
-  }
-  
-  return uniqueLinks;
 }
 
 // -----------------------------
-// Main Command - Search Movies
+// Main Command - Search
 // -----------------------------
 cmd({
   pattern: "film",
-  alias: ["sinhalasub", "films", "cinema", "movie", "gd", "gdrive"],
+  alias: ["sinhalasub", "movies", "cinema", "gdrive", "gd"],
   react: "🎬",
   desc: "Search and download Sinhala subbed movies from Cinesubz.lk",
   category: "download",
@@ -261,45 +289,37 @@ cmd({
 }, async (maliya, mek, m, { from, q, sender, reply }) => {
   
   if (!q) {
-    return reply(`*🎬 Movie Search Plugin*\n\nUsage: .film <movie name>\nExample: .film avengers\nExample: .film jawan`);
+    return reply(`*🎬 Movie Downloader*\n\nUsage: .film <movie name>\nExample: .film avengers\nExample: .film jawan\nExample: .film leo`);
   }
   
-  reply("*🔍 Searching for movies from Cinesubz.lk...*");
+  reply("*🔍 Searching Cinesubz.lk for:* `" + q + "`");
   
   try {
-    const searchResults = await searchMovies(q);
+    const results = await searchMovies(q);
     
-    if (!searchResults.length) {
-      return reply("*❌ No movies found! Try another name.*");
+    if (!results || results.length === 0) {
+      return reply("*❌ No movies found! Try a different name.*");
     }
     
-    pendingSearch[sender] = { 
-      results: searchResults, 
-      timestamp: Date.now() 
+    pendingSearch[sender] = {
+      results: results,
+      timestamp: Date.now()
     };
     
-    let text = "*🎬 CINESUBZ.LK - SEARCH RESULTS:*\n\n";
-    text += `*🔎 Query:* ${q}\n*📊 Results:* ${searchResults.length}\n\n`;
-    
-    searchResults.forEach((m, i) => {
-      text += `*${i+1}.* ${m.title}\n`;
-      text += `   📝 *Language:* ${m.language || "N/A"}\n`;
-      text += `   📊 *Quality:* ${m.quality || "N/A"}\n`;
-      text += `   🎞️ *Format:* ${m.qty || "N/A"}\n\n`;
+    let msg = "*🎬 CINESUBZ.LK - MOVIES FOUND:*\n\n";
+    results.forEach((movie, i) => {
+      msg += `*${i+1}.* ${movie.title}\n`;
+      msg += `   📝 *Lang:* ${movie.language || "Sinhala Sub"}\n`;
+      msg += `   📊 *Quality:* ${movie.quality || "N/A"}\n`;
+      msg += `   🎞️ *Format:* ${movie.qty || "MP4"}\n\n`;
     });
+    msg += `*✅ Reply with number (1-${results.length}) to get details*`;
     
-    text += `*✅ Reply with movie number (1-${searchResults.length})*`;
-    
-    await maliya.sendMessage(from, { 
-      image: { url: searchResults[0]?.thumb || "" }, 
-      caption: text 
-    }, { quoted: mek }).catch(() => {
-      maliya.sendMessage(from, { text: text }, { quoted: mek });
-    });
+    await maliya.sendMessage(from, { text: msg }, { quoted: mek });
     
   } catch (error) {
-    console.error("Search error:", error);
-    reply(`*❌ Search failed:* ${error.message}`);
+    console.error(error);
+    reply("*❌ Search failed! Try again later.*");
   }
 });
 
@@ -315,66 +335,60 @@ cmd({
   }
 }, async (maliya, mek, m, { body, sender, reply, from }) => {
   
-  await maliya.sendMessage(from, { 
-    react: { text: "✅", key: m.key } 
-  });
+  await maliya.sendMessage(from, { react: { text: "✅", key: m.key } });
   
-  const index = parseInt(body.trim()) - 1;
+  const index = parseInt(body) - 1;
   const selected = pendingSearch[sender].results[index];
   delete pendingSearch[sender];
   
-  reply(`*📥 Fetching movie details for:*\n${selected.title}`);
+  reply(`*📥 Getting details for:*\n${selected.title}`);
   
   try {
     const metadata = await getMovieMetadata(selected.movieUrl);
     
-    let msg = `*🎬 ${metadata.title || selected.title}*\n\n`;
-    msg += `*📝 Language:* ${metadata.language || selected.language || "N/A"}\n`;
-    msg += `*⏱️ Duration:* ${metadata.duration || "N/A"}\n`;
-    msg += `*⭐ IMDb:* ${metadata.imdb || "N/A"}\n`;
-    msg += `*🎭 Genres:* ${metadata.genres?.join(", ") || "N/A"}\n`;
-    msg += `*🎥 Directors:* ${metadata.directors?.join(", ") || "N/A"}\n`;
-    msg += `*🌟 Stars:* ${metadata.stars?.slice(0,5).join(", ") || "N/A"}${metadata.stars?.length > 5 ? "..." : ""}\n\n`;
-    msg += "*🔗 Fetching download links from Google Drive...*\n*⏳ Please wait...*";
+    let details = `*🎬 ${metadata.title || selected.title}*\n\n`;
+    details += `*📝 Language:* ${metadata.language || selected.language || "Sinhala Sub"}\n`;
+    details += `*⏱️ Duration:* ${metadata.duration || "N/A"}\n`;
+    details += `*⭐ IMDb:* ${metadata.imdb || "N/A"}\n`;
+    details += `*🎭 Genres:* ${metadata.genres?.join(", ") || "N/A"}\n`;
+    details += `*🎥 Directors:* ${metadata.directors?.join(", ") || "N/A"}\n`;
+    details += `*🌟 Stars:* ${metadata.stars?.slice(0, 3).join(", ") || "N/A"}\n\n`;
+    details += `*🔍 Fetching Google Drive links...*\n*⏳ Please wait...*`;
     
-    if (metadata.thumbnail) {
-      await maliya.sendMessage(from, { 
-        image: { url: metadata.thumbnail }, 
-        caption: msg 
-      }, { quoted: mek });
-    } else {
-      await maliya.sendMessage(from, { text: msg }, { quoted: mek });
+    await maliya.sendMessage(from, { text: details }, { quoted: mek });
+    
+    // Get Google Drive links
+    const driveLinks = await getGoogleDriveLinks(selected.movieUrl);
+    
+    if (!driveLinks || driveLinks.length === 0) {
+      return reply("*❌ No Google Drive links found!\n\nReason:*\n• Movie might be removed\n• Links are expired\n• File size >2GB\n\n*Try another movie.*");
     }
     
-    const downloadLinks = await getDownloadLinks(selected.movieUrl);
-    
-    if (!downloadLinks.length) {
-      return reply("*❌ No download links found! (Maybe file >2GB or link expired)*");
-    }
-    
-    pendingQuality[sender] = { 
-      movie: { 
-        metadata: metadata.title ? metadata : selected, 
-        downloadLinks 
-      }, 
-      timestamp: Date.now() 
+    // Store for quality selection
+    pendingQuality[sender] = {
+      movie: {
+        title: metadata.title || selected.title,
+        links: driveLinks
+      },
+      timestamp: Date.now()
     };
     
-    let qualityMsg = "*📥 AVAILABLE QUALITIES (≤2GB):*\n\n";
+    let qualityMsg = `*📥 AVAILABLE (Google Drive):*\n\n`;
+    qualityMsg += `*🎬 ${metadata.title || selected.title}*\n\n`;
     
-    downloadLinks.forEach((d, i) => {
-      qualityMsg += `*${i+1}.* ${d.quality} - ${d.size}\n`;
-      qualityMsg += `   🔗 ${d.link.includes("drive.google") ? "Google Drive" : "Direct Link"}\n\n`;
+    driveLinks.forEach((link, i) => {
+      qualityMsg += `*${i+1}.* *${link.quality}*\n`;
+      qualityMsg += `   💾 Size: ${link.size || "~500MB"}\n\n`;
     });
     
-    qualityMsg += `*✅ Reply with quality number (1-${downloadLinks.length})*\n`;
-    qualityMsg += `*📤 Movie will be sent as Document (MP4)*`;
+    qualityMsg += `*✅ Reply with quality number (1-${driveLinks.length})*\n`;
+    qualityMsg += `*📤 Movie will be sent as Document*`;
     
     await maliya.sendMessage(from, { text: qualityMsg }, { quoted: mek });
     
   } catch (error) {
-    console.error("Metadata error:", error);
-    reply(`*❌ Failed to get movie details:* ${error.message}`);
+    console.error(error);
+    reply("*❌ Failed to get movie details!*");
   }
 });
 
@@ -386,90 +400,69 @@ cmd({
     return pendingQuality[sender] && 
            !isNaN(text) && 
            parseInt(text) > 0 && 
-           parseInt(text) <= pendingQuality[sender].movie.downloadLinks.length;
+           parseInt(text) <= pendingQuality[sender].movie.links.length;
   }
 }, async (maliya, mek, m, { body, sender, reply, from }) => {
   
-  await maliya.sendMessage(from, { 
-    react: { text: "✅", key: m.key } 
-  });
+  await maliya.sendMessage(from, { react: { text: "✅", key: m.key } });
   
-  const index = parseInt(body.trim()) - 1;
-  const { movie } = pendingQuality[sender];
+  const index = parseInt(body) - 1;
+  const data = pendingQuality[sender];
+  const selected = data.movie.links[index];
+  const movieTitle = data.movie.title;
+  
   delete pendingQuality[sender];
   
-  const selectedLink = movie.downloadLinks[index];
-  
-  reply(`*⬇️ Preparing ${selectedLink.quality}...*\n*📦 Size:* ${selectedLink.size}\n*☁️ Source:* ${selectedLink.link.includes("drive.google") ? "Google Drive" : "Direct"}\n*⏳ Please wait...*`);
+  reply(`*⬇️ Preparing ${selected.quality}...*\n*💾 Size:* ${selected.size || "Unknown"}\n*☁️ Source:* Google Drive\n*⏳ Sending as document...*`);
   
   try {
     // Get direct download URL
-    const directUrl = getDirectDownloadUrl(selectedLink.link);
+    const directUrl = getDirectGoogleDriveUrl(selected.link);
     
     if (!directUrl) {
-      return reply("*❌ Failed to generate download link!*");
+      return reply("*❌ Cannot generate download link!*\n\n🔗 Direct Link:\n" + selected.link);
     }
     
     // Clean filename
-    const movieTitle = (movie.metadata?.title || "Movie").substring(0, 50);
-    const cleanTitle = movieTitle.replace(/[^\w\s.-]/gi, '').trim();
-    const fileName = `${cleanTitle} - ${selectedLink.quality}.mp4`;
+    const cleanTitle = movieTitle.replace(/[^\w\s]/gi, '').substring(0, 40).trim();
+    const fileName = `${cleanTitle} - ${selected.quality}.mp4`;
     
     // Send as document
     await maliya.sendMessage(from, {
       document: { url: directUrl },
       mimetype: "video/mp4",
       fileName: fileName,
-      caption: `*🎬 ${movie.metadata?.title || "Movie"}*\n` +
-               `*📊 Quality:* ${selectedLink.quality}\n` +
-               `*💾 Size:* ${selectedLink.size}\n` +
+      caption: `*🎬 ${movieTitle}*\n` +
+               `*📊 Quality:* ${selected.quality}\n` +
+               `*💾 Size:* ${selected.size || "Unknown"}\n` +
                `*☁️ Source:* Google Drive\n\n` +
                `*✅ Downloaded via MALIYA-MD Bot*\n` +
                `*🍿 Enjoy your movie!*`
     }, { quoted: mek });
     
-    // Send success reaction
-    await maliya.sendMessage(from, { 
-      react: { text: "📤", key: m.key } 
-    });
+    await maliya.sendMessage(from, { react: { text: "📤", key: m.key } });
     
   } catch (error) {
-    console.error("Send document error:", error);
+    console.error("Send error:", error);
     
-    // Try alternative method if document fails
-    if (selectedLink.link.includes("drive.google.com")) {
-      reply(`*❌ Document send failed!*\n\n*🔗 Direct Link:*\n${selectedLink.link}\n\n*📱 Copy and open in browser.*`);
-    } else {
-      reply(`*❌ Failed to send movie:* ${error.message || "Unknown error"}`);
-    }
+    // Fallback: Send direct link
+    reply(`*❌ Cannot send as document!*\n\n*🔗 Direct Download Link:*\n${selected.link}\n\n*📱 Copy and open in browser.*`);
   }
 });
 
 // -----------------------------
-// Cleanup - Remove expired sessions
+// Cleanup old sessions
 // -----------------------------
 setInterval(() => {
   const now = Date.now();
-  const timeout = 10 * 60 * 1000; // 10 minutes
+  const timeout = 10 * 60 * 1000; // 10 mins
   
   for (const s in pendingSearch) {
-    if (now - pendingSearch[s].timestamp > timeout) {
-      delete pendingSearch[s];
-    }
+    if (now - pendingSearch[s].timestamp > timeout) delete pendingSearch[s];
   }
-  
   for (const s in pendingQuality) {
-    if (now - pendingQuality[s].timestamp > timeout) {
-      delete pendingQuality[s];
-    }
+    if (now - pendingQuality[s].timestamp > timeout) delete pendingQuality[s];
   }
-  
-}, 5 * 60 * 1000); // Every 5 minutes
+}, 5 * 60 * 1000);
 
-module.exports = { 
-  pendingSearch, 
-  pendingQuality,
-  searchMovies,
-  getMovieMetadata,
-  getDownloadLinks
-};
+module.exports = { pendingSearch, pendingQuality };
