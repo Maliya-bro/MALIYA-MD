@@ -1,4 +1,4 @@
-// index.js (FULL CODE) ✅ Status Auto Seen + React FIXED (Baileys latest)
+// index.js (FULL CODE) ✅ Status Auto Seen + React FIXED (Baileys latest) + Cmd Auto-Fix
 // ------------------------------------------------------------
 
 const {
@@ -22,7 +22,7 @@ const { sms } = require("./lib/msg");
 const { File } = require("megajs");
 const { commands, replyHandlers } = require("./command");
 
-// ✅ ADD: auto msg plugin (GEMINI_API_KEY2 uses in plugin)
+// ✅ auto msg plugin (GEMINI_API_KEY2 uses in plugin)
 const autoMsgPlugin = require("./plugins/auto_msg.js");
 
 const app = express();
@@ -32,6 +32,64 @@ const prefix = ".";
 const ownerNumber = ["94701369636"];
 const authDir = path.join(__dirname, "/auth_info_baileys/");
 const credsPath = path.join(authDir, "creds.json");
+
+/* ================= COMMAND AUTO-FIX SETTINGS ================= */
+const CMD_AUTOFIX_ENABLED = true;
+const CMD_AUTOFIX_THRESHOLD = 0.62; // 0.55~0.70 best, tune if needed
+
+function _normCmd(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+// prefix-based similarity (fast & good for typos)
+function _cmdSimilarity(a, b) {
+  a = _normCmd(a);
+  b = _normCmd(b);
+  if (!a || !b) return 0;
+
+  const maxLen = Math.max(a.length, b.length);
+  const minLen = Math.min(a.length, b.length);
+
+  let same = 0;
+  for (let i = 0; i < minLen; i++) {
+    if (a[i] === b[i]) same++;
+  }
+  return same / maxLen;
+}
+
+function findBestCommandName(input) {
+  const inCmd = _normCmd(input);
+  if (!inCmd) return null;
+
+  let best = null;
+  let bestScore = 0;
+
+  for (const c of commands || []) {
+    const name = c?.pattern;
+    if (!name) continue;
+
+    const score = _cmdSimilarity(inCmd, name);
+    if (score > bestScore) {
+      bestScore = score;
+      best = name;
+    }
+
+    if (Array.isArray(c.alias)) {
+      for (const al of c.alias) {
+        const s2 = _cmdSimilarity(inCmd, al);
+        if (s2 > bestScore) {
+          bestScore = s2;
+          best = name; // execute main pattern
+        }
+      }
+    }
+  }
+
+  if (best && bestScore >= CMD_AUTOFIX_THRESHOLD) {
+    return { name: best, score: bestScore };
+  }
+  return null;
+}
 
 /* ================= SESSION CHECK ================= */
 async function ensureSessionFile() {
@@ -173,7 +231,6 @@ async function connectToWA() {
   sock.ev.on("messages.upsert", async ({ messages }) => {
     if (!messages || !messages.length) return;
 
-    // ✅ IMPORTANT: handle ALL messages (not only messages[0])
     for (const mek0 of messages) {
       const mek = mek0;
       if (!mek?.message) continue;
@@ -223,27 +280,22 @@ async function connectToWA() {
         // ✅ Seen
         if (String(config.AUTO_STATUS_SEEN).toLowerCase() === "true") {
           try {
-            // Most reliable in latest builds:
             await sock.readMessages([statusKey]);
-
-            // Fallback:
             try {
               await sock.sendReadReceipt("status@broadcast", participant, [id]);
             } catch {}
-
             console.log(`[✓] Status seen: ${id} (${participant})`);
           } catch (e) {
             console.error("❌ Failed to mark status as seen:", e?.message || e);
           }
         }
 
-        // ✅ React (needs statusJidList)
+        // ✅ React
         if (String(config.AUTO_STATUS_REACT).toLowerCase() === "true") {
           try {
             const emojis = [
               "❤️","💸","😇","🍂","💥","💯","🔥","💫","💎","💗","🤍","🖤","👀","🙌","🙆","🚩",
-              "🥰","💐","😎","✅","🫀","😁","😄","🌸","🕊️","🌷","⛅","🌟","🗿",
-              "💜","🌝"
+              "🥰","💐","😎","✅","🫀","😁","😄","🌸","🕊️","🌷","⛅","🌟","🗿","💜","🌝"
             ];
             const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
@@ -310,26 +362,27 @@ async function connectToWA() {
           }
         }
 
-        // ✅ status වලට normal command handler run නොවෙන්න
-        continue;
+        continue; // ✅ status වලට normal handler run නොවෙන්න
       }
       /* ===================== END STATUS BLOCK ===================== */
 
       const m = sms(sock, mek);
       const type = getContentType(mek.message);
 
-      const body =
+      let body =
         type === "conversation"
           ? mek.message.conversation
           : mek.message[type]?.text || mek.message[type]?.caption || "";
 
-      const isCmd = body.startsWith(prefix);
-      const commandName = isCmd
+      body = String(body || "");
+
+      let isCmd = body.startsWith(prefix);
+      let commandName = isCmd
         ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase()
         : "";
 
-      const args = body.trim().split(/ +/).slice(1);
-      const q = args.join(" ");
+      let args = body.trim().split(/ +/).slice(1);
+      let q = args.join(" ");
 
       const from = mek.key.remoteJid;
       const sender = mek.key.fromMe ? sock.user.id : mek.key.participant || mek.key.remoteJid;
@@ -340,7 +393,7 @@ async function connectToWA() {
 
       const reply = (text) => sock.sendMessage(from, { text }, { quoted: mek });
 
-      // ✅ ADD: call auto-msg plugin ONLY here (so status won't trigger)
+      // ✅ auto-msg plugin ONLY here (so status won't trigger)
       try {
         if (autoMsgPlugin && typeof autoMsgPlugin.onMessage === "function") {
           await autoMsgPlugin.onMessage(sock, mek, m, {
@@ -397,9 +450,35 @@ async function connectToWA() {
 
       // ===================== COMMAND HANDLER =====================
       if (isCmd) {
-        const cmd = commands.find(
+        let cmd = (commands || []).find(
           (c) => c.pattern === commandName || c.alias?.includes(commandName)
         );
+
+        // ✅ AUTO FIX for wrong/typo command
+        if (!cmd && CMD_AUTOFIX_ENABLED) {
+          const best = findBestCommandName(commandName);
+          if (best?.name) {
+            const fixedName = best.name;
+
+            // rebuild body -> keep same args
+            const fixedBody = `${prefix}${fixedName}${q ? " " + q : ""}`;
+
+            // update parsed vars
+            body = fixedBody;
+            commandName = fixedName;
+            args = fixedBody.trim().split(/ +/).slice(1);
+            q = args.join(" ");
+
+            cmd = (commands || []).find(
+              (c) => c.pattern === commandName || c.alias?.includes(commandName)
+            );
+
+            // notify user (short)
+            try {
+              await sock.sendMessage(from, { text: `⚡ Fixed command → *${prefix}${fixedName}*\nRunning...` }, { quoted: mek });
+            } catch {}
+          }
+        }
 
         if (cmd) {
           if (cmd.react) {
