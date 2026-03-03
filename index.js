@@ -1,4 +1,4 @@
-// index.js (FULL CODE) ✅ Status Auto Seen + React FIXED (Baileys latest) + Cmd Auto-Fix
+// index.js (FULL CODE) ✅ Status Auto Seen + React FIXED (Baileys latest) + Cmd Auto-Fix (CONFIRM MODE)
 // ------------------------------------------------------------
 
 const {
@@ -25,6 +25,9 @@ const { commands, replyHandlers } = require("./command");
 // ✅ auto msg plugin (GEMINI_API_KEY2 uses in plugin)
 const autoMsgPlugin = require("./plugins/auto_msg.js");
 
+// ✅ NEW: Cmd AutoFix Confirm plugin (1=run / 2=cancel)
+const cmdFixPlugin = require("./plugins/cmd_autofix_confirm.js");
+
 const app = express();
 const port = process.env.PORT || 8000;
 
@@ -32,64 +35,6 @@ const prefix = ".";
 const ownerNumber = ["94701369636"];
 const authDir = path.join(__dirname, "/auth_info_baileys/");
 const credsPath = path.join(authDir, "creds.json");
-
-/* ================= COMMAND AUTO-FIX SETTINGS ================= */
-const CMD_AUTOFIX_ENABLED = true;
-const CMD_AUTOFIX_THRESHOLD = 0.62; // 0.55~0.70 best, tune if needed
-
-function _normCmd(s) {
-  return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-// prefix-based similarity (fast & good for typos)
-function _cmdSimilarity(a, b) {
-  a = _normCmd(a);
-  b = _normCmd(b);
-  if (!a || !b) return 0;
-
-  const maxLen = Math.max(a.length, b.length);
-  const minLen = Math.min(a.length, b.length);
-
-  let same = 0;
-  for (let i = 0; i < minLen; i++) {
-    if (a[i] === b[i]) same++;
-  }
-  return same / maxLen;
-}
-
-function findBestCommandName(input) {
-  const inCmd = _normCmd(input);
-  if (!inCmd) return null;
-
-  let best = null;
-  let bestScore = 0;
-
-  for (const c of commands || []) {
-    const name = c?.pattern;
-    if (!name) continue;
-
-    const score = _cmdSimilarity(inCmd, name);
-    if (score > bestScore) {
-      bestScore = score;
-      best = name;
-    }
-
-    if (Array.isArray(c.alias)) {
-      for (const al of c.alias) {
-        const s2 = _cmdSimilarity(inCmd, al);
-        if (s2 > bestScore) {
-          bestScore = s2;
-          best = name; // execute main pattern
-        }
-      }
-    }
-  }
-
-  if (best && bestScore >= CMD_AUTOFIX_THRESHOLD) {
-    return { name: best, score: bestScore };
-  }
-  return null;
-}
 
 /* ================= SESSION CHECK ================= */
 async function ensureSessionFile() {
@@ -256,12 +201,11 @@ async function connectToWA() {
          ✅✅✅ STATUS AUTO SEEN + REACT + FORWARD (FIXED)
          ============================================================ */
       if (mek.key?.remoteJid === "status@broadcast") {
-        const participantRaw = mek.key.participant; // status owner
+        const participantRaw = mek.key.participant;
         const id = mek.key.id;
 
         if (!participantRaw || !id) continue;
 
-        // normalize jids
         const participant = jidNormalizedUser(participantRaw);
         const myJid = jidNormalizedUser(sock.user?.id || "");
 
@@ -269,7 +213,6 @@ async function connectToWA() {
           ? participant
           : participant + "@s.whatsapp.net";
 
-        // ✅ Proper status key
         const statusKey = {
           remoteJid: "status@broadcast",
           id,
@@ -415,6 +358,43 @@ async function connectToWA() {
         console.log("AutoMsg hook error:", e?.message || e);
       }
 
+      // ✅ Cmd Auto-Fix Confirm plugin (friendly ask 1/2)
+      // If handled => stop. If confirmed => it returns corrected body to run.
+      try {
+        if (cmdFixPlugin && typeof cmdFixPlugin.onMessage === "function") {
+          const res = await cmdFixPlugin.onMessage(sock, mek, m, {
+            from,
+            body,
+            args,
+            q,
+            sender,
+            senderNumber,
+            isGroup,
+            isOwner,
+            reply,
+            prefix,
+            isCmd,
+            commandName,
+          });
+
+          // handled and nothing to run
+          if (res?.handled && !res?.newBody) continue;
+
+          // confirmed -> replace body with corrected cmd and re-parse
+          if (res?.handled && res?.newBody) {
+            body = String(res.newBody || "");
+            isCmd = body.startsWith(prefix);
+            commandName = isCmd
+              ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase()
+              : "";
+            args = body.trim().split(/ +/).slice(1);
+            q = args.join(" ");
+          }
+        }
+      } catch (e) {
+        console.log("cmdFixPlugin error:", e?.message || e);
+      }
+
       // ===================== REPLY HANDLERS (NO PREFIX) =====================
       if (!isCmd && replyHandlers && replyHandlers.length) {
         for (const h of replyHandlers) {
@@ -450,35 +430,9 @@ async function connectToWA() {
 
       // ===================== COMMAND HANDLER =====================
       if (isCmd) {
-        let cmd = (commands || []).find(
+        const cmd = (commands || []).find(
           (c) => c.pattern === commandName || c.alias?.includes(commandName)
         );
-
-        // ✅ AUTO FIX for wrong/typo command
-        if (!cmd && CMD_AUTOFIX_ENABLED) {
-          const best = findBestCommandName(commandName);
-          if (best?.name) {
-            const fixedName = best.name;
-
-            // rebuild body -> keep same args
-            const fixedBody = `${prefix}${fixedName}${q ? " " + q : ""}`;
-
-            // update parsed vars
-            body = fixedBody;
-            commandName = fixedName;
-            args = fixedBody.trim().split(/ +/).slice(1);
-            q = args.join(" ");
-
-            cmd = (commands || []).find(
-              (c) => c.pattern === commandName || c.alias?.includes(commandName)
-            );
-
-            // notify user (short)
-            try {
-              await sock.sendMessage(from, { text: `⚡ Fixed command → *${prefix}${fixedName}*\nRunning...` }, { quoted: mek });
-            } catch {}
-          }
-        }
 
         if (cmd) {
           if (cmd.react) {
@@ -497,6 +451,7 @@ async function connectToWA() {
             reply,
           });
         }
+        // NOTE: unknown commands are handled by cmd_autofix_confirm plugin now
       }
     }
   });
