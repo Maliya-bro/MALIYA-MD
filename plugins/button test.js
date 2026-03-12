@@ -1,56 +1,30 @@
 const { cmd } = require("../command");
 
-cmd(
-  {
-    pattern: "poll",
-    desc: "Create a WhatsApp poll",
-    category: "group",
+cmd({
+    pattern: "polltest",
+    desc: "Poll buttons වැඩද කියා බැලීමට",
+    category: "test",
     react: "📊",
-    filename: __filename,
-  },
-  async (conn, mek, m, { q, reply, from, isGroup }) => {
+    filename: __filename
+},
+async (sock, mek, m, { from, reply }) => {
     try {
-      if (!q) {
-        return reply(
-          "📌 Use:\n.poll Question | Option1, Option2\n\nExample:\n.poll Heta enawada | Ow, Na"
-        );
-      }
+        const pollMessage = {
+            poll: {
+                name: "මෙන්න MALIYA-MD Poll Buttons! වැඩ කරනවද?",
+                values: [
+                    "Ow 😍",
+                    "Na ❌",
+                    "Clear Memory 🗑️"
+                ],
+                selectableCount: 1 // එක පාරක් තෝරන්න පුළුවන් ගණන
+            }
+        };
 
-      const parts = q.split("|");
-      if (parts.length < 2) {
-        return reply(
-          "❌ Format waradi.\n\nUse:\n.poll Question | Option1, Option2"
-        );
-      }
+        await sock.sendMessage(from, pollMessage, { quoted: mek });
 
-      const question = parts[0].trim();
-      const options = parts[1]
-        .split(",")
-        .map((x) => x.trim())
-        .filter(Boolean);
-
-      if (!question) {
-        return reply("❌ Poll question ekak denna.");
-      }
-
-      if (options.length < 2) {
-        return reply("❌ Poll ekakata options 2k wath one.");
-      }
-
-      await conn.sendMessage(
-        from,
-        {
-          poll: {
-            name: question,
-            values: options,
-            selectableCount: 1,
-          },
-        },
-        { quoted: mek }
-      );
     } catch (e) {
-      console.log("POLL PLUGIN ERROR:", e);
-      return reply("❌ Poll send karanna bari una.");
+        console.log("Poll Error: ", e.message);
+        reply("❌ Poll එක යැවීමට නොහැකි වුණා.");
     }
-  }
-);
+});
