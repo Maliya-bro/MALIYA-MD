@@ -1,5 +1,6 @@
 const { cmd } = require("../command");
 
+// 1. Poll එක යවන Command එක
 cmd({
     pattern: "polltest",
     desc: "Poll buttons වැඩද කියා බැලීමට",
@@ -9,22 +10,29 @@ cmd({
 },
 async (sock, mek, m, { from, reply }) => {
     try {
-        const pollMessage = {
+        await sock.sendMessage(from, {
             poll: {
-                name: "මෙන්න MALIYA-MD Poll Buttons! වැඩ කරනවද?",
+                name: "MALIYA-MD Poll Test: පහත Button එක Click කරන්න 👇",
                 values: [
-                    "Ow 😍",
-                    "Na ❌",
-                    "Clear Memory 🗑️"
+                    "Click Me 🔘",
+                    "Test Button ✨"
                 ],
-                selectableCount: 1 // එක පාරක් තෝරන්න පුළුවන් ගණන
+                selectableCount: 1
             }
-        };
-
-        await sock.sendMessage(from, pollMessage, { quoted: mek });
-
+        }, { quoted: mek });
     } catch (e) {
-        console.log("Poll Error: ", e.message);
-        reply("❌ Poll එක යැවීමට නොහැකි වුණා.");
+        reply("Error: " + e.message);
+    }
+});
+
+// 2. Poll එක Click කළාම "Hi" කියන කොටස (Reply Handler එකක් ලෙස)
+// මේ කොටස වැඩ කිරීමට index.js එකේ pollUpdate handler එක තිබිය යුතුය.
+cmd({
+    on: "body" 
+},
+async (sock, mek, m, { from, body, reply }) => {
+    // යූසර් Poll එකේ option එකක් click කළාම index.js එකෙන් body එකට ඒ නම එවනවා
+    if (body === "Click Me 🔘" || body === "Test Button ✨") {
+        await reply("Hi");
     }
 });
