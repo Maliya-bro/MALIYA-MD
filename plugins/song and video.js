@@ -1,5 +1,5 @@
 const { cmd } = require("../command");
-const { ytmp3, tiktok, ytmp4 } = require("sadaslk-dlcore");
+const { ytmp3, tiktok } = require("sadaslk-dlcore");
 const yts = require("yt-search");
 const fs = require("fs");
 const axios = require("axios");
@@ -44,41 +44,6 @@ function generateProgressBar(duration) {
 /* ================= YOUTUBE VIDEO (MP4) ================= */
 
 /* ================= YOUTUBE VIDEO - DIRECT URL ================= */
-
-cmd(
-  {
-    pattern: "video",
-    alias: ["ytv", "ytmp4"],
-    react: "🎬",
-    category: "download",
-    filename: __filename,
-  },
-  async (bot, mek, m, { from, q, reply }) => {
-    try {
-      if (!q) return reply("🎬 Send YouTube link or name");
-
-      reply("⏳ Searching...");
-      const video = await getYoutube(q);
-      if (!video) return reply("❌ Not found");
-
-      const data = await ytmp4(video.url);
-      
-      if (data?.url) {
-        // Direct URL එක send කරන්න - මේක 100% වැඩ කරයි
-        await bot.sendMessage(from, {
-          video: { url: data.url },
-          mimetype: "video/mp4",
-          caption: `📌 ${video.title}`,
-        }, { quoted: mek });
-      } else {
-        reply("❌ Download failed");
-      }
-      
-    } catch (e) {
-      reply("❌ Error: " + e.message);
-    }
-  }
-);
 
 
 
