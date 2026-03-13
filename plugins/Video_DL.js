@@ -163,14 +163,14 @@ cmd(
       const videoUrl = video.url || "Unknown";
       const thumbnail = video.thumbnail;
 
-      const detailsCaption = `╭━━━〔 *MALIYA-MD YOUTUBE DOWNLOADER* 〕━━━⬣
+      const detailsCaption = `╭*MALIYA-MD YOUTUBE DOWNLOADER* ━⬣
 ┃ 🎬 *Title* : ${title}
 ┃ 👤 *Channel* : ${channel}
 ┃ ⏱ *Duration* : ${duration}
 ┃ 👀 *Views* : ${views}
 ┃ 📅 *Uploaded* : ${uploaded}
 ┃ 🔗 *Link* : ${videoUrl}
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
+╰━━━━━━━━━━━━━━⬣
 
 ${generateProgressBar(duration)}
 
@@ -188,13 +188,13 @@ ${generateProgressBar(duration)}
       await sock.sendMessage(
         from,
         {
-          text: `╭━━━〔 *SELECT VIDEO QUALITY* 〕━━━⬣
+          text: `╭━〔 *SELECT VIDEO QUALITY* 〕━⬣
 ┃ *1* ┃ 360p
 ┃ *2* ┃ 480p
 ┃ *3* ┃ 720p HD
 ┃ *4* ┃ 1080p FHD
 ┃ > MALIYA-MD 🎥🎥
-╰━━━━━━━━━━━━━━━━━━━━━━⬣
+╰━━━━━━━━━━━━━━━⬣
 
 📥 *Reply with a number only*
 > Example : 1 or 2 or 3 or 4`,
@@ -268,8 +268,8 @@ replyHandlers.push({
 ┃ 🎞 *Quality* : ${qualityLabel}
 ┃ 📦 *Size* : ${sizeMB.toFixed(2)} MB
 ┃ 📄 *Mode* : Document
-┃ 🍀ENJOY YOUR VIDEO🍀
-╰━━━━━━━━━━━━━━━━━━━━━━⬣
+┃ > 🍀ENJOY YOUR VIDEO🍀
+╰━━━━━━━━━━━━━━━━━━⬣
 
 > File size is high, so it was sent as a document.
 *MALIYA-MD ❤️*`,
@@ -288,8 +288,8 @@ replyHandlers.push({
 ┃ 🎞 *Quality* : ${qualityLabel}
 ┃ 📦 *Size* : ${sizeMB.toFixed(2)} MB
 ┃ 📱 *Mode* : Playable Video
-┃ 🍀ENJOY YOUR VIDEO🍀
-╰━━━━━━━━━━━━━━━━━━━━━━⬣
+┃ > 🍀ENJOY YOUR VIDEO🍀
+╰━━━━━━━━━━━━━━━━━━⬣
 
 *MALIYA-MD ❤️*`,
             gifPlayback: false,
