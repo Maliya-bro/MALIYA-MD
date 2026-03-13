@@ -17,30 +17,35 @@ const MODEL_CANDIDATES = [
 
 // ========= SETTINGS =========
 const PREFIXES = ["."];
-
 const DATA_DIR = path.join(process.cwd(), "data");
 const STORE = path.join(DATA_DIR, "auto_msg.json");
 const MEMORY_STORE = path.join(DATA_DIR, "auto_msg_memory.json");
 const PROFILE_STORE = path.join(DATA_DIR, "auto_msg_profiles.json");
 const LOGS_DIR = path.join(DATA_DIR, "auto_msg_logs");
+const CACHE_STORE = path.join(DATA_DIR, "auto_msg_cache.json");
 
 // 🔒 RATE-LIMIT SAFETY
-const COOLDOWN_MS = 15000; // 15s per chat
-const BACKOFF_MS_ON_429 = 180000; // 3 minutes global pause
-const MAX_REPLIES_PER_HOUR = 60; // global hourly cap
+const COOLDOWN_MS = 12000;
+const BACKOFF_MS_ON_429 = 180000;
+const MAX_REPLIES_PER_HOUR = 60;
 
 // 🧠 MEMORY SETTINGS
-const MEMORY_MAX_PER_CHAT = 300;
-const MEMORY_TTL_DAYS = 90;
+const MEMORY_MAX_PER_CHAT = 400;
+const MEMORY_TTL_DAYS = 120;
 const MEMORY_MIN_CHARS = 3;
-const SIM_THRESHOLD = 0.52; // lowered from 0.84 -> much better for similar questions
-const EXACT_THRESHOLD = 0.97;
+const SIM_THRESHOLD = 0.56;
+const EXACT_THRESHOLD = 0.975;
 
 // 🧩 CONTEXT SETTINGS
-const CONTEXT_MAX_TURNS = 12;
+const CONTEXT_MAX_TURNS = 14;
+
+// ⚡ CACHE SETTINGS
+const CACHE_MAX_ITEMS = 800;
+const CACHE_TTL_DAYS = 30;
+const CACHE_SIM_THRESHOLD = 0.93;
 
 // 👤 PROFILE SETTINGS
-const PROFILE_MAX_TOPICS = 20;
+const PROFILE_MAX_TOPICS = 30;
 const MIN_TOKEN_LEN = 3;
 
 // ========= IDENTITY =========
@@ -64,7 +69,7 @@ const STOPWORDS_SI = new Set([
   "මට", "මගේ", "මම", "ඔයා", "ඔබ", "එක", "මේ", "ඒ", "ඒක", "මෙක", "ඔනෙ", "one",
   "denna", "mata", "mage", "oya", "mokak", "mokada", "kohomada", "karanna",
   "puluwan", "hari", "thawa", "kiyala", "kiyanne", "weda", "wada", "balanna",
-  "ane", "ai", "ne", "da", "eka", "ehema", "ehama", "meka", "oya", "api",
+  "ane", "ai", "ne", "da", "eka", "ehema", "ehama", "meka", "api",
   "onn", "anith", "tikak", "godak", "hodata", "hoda", "ewage", "wagema"
 ]);
 
@@ -85,34 +90,31 @@ function safeJsonWrite(file, data) {
 }
 
 function sanitizeChatId(chatId) {
-  return String(chatId || "unknown")
-    .replace(/[^\w.-]+/g, "_")
-    .slice(0, 120);
+  return String(chatId || "unknown").replace(/[^\w.-]+/g, "_").slice(0, 120);
 }
 
 function ensureBaseFiles() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
 
-  if (!fs.existsSync(STORE)) {
-    safeJsonWrite(STORE, { global: { enabled: false } });
-  }
+  if (!fs.existsSync(STORE)) safeJsonWrite(STORE, { global: { enabled: false } });
   if (!fs.existsSync(MEMORY_STORE)) {
     safeJsonWrite(MEMORY_STORE, { chats: {}, context: {} });
   }
   if (!fs.existsSync(PROFILE_STORE)) {
     safeJsonWrite(PROFILE_STORE, { chats: {} });
   }
+  if (!fs.existsSync(CACHE_STORE)) {
+    safeJsonWrite(CACHE_STORE, { items: [] });
+  }
 }
 
-// ========= RATE LIMIT FRIENDLY MSG =========
 function rateLimitMsg(lang) {
   return lang === "si"
     ? "⏳ දැන් requests ටිකක් වැඩියි. ටිකක් පස්සේ ආයෙ try කරන්න.\n> MALIYA-MD ❤️"
     : "⏳ Too many requests right now. Please try again in a moment.\n> MALIYA-MD ❤️";
 }
 
-// ========= HELP / ABOUT TEXT =========
 function helpText(lang) {
   if (lang === "si") {
     return `🤖 *MALIYA-MD BOT - Help / Guide*
@@ -165,8 +167,7 @@ function setGlobalEnabled(val) {
 }
 
 function isGlobalEnabled() {
-  const db = readStore();
-  return !!db.global.enabled;
+  return !!readStore().global.enabled;
 }
 
 // ========= MEMORY STORE =========
@@ -204,9 +205,14 @@ function saveQA(chatId, q, a) {
   const db = readMemory();
   if (!db.chats[chatId]) db.chats[chatId] = [];
 
+  const qRaw = String(q).trim();
+  const qNorm = normalizeText(qRaw);
+  const qVec = buildSemanticVector(qRaw, detectLang(qRaw));
+
   db.chats[chatId].push({
-    qRaw: String(q),
-    qNorm: normalizeText(q),
+    qRaw,
+    qNorm,
+    qVec,
     a: String(a),
     ts: Date.now(),
   });
@@ -244,8 +250,7 @@ function saveTurn(chatId, role, text) {
 }
 
 function getContext(chatId) {
-  const db = readMemory();
-  return db.context[chatId] || [];
+  return readMemory().context[chatId] || [];
 }
 
 function clearChatMemory(chatId) {
@@ -257,6 +262,10 @@ function clearChatMemory(chatId) {
   const p = readProfiles();
   p.chats[chatId] = newEmptyProfile();
   writeProfiles(p);
+
+  const c = readCache();
+  c.items = (c.items || []).filter((x) => x.chatId !== chatId);
+  writeCache(c);
 
   const logFile = getChatLogFile(chatId);
   safeJsonWrite(logFile, []);
@@ -273,6 +282,15 @@ function newEmptyProfile() {
     topics: {},
     lastSeen: 0,
     createdAt: Date.now(),
+    style: {
+      shortPref: 0.5,
+      emojiRate: 0,
+      punctuationLight: 0,
+      singlishRate: 0,
+      asksDirectly: 0.5,
+      casualRate: 0.5,
+    },
+    examples: [],
   };
 }
 
@@ -297,6 +315,43 @@ function getProfile(chatId) {
   return db.chats[chatId];
 }
 
+function rollingAvg(currentAvg, count, newVal) {
+  if (count <= 1) return newVal || 0;
+  return ((currentAvg * (count - 1)) + (newVal || 0)) / count;
+}
+
+function trimTopTopics(topicMap, maxTopics) {
+  const arr = Object.entries(topicMap || {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxTopics);
+
+  const out = {};
+  for (const [k, v] of arr) out[k] = v;
+  return out;
+}
+
+function detectStyleSignals(text = "", lang = "en") {
+  const t = String(text || "");
+  const lower = t.toLowerCase();
+  const len = t.trim().length || 1;
+
+  const emojiCount = (t.match(/[\u{1F300}-\u{1FAFF}]/gu) || []).length;
+  const punctLight = (t.match(/[!?]/g) || []).length;
+  const singlishHints = [
+    "oya", "mata", "mage", "mokak", "mokada", "kohomada", "karanna", "puluwan",
+    "hari", "ane", "machan", "bro", "thiyenawa", "wenawa", "kiyala", "ganna"
+  ];
+
+  return {
+    shortPref: len <= 80 ? 1 : 0,
+    emojiRate: Math.min(1, emojiCount / 3),
+    punctuationLight: Math.min(1, punctLight / 3),
+    singlishRate: singlishHints.some((w) => lower.includes(w)) || lang === "si" ? 1 : 0,
+    asksDirectly: /\?$/.test(t.trim()) ? 1 : 0.35,
+    casualRate: /(bro|machan|ane|pls|plz|ok|okay|hari|hoda)/i.test(lower) ? 1 : 0.4,
+  };
+}
+
 function updateProfile(chatId, role, text, lang) {
   const db = readProfiles();
   if (!db.chats[chatId]) db.chats[chatId] = newEmptyProfile();
@@ -315,26 +370,22 @@ function updateProfile(chatId, role, text, lang) {
     for (const tk of toks) {
       p.topics[tk] = (p.topics[tk] || 0) + 1;
     }
-
     p.topics = trimTopTopics(p.topics, PROFILE_MAX_TOPICS);
+
+    const sig = detectStyleSignals(clean, p.lang);
+    const n = p.userMessageCount;
+    for (const k of Object.keys(p.style)) {
+      p.style[k] = ((p.style[k] * (n - 1)) + (sig[k] || 0)) / n;
+    }
+
+    p.examples.push(clean.slice(0, 180));
+    if (p.examples.length > 8) p.examples = p.examples.slice(-8);
   } else if (role === "bot") {
     p.botMessageCount += 1;
     p.avgBotMsgLen = rollingAvg(p.avgBotMsgLen, p.botMessageCount, clean.length);
   }
 
   writeProfiles(db);
-}
-
-function rollingAvg(currentAvg, count, newVal) {
-  if (count <= 1) return newVal || 0;
-  return ((currentAvg * (count - 1)) + (newVal || 0)) / count;
-}
-
-function trimTopTopics(topicMap, maxTopics) {
-  const arr = Object.entries(topicMap || {}).sort((a, b) => b[1] - a[1]).slice(0, maxTopics);
-  const out = {};
-  for (const [k, v] of arr) out[k] = v;
-  return out;
 }
 
 function getTopTopics(chatId, limit = 8) {
@@ -353,10 +404,7 @@ function getChatLogFile(chatId) {
 function appendChatLog(chatId, entry) {
   const file = getChatLogFile(chatId);
   const arr = safeJsonRead(file, []);
-  arr.push({
-    ...entry,
-    ts: entry.ts || Date.now(),
-  });
+  arr.push({ ...entry, ts: entry.ts || Date.now() });
 
   if (arr.length > 1000) {
     arr.splice(0, arr.length - 1000);
@@ -366,9 +414,83 @@ function appendChatLog(chatId, entry) {
 }
 
 function getRecentLogs(chatId, limit = 20) {
-  const file = getChatLogFile(chatId);
-  const arr = safeJsonRead(file, []);
-  return arr.slice(-limit);
+  return safeJsonRead(getChatLogFile(chatId), []).slice(-limit);
+}
+
+// ========= CACHE =========
+function readCache() {
+  ensureBaseFiles();
+  const db = safeJsonRead(CACHE_STORE, { items: [] });
+  if (!Array.isArray(db.items)) db.items = [];
+  return db;
+}
+
+function writeCache(db) {
+  ensureBaseFiles();
+  safeJsonWrite(CACHE_STORE, db);
+}
+
+function pruneCache(items) {
+  const now = Date.now();
+  const ttlMs = CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
+
+  items = (items || []).filter((x) => now - (x.ts || now) <= ttlMs);
+
+  if (items.length > CACHE_MAX_ITEMS) {
+    items = items.slice(items.length - CACHE_MAX_ITEMS);
+  }
+
+  return items;
+}
+
+function saveCache(chatId, q, a, lang) {
+  if (!q || !a) return;
+  const db = readCache();
+  db.items.push({
+    chatId,
+    qRaw: String(q),
+    qNorm: normalizeText(q),
+    qVec: buildSemanticVector(q, lang),
+    a: String(a),
+    lang,
+    ts: Date.now(),
+  });
+  db.items = pruneCache(db.items);
+  writeCache(db);
+}
+
+function findCacheAnswer(chatId, userText, lang) {
+  const db = readCache();
+  db.items = pruneCache(db.items);
+  writeCache(db);
+
+  const qNorm = normalizeText(userText);
+  const qVec = buildSemanticVector(userText, lang);
+
+  let best = null;
+  let bestScore = 0;
+
+  for (let i = db.items.length - 1; i >= 0; i--) {
+    const it = db.items[i];
+    if (it.chatId !== chatId) continue;
+
+    const sc = semanticSimilarityFromStored(qNorm, qVec, it.qNorm, it.qVec);
+    if (sc > bestScore) {
+      bestScore = sc;
+      best = it;
+      if (sc >= 0.99) break;
+    }
+  }
+
+  if (best && bestScore >= CACHE_SIM_THRESHOLD) {
+    return {
+      answer: best.a,
+      score: bestScore,
+      source: "cache",
+    };
+  }
+
+  return null;
 }
 
 // ========= TEXT NORMALIZATION =========
@@ -391,9 +513,7 @@ function charNgrams(s, n = 3) {
   if (!t) return [];
   if (t.length <= n) return [t];
   const out = [];
-  for (let i = 0; i <= t.length - n; i++) {
-    out.push(t.slice(i, i + n));
-  }
+  for (let i = 0; i <= t.length - n; i++) out.push(t.slice(i, i + n));
   return out;
 }
 
@@ -409,10 +529,24 @@ function jaccardFromArrays(a1, a2) {
   return union ? inter / union : 0;
 }
 
-function similarity(a, b) {
-  const tokenScore = jaccardFromArrays(tokens(a), tokens(b));
-  const ngramScore = jaccardFromArrays(charNgrams(a, 3), charNgrams(b, 3));
-  return (tokenScore * 0.65) + (ngramScore * 0.35);
+function cosineSparse(mapA, mapB) {
+  const keys = new Set([...Object.keys(mapA || {}), ...Object.keys(mapB || {})]);
+  if (!keys.size) return 0;
+
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+
+  for (const k of keys) {
+    const a = mapA[k] || 0;
+    const b = mapB[k] || 0;
+    dot += a * b;
+    na += a * a;
+    nb += b * b;
+  }
+
+  if (!na || !nb) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
 // ========= TOPIC EXTRACTION =========
@@ -420,95 +554,6 @@ function detectSinhalaScript(text) {
   return /[අ-෴]/.test(String(text || ""));
 }
 
-function extractTopicTokens(text, lang = "en") {
-  const arr = tokens(text);
-  const stop = lang === "si" ? STOPWORDS_SI : STOPWORDS_EN;
-
-  return arr.filter((w) => {
-    if (!w) return false;
-    if (w.length < MIN_TOKEN_LEN) return false;
-    if (/^\d+$/.test(w)) return false;
-    if (stop.has(w)) return false;
-    return true;
-  });
-}
-
-// ========= MEMORY SEARCH =========
-function findBestMemoryAnswer(chatId, userText) {
-  const qn = normalizeText(userText);
-  if (!qn || qn.length < MEMORY_MIN_CHARS) return null;
-
-  const items = getChatMemory(chatId);
-  if (!items.length) return null;
-
-  let best = null;
-  let bestScore = 0;
-
-  for (let i = items.length - 1; i >= 0; i--) {
-    const it = items[i];
-    const sc = similarity(qn, it.qNorm || it.qRaw || "");
-    if (sc > bestScore) {
-      bestScore = sc;
-      best = it;
-      if (bestScore >= EXACT_THRESHOLD) break;
-    }
-  }
-
-  if (best && bestScore >= SIM_THRESHOLD) {
-    return {
-      answer: best.a,
-      score: bestScore,
-      matchedQuestion: best.qRaw || best.qNorm,
-      source: bestScore >= EXACT_THRESHOLD ? "exact_memory" : "similar_memory",
-    };
-  }
-
-  return null;
-}
-
-// ========= COOLDOWN =========
-const lastReplyAt = new Map();
-
-function inCooldown(chatId) {
-  const now = Date.now();
-  const last = lastReplyAt.get(chatId) || 0;
-  if (now - last < COOLDOWN_MS) return true;
-  lastReplyAt.set(chatId, now);
-  return false;
-}
-
-// ========= HOURLY CAP =========
-let hourWindowStart = Date.now();
-let repliesThisHour = 0;
-
-function hitHourlyCap() {
-  const now = Date.now();
-
-  if (now - hourWindowStart > 3600000) {
-    hourWindowStart = now;
-    repliesThisHour = 0;
-  }
-
-  if (repliesThisHour >= MAX_REPLIES_PER_HOUR) return true;
-  repliesThisHour++;
-  return false;
-}
-
-// ========= BACKOFF =========
-let backoffUntil = 0;
-
-function inBackoff() {
-  return Date.now() < backoffUntil;
-}
-
-function startBackoff() {
-  backoffUntil = Date.now() + BACKOFF_MS_ON_429;
-}
-
-// ========= QUEUE LOCK =========
-let busy = false;
-
-// ========= LANGUAGE DETECT =========
 function detectLang(text) {
   if (!text) return "en";
   const t = text.toLowerCase().trim();
@@ -527,11 +572,136 @@ function detectLang(text) {
   return "en";
 }
 
-// ========= FOLLOW-UP DETECT =========
+function extractTopicTokens(text, lang = "en") {
+  const arr = tokens(text);
+  const stop = lang === "si" ? STOPWORDS_SI : STOPWORDS_EN;
+
+  return arr.filter((w) => {
+    if (!w) return false;
+    if (w.length < MIN_TOKEN_LEN) return false;
+    if (/^\d+$/.test(w)) return false;
+    if (stop.has(w)) return false;
+    return true;
+  });
+}
+
+// ========= SEMANTIC MEMORY =========
+function buildSemanticVector(text, lang = "en") {
+  const toks = tokens(text);
+  const topToks = extractTopicTokens(text, lang);
+  const grams = charNgrams(text, 3);
+
+  const vec = {};
+
+  for (const t of toks) vec[`tok:${t}`] = (vec[`tok:${t}`] || 0) + 1;
+  for (const t of topToks) vec[`top:${t}`] = (vec[`top:${t}`] || 0) + 2;
+  for (const g of grams) vec[`ng:${g}`] = (vec[`ng:${g}`] || 0) + 0.35;
+
+  return vec;
+}
+
+function semanticSimilarity(a, b, lang = "en") {
+  const tokenScore = jaccardFromArrays(tokens(a), tokens(b));
+  const ngramScore = jaccardFromArrays(charNgrams(a, 3), charNgrams(b, 3));
+  const topicScore = jaccardFromArrays(extractTopicTokens(a, lang), extractTopicTokens(b, lang));
+  const vecScore = cosineSparse(buildSemanticVector(a, lang), buildSemanticVector(b, lang));
+
+  return (
+    tokenScore * 0.22 +
+    ngramScore * 0.18 +
+    topicScore * 0.20 +
+    vecScore * 0.40
+  );
+}
+
+function semanticSimilarityFromStored(qNorm, qVec, storedNorm, storedVec) {
+  const tokenScore = jaccardFromArrays(tokens(qNorm), tokens(storedNorm));
+  const ngramScore = jaccardFromArrays(charNgrams(qNorm, 3), charNgrams(storedNorm, 3));
+  const vecScore = cosineSparse(qVec || {}, storedVec || {});
+  return (tokenScore * 0.25) + (ngramScore * 0.20) + (vecScore * 0.55);
+}
+
+function findBestMemoryAnswer(chatId, userText) {
+  const qn = normalizeText(userText);
+  if (!qn || qn.length < MEMORY_MIN_CHARS) return null;
+
+  const lang = detectLang(userText);
+  const qVec = buildSemanticVector(userText, lang);
+  const items = getChatMemory(chatId);
+  if (!items.length) return null;
+
+  let best = null;
+  let bestScore = 0;
+
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    const sc = semanticSimilarityFromStored(
+      qn,
+      qVec,
+      it.qNorm || normalizeText(it.qRaw || ""),
+      it.qVec || {}
+    );
+
+    if (sc > bestScore) {
+      bestScore = sc;
+      best = it;
+      if (bestScore >= EXACT_THRESHOLD) break;
+    }
+  }
+
+  if (best && bestScore >= SIM_THRESHOLD) {
+    return {
+      answer: best.a,
+      score: bestScore,
+      matchedQuestion: best.qRaw || best.qNorm,
+      source: bestScore >= EXACT_THRESHOLD ? "exact_memory" : "semantic_memory",
+    };
+  }
+
+  return null;
+}
+
+// ========= COOLDOWN / HOURLY / BACKOFF =========
+const lastReplyAt = new Map();
+
+function inCooldown(chatId) {
+  const now = Date.now();
+  const last = lastReplyAt.get(chatId) || 0;
+  if (now - last < COOLDOWN_MS) return true;
+  lastReplyAt.set(chatId, now);
+  return false;
+}
+
+let hourWindowStart = Date.now();
+let repliesThisHour = 0;
+
+function hitHourlyCap() {
+  const now = Date.now();
+
+  if (now - hourWindowStart > 3600000) {
+    hourWindowStart = now;
+    repliesThisHour = 0;
+  }
+
+  if (repliesThisHour >= MAX_REPLIES_PER_HOUR) return true;
+  repliesThisHour++;
+  return false;
+}
+
+let backoffUntil = 0;
+function inBackoff() {
+  return Date.now() < backoffUntil;
+}
+function startBackoff() {
+  backoffUntil = Date.now() + BACKOFF_MS_ON_429;
+}
+
+const busyChats = new Set();
+
+// ========= FOLLOW-UP / DETECTORS =========
 function isFollowUp(text) {
   const t = normalizeText(text);
   if (!t) return false;
-
   if (t.length <= 18) return true;
 
   const keys = [
@@ -544,7 +714,6 @@ function isFollowUp(text) {
   return keys.some((k) => t === k || t.includes(k));
 }
 
-// ========= QUESTION DETECTORS =========
 function isIdentityQuestion(text) {
   const t = (text || "").toLowerCase();
   const siKeys = ["oya kawda", "kawda oya", "oyawa haduwe", "haduwe kawda", "me bot eka kawda"];
@@ -563,7 +732,27 @@ function getIdentityReply(lang) {
   return lang === "si" ? IDENTITY_SI : IDENTITY_EN;
 }
 
-// ========= USER PROFILE SUMMARY FOR PROMPT =========
+// ========= PROFILE / STYLE SUMMARY =========
+function styleSummary(chatId) {
+  const p = getProfile(chatId);
+  const s = p.style || {};
+
+  const lengthStyle = s.shortPref >= 0.65 ? "short replies" : s.shortPref >= 0.45 ? "medium replies" : "slightly detailed replies";
+  const tone = s.casualRate >= 0.65 ? "casual" : "balanced";
+  const emoji = s.emojiRate >= 0.35 ? "light emoji okay" : "minimal emoji";
+  const language =
+    p.lang === "si"
+      ? (s.singlishRate >= 0.45 ? "Sinhala / Singlish mix" : "simple Sinhala")
+      : "simple English";
+
+  const examples = (p.examples || []).slice(-3).map((x) => `- ${x}`).join("\n") || "- none";
+
+  return {
+    text: `${language}, ${tone}, ${lengthStyle}, ${emoji}`,
+    examples,
+  };
+}
+
 function buildUserProfileSummary(chatId) {
   const p = getProfile(chatId);
   const topics = getTopTopics(chatId, 8);
@@ -571,16 +760,20 @@ function buildUserProfileSummary(chatId) {
     .map((x) => `${x.role === "user" ? "User" : "Bot"}: ${x.text}`)
     .join("\n");
 
+  const style = styleSummary(chatId);
+
   return {
     lang: p.lang || "en",
     userMessageCount: p.userMessageCount || 0,
     avgUserMsgLen: Math.round(p.avgUserMsgLen || 0),
     topics,
     recent,
+    styleText: style.text,
+    examples: style.examples,
   };
 }
 
-// ========= PROMPT =========
+// ========= PROMPTS =========
 function buildPrompt(userText, lang, chatId) {
   const prof = buildUserProfileSummary(chatId);
   const topTopics = prof.topics.length ? prof.topics.join(", ") : "none";
@@ -590,16 +783,20 @@ function buildPrompt(userText, lang, chatId) {
 ඔබ "MALIYA-MD" bot.
 ඔබ Malindu Nadith විසින් හදපු AI powered advanced bot එකක්.
 ඔබ ගැන කතා කරද්දි "MALIYA-MD" සහ "Malindu Nadith" විතරක් භාවිතා කරන්න.
-පිළිතුරු කෙටි, පැහැදිලි, friendly Sinhala / Singlish mix එකෙන් දෙන්න.
-user ගේ style එකට ගැලපෙන විදිහට reply කරන්න.
-ඕනෙ නැති විස්තර වැඩියෙන් දෙන්න එපා.
-same answer repeat කරන්න එපා.
+User ගේ style එකට ගැලපෙන විදිහට short, natural, friendly Sinhala / Singlish mix reply දෙන්න.
+Unnecessary details දෙන්න එපා.
+Same phrases නැවත නැවත use කරන්න එපා.
+User style mimic කරන්න, හැබැයි over කරන්න එපා.
 
 User profile:
 - Preferred language: ${prof.lang}
 - User message count: ${prof.userMessageCount}
 - Average user message length: ${prof.avgUserMsgLen}
 - Common topics: ${topTopics}
+- Preferred style: ${prof.styleText}
+
+Recent user style examples:
+${prof.examples}
 
 User: ${userText}
 `.trim();
@@ -610,15 +807,19 @@ You are "MALIYA-MD" bot.
 You are made by Malindu Nadith.
 Use only "MALIYA-MD" and "Malindu Nadith" when referring to yourself.
 Reply short, clear, friendly, and natural.
-Match the user's style.
-Do not overuse the bot name.
-Avoid repeating the same phrases.
+Match the user's style and tone without overdoing it.
+Avoid repeating the bot name.
+Avoid unnecessary details.
 
 User profile:
 - Preferred language: ${prof.lang}
 - User message count: ${prof.userMessageCount}
 - Average user message length: ${prof.avgUserMsgLen}
 - Common topics: ${topTopics}
+- Preferred style: ${prof.styleText}
+
+Recent user style examples:
+${prof.examples}
 
 User: ${userText}
 `.trim();
@@ -629,7 +830,6 @@ function buildPromptWithContext(userText, lang, chatId, contextTurns) {
   const history = (contextTurns || [])
     .map((x) => `${x.role === "user" ? "User" : "Bot"}: ${x.text}`)
     .join("\n");
-
   const topTopics = prof.topics.length ? prof.topics.join(", ") : "none";
 
   if (lang === "si") {
@@ -637,10 +837,9 @@ function buildPromptWithContext(userText, lang, chatId, contextTurns) {
 ඔබ "MALIYA-MD" bot.
 ඔබ Malindu Nadith විසින් හදපු AI powered advanced bot එකක්.
 ඔබ ගැන කතා කරද්දි "MALIYA-MD" සහ "Malindu Nadith" විතරක් භාවිතා කරන්න.
-පිළිතුරු කෙටි, පැහැදිලි, friendly Sinhala / Singlish mix එකෙන් දෙන්න.
-User කලින් කතා කරපු context එක හරියට බලලා reply කරන්න.
-Follow-up question එකට context එකට ගැලපෙන answer දෙන්න.
-ඕනෙ නැති විස්තර දෙන්න එපා.
+User කලින් කතා කරපු context එක බලලා reply කරන්න.
+Follow-up එකට context එකට ගැලපෙන short, clear, natural Sinhala / Singlish reply දෙන්න.
+User style mimic කරන්න, හැබැයි unnatural වෙන්න එපා.
 නිතරම bot name repeat කරන්න එපා.
 
 User profile:
@@ -648,6 +847,10 @@ User profile:
 - User message count: ${prof.userMessageCount}
 - Average user message length: ${prof.avgUserMsgLen}
 - Common topics: ${topTopics}
+- Preferred style: ${prof.styleText}
+
+Recent user style examples:
+${prof.examples}
 
 Previous chat context:
 ${history || "(no context)"}
@@ -663,16 +866,20 @@ ${userText}
   return `
 You are "MALIYA-MD" bot, made by Malindu Nadith.
 Use only "MALIYA-MD" and "Malindu Nadith" when referring to yourself.
-Reply short, clear, and friendly.
 Use previous context properly for follow-up messages.
-Do not overuse the bot name.
-Avoid unnecessary details.
+Reply short, clear, natural, and friendly.
+Match the user's style without overdoing it.
+Avoid unnecessary details and repeated phrases.
 
 User profile:
 - Preferred language: ${prof.lang}
 - User message count: ${prof.userMessageCount}
 - Average user message length: ${prof.avgUserMsgLen}
 - Common topics: ${topTopics}
+- Preferred style: ${prof.styleText}
+
+Recent user style examples:
+${prof.examples}
 
 Previous chat context:
 ${history || "(no context)"}
@@ -733,6 +940,7 @@ function buildProfileText(chatId) {
   const p = getProfile(chatId);
   const topTopics = getTopTopics(chatId, 10);
   const recent = getRecentLogs(chatId, 10);
+  const style = styleSummary(chatId);
 
   return `👤 *Chat Profile*
 
@@ -742,6 +950,7 @@ function buildProfileText(chatId) {
 • Avg user msg length: ${Math.round(p.avgUserMsgLen || 0)}
 • Avg bot msg length: ${Math.round(p.avgBotMsgLen || 0)}
 • Top topics: ${topTopics.length ? topTopics.join(", ") : "none"}
+• Style: ${style.text}
 
 🕘 *Recent messages:*
 ${recent.length
@@ -802,7 +1011,7 @@ cmd(
       if (arg === "clear") {
         if (!from) return reply("Chat not found.");
         clearChatMemory(from);
-        return reply("🧹 මේ chat එකේ memory / profile / logs clear කරලා ඉවරයි.");
+        return reply("🧹 මේ chat එකේ memory / profile / logs / cache clear කරලා ඉවරයි.");
       }
 
       if (arg === "export") {
@@ -822,9 +1031,10 @@ cmd(
 // ========= MAIN HOOK =========
 async function onMessage(conn, mek, m, ctx = {}) {
   let lang = "en";
+  let from = null;
 
   try {
-    const from = ctx.from || mek?.key?.remoteJid;
+    from = mek?.key?.remoteJid;
     if (!from) return;
 
     // Private chats only
@@ -853,6 +1063,8 @@ async function onMessage(conn, mek, m, ctx = {}) {
       saveTurn(from, "bot", txt);
       appendChatLog(from, { role: "bot", text: txt, ts: Date.now() });
       updateProfile(from, "bot", txt, lang);
+      saveQA(from, body, txt);
+      saveCache(from, body, txt, lang);
       return;
     }
 
@@ -863,16 +1075,37 @@ async function onMessage(conn, mek, m, ctx = {}) {
       saveTurn(from, "bot", txt);
       appendChatLog(from, { role: "bot", text: txt, ts: Date.now() });
       updateProfile(from, "bot", txt, lang);
+      saveQA(from, body, txt);
+      saveCache(from, body, txt, lang);
       return;
     }
 
     // backoff / queue / caps
     if (inBackoff()) return;
-    if (busy) return;
+    if (busyChats.has(from)) return;
     if (inCooldown(from)) return;
     if (hitHourlyCap()) return;
 
-    // 1) MEMORY CHECK FIRST
+    // 1) FAST CACHE FIRST
+    const cacheHit = findCacheAnswer(from, body, lang);
+    if (cacheHit?.answer) {
+      await conn.sendMessage(from, { text: cacheHit.answer }, { quoted: mek });
+
+      saveTurn(from, "bot", cacheHit.answer);
+      appendChatLog(from, {
+        role: "bot",
+        text: cacheHit.answer,
+        ts: Date.now(),
+        meta: {
+          source: cacheHit.source,
+          score: Number(cacheHit.score || 0).toFixed(3),
+        },
+      });
+      updateProfile(from, "bot", cacheHit.answer, lang);
+      return;
+    }
+
+    // 2) SEMANTIC MEMORY
     const mem = findBestMemoryAnswer(from, body);
     if (mem?.answer) {
       const reused = mem.answer;
@@ -891,11 +1124,12 @@ async function onMessage(conn, mek, m, ctx = {}) {
         },
       });
       updateProfile(from, "bot", reused, lang);
+      saveCache(from, body, reused, lang);
       return;
     }
 
-    // 2) API CALL
-    busy = true;
+    // 3) API CALL
+    busyChats.add(from);
 
     const ctxTurns = getContext(from);
     const prompt = isFollowUp(body)
@@ -907,10 +1141,9 @@ async function onMessage(conn, mek, m, ctx = {}) {
     if (out) {
       await conn.sendMessage(from, { text: out }, { quoted: mek });
 
-      // save Q/A for future no-API reuse
       saveQA(from, body, out);
+      saveCache(from, body, out, lang);
 
-      // save context, logs, profile
       saveTurn(from, "bot", out);
       appendChatLog(from, {
         role: "bot",
@@ -925,21 +1158,18 @@ async function onMessage(conn, mek, m, ctx = {}) {
 
     if (status === 429) {
       startBackoff();
-
       try {
-        const from = ctx.from || mek?.key?.remoteJid;
         if (from && !String(from).endsWith("@g.us")) {
           await conn.sendMessage(from, { text: rateLimitMsg(lang) }, { quoted: mek });
         }
       } catch {}
-
       console.log("AUTO_MSG: rate limit hit (429) - backoff started");
       return;
     }
 
     console.log("AUTO_MSG ERROR:", status || "", e?.message || e);
   } finally {
-    busy = false;
+    if (from) busyChats.delete(from);
   }
 }
 
