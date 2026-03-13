@@ -8,32 +8,38 @@ function generateProgressBar(duration = "0:00") {
     return `*00:00* ${bar}○ *${duration}*`;
 }
 
-async function getVideoDownload(url) {
-    // 1st try normal
+function isYouTubeUrl(text = "") {
+    return /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//i.test(text.trim());
+}
+
+async function tryVideoDownload(url) {
+    // normal ytmp4
     try {
-        const data = await dy_scrap.ytmp4(url, 360);
-        const dl = data?.result?.download?.url;
-        if (data?.status && dl) {
-            return { ok: true, url: dl, source: "ytmp4" };
+        const res1 = await dy_scrap.ytmp4(url, 360);
+        console.log("ytmp4 response:", JSON.stringify(res1, null, 2));
+
+        const dl1 = res1?.result?.download?.url;
+        if (res1?.status && dl1) {
+            return { ok: true, url: dl1, method: "ytmp4" };
         }
-        console.log("ytmp4 failed response:", data);
     } catch (e) {
         console.log("ytmp4 error:", e.message);
     }
 
-    // 2nd try v2
+    // fallback ytmp4_v2
     try {
-        const data2 = await dy_scrap.ytmp4_v2(url, 360);
-        const dl2 = data2?.result?.download?.url;
-        if (data2?.status && dl2) {
-            return { ok: true, url: dl2, source: "ytmp4_v2" };
+        const res2 = await dy_scrap.ytmp4_v2(url, 360);
+        console.log("ytmp4_v2 response:", JSON.stringify(res2, null, 2));
+
+        const dl2 = res2?.result?.download?.url;
+        if (res2?.status && dl2) {
+            return { ok: true, url: dl2, method: "ytmp4_v2" };
         }
-        console.log("ytmp4_v2 failed response:", data2);
     } catch (e) {
         console.log("ytmp4_v2 error:", e.message);
     }
 
-    return { ok: false };
+    return { ok: false, url: null };
 }
 
 cmd(
@@ -50,23 +56,51 @@ cmd(
 
             await reply("🔍 Searching Video...");
 
-            const search = await dy_scrap.ytsearch(q);
+            let video;
+            let videoUrl;
 
-            if (!search?.results?.length) {
-                return reply("❌ No results found.");
+            if (isYouTubeUrl(q)) {
+                videoUrl = q.trim();
+
+                // optional metadata fetch through search
+                try {
+                    const directSearch = await dy_scrap.ytsearch(q.trim());
+                    video = directSearch?.results?.[0];
+                } catch (e) {
+                    console.log("direct ytsearch error:", e.message);
+                }
+
+                if (!video) {
+                    video = {
+                        title: "YouTube Video",
+                        thumbnail: null,
+                        image: null,
+                        timestamp: "0:00",
+                        views: 0,
+                        ago: "Unknown",
+                        author: { name: "Unknown Channel" },
+                        url: videoUrl,
+                    };
+                }
+            } else {
+                const search = await dy_scrap.ytsearch(q);
+
+                if (!search?.results?.length) {
+                    return reply("❌ No results found.");
+                }
+
+                video = search.results[0];
+                videoUrl = video?.url;
             }
 
-            const video = search.results[0];
+            if (!videoUrl) return reply("❌ Video URL not found.");
+
             const title = video?.title || "Unknown Title";
             const thumbnail = video?.thumbnail || video?.image || null;
             const duration = video?.timestamp || "0:00";
             const channel = video?.author?.name || "Unknown Channel";
             const views = video?.views ? Number(video.views).toLocaleString() : "Unknown";
             const uploaded = video?.ago || "Unknown";
-            const videoUrl = video?.url;
-
-            if (!videoUrl) return reply("❌ Video URL not found.");
-
             const progressBar = generateProgressBar(duration);
 
             if (thumbnail) {
@@ -84,7 +118,7 @@ cmd(
 ${progressBar}
 
 🍀 *MALIYA-MD VIDEO DOWNLOADER* 🍀
-> QUALITY: 360P STABLE 🎬`,
+> QUALITY: 360P STABLE 🎬`
                     },
                     { quoted: mek }
                 );
@@ -92,10 +126,14 @@ ${progressBar}
 
             await reply("⬇️ Downloading video...");
 
-            const result = await getVideoDownload(videoUrl);
+            const result = await tryVideoDownload(videoUrl);
 
             if (!result.ok || !result.url) {
-                return reply("❌ Failed to fetch video download link.\n\nTry another video or use a direct YouTube URL.");
+                return reply(
+                    "❌ Failed to fetch video download link.\n\n" +
+                    "Console log eka balanna.\n" +
+                    "Likely scrap backend issue ekak."
+                );
             }
 
             await bot.sendMessage(
@@ -103,7 +141,7 @@ ${progressBar}
                 {
                     video: { url: result.url },
                     mimetype: "video/mp4",
-                    caption: `✅ *${title}*\n\n*MALIYA-MD ❤️*\n> Source: ${result.source}`,
+                    caption: `✅ *${title}*\n\n*MALIYA-MD ❤️*\n> Source: ${result.method}`,
                 },
                 { quoted: mek }
             );
