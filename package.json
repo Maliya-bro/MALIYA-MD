@@ -52,7 +52,9 @@
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "@dark-yasiya/scrap": "latest",
     "@distube/ytdl-core": "latest",
-    "youtube-dl-exec": "latest"
+    "youtube-dl-exec": "latest",
+    "@ffmpeg-installer/ffmpeg": "latest",
+    "@ffprobe-installer/ffprobe": "latest"
     
   }
 }
