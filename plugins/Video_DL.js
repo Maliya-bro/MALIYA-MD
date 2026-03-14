@@ -114,17 +114,8 @@ function buildQualityMenu(video) {
   const videoId = video.videoId || "Unknown";
   const live = video.live ? "Yes" : "No";
 
-  return `╭━━━〔 🎬 VIDEO INFO 〕━━━╮
-🎥 *Title:* ${title}
-👤 *Channel:* ${channel}
-🆔 *Video ID:* ${videoId}
-⏱️ *Duration:* ${duration}
-👀 *Views:* ${views}
-📅 *Uploaded:* ${uploaded}
-📡 *Live:* ${live}
-╰━━━━━━━━━━━━━━━━━━━━━━━╯
-
-╭━━━〔 🎞️ VIDEO QUALITY 〕━━━╮
+  return `
+╭━〔 🎞️ VIDEO QUALITY 〕━╮
   1️⃣  •  \`360p\`
   2️⃣  •  \`480p\`
   3️⃣  •  \`720p HD\`
@@ -135,7 +126,7 @@ function buildQualityMenu(video) {
 }
 
 function buildFinalCaption(video, qualityLabel, sizeMB) {
-  return `╭━━━〔 ✅ DOWNLOAD COMPLETE 〕━━━╮
+  return `╭━〔 ✅ DOWNLOAD COMPLETE 〕━╮
 🎥 *Title:* ${video.title || "Unknown Title"}
 👤 *Channel:* ${video.author?.name || "Unknown Channel"}
 🎞️ *Quality:* ${qualityLabel}
@@ -143,7 +134,7 @@ function buildFinalCaption(video, qualityLabel, sizeMB) {
 👀 *Views:* ${formatViews(video.views)}
 📅 *Uploaded:* ${video.ago || "Unknown"}
 📦 *Size:* ${sizeMB.toFixed(2)} MB
-╰━━━━━━━━━━━━━━━━━━━━━━━╯`;
+╰━━━━━━━━━━━━━━━━━╯`;
 }
 
 async function getYoutube(query) {
