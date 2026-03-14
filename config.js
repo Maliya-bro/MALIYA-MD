@@ -34,7 +34,7 @@ function convertToBool(text, fault = 'true') {
     return text === fault ? true : false;
 }
 module.exports = {
-SESSION_ID: process.env.SESSION_ID || "vkwUHSJT#0mR63om-uG_FlaLNOP31B6L6N-WeZ5reKY3GR6DmFlU",
+SESSION_ID: process.env.SESSION_ID || "3gpHgQCI#x0vtNfuPnpX-XbGbndnT9uDL9d1Cz92q-MNPYTwxteY",
 ALIVE_IMG: process.env.ALIVE_IMG || "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/WhatsApp%20Image%202026-01-18%20at%2012.37.23.jpeg?raw=true",
 ALIVE_MSG: process.env.ALIVE_MSG || "*Hello👋 MALIYA-MD Is Alive Now!😍😍😍.*",
 BOT_OWNER: "94702135392",
