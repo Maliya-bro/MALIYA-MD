@@ -1,8 +1,7 @@
-const { cmd } = require("../command");
 const axios = require("axios");
 const pdf = require("pdf-parse");
 const { downloadContentFromMessage } = require("@whiskeysockets/baileys");
-
+const { cmd } = require("../command");
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
@@ -17,8 +16,16 @@ const MAX_TEXT_FOR_AI = 20000;
 const MAX_MESSAGE_CHARS = 3500;
 const PROCESSING_COOLDOWN_MS = 15000;
 
-// duplicate processing avoid
 const recentlyProcessed = new Map();
+
+let pdfjsGetDocument = null;
+
+async function loadPdfJs() {
+  if (!pdfjsGetDocument) {
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    pdfjsGetDocument = pdfjs.getDocument;
+  }
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -35,25 +42,32 @@ function normalizeText(text = "") {
 }
 
 function trimForAI(text = "", max = MAX_TEXT_FOR_AI) {
+  if (!text) return "";
   if (text.length <= max) return text;
   return text.slice(0, max) + "\n\n[Text trimmed because PDF is too long]";
 }
 
 function splitText(text = "", max = MAX_MESSAGE_CHARS) {
-  const out = [];
-  let remaining = text.trim();
+  const chunks = [];
+  let remaining = String(text || "").trim();
 
   while (remaining.length > max) {
     let cut = remaining.lastIndexOf("\n", max);
-    if (cut < Math.floor(max * 0.6)) cut = remaining.lastIndexOf(" ", max);
-    if (cut < Math.floor(max * 0.6)) cut = max;
 
-    out.push(remaining.slice(0, cut).trim());
+    if (cut < Math.floor(max * 0.6)) {
+      cut = remaining.lastIndexOf(" ", max);
+    }
+
+    if (cut < Math.floor(max * 0.6)) {
+      cut = max;
+    }
+
+    chunks.push(remaining.slice(0, cut).trim());
     remaining = remaining.slice(cut).trim();
   }
 
-  if (remaining) out.push(remaining);
-  return out;
+  if (remaining) chunks.push(remaining);
+  return chunks;
 }
 
 async function sendLongMessage(sock, jid, text, quoted) {
@@ -138,7 +152,6 @@ function looksLikeQuestionPaper(text = "") {
     /පිළිතුරු/g,
     /අභ්‍යාස/g,
     /වරණ/g,
-    /වගුව/g,
     /வினா/g,
     /பதில்/g,
   ];
@@ -149,6 +162,54 @@ function looksLikeQuestionPaper(text = "") {
   }
 
   return hits >= 2;
+}
+
+function looksGarbled(text = "") {
+  if (!text) return false;
+
+  const weirdMatches =
+    text.match(/[ƒ†‡…‰Š‹ŒŽ‘’“”•–—™›œžŸ÷×¤§©®±µ¶]/g) || [];
+  const sinhalaMatches = text.match(/[\u0D80-\u0DFF]/g) || [];
+  const tamilMatches = text.match(/[\u0B80-\u0BFF]/g) || [];
+  const latinMatches = text.match(/[A-Za-z]/g) || [];
+
+  const hasExamStyle =
+    /(\d+\.)|(\(\d+\))|question|model|paper|ප්‍රශ්න|වරණ/i.test(text);
+
+  return (
+    weirdMatches.length > 10 ||
+    (hasExamStyle &&
+      sinhalaMatches.length < 5 &&
+      tamilMatches.length < 5 &&
+      latinMatches.length > 20)
+  );
+}
+
+async function extractWithPdfJs(buffer) {
+  await loadPdfJs();
+
+  const loadingTask = pdfjsGetDocument({ data: new Uint8Array(buffer) });
+  const pdfDoc = await loadingTask.promise;
+
+  let fullText = "";
+
+  for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+    const page = await pdfDoc.getPage(pageNum);
+    const content = await page.getTextContent();
+
+    const pageText = content.items
+      .map((item) => item.str || "")
+      .join(" ")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim();
+
+    fullText += pageText + "\n\n";
+  }
+
+  return {
+    text: fullText.trim(),
+    numpages: pdfDoc.numPages,
+  };
 }
 
 async function callGemini(prompt) {
@@ -189,6 +250,7 @@ async function callGemini(prompt) {
           .trim() || "";
 
       if (text) return text;
+
       lastError = new Error(`Empty response from ${model}`);
     } catch (err) {
       console.log(`[PDF SCANNER] Model failed: ${model} -> ${err.message}`);
@@ -207,7 +269,7 @@ function safeJsonParse(text) {
   }
 }
 
-async function analyzePdf(fileName, pageCount, extractedText) {
+async function analyzePdf(fileName, pageCount, extractedText, garbled = false) {
   const cleanedSource = trimForAI(normalizeText(extractedText));
   const maybeQuestions = looksLikeQuestionPaper(cleanedSource);
 
@@ -218,13 +280,16 @@ A text-based PDF has been parsed. Images are intentionally ignored.
 Your job is to analyze only the extracted text.
 
 Rules:
-- Detect the main language of the PDF.
+- Detect the main language.
 - Detect whether this is a question paper, worksheet, activity sheet, exercise, test, exam, or study questions.
 - If it contains questions, answer them in the SAME language as the paper.
 - If it is not a question paper, do not invent answers.
 - Keep the cleaned extracted text neat and readable.
 - Make the answer user-friendly for WhatsApp.
 - If some text is broken because of PDF formatting, intelligently clean it.
+- If extracted text appears garbled due to font encoding, try to reconstruct meaning as much as possible.
+- This may be a Sinhala or Tamil school paper with broken font encoding.
+- Do NOT say it is image-only unless text is completely unavailable.
 - Do not mention markdown code fences.
 - Return ONLY valid JSON.
 
@@ -242,6 +307,7 @@ Return exactly in this JSON format:
 File name: ${fileName}
 Page count: ${pageCount}
 Heuristic says likely question paper: ${maybeQuestions ? "YES" : "NO"}
+Possible garbled font encoding: ${garbled ? "YES" : "NO"}
 
 EXTRACTED TEXT:
 ${cleanedSource}
@@ -320,7 +386,6 @@ async function processPdf(sock, mek, context = {}) {
     if (recentlyProcessed.has(uniqueKey)) return true;
     recentlyProcessed.set(uniqueKey, now);
 
-    // cleanup old
     for (const [k, t] of recentlyProcessed.entries()) {
       if (now - t > PROCESSING_COOLDOWN_MS) {
         recentlyProcessed.delete(k);
@@ -348,21 +413,33 @@ async function processPdf(sock, mek, context = {}) {
 
     const pdfBuffer = await downloadPdfBuffer(pdfMessage);
 
-    let parsedPdf;
+    let parsedPdf = null;
+    let extractorUsed = "pdf-parse";
+
     try {
       parsedPdf = await pdf(pdfBuffer);
     } catch (err) {
-      await sock.sendMessage(
-        from,
-        {
-          text:
-            `❌ *PDF parse කරන්න බැරි වුණා.*\n\n` +
-            `මෙක scanned image PDF එකක් වෙන්න පුළුවන්.\n` +
-            `මේ plugin එක images bypass කරන නිසා OCR කරන්නේ නෑ.`,
-        },
-        { quoted: mek }
-      );
-      return true;
+      console.log("pdf-parse failed, trying pdfjs-dist:", err?.message || err);
+
+      try {
+        parsedPdf = await extractWithPdfJs(pdfBuffer);
+        extractorUsed = "pdfjs-dist";
+      } catch (err2) {
+        console.log("pdfjs-dist also failed:", err2?.message || err2);
+
+        await sock.sendMessage(
+          from,
+          {
+            text:
+              `❌ *PDF parse කරන්න බැරි වුණා.*\n\n` +
+              `මේ PDF එක normal text PDF එකක් නොවෙන්න පුළුවන්,\n` +
+              `නැත්නම් PDF structure / font encoding issue එකක් තියෙන්න පුළුවන්.\n\n` +
+              `⚠️ මෙක scanned image PDF එකක් කියලා sure නෑ.`,
+          },
+          { quoted: mek }
+        );
+        return true;
+      }
     }
 
     const rawText = normalizeText(parsedPdf.text || "");
@@ -374,15 +451,31 @@ async function processPdf(sock, mek, context = {}) {
         {
           text:
             `⚠️ *Text extract වුණේ නෑ.*\n\n` +
-            `මෙක selectable text නැති scanned/image PDF එකක් වෙන්න පුළුවන්.\n` +
-            `ඔයා කියපු විදියට images bypass කරන නිසා image OCR ගන්නේ නෑ.`,
+            `මේ PDF එකේ selectable text නැති වෙන්න පුළුවන්\n` +
+            `හෝ text layer එක damaged වෙලා තියෙන්න පුළුවන්.`,
         },
         { quoted: mek }
       );
       return true;
     }
 
-    const result = await analyzePdf(fileName, pageCount, rawText);
+    const garbled = looksGarbled(rawText);
+
+    if (garbled) {
+      await sock.sendMessage(
+        from,
+        {
+          text:
+            `⚠️ *PDF text extract වුණා, හැබැයි font / encoding issue එකක් තියෙනවා.*\n\n` +
+            `මේක scanned image PDF එකක් කියලා නෙමෙයි.\n` +
+            `📦 Extractor: ${extractorUsed}\n` +
+            `🤖 AI එකෙන් possible නම් text එක reconstruct කරලා answers/summary හදන්න try කරනවා...`,
+        },
+        { quoted: mek }
+      );
+    }
+
+    const result = await analyzePdf(fileName, pageCount, rawText, garbled);
     const finalText = buildFinalText(fileName, pageCount, result);
 
     await sendLongMessage(sock, from, finalText, mek);
@@ -436,8 +529,8 @@ cmd(
     await reply(
       `✅ *PDF Scanner Active*\n\n` +
         `• PDF auto detect කරනවා\n` +
-        `• text extract කරනවා\n` +
-        `• images bypass කරනවා\n` +
+        `• pdf-parse + pdfjs-dist fallback use කරනවා\n` +
+        `• font/encoding issue detect කරනවා\n` +
         `• question paper නම් same language එකෙන් answer දෙනවා\n` +
         `• original PDF එකත් ආපහු send කරනවා`
     );
@@ -451,7 +544,6 @@ module.exports = {
     const body = String(context?.body || "");
     const isCmd = !!context?.isCmd;
 
-    // command එකක් ගහන වෙලාවට unnecessary auto scan වෙන්න එපා
     if (isCmd && body.startsWith(".")) return false;
 
     return await processPdf(sock, mek, context);
