@@ -90,6 +90,61 @@ const antiDeletePlugin = require("./plugins/antidelete.js");
 global.pluginHooks = global.pluginHooks || [];
 global.pluginHooks.push(antiDeletePlugin);
 
+/* ================= ONLY ADDED FOR INTERACTIVE BODY PARSING ================= */
+
+function safeJsonParse(str) {
+  try {
+    return JSON.parse(str);
+  } catch {
+    return null;
+  }
+}
+
+function getBodyFromMessage(message) {
+  if (!message) return "";
+
+  const direct =
+    message.conversation ||
+    message.extendedTextMessage?.text ||
+    message.imageMessage?.caption ||
+    message.videoMessage?.caption ||
+    message.documentMessage?.caption ||
+    message.buttonsResponseMessage?.selectedButtonId ||
+    message.buttonsResponseMessage?.selectedDisplayText ||
+    message.templateButtonReplyMessage?.selectedId ||
+    message.templateButtonReplyMessage?.selectedDisplayText ||
+    message.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    message.listResponseMessage?.title ||
+    message.interactiveResponseMessage?.body?.text ||
+    "";
+
+  if (direct) return String(direct).trim();
+
+  const paramsJson =
+    message.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+
+  if (paramsJson) {
+    const parsed = safeJsonParse(paramsJson);
+
+    if (parsed) {
+      return String(
+        parsed.id ||
+          parsed.selectedId ||
+          parsed.selectedRowId ||
+          parsed.title ||
+          parsed.display_text ||
+          parsed.text ||
+          parsed.name ||
+          paramsJson
+      ).trim();
+    }
+
+    return String(paramsJson).trim();
+  }
+
+  return "";
+}
+
 /* ================= CONNECT ================= */
 
 async function connectToWA() {
@@ -184,7 +239,7 @@ async function connectToWA() {
 
       try {
         fs.readdirSync("./plugins/").forEach((plugin) => {
-          if (plugin === "auto_msg.js") return; // prevent duplicate load
+          if (plugin === "auto_msg.js") return;
           if (plugin.endsWith(".js")) {
             require(`./plugins/${plugin}`);
           }
@@ -335,12 +390,8 @@ async function connectToWA() {
       const m = sms(sock, mek);
       const type = getContentType(mek.message);
 
-      let body =
-        type === "conversation"
-          ? mek.message.conversation
-          : mek.message[type]?.text || mek.message[type]?.caption || "";
-
-      body = String(body || "");
+      let body = getBodyFromMessage(mek.message);
+      body = String(body || "").trim();
 
       let isCmd = body.startsWith(prefix);
       let commandName = isCmd
