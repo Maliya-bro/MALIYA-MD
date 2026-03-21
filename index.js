@@ -1,7 +1,6 @@
-// This si main file of MALIYA-MD bot 
-// Do not edit or delete any files with permission or without permission
-// Contact owner: 94702135392
-// ©️2026 MALIYA-MD
+// index.js (FULL CODE)
+// ------------------------------------------------------------
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -20,6 +19,7 @@ const path = require("path");
 const { execSync } = require("child_process");
 
 const config = require("./config");
+const { readSettings } = require("./lib/botSettings");
 const { sms } = require("./lib/msg");
 const { File } = require("megajs");
 const { commands, replyHandlers } = require("./command");
@@ -30,10 +30,6 @@ function ensurePluginsRepo() {
 
     if (!fs.existsSync(pluginsPath)) {
       execSync("git clone https://github.com/Maliya-bro/my-plugins.git plugins", {
-        stdio: "ignore",
-      });
-    } else {
-      execSync("git -C plugins pull", {
         stdio: "ignore",
       });
     }
@@ -67,7 +63,7 @@ const app = express();
 const port = process.env.PORT || 8000;
 
 const prefix = ".";
-const ownerNumber = ["94701369636"];
+const ownerNumber = [String(config.BOT_OWNER || "94702135392")];
 const authDir = path.join(__dirname, "/auth_info_baileys/");
 const credsPath = path.join(authDir, "creds.json");
 
@@ -112,7 +108,7 @@ const antiDeletePlugin = require("./plugins/antidelete.js");
 global.pluginHooks = global.pluginHooks || [];
 global.pluginHooks.push(antiDeletePlugin);
 
-/* ================= ONLY ADDED FOR INTERACTIVE BODY PARSING ================= */
+/* ================= HELPERS ================= */
 
 function safeJsonParse(str) {
   try {
@@ -203,8 +199,6 @@ async function connectToWA() {
     if (connection === "open") {
       console.log("✅ MALIYA-MD connected");
 
-      /* ===== CONNECT MESSAGE ===== */
-
       const OWNER_NAME = "Malindu Nadith";
       const BOT_VERSION = "v4.0.0";
 
@@ -232,7 +226,7 @@ async function connectToWA() {
 
 ✅✨ Connection : CONNECTED & ONLINE
 ⚡🧬 System     : STABLE | FAST | SECURE
-🛡️🔐 Mode      : PUBLIC
+🛡️🔐 Mode      : ${String(readSettings().mode || "public").toUpperCase()}
 🎯🧩 Prefix    : ${prefix}
 
 🧑‍💻👑 Owner    : ${OWNER_NAME}
@@ -257,11 +251,10 @@ async function connectToWA() {
         console.log("⚠️ Connect msg send failed:", e?.message || e);
       }
 
-      /* ================= LOAD PLUGINS ================= */
-
       try {
         fs.readdirSync("./plugins/").forEach((plugin) => {
           if (plugin === "auto_msg.js") return;
+          if (plugin === "antidelete.js") return;
           if (plugin.endsWith(".js")) {
             require(`./plugins/${plugin}`);
           }
@@ -273,6 +266,33 @@ async function connectToWA() {
   });
 
   sock.ev.on("creds.update", saveCreds);
+
+  /* ================= AUTO REJECT CALLS ================= */
+
+  sock.ev.on("call", async (calls) => {
+    try {
+      const settings = readSettings();
+      if (!settings.auto_reject_calls) return;
+
+      for (const call of calls) {
+        const callId = call.id;
+        const callerId = call.from;
+
+        if (!callId || !callerId) continue;
+
+        try {
+          await sock.rejectCall(callId, callerId);
+          await sock.sendMessage(callerId, {
+            text: "❌ Calls are not allowed on this bot.",
+          });
+        } catch (e) {
+          console.log("Call reject error:", e?.message || e);
+        }
+      }
+    } catch (e) {
+      console.log("Call event error:", e?.message || e);
+    }
+  });
 
   /* ================= MESSAGE HANDLER ================= */
 
@@ -287,8 +307,6 @@ async function connectToWA() {
           ? mek.message.ephemeralMessage.message
           : mek.message;
 
-      /* ===== pluginHooks ===== */
-
       if (global.pluginHooks) {
         for (const plugin of global.pluginHooks) {
           if (plugin.onMessage) {
@@ -299,9 +317,6 @@ async function connectToWA() {
         }
       }
 
-      /* ============================================================
-          ✅✅✅ STATUS AUTO SEEN + REACT + FORWARD (FIXED)
-          ============================================================ */
       if (mek.key?.remoteJid === "status@broadcast") {
         const participantRaw = mek.key.participant;
         const id = mek.key.id;
@@ -322,7 +337,7 @@ async function connectToWA() {
           fromMe: false,
         };
 
-        if (String(config.AUTO_STATUS_SEEN).toLowerCase() === "true") {
+        if (readSettings().auto_status_seen === true) {
           try {
             await sock.readMessages([statusKey]);
 
@@ -336,7 +351,7 @@ async function connectToWA() {
           }
         }
 
-        if (String(config.AUTO_STATUS_REACT).toLowerCase() === "true") {
+        if (readSettings().auto_status_react === true) {
           try {
             const emojis = [
               "❤️","💸","😇","🍂","💥","💯","🔥","💫","💎","💗","🤍","🖤","👀","🙌","🙆","🚩",
@@ -407,7 +422,6 @@ async function connectToWA() {
 
         continue;
       }
-      /* ===================== END STATUS BLOCK ===================== */
 
       const m = sms(sock, mek);
       const type = getContentType(mek.message);
@@ -435,10 +449,30 @@ async function connectToWA() {
       const reply = (text) =>
         sock.sendMessage(from, { text }, { quoted: mek });
 
+      try {
+        const presenceMode = readSettings().always_presence;
+
+        if (presenceMode === "typing") {
+          await sock.sendPresenceUpdate("composing", from);
+        } else if (presenceMode === "recording") {
+          await sock.sendPresenceUpdate("recording", from);
+        }
+      } catch {}
+
       /* ================= AUTO AI ================= */
 
       try {
-        if (autoMsgPlugin && typeof autoMsgPlugin.onMessage === "function") {
+        const botSettings = readSettings();
+
+        if (botSettings.mode === "private" && !isOwner) {
+          if (isCmd) continue;
+        }
+
+        if (
+          botSettings.auto_msg === true &&
+          autoMsgPlugin &&
+          typeof autoMsgPlugin.onMessage === "function"
+        ) {
           await autoMsgPlugin.onMessage(sock, mek, m, {
             from,
             body,
@@ -519,7 +553,7 @@ async function connectToWA() {
         console.log("pdfScannerPlugin error:", e?.message || e);
       }
 
-      /* ================= REPLY HANDLERS (NO PREFIX) ================= */
+      /* ================= REPLY HANDLERS ================= */
 
       if (!isCmd && replyHandlers && replyHandlers.length) {
         for (const h of replyHandlers) {
@@ -556,6 +590,12 @@ async function connectToWA() {
       /* ================= COMMAND HANDLER ================= */
 
       if (isCmd) {
+        const botSettings = readSettings();
+
+        if (botSettings.mode === "private" && !isOwner) {
+          continue;
+        }
+
         const cmd = commands.find(
           (c) => c.pattern === commandName || c.alias?.includes(commandName)
         );
