@@ -2,3 +2,4 @@ node_modules/
 sessions/
 .env
 plugins/
+data/bot_settings.json
