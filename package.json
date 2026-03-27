@@ -58,7 +58,9 @@
     "sharp": "latest",
     "tesseract.js": "latest",
     "pdf-parse": "latest",
-    "gifted-btns": "latest"
+    "gifted-btns": "latest",
+    "puppeteer-extra-plugin-stealth": "latest",
+    "puppeteer-extra": "latest"
     
   }
 }
