@@ -60,7 +60,8 @@
     "pdf-parse": "latest",
     "gifted-btns": "latest",
     "puppeteer-extra-plugin-stealth": "latest",
-    "puppeteer-extra": "latest"
+    "puppeteer-extra": "latest",
+    "mongodb": "latest"
     
   }
 }
