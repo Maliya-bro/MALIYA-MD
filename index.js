@@ -688,8 +688,6 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
       } catch {}
 
-      /* ================= AUTO AI ================= */
-
       try {
         const botSettings = readSettings();
 
@@ -720,8 +718,6 @@ function attachSessionHandlers(sock, sessionCtx) {
       } catch (e) {
         console.log("AutoMsg hook error:", e?.message || e);
       }
-
-      /* ================= CMD AUTOFIX ================= */
 
       try {
         if (cmdFixPlugin && typeof cmdFixPlugin.onMessage === "function") {
@@ -759,8 +755,6 @@ function attachSessionHandlers(sock, sessionCtx) {
         console.log("cmdFixPlugin error:", e?.message || e);
       }
 
-      /* ================= PDF SCANNER AUTO ================= */
-
       try {
         if (pdfScannerPlugin && typeof pdfScannerPlugin.onMessage === "function") {
           await pdfScannerPlugin.onMessage(sock, mek, m, {
@@ -781,8 +775,6 @@ function attachSessionHandlers(sock, sessionCtx) {
       } catch (e) {
         console.log("pdfScannerPlugin error:", e?.message || e);
       }
-
-      /* ================= REPLY HANDLERS ================= */
 
       if (!isCmd && replyHandlers && replyHandlers.length) {
         for (const h of replyHandlers) {
@@ -816,8 +808,6 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
       }
 
-      /* ================= COMMAND HANDLER ================= */
-
       if (isCmd) {
         const botSettings = readSettings();
 
@@ -849,8 +839,6 @@ function attachSessionHandlers(sock, sessionCtx) {
       }
     }
   });
-
-  /* ================= DELETE & POLL HANDLER ================= */
 
   sock.ev.on("messages.update", async (updates) => {
     if (global.pluginHooks) {
