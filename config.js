@@ -29,17 +29,16 @@ if (fs.existsSync("config.env")) {
   require("dotenv").config({ path: "./config.env" });
 }
 
-// string → boolean convert
+// string -> boolean convert
 function toBool(value, def = true) {
   if (value === undefined) return def;
   return String(value).toLowerCase() === "true";
 }
 
 module.exports = {
-  // 🔐 MongoDB / Session
-  SESSION_ID:
-    process.env.SESSION_ID ||
-    "WTqNeiNX_qEgJRRdD-LHYo6w5BKn9g5sxWafAbXYCaSc5TeQHB_H",
+  // 🔐 Session
+  // watcher system එකේ default empty තියෙන එක හොඳයි
+  SESSION_ID: process.env.SESSION_ID || "",
 
   // 🖼️ Alive
   ALIVE_IMG:
@@ -50,17 +49,17 @@ module.exports = {
     process.env.ALIVE_MSG ||
     "*Hello👋 MALIYA-MD Is Alive Now!😍😍😍.*",
 
- 
+  // 👑 Owner
   BOT_OWNER:
     process.env.BOT_OWNER || "94702135392",
 
- 
+  // ⚙️ Settings
   AUTO_STATUS_SEEN: toBool(process.env.AUTO_STATUS_SEEN, true),
 
   AUTO_STATUS_REACT: toBool(process.env.AUTO_STATUS_REACT, true),
 
   MODE:
-    process.env.MODE || "public", 
+    process.env.MODE || "public",
 
   ANTI_DELETE: toBool(process.env.ANTI_DELETE, true),
 
@@ -69,7 +68,7 @@ module.exports = {
   AUTO_REJECT_CALLS: toBool(process.env.AUTO_REJECT_CALLS, false),
 
   ALWAYS_PRESENCE:
-    process.env.ALWAYS_PRESENCE || "off", 
+    process.env.ALWAYS_PRESENCE || "off",
 };
 
 
