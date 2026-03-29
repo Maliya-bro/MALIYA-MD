@@ -67,7 +67,7 @@ const ownerNumber = [String(config.BOT_OWNER || "94702135392").replace(/\D/g, ""
 const authDir = path.join(__dirname, "/auth_info_baileys/");
 const credsPath = path.join(authDir, "creds.json");
 
-/* ================= MONGODB SESSION CHECK ================= */
+/* ================= MONGODB SESSION WATCHER ================= */
 
 const MONGODB_URI =
   process.env.MONGODB_URI ||
@@ -78,6 +78,12 @@ const SESSION_COLLECTION = process.env.SESSION_COLLECTION || "wa_sessions";
 
 let cachedClient = null;
 let cachedDb = null;
+let watcherStarted = false;
+let isConnecting = false;
+let isConnected = false;
+let currentSessionId = null;
+let watcherInterval = null;
+let sockInstance = null;
 
 async function getDb() {
   if (cachedDb) return cachedDb;
@@ -102,6 +108,40 @@ async function getSessionById(sessionId) {
   return col.findOne({ sessionId: normalizeSessionId(sessionId) });
 }
 
+async function getLatestConnectableSession() {
+  const db = await getDb();
+  const col = db.collection(SESSION_COLLECTION);
+
+  return col.findOne(
+    {
+      connectBot: true,
+      status: { $in: ["ready", "connected", "pair-code", "qr"] },
+    },
+    {
+      sort: { updatedAt: -1, createdAt: -1 },
+    }
+  );
+}
+
+async function updateSessionStatus(sessionId, data = {}) {
+  if (!sessionId) return;
+  try {
+    const db = await getDb();
+    const col = db.collection(SESSION_COLLECTION);
+    await col.updateOne(
+      { sessionId: normalizeSessionId(sessionId) },
+      {
+        $set: {
+          ...data,
+          updatedAt: new Date(),
+        },
+      }
+    );
+  } catch (e) {
+    console.log("Session status update error:", e?.message || e);
+  }
+}
+
 async function restoreCredsToFile(sessionId, targetFilePath) {
   const doc = await getSessionById(sessionId);
 
@@ -119,31 +159,79 @@ async function restoreCredsToFile(sessionId, targetFilePath) {
   return targetFilePath;
 }
 
+async function loadSessionFromMongoAndConnect(sessionId) {
+  if (!sessionId) return;
+  if (isConnecting || isConnected) return;
+
+  try {
+    isConnecting = true;
+    currentSessionId = sessionId;
+
+    console.log(`🔄 Restoring creds.json from MongoDB for session: ${sessionId}`);
+
+    fs.rmSync(authDir, { recursive: true, force: true });
+    fs.mkdirSync(authDir, { recursive: true });
+
+    await restoreCredsToFile(sessionId, credsPath);
+
+    if (!fs.existsSync(credsPath)) {
+      throw new Error("creds.json restore failed");
+    }
+
+    await updateSessionStatus(sessionId, { status: "restored" });
+
+    console.log("✅ Session restored from MongoDB. Connecting...");
+    setTimeout(connectToWA, 1500);
+  } catch (e) {
+    console.error("❌ loadSessionFromMongoAndConnect error:", e?.message || e);
+  } finally {
+    isConnecting = false;
+  }
+}
+
 async function ensureSessionFile() {
   try {
-    if (!fs.existsSync(credsPath)) {
-      if (!config.SESSION_ID) {
-        console.error("❌ SESSION_ID missing");
-        process.exit(1);
-      }
-
-      console.log("🔄 Restoring creds.json from MongoDB...");
-      await restoreCredsToFile(config.SESSION_ID, credsPath);
-
-      if (!fs.existsSync(credsPath)) {
-        console.error("❌ creds.json restore failed");
-        process.exit(1);
-      }
-
-      console.log("✅ Session restored from MongoDB. Restarting...");
-      setTimeout(connectToWA, 2000);
-    } else {
+    if (fs.existsSync(credsPath)) {
+      currentSessionId = normalizeSessionId(config.SESSION_ID || currentSessionId || "");
       setTimeout(connectToWA, 1000);
+      return;
+    }
+
+    if (config.SESSION_ID) {
+      console.log("🔄 Restoring initial session from MongoDB...");
+      await loadSessionFromMongoAndConnect(config.SESSION_ID);
+    } else {
+      console.log("⏳ No local session found. Waiting for MongoDB watcher...");
     }
   } catch (e) {
     console.error("❌ ensureSessionFile error:", e?.message || e);
-    process.exit(1);
   }
+}
+
+function startSessionWatcher() {
+  if (watcherStarted) return;
+  watcherStarted = true;
+
+  const tick = async () => {
+    try {
+      if (isConnecting || isConnected) return;
+
+      const doc = await getLatestConnectableSession();
+      if (!doc || !doc.sessionId) return;
+
+      if (currentSessionId && currentSessionId === normalizeSessionId(doc.sessionId) && fs.existsSync(credsPath)) {
+        return;
+      }
+
+      console.log(`👀 New session detected in MongoDB: ${doc.sessionId}`);
+      await loadSessionFromMongoAndConnect(doc.sessionId);
+    } catch (e) {
+      console.log("Watcher tick error:", e?.message || e);
+    }
+  };
+
+  tick();
+  watcherInterval = setInterval(tick, 10000);
 }
 
 /* ================= PLUGINS ================= */
@@ -211,6 +299,8 @@ function getBodyFromMessage(message) {
 /* ================= CONNECT ================= */
 
 async function connectToWA() {
+  if (isConnected) return;
+
   console.log("Connecting MALIYA-MD 🧬...");
 
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
@@ -227,21 +317,42 @@ async function connectToWA() {
     generateHighQualityLinkPreview: true,
   });
 
+  sockInstance = sock;
+
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect } = update;
 
     if (connection === "close") {
+      isConnected = false;
+
       const code = lastDisconnect?.error?.output?.statusCode;
 
       if (code !== DisconnectReason.loggedOut) {
         console.log("🔁 Reconnecting...");
-        connectToWA();
+        setTimeout(connectToWA, 3000);
       } else {
         console.log("❌ Logged out. Delete auth_info_baileys and re-pair.");
+        await updateSessionStatus(currentSessionId, {
+          status: "logged_out",
+          connectBot: false,
+        });
+
+        try {
+          fs.rmSync(authDir, { recursive: true, force: true });
+        } catch {}
+
+        currentSessionId = null;
       }
     }
 
     if (connection === "open") {
+      isConnected = true;
+
+      await updateSessionStatus(currentSessionId, {
+        status: "connected",
+        connectBot: true,
+      });
+
       console.log("✅ MALIYA-MD connected");
 
       const OWNER_NAME = "Malindu Nadith";
@@ -709,6 +820,7 @@ async function connectToWA() {
 /* ================= SERVER ================= */
 
 ensureSessionFile();
+startSessionWatcher();
 
 app.get("/", (req, res) => {
   res.send("Hey There, MALIYA-MD started ✅");
