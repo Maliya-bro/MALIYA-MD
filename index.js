@@ -1,4 +1,4 @@
-// index.js (FULL CODE)
+// index.js (MULTI USER FULL CODE)
 // ------------------------------------------------------------
 
 const {
@@ -63,11 +63,11 @@ const app = express();
 const port = process.env.PORT || 8000;
 
 const prefix = ".";
-const ownerNumber = [String(config.BOT_OWNER || "94702135392").replace(/\D/g, "")];
-const authDir = path.join(__dirname, "/auth_info_baileys/");
-const credsPath = path.join(authDir, "creds.json");
+const baseOwnerNumber = [String(config.BOT_OWNER || "").replace(/\D/g, "")].filter(Boolean);
+const sessionsBaseDir = path.join(__dirname, "multi_auth_sessions");
+const MAX_ACTIVE_SESSIONS = Number(process.env.MAX_ACTIVE_SESSIONS || 50);
 
-/* ================= MONGODB SESSION WATCHER ================= */
+/* ================= MONGODB ================= */
 
 const MONGODB_URI =
   process.env.MONGODB_URI ||
@@ -78,18 +78,12 @@ const SESSION_COLLECTION = process.env.SESSION_COLLECTION || "wa_sessions";
 
 let cachedClient = null;
 let cachedDb = null;
-let watcherStarted = false;
-let isConnecting = false;
-let isConnected = false;
-let currentSessionId = null;
-let watcherInterval = null;
-let sockInstance = null;
 
 async function getDb() {
   if (cachedDb) return cachedDb;
 
   cachedClient = new MongoClient(MONGODB_URI, {
-    maxPoolSize: 10,
+    maxPoolSize: 30,
   });
 
   await cachedClient.connect();
@@ -102,32 +96,40 @@ function normalizeSessionId(value) {
   return String(value || "").trim();
 }
 
+function safeSessionFolderName(sessionId) {
+  return String(sessionId || "")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 150);
+}
+
 async function getSessionById(sessionId) {
   const db = await getDb();
   const col = db.collection(SESSION_COLLECTION);
   return col.findOne({ sessionId: normalizeSessionId(sessionId) });
 }
 
-async function getLatestConnectableSession() {
+async function getConnectableSessions(limit = MAX_ACTIVE_SESSIONS) {
   const db = await getDb();
   const col = db.collection(SESSION_COLLECTION);
 
-  return col.findOne(
-    {
+  return col
+    .find({
       connectBot: true,
-      status: { $in: ["ready", "connected", "pair-code", "qr"] },
-    },
-    {
-      sort: { updatedAt: -1, createdAt: -1 },
-    }
-  );
+      status: { $nin: ["logged_out", "deleted", "disabled"] },
+      primaryFile: { $exists: true },
+    })
+    .sort({ updatedAt: -1, createdAt: -1 })
+    .limit(limit)
+    .toArray();
 }
 
 async function updateSessionStatus(sessionId, data = {}) {
   if (!sessionId) return;
+
   try {
     const db = await getDb();
     const col = db.collection(SESSION_COLLECTION);
+
     await col.updateOne(
       { sessionId: normalizeSessionId(sessionId) },
       {
@@ -155,83 +157,7 @@ async function restoreCredsToFile(sessionId, targetFilePath) {
 
   fs.mkdirSync(path.dirname(targetFilePath), { recursive: true });
   fs.writeFileSync(targetFilePath, Buffer.from(doc.primaryFile.data, "base64"));
-
   return targetFilePath;
-}
-
-async function loadSessionFromMongoAndConnect(sessionId) {
-  if (!sessionId) return;
-  if (isConnecting || isConnected) return;
-
-  try {
-    isConnecting = true;
-    currentSessionId = sessionId;
-
-    console.log(`🔄 Restoring creds.json from MongoDB for session: ${sessionId}`);
-
-    fs.rmSync(authDir, { recursive: true, force: true });
-    fs.mkdirSync(authDir, { recursive: true });
-
-    await restoreCredsToFile(sessionId, credsPath);
-
-    if (!fs.existsSync(credsPath)) {
-      throw new Error("creds.json restore failed");
-    }
-
-    await updateSessionStatus(sessionId, { status: "restored" });
-
-    console.log("✅ Session restored from MongoDB. Connecting...");
-    setTimeout(connectToWA, 1500);
-  } catch (e) {
-    console.error("❌ loadSessionFromMongoAndConnect error:", e?.message || e);
-  } finally {
-    isConnecting = false;
-  }
-}
-
-async function ensureSessionFile() {
-  try {
-    if (fs.existsSync(credsPath)) {
-      currentSessionId = normalizeSessionId(config.SESSION_ID || currentSessionId || "");
-      setTimeout(connectToWA, 1000);
-      return;
-    }
-
-    if (config.SESSION_ID) {
-      console.log("🔄 Restoring initial session from MongoDB...");
-      await loadSessionFromMongoAndConnect(config.SESSION_ID);
-    } else {
-      console.log("⏳ No local session found. Waiting for MongoDB watcher...");
-    }
-  } catch (e) {
-    console.error("❌ ensureSessionFile error:", e?.message || e);
-  }
-}
-
-function startSessionWatcher() {
-  if (watcherStarted) return;
-  watcherStarted = true;
-
-  const tick = async () => {
-    try {
-      if (isConnecting || isConnected) return;
-
-      const doc = await getLatestConnectableSession();
-      if (!doc || !doc.sessionId) return;
-
-      if (currentSessionId && currentSessionId === normalizeSessionId(doc.sessionId) && fs.existsSync(credsPath)) {
-        return;
-      }
-
-      console.log(`👀 New session detected in MongoDB: ${doc.sessionId}`);
-      await loadSessionFromMongoAndConnect(doc.sessionId);
-    } catch (e) {
-      console.log("Watcher tick error:", e?.message || e);
-    }
-  };
-
-  tick();
-  watcherInterval = setInterval(tick, 10000);
 }
 
 /* ================= PLUGINS ================= */
@@ -240,6 +166,28 @@ const antiDeletePlugin = require("./plugins/antidelete.js");
 
 global.pluginHooks = global.pluginHooks || [];
 global.pluginHooks.push(antiDeletePlugin);
+
+let pluginsLoaded = false;
+
+function loadCommandPluginsOnce() {
+  if (pluginsLoaded) return;
+  pluginsLoaded = true;
+
+  try {
+    fs.readdirSync("./plugins/").forEach((plugin) => {
+      if (plugin === "auto_msg.js") return;
+      if (plugin === "antidelete.js") return;
+      if (plugin.endsWith(".js")) {
+        require(`./plugins/${plugin}`);
+      }
+    });
+    console.log("✅ Plugins loaded");
+  } catch (e) {
+    console.log("⚠️ Plugin load error:", e?.message || e);
+  }
+}
+
+loadCommandPluginsOnce();
 
 /* ================= HELPERS ================= */
 
@@ -296,86 +244,138 @@ function getBodyFromMessage(message) {
   return "";
 }
 
-/* ================= CONNECT ================= */
+/* ================= MULTI SESSION MANAGER ================= */
 
-async function connectToWA() {
-  if (isConnected) return;
+const activeSessions = new Map();
+const reconnectTimers = new Map();
+let watcherStarted = false;
 
-  console.log("Connecting MALIYA-MD 🧬...");
+function getSessionPaths(sessionId) {
+  const safeId = safeSessionFolderName(sessionId);
+  const authDir = path.join(sessionsBaseDir, safeId);
+  const credsPath = path.join(authDir, "creds.json");
+  return { authDir, credsPath, safeId };
+}
 
-  const { state, saveCreds } = await useMultiFileAuthState(authDir);
-  const { version } = await fetchLatestBaileysVersion();
+function getOwnerNumberForSock(sock) {
+  const jid = sock.user?.id || "";
+  const number = String(jid).split("@")[0].split(":")[0].replace(/\D/g, "");
+  return number ? [number] : [...baseOwnerNumber];
+}
 
-  const sock = makeWASocket({
-    logger: P({ level: "silent" }),
-    printQRInTerminal: false,
-    browser: Browsers.macOS("Firefox"),
-    auth: state,
-    version,
-    syncFullHistory: true,
-    markOnlineOnConnect: true,
-    generateHighQualityLinkPreview: true,
-  });
+async function cleanupSessionFolder(sessionId) {
+  try {
+    const { authDir } = getSessionPaths(sessionId);
+    fs.rmSync(authDir, { recursive: true, force: true });
+  } catch {}
+}
 
-  sockInstance = sock;
+async function scheduleReconnect(sessionId, delayMs = 5000) {
+  if (!sessionId) return;
+  if (reconnectTimers.has(sessionId)) return;
 
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect } = update;
+  const timer = setTimeout(async () => {
+    reconnectTimers.delete(sessionId);
 
-    if (connection === "close") {
-      isConnected = false;
+    if (activeSessions.has(sessionId)) return;
 
-      const code = lastDisconnect?.error?.output?.statusCode;
+    console.log(`🔁 Reconnecting session ${sessionId}...`);
+    await startSessionBot(sessionId);
+  }, delayMs);
 
-      if (code !== DisconnectReason.loggedOut) {
-        console.log("🔁 Reconnecting...");
-        setTimeout(connectToWA, 3000);
-      } else {
-        console.log("❌ Logged out. Delete auth_info_baileys and re-pair.");
-        await updateSessionStatus(currentSessionId, {
-          status: "logged_out",
-          connectBot: false,
+  reconnectTimers.set(sessionId, timer);
+}
+
+async function startSessionBot(sessionId) {
+  sessionId = normalizeSessionId(sessionId);
+  if (!sessionId) return null;
+
+  if (activeSessions.has(sessionId)) {
+    return activeSessions.get(sessionId);
+  }
+
+  if (activeSessions.size >= MAX_ACTIVE_SESSIONS) {
+    console.log(`⚠️ Active session limit reached (${MAX_ACTIVE_SESSIONS}). Skipping ${sessionId}`);
+    return null;
+  }
+
+  const existingDoc = await getSessionById(sessionId);
+  if (!existingDoc || existingDoc.connectBot !== true) {
+    return null;
+  }
+
+  const { authDir, credsPath } = getSessionPaths(sessionId);
+
+  try {
+    fs.mkdirSync(authDir, { recursive: true });
+    await restoreCredsToFile(sessionId, credsPath);
+
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    const { version } = await fetchLatestBaileysVersion();
+
+    const sessionCtx = {
+      sessionId,
+      authDir,
+      credsPath,
+      ownerNumber: [...baseOwnerNumber],
+      connected: false,
+      connecting: true,
+      sock: null,
+    };
+
+    const sock = makeWASocket({
+      logger: P({ level: "silent" }),
+      printQRInTerminal: false,
+      browser: Browsers.macOS("Firefox"),
+      auth: state,
+      version,
+      syncFullHistory: true,
+      markOnlineOnConnect: true,
+      generateHighQualityLinkPreview: true,
+    });
+
+    sessionCtx.sock = sock;
+    activeSessions.set(sessionId, sessionCtx);
+
+    sock.ev.on("creds.update", saveCreds);
+
+    sock.ev.on("connection.update", async (update) => {
+      const { connection, lastDisconnect } = update;
+
+      if (connection === "open") {
+        sessionCtx.connected = true;
+        sessionCtx.connecting = false;
+        sessionCtx.ownerNumber = getOwnerNumberForSock(sock);
+
+        await updateSessionStatus(sessionId, {
+          status: "connected",
+          connectBot: true,
+          botJid: sock.user?.id || null,
         });
 
-        try {
-          fs.rmSync(authDir, { recursive: true, force: true });
-        } catch {}
+        console.log(`✅ Session connected: ${sessionId}`);
 
-        currentSessionId = null;
-      }
-    }
+        const OWNER_NAME = "Malindu Nadith";
+        const BOT_VERSION = "v4.0.0";
 
-    if (connection === "open") {
-      isConnected = true;
+        const now = new Date();
 
-      await updateSessionStatus(currentSessionId, {
-        status: "connected",
-        connectBot: true,
-      });
+        const time = new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Colombo",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true,
+        }).format(now);
 
-      console.log("✅ MALIYA-MD connected");
+        const date = new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Colombo",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(now);
 
-      const OWNER_NAME = "Malindu Nadith";
-      const BOT_VERSION = "v4.0.0";
-
-      const now = new Date();
-
-      const time = new Intl.DateTimeFormat("en-GB", {
-        timeZone: "Asia/Colombo",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: true,
-      }).format(now);
-
-      const date = new Intl.DateTimeFormat("en-GB", {
-        timeZone: "Asia/Colombo",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).format(now);
-
-      const up = `
+        const up = `
 🌈━━━━━━━━━━━━━🌈
 🔥🤖 *MALIYA-MD* 🤖🔥
 🌈━━━━━━━━━━━━━🌈
@@ -396,33 +396,102 @@ async function connectToWA() {
 🌈━━━━━━━━━━━🌈
 `.trim();
 
-      try {
-        await sock.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
-          image: {
-            url: "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Screenshot%202026-01-18%20122855.png?raw=true",
-          },
-          caption: up,
-        });
-      } catch (e) {
-        console.log("⚠️ Connect msg send failed:", e?.message || e);
-      }
-
-      try {
-        fs.readdirSync("./plugins/").forEach((plugin) => {
-          if (plugin === "auto_msg.js") return;
-          if (plugin === "antidelete.js") return;
-          if (plugin.endsWith(".js")) {
-            require(`./plugins/${plugin}`);
+        try {
+          if (sessionCtx.ownerNumber[0]) {
+            await sock.sendMessage(sessionCtx.ownerNumber[0] + "@s.whatsapp.net", {
+              image: {
+                url: "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Screenshot%202026-01-18%20122855.png?raw=true",
+              },
+              caption: up,
+            });
           }
-        });
-      } catch (e) {
-        console.log("⚠️ Plugin load error:", e?.message || e);
+        } catch (e) {
+          console.log("⚠️ Connect msg send failed:", e?.message || e);
+        }
       }
+
+      if (connection === "close") {
+        sessionCtx.connected = false;
+        sessionCtx.connecting = false;
+
+        const code = lastDisconnect?.error?.output?.statusCode;
+        activeSessions.delete(sessionId);
+
+        if (code !== DisconnectReason.loggedOut) {
+          console.log(`🔁 Session disconnected, reconnecting: ${sessionId}`);
+
+          await updateSessionStatus(sessionId, {
+            status: "disconnected",
+            connectBot: true,
+          });
+
+          await scheduleReconnect(sessionId, 5000);
+        } else {
+          console.log(`❌ Session logged out: ${sessionId}`);
+
+          await updateSessionStatus(sessionId, {
+            status: "logged_out",
+            connectBot: false,
+          });
+
+          await cleanupSessionFolder(sessionId);
+        }
+      }
+    });
+
+    attachSessionHandlers(sock, sessionCtx);
+
+    await updateSessionStatus(sessionId, {
+      status: "connecting",
+      connectBot: true,
+    });
+
+    return sessionCtx;
+  } catch (e) {
+    console.log(`❌ Failed to start session ${sessionId}:`, e?.message || e);
+    activeSessions.delete(sessionId);
+
+    await updateSessionStatus(sessionId, {
+      status: "connect_error",
+      lastError: String(e?.message || e),
+    });
+
+    return null;
+  }
+}
+
+async function ensureConfiguredSession() {
+  if (!config.SESSION_ID) return;
+  await startSessionBot(config.SESSION_ID);
+}
+
+function startSessionWatcher() {
+  if (watcherStarted) return;
+  watcherStarted = true;
+
+  const tick = async () => {
+    try {
+      const docs = await getConnectableSessions(MAX_ACTIVE_SESSIONS);
+
+      for (const doc of docs) {
+        if (!doc?.sessionId) continue;
+        if (activeSessions.has(doc.sessionId)) continue;
+        if (activeSessions.size >= MAX_ACTIVE_SESSIONS) break;
+
+        await startSessionBot(doc.sessionId);
+      }
+    } catch (e) {
+      console.log("Watcher tick error:", e?.message || e);
     }
-  });
+  };
 
-  sock.ev.on("creds.update", saveCreds);
+  tick();
+  setInterval(tick, 10000);
+}
 
+/* ================= SESSION MESSAGE HANDLERS ================= */
+
+function attachSessionHandlers(sock, sessionCtx) {
   /* ================= AUTO REJECT CALLS ================= */
 
   sock.ev.on("call", async (calls) => {
@@ -535,10 +604,12 @@ async function connectToWA() {
           const text = mek.message.extendedTextMessage.text || "";
           if (text.trim().length > 0) {
             try {
-              await sock.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
-                text: `📝 *Text Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${text}`,
-                mentions: [mentionJid],
-              });
+              if (sessionCtx.ownerNumber[0]) {
+                await sock.sendMessage(sessionCtx.ownerNumber[0] + "@s.whatsapp.net", {
+                  text: `📝 *Text Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${text}`,
+                  mentions: [mentionJid],
+                });
+              }
               console.log(`✅ Text-only status from ${mentionJid} forwarded.`);
             } catch (e) {
               console.error("❌ Failed to forward text status:", e?.message || e);
@@ -563,12 +634,14 @@ async function connectToWA() {
               mediaMsg.mimetype || (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
             const captionText = mediaMsg.caption || "";
 
-            await sock.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
-              [msgType === "imageMessage" ? "image" : "video"]: buffer,
-              mimetype,
-              caption: `📥 *Forwarded Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${captionText}`,
-              mentions: [mentionJid],
-            });
+            if (sessionCtx.ownerNumber[0]) {
+              await sock.sendMessage(sessionCtx.ownerNumber[0] + "@s.whatsapp.net", {
+                [msgType === "imageMessage" ? "image" : "video"]: buffer,
+                mimetype,
+                caption: `📥 *Forwarded Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${captionText}`,
+                mentions: [mentionJid],
+              });
+            }
 
             console.log(`✅ Media status from ${mentionJid} forwarded.`);
           } catch (err) {
@@ -600,7 +673,7 @@ async function connectToWA() {
       const rawSenderNumber = (sender || "").split("@")[0];
       const senderNumber = rawSenderNumber.split(":")[0].replace(/\D/g, "");
       const isGroup = from.endsWith("@g.us");
-      const isOwner = ownerNumber.includes(senderNumber);
+      const isOwner = sessionCtx.ownerNumber.includes(senderNumber);
 
       const reply = (text) =>
         sock.sendMessage(from, { text }, { quoted: mek });
@@ -819,13 +892,34 @@ async function connectToWA() {
 
 /* ================= SERVER ================= */
 
-ensureSessionFile();
+ensureConfiguredSession();
 startSessionWatcher();
 
 app.get("/", (req, res) => {
-  res.send("Hey There, MALIYA-MD started ✅");
+  res.send(
+    `Hey There, MALIYA-MD started ✅ | Active Sessions: ${activeSessions.size}/${MAX_ACTIVE_SESSIONS}`
+  );
+});
+
+app.get("/sessions", async (req, res) => {
+  try {
+    const docs = await getConnectableSessions(200);
+    res.json({
+      active: activeSessions.size,
+      max: MAX_ACTIVE_SESSIONS,
+      sessions: docs.map((d) => ({
+        sessionId: d.sessionId,
+        phone: d.phone || null,
+        status: d.status || null,
+        updatedAt: d.updatedAt || null,
+      })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || "failed" });
+  }
 });
 
 app.listen(port, () => {
   console.log(`Server listening on http://localhost:${port}`);
+  console.log(`🔥 Multi-user mode ready | Max active sessions: ${MAX_ACTIVE_SESSIONS}`);
 });
