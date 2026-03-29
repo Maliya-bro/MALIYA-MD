@@ -37,7 +37,6 @@ function toBool(value, def = true) {
 
 module.exports = {
   // 🔐 Session
-  // watcher system එකේ default empty තියෙන එක හොඳයි
   SESSION_ID: process.env.SESSION_ID || "",
 
   // 🖼️ Alive
@@ -70,7 +69,6 @@ module.exports = {
   ALWAYS_PRESENCE:
     process.env.ALWAYS_PRESENCE || "off",
 };
-
 
 
 
