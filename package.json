@@ -3,11 +3,15 @@
   "version": "2.0.0",
   "description": "A Powerfull AI Whatsapp Bot",
   "main": "index.js",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "start": "pm2 start index.js --deep-monitoring --attach --name MALIYA-MD",
     "stop": "pm2 stop MALIYA-MD",
     "restart": "pm2 restart MALIYA-MD"
   },
+
   "dependencies": {
     "@whiskeysockets/baileys": "latest",
     "api-dylux": "latest",
@@ -59,8 +63,6 @@
     "tesseract.js": "latest",
     "pdf-parse": "latest",
     "gifted-btns": "latest",
-    "puppeteer-extra-plugin-stealth": "latest",
-    "puppeteer-extra": "latest",
     "mongodb": "latest"
     
   }
