@@ -1,6 +1,5 @@
-node_modules/
+
 sessions/
-.env
+
 
 data/bot_settings.json
-1
