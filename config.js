@@ -23,40 +23,54 @@
 // //                                                                             MALIYA-MD                  
 
 const fs = require("fs");
-if (fs.existsSync("config.env")) require("dotenv").config({ path: "./config.env" });
 
-function convertToBool(text, fault = "true") {
-  return text === fault;
+// load env file
+if (fs.existsSync("config.env")) {
+  require("dotenv").config({ path: "./config.env" });
+}
+
+// string → boolean convert
+function toBool(value, def = true) {
+  if (value === undefined) return def;
+  return String(value).toLowerCase() === "true";
 }
 
 module.exports = {
+  // 🔐 MongoDB / Session
   SESSION_ID:
-    process.env.SESSION_ID || "GkpAnI7T#vsUMUotpfxvu1xXbs-zBXKENg8FbvJaHO-cv1DNuZpE", // replace with your session ID
+    process.env.SESSION_ID ||
+    "tlh9PxrC_pxtrohr7ypQiAsfnBrexoy5u-IxHkrEXnP4qv8t3Q8M",
+
+  // 🖼️ Alive
   ALIVE_IMG:
-    process.env.ALIVE_IMG || "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/WhatsApp%20Image%202026-01-18%20at%2012.37.23.jpeg?raw=true",
- ALIVE_MSG:
-    process.env.ALIVE_MSG || "*Hello👋 MALIYA-MD Is Alive Now!😍😍😍.*",
+    process.env.ALIVE_IMG ||
+    "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/WhatsApp%20Image%202026-01-18%20at%2012.37.23.jpeg?raw=true",
 
-  BOT_OWNER: process.env.BOT_OWNER || "94702135392", // Replace with your whtasapp number
+  ALIVE_MSG:
+    process.env.ALIVE_MSG ||
+    "*Hello👋 MALIYA-MD Is Alive Now!😍😍😍.*",
 
-  AUTO_STATUS_SEEN: process.env.AUTO_STATUS_SEEN || "true",
+ 
+  BOT_OWNER:
+    process.env.BOT_OWNER || "94702135392",
 
-  AUTO_STATUS_REACT: process.env.AUTO_STATUS_REACT || "true",
+ 
+  AUTO_STATUS_SEEN: toBool(process.env.AUTO_STATUS_SEEN, true),
 
-  MODE: process.env.MODE || "public",
+  AUTO_STATUS_REACT: toBool(process.env.AUTO_STATUS_REACT, true),
 
-  ANTI_DELETE: process.env.ANTI_DELETE || "true",
+  MODE:
+    process.env.MODE || "public", 
 
-  AUTO_MSG: process.env.AUTO_MSG || "true",
+  ANTI_DELETE: toBool(process.env.ANTI_DELETE, true),
 
-  AUTO_REJECT_CALLS: process.env.AUTO_REJECT_CALLS || "false",
+  AUTO_MSG: toBool(process.env.AUTO_MSG, true),
 
-  ALWAYS_PRESENCE: process.env.ALWAYS_PRESENCE || "off",
+  AUTO_REJECT_CALLS: toBool(process.env.AUTO_REJECT_CALLS, false),
 
-
+  ALWAYS_PRESENCE:
+    process.env.ALWAYS_PRESENCE || "off", 
 };
-
-
 
 
 
