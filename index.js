@@ -16,29 +16,12 @@ const fs = require("fs");
 const P = require("pino");
 const express = require("express");
 const path = require("path");
-const { execSync } = require("child_process");
 const { MongoClient } = require("mongodb");
 
 const config = require("./config");
 const { readSettings } = require("./lib/botSettings");
 const { sms } = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
-
-function ensurePluginsRepo() {
-  try {
-    const pluginsPath = path.join(__dirname, "plugins");
-
-    if (!fs.existsSync(pluginsPath)) {
-      execSync("git clone https://github.com/Maliya-bro/my-plugins.git plugins", {
-        stdio: "ignore",
-      });
-    }
-  } catch (e) {
-    console.log("Plugin repo setup failed:", e?.message || e);
-  }
-}
-
-ensurePluginsRepo();
 
 // ✅ auto msg plugin
 const autoMsgPlugin = require("./plugins/auto_msg.js");
@@ -181,7 +164,7 @@ function loadCommandPluginsOnce() {
         require(`./plugins/${plugin}`);
       }
     });
-    console.log("✅ Plugins loaded");
+    console.log("✅ Plugins loaded from local plugins folder");
   } catch (e) {
     console.log("⚠️ Plugin load error:", e?.message || e);
   }
@@ -492,8 +475,6 @@ function startSessionWatcher() {
 /* ================= SESSION MESSAGE HANDLERS ================= */
 
 function attachSessionHandlers(sock, sessionCtx) {
-  /* ================= AUTO REJECT CALLS ================= */
-
   sock.ev.on("call", async (calls) => {
     try {
       const settings = readSettings();
@@ -518,8 +499,6 @@ function attachSessionHandlers(sock, sessionCtx) {
       console.log("Call event error:", e?.message || e);
     }
   });
-
-  /* ================= MESSAGE HANDLER ================= */
 
   sock.ev.on("messages.upsert", async ({ messages }) => {
     if (!messages || !messages.length) return;
