@@ -39,7 +39,7 @@ module.exports = {
   // 🔐 MongoDB / Session
   SESSION_ID:
     process.env.SESSION_ID ||
-    "tlh9PxrC_pxtrohr7ypQiAsfnBrexoy5u-IxHkrEXnP4qv8t3Q8M",
+    "WTqNeiNX_qEgJRRdD-LHYo6w5BKn9g5sxWafAbXYCaSc5TeQHB_H",
 
   // 🖼️ Alive
   ALIVE_IMG:
