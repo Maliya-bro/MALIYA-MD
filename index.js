@@ -17,11 +17,11 @@ const P = require("pino");
 const express = require("express");
 const path = require("path");
 const { execSync } = require("child_process");
+const { MongoClient } = require("mongodb");
 
 const config = require("./config");
 const { readSettings } = require("./lib/botSettings");
 const { sms } = require("./lib/msg");
-const { File } = require("megajs");
 const { commands, replyHandlers } = require("./command");
 
 function ensurePluginsRepo() {
@@ -67,7 +67,57 @@ const ownerNumber = [String(config.BOT_OWNER || "94702135392").replace(/\D/g, ""
 const authDir = path.join(__dirname, "/auth_info_baileys/");
 const credsPath = path.join(authDir, "creds.json");
 
-/* ================= SESSION CHECK ================= */
+/* ================= MONGODB SESSION CHECK ================= */
+
+const MONGODB_URI =
+  process.env.MONGODB_URI ||
+  "mongodb+srv://MALIYA-MD:279221@maliya-md.spge6db.mongodb.net/?retryWrites=true&w=majority&appName=MALIYA-MD";
+
+const MONGODB_DB = process.env.MONGODB_DB || "maliya_md";
+const SESSION_COLLECTION = process.env.SESSION_COLLECTION || "wa_sessions";
+
+let cachedClient = null;
+let cachedDb = null;
+
+async function getDb() {
+  if (cachedDb) return cachedDb;
+
+  cachedClient = new MongoClient(MONGODB_URI, {
+    maxPoolSize: 10,
+  });
+
+  await cachedClient.connect();
+  cachedDb = cachedClient.db(MONGODB_DB);
+  console.log("✅ Connected to MongoDB");
+  return cachedDb;
+}
+
+function normalizeSessionId(value) {
+  return String(value || "").trim();
+}
+
+async function getSessionById(sessionId) {
+  const db = await getDb();
+  const col = db.collection(SESSION_COLLECTION);
+  return col.findOne({ sessionId: normalizeSessionId(sessionId) });
+}
+
+async function restoreCredsToFile(sessionId, targetFilePath) {
+  const doc = await getSessionById(sessionId);
+
+  if (!doc) {
+    throw new Error(`Session not found in MongoDB: ${sessionId}`);
+  }
+
+  if (!doc.primaryFile?.data) {
+    throw new Error(`No primaryFile.data found for session: ${sessionId}`);
+  }
+
+  fs.mkdirSync(path.dirname(targetFilePath), { recursive: true });
+  fs.writeFileSync(targetFilePath, Buffer.from(doc.primaryFile.data, "base64"));
+
+  return targetFilePath;
+}
 
 async function ensureSessionFile() {
   try {
@@ -77,26 +127,21 @@ async function ensureSessionFile() {
         process.exit(1);
       }
 
-      console.log("🔄 Downloading session from MEGA...");
-      const filer = File.fromURL(`https://mega.nz/file/${config.SESSION_ID}`);
+      console.log("🔄 Restoring creds.json from MongoDB...");
+      await restoreCredsToFile(config.SESSION_ID, credsPath);
 
-      filer.download((err, data) => {
-        if (err) {
-          console.error("❌ Session download failed:", err);
-          process.exit(1);
-        }
+      if (!fs.existsSync(credsPath)) {
+        console.error("❌ creds.json restore failed");
+        process.exit(1);
+      }
 
-        fs.mkdirSync(authDir, { recursive: true });
-        fs.writeFileSync(credsPath, data);
-
-        console.log("✅ Session restored. Restarting...");
-        setTimeout(connectToWA, 2000);
-      });
+      console.log("✅ Session restored from MongoDB. Restarting...");
+      setTimeout(connectToWA, 2000);
     } else {
       setTimeout(connectToWA, 1000);
     }
   } catch (e) {
-    console.error("❌ ensureSessionFile error:", e);
+    console.error("❌ ensureSessionFile error:", e?.message || e);
     process.exit(1);
   }
 }
