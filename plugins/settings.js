@@ -73,13 +73,7 @@ function mapKey(name = "") {
   }
 
   if (
-    [
-      "autodownloadstatus",
-      "auto_download_status",
-      "downloadstatus",
-      "statusdownload",
-      "autostatusdownload",
-    ].includes(k)
+    ["autodownloadstatus", "auto_download_status", "statusdownload", "downloadstatus"].includes(k)
   ) {
     return "auto_download_status";
   }
@@ -302,17 +296,11 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "off", value: "autoreact" };
   }
 
-  if (
-    t === ".setting on autodownloadstatus" ||
-    t === "auto download status on"
-  ) {
+  if (t === ".setting on autodownloadstatus" || t === "auto download status on") {
     return { action: "on", value: "autodownloadstatus" };
   }
 
-  if (
-    t === ".setting off autodownloadstatus" ||
-    t === "auto download status off"
-  ) {
+  if (t === ".setting off autodownloadstatus" || t === "auto download status off") {
     return { action: "off", value: "autodownloadstatus" };
   }
 
@@ -324,10 +312,7 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "toggle", value: "autoreact" };
   }
 
-  if (
-    t === ".setting toggle autodownloadstatus" ||
-    t === "toggle auto download status"
-  ) {
+  if (t === ".setting toggle autodownloadstatus" || t === "toggle auto download status") {
     return { action: "toggle", value: "autodownloadstatus" };
   }
 
@@ -543,12 +528,12 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
                     },
                     {
                       title: "Auto Download Status ON",
-                      description: "Forward status to owner inbox",
+                      description: "Enable auto status download",
                       id: ".setting on autodownloadstatus",
                     },
                     {
                       title: "Auto Download Status OFF",
-                      description: "Stop forwarding status",
+                      description: "Disable auto status download",
                       id: ".setting off autodownloadstatus",
                     },
                     {
