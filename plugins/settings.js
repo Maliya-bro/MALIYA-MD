@@ -55,6 +55,7 @@ function getStatusCard() {
 🍀 | *ANTI CALL:* ${onOff(!!s.auto_reject_calls)}
 🍀 | *AUTO STATUS:* ${onOff(!!s.auto_status_seen)}
 🍀 | *AUTO REACT:* ${onOff(!!s.auto_status_react)}
+🍀 | *AUTO DOWNLOAD STATUS:* ${onOff(!!s.auto_download_status)}
 
 © MALIYA-MD
 `.trim();
@@ -69,6 +70,18 @@ function mapKey(name = "") {
 
   if (["autoreact", "auto_react", "statusreact", "auto_status_react"].includes(k)) {
     return "auto_status_react";
+  }
+
+  if (
+    [
+      "autodownloadstatus",
+      "auto_download_status",
+      "downloadstatus",
+      "statusdownload",
+      "autostatusdownload",
+    ].includes(k)
+  ) {
+    return "auto_download_status";
   }
 
   if (["automsg", "auto_msg", "msg", "aichat", "ai"].includes(k)) {
@@ -166,6 +179,9 @@ function applySettingAction(action, value) {
     if (key === "auto_status_react") {
       return `✅ Auto Status React: ${onOff(updated.auto_status_react)}`;
     }
+    if (key === "auto_download_status") {
+      return `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`;
+    }
     if (key === "auto_msg") {
       return `✅ AI Chat: ${onOff(updated.auto_msg)}`;
     }
@@ -192,6 +208,9 @@ function applySettingAction(action, value) {
     }
     if (key === "auto_status_react") {
       return `✅ Auto Status React: ${onOff(updated.auto_status_react)}`;
+    }
+    if (key === "auto_download_status") {
+      return `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`;
     }
     if (key === "auto_msg") {
       return `✅ AI Chat: ${onOff(updated.auto_msg)}`;
@@ -283,12 +302,33 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "off", value: "autoreact" };
   }
 
+  if (
+    t === ".setting on autodownloadstatus" ||
+    t === "auto download status on"
+  ) {
+    return { action: "on", value: "autodownloadstatus" };
+  }
+
+  if (
+    t === ".setting off autodownloadstatus" ||
+    t === "auto download status off"
+  ) {
+    return { action: "off", value: "autodownloadstatus" };
+  }
+
   if (t === ".setting toggle autoseen" || t === "toggle auto seen") {
     return { action: "toggle", value: "autoseen" };
   }
 
   if (t === ".setting toggle autoreact" || t === "toggle auto react") {
     return { action: "toggle", value: "autoreact" };
+  }
+
+  if (
+    t === ".setting toggle autodownloadstatus" ||
+    t === "toggle auto download status"
+  ) {
+    return { action: "toggle", value: "autodownloadstatus" };
   }
 
   if (t === ".setting toggle automsg" || t === "toggle ai chat") {
@@ -502,6 +542,16 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
                       id: ".setting off autoreact",
                     },
                     {
+                      title: "Auto Download Status ON",
+                      description: "Forward status to owner inbox",
+                      id: ".setting on autodownloadstatus",
+                    },
+                    {
+                      title: "Auto Download Status OFF",
+                      description: "Stop forwarding status",
+                      id: ".setting off autodownloadstatus",
+                    },
+                    {
                       title: "Toggle Auto Seen",
                       description: "Switch auto seen",
                       id: ".setting toggle autoseen",
@@ -510,6 +560,11 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
                       title: "Toggle Auto React",
                       description: "Switch auto react",
                       id: ".setting toggle autoreact",
+                    },
+                    {
+                      title: "Toggle Auto Download Status",
+                      description: "Switch auto download status",
+                      id: ".setting toggle autodownloadstatus",
                     },
                     {
                       title: "Toggle AI Chat",
@@ -624,6 +679,9 @@ cmd(
         if (key === "auto_status_react") {
           return reply(`✅ Auto Status React: ${onOff(updated.auto_status_react)}`);
         }
+        if (key === "auto_download_status") {
+          return reply(`✅ Auto Download Status: ${onOff(updated.auto_download_status)}`);
+        }
         if (key === "auto_msg") {
           return reply(`✅ AI Chat: ${onOff(updated.auto_msg)}`);
         }
@@ -650,6 +708,9 @@ cmd(
         }
         if (key === "auto_status_react") {
           return reply(`✅ Auto Status React: ${onOff(updated.auto_status_react)}`);
+        }
+        if (key === "auto_download_status") {
+          return reply(`✅ Auto Download Status: ${onOff(updated.auto_download_status)}`);
         }
         if (key === "auto_msg") {
           return reply(`✅ AI Chat: ${onOff(updated.auto_msg)}`);
