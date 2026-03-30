@@ -329,7 +329,7 @@ async function sendMainMenu(sock, from, mek, state, userName) {
           name: "cta_url",
           buttonParamsJson: JSON.stringify({
             display_text: "🌐 Official Website",
-            url: "https://web-pair--sithmikavihara8.replit.app",
+            url: "https://maliya-md.replit.app",
           }),
         },
         {
