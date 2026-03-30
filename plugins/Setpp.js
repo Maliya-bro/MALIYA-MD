@@ -2,22 +2,33 @@ const { cmd } = require("../command");
 const fs = require("fs");
 const path = require("path");
 const sharp = require("sharp");
+const { generateProfilePicture } = require("@whiskeysockets/baileys");
 
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-async function downloadMediaMessage(message, sock) {
-  const msg =
-    message?.message?.imageMessage
-      ? message.message.imageMessage
-      : message?.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage
-      ? message.message.extendedTextMessage.contextInfo.quotedMessage.imageMessage
-      : null;
+async function getImageBuffer(conn, mek, from, sender) {
+  const hasDirectImage = !!mek.message?.imageMessage;
+  const hasQuotedImage =
+    !!mek.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage;
 
-  if (!msg) return null;
+  if (!hasDirectImage && !hasQuotedImage) return null;
 
-  const stream = await sock.downloadMediaMessage(message);
-  return stream;
+  if (hasDirectImage) {
+    return await conn.downloadMediaMessage(mek);
+  }
+
+  const quoted = {
+    key: {
+      remoteJid: from,
+      id: mek.message.extendedTextMessage.contextInfo.stanzaId,
+      participant:
+        mek.message.extendedTextMessage.contextInfo.participant || sender,
+    },
+    message: mek.message.extendedTextMessage.contextInfo.quotedMessage,
+  };
+
+  return await conn.downloadMediaMessage(quoted);
 }
 
 cmd(
@@ -38,72 +49,46 @@ cmd(
         !!mek.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage;
 
       if (!hasDirectImage && !hasQuotedImage) {
-        return reply(
-          "📸 Send an image with .setpp caption\nor\nReply to an image with .setpp"
-        );
+        return reply("📸 Image ekak caption .setpp ekka yawanna nathnam image ekakata reply karala .setpp danna.");
       }
 
       reply("⬇️ Downloading image...");
 
-      let mediaBuffer = null;
+      const mediaBuffer = await getImageBuffer(conn, mek, from, sender);
+      if (!mediaBuffer) return reply("❌ Could not download image.");
 
-      if (hasDirectImage) {
-        mediaBuffer = await conn.downloadMediaMessage(mek);
-      } else {
-        const quoted = {
-          key: mek.message.extendedTextMessage.contextInfo.stanzaId
-            ? {
-                remoteJid: from,
-                id: mek.message.extendedTextMessage.contextInfo.stanzaId,
-                participant:
-                  mek.message.extendedTextMessage.contextInfo.participant || sender,
-              }
-            : undefined,
-          message:
-            mek.message.extendedTextMessage.contextInfo.quotedMessage || {},
-        };
+      reply("🎨 Processing profile picture...");
 
-        mediaBuffer = await conn.downloadMediaMessage(quoted);
-      }
+      const canvasSize = 1080;
+      const fitSize = 820;
 
-      if (!mediaBuffer) {
-        return reply("❌ Could not download image.");
-      }
-
-      reply("🎨 Processing image for full-body profile photo...");
-
-      const baseSize = 1080;
-      const innerSize = 820;
-
-      const outputBuffer = await sharp(mediaBuffer)
+      const processed = await sharp(mediaBuffer)
         .rotate()
-        .resize(innerSize, innerSize, {
+        .resize(fitSize, fitSize, {
           fit: "contain",
           background: { r: 255, g: 255, b: 255, alpha: 1 },
         })
         .extend({
-          top: Math.floor((baseSize - innerSize) / 2),
-          bottom: Math.floor((baseSize - innerSize) / 2),
-          left: Math.floor((baseSize - innerSize) / 2),
-          right: Math.floor((baseSize - innerSize) / 2),
+          top: Math.floor((canvasSize - fitSize) / 2),
+          bottom: Math.floor((canvasSize - fitSize) / 2),
+          left: Math.floor((canvasSize - fitSize) / 2),
+          right: Math.floor((canvasSize - fitSize) / 2),
           background: { r: 255, g: 255, b: 255, alpha: 1 },
         })
-        .resize(640, 640)
         .jpeg({ quality: 95 })
         .toBuffer();
 
-      const jid = conn.user?.id;
+      const profilePic = await generateProfilePicture(processed);
 
+      const jid = conn.user?.id;
       if (!jid) return reply("❌ Bot JID not found.");
 
-      await conn.updateProfilePicture(jid, outputBuffer);
+      await conn.updateProfilePicture(jid, profilePic);
 
-      return reply(
-        "✅ Bot profile picture updated successfully.\n🖼️ Full-body fit mode applied."
-      );
+      return reply("✅ Bot profile picture updated successfully.");
     } catch (e) {
-      console.log("SETPP ERROR:", e);
-      return reply("❌ Error while setting profile picture.");
+      console.log("SETPP ERROR FULL:", e);
+      return reply(`❌ Error while setting DP\n\n${e?.message || e}`);
     }
   }
 );
