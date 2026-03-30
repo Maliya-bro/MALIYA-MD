@@ -57,6 +57,8 @@ module.exports = {
 
   AUTO_STATUS_REACT: toBool(process.env.AUTO_STATUS_REACT, true),
 
+  AUTO_DOWNLOAD_STATUS: toBool(process.env.AUTO_DOWNLOAD_STATUS, false),
+
   MODE:
     process.env.MODE || "public",
 
@@ -69,7 +71,6 @@ module.exports = {
   ALWAYS_PRESENCE:
     process.env.ALWAYS_PRESENCE || "off",
 };
-
 
 
 
