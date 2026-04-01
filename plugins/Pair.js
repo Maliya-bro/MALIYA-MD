@@ -350,19 +350,26 @@ async function generatePairCode({ conn, from, reply, phone }) {
 
     if (finished) return;
 
-    await conn.sendMessage(
-      from,
-      {
-        text:
-          "🔗 *MALIYA-MD PAIR CODE*\n\n" +
-          `📱 Number: ${phone}\n` +
-          `🔐 Code: *${code}*\n\n` +
-          "📌 Open WhatsApp > Linked Devices > Link with phone number\n" +
-          "Then enter this code.\n\n" +
-          "⏱️ Code expires in about 1 minute.",
-      },
-      { quoted: null }
-    );
+await conn.sendMessage(
+  from,
+  {
+    text:
+      "🔗 *MALIYA-MD PAIR CODE*\n\n" +
+      `📱 Number: ${phone}\n\n` +
+      "📌 Open WhatsApp > Linked Devices > Link with phone number\n" +
+      "Then use the code sent below.\n\n" +
+      "⏱️ Code expires in about 1 minute.",
+  },
+  { quoted: null }
+);
+
+await conn.sendMessage(
+  from,
+  {
+    text: code,
+  },
+  { quoted: null }
+);
   } catch (e) {
     console.error("PAIR GENERATE ERROR:", e);
     await reply(
