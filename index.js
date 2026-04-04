@@ -23,6 +23,7 @@ const { readSettings } = require("./lib/botSettings");
 const { sms } = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 
+
 // ✅ auto msg plugin
 const autoMsgPlugin = require("./plugins/auto_msg.js");
 
