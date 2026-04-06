@@ -43,95 +43,98 @@ async function translate(text, targetLang) {
     }
   );
 
-  return (res.data?.[0] || []).map((x) => x?.[0]).join("") || "";
+  return (res.data?.[0] || []).map((x) => x?.[0]).join("").trim();
 }
 
-/* ================= SEND VOICE (FIXED) ================= */
+/* ================= SEND VOICE ================= */
 async function sendVoice(conn, mek, m, text, lang) {
   const outDir = path.join(process.cwd(), "tmp");
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
   const outFile = path.join(outDir, `${Date.now()}.mp3`);
 
-  // generate TTS url
   const ttsUrl = googleTTS.getAudioUrl(text, {
     lang,
     slow: false,
     host: "https://translate.google.com",
   });
 
-  // download audio
-  const res = await axios.get(ttsUrl, { responseType: "arraybuffer" });
+  const res = await axios.get(ttsUrl, {
+    responseType: "arraybuffer",
+    timeout: 20000,
+  });
+
   fs.writeFileSync(outFile, Buffer.from(res.data));
 
-  // ✅ CORRECT Baileys audio payload
   await conn.sendMessage(
     m.chat,
     {
-      audio: { url: outFile },
+      audio: fs.readFileSync(outFile),
       mimetype: "audio/mpeg",
       ptt: true,
     },
     { quoted: mek }
   );
 
-  fs.unlinkSync(outFile);
+  if (fs.existsSync(outFile)) fs.unlinkSync(outFile);
 }
 
-/* ================= HELP ================= */
+/* ================= MAIN COMMAND ================= */
 cmd(
   {
     pattern: "tts",
     alias: ["voice"],
-    desc: "Translate text and send as voice (.tts<lang>)",
+    desc: "Translate text and send as voice",
     category: "utility",
     react: "🗣️",
     filename: __filename,
   },
-  async (conn, mek, m, { reply }) => {
-    reply(
-      "🗣️ *Text to Voice*\n\n" +
-        "Usage:\n" +
-        ".tts<lang> <text>\n\n" +
-        "Examples:\n" +
-        ".ttssi mama oyata adarei\n" +
-        ".ttsen mama oyata adarei\n" +
-        ".ttsfr mama oyata adarei\n\n" +
-        "Languages:\n" +
-        Object.keys(LANGS).join(", ")
-    );
+  async (conn, mek, m, { q, reply }) => {
+    try {
+      if (!q) {
+        return reply(
+          "🗣️ *Text to Voice*\n\n" +
+            "Usage:\n" +
+            ".tts <lang> <text>\n\n" +
+            "Examples:\n" +
+            ".tts si mama oyata adarei\n" +
+            ".tts en mama oyata adarei\n" +
+            ".tts fr mama oyata adarei\n\n" +
+            "Languages:\n" +
+            Object.keys(LANGS).join(", ")
+        );
+      }
+
+      const parts = q.trim().split(" ");
+      const lang = (parts.shift() || "").toLowerCase();
+      const text = parts.join(" ").trim();
+
+      if (!lang || !LANGS[lang]) {
+        return reply(
+          "❌ Invalid language code.\n\n" +
+            "Example:\n" +
+            ".tts si mama oyata adarei\n\n" +
+            "Available:\n" +
+            Object.keys(LANGS).join(", ")
+        );
+      }
+
+      if (!text) {
+        return reply(`❌ Usage: .tts ${lang} <text>`);
+      }
+
+      await reply(`🔄 Translating to ${LANGS[lang]}...`);
+      const translated = await translate(text, lang);
+
+      if (!translated) {
+        return reply("❌ Translation failed.");
+      }
+
+      await reply("🎙️ Generating voice note from MALIYA-MD...");
+      await sendVoice(conn, mek, m, translated, lang);
+    } catch (err) {
+      console.error("TTS ERROR:", err);
+      return reply("❌ Failed (network / TTS error).");
+    }
   }
 );
-
-/* ================= REGISTER COMMANDS ================= */
-for (const code of Object.keys(LANGS)) {
-  const langName = LANGS[code];
-
-  cmd(
-    {
-      pattern: `tts${code}`,
-      alias: [`voice${code}`],
-      desc: `Translate to ${langName} and send voice`,
-      category: "utility",
-      react: "🗣️",
-      filename: __filename,
-    },
-    async (conn, mek, m, { q, reply }) => {
-      try {
-        if (!q) {
-          return reply(`❌ Usage: .tts${code} <text>`);
-        }
-
-        await reply(`🔄 Translating to ${langName}...`);
-        const translated = await translate(q, code);
-        if (!translated) return reply("❌ Translation failed.");
-
-        await reply("🎙️ Generating voice note from MALIYA-MD...");
-        await sendVoice(conn, mek, m, translated, code);
-      } catch (err) {
-        console.error(err);
-        reply("❌ Failed (network / TTS error).");
-      }
-    }
-  );
-}
