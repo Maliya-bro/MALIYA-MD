@@ -11,13 +11,13 @@ cmd({
     filename: __filename
 },
 async (bot, mek, m, { from, q, reply, isOwner }) => {
-    if (!isOwner) return reply("මෙය ආරක්ෂක හේතූන් මත Owner Only ලෙස සකසා ඇත!");
-    if (!q) return reply("කරුණාකර වීඩියෝ ලින්ක් එකක් හෝ සර්ච් කිරීමට නමක් ලබා දෙන්න.");
+    if (!isOwner) return reply("මෙය ආරක්ෂක හේතූන් මත Owner Only ලෙස සකසා ඇත!මේක *whatsapp නීති උල්ලංගනය* කරන බැවින් ඔබගේ *account එක ban* වීමට බොහෝ ඉඩකඩක් පවතී .... *ප්‍රවේශමෙන්* භාවිතා කරන්න ");
+    if (!q) return reply("කරුණාකර වීඩියෝ ලින්ක් එකක් හෝ සර්ච් කිරීමට නමක් ලබා දෙන්න.මේක *whatsapp නීති උල්ලංගනය කරන බැවින්* ඔබගේ *account එක ban* වීමට බොහෝ ඉඩකඩක් පවතී .... *ප්‍රවේශමෙන්* භාවිතා කරන්න ");
 
     try {
         // 1. කෙලින්ම ලින්ක් එකක් ලබා දී ඇත්නම් (Direct Download)
         if (q.includes("xhamster.com")) {
-            reply("වීඩියෝව සකසමින් පවතී... ⏳");
+            reply("වීඩියෝව සකසමින් පවතී...මේක *whatsapp නීති උල්ලංගනය* කරන බැවින් ඔබගේ *account එක ban* වීමට බොහෝ ඉඩකඩක් පවතී .... *ප්‍රවේශමෙන්* භාවිතා කරන්න  ⏳");
             const { data } = await axios.get(q);
             const $ = cheerio.load(data);
             let videoUrl = $('video').find('source').attr('src') || $('meta[property="og:video"]').attr('content');
@@ -38,7 +38,7 @@ async (bot, mek, m, { from, q, reply, isOwner }) => {
 
         // 2. සර්ච් මාදිලිය (Search Mode - Top 5 Results)
         else {
-            reply(`🔎 xHamster හි "${q}" සොයමින් පවතී...`);
+            reply(`🔎 xHamster හි "${q}" සොයමින් පවතී...මේක *whatsapp නීති* උල්ලංගනය කරන බැවින් ඔබගේ *account එක ban* වීමට බොහෝ ඉඩකඩක් පවතී .... *ප්‍රවේශමෙන්* භාවිතා කරන්න `);
             const searchUrl = `https://xhamster.com/search/${encodeURIComponent(q)}`;
             const { data } = await axios.get(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }});
             const $ = cheerio.load(data);
