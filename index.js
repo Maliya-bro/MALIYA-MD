@@ -698,26 +698,22 @@ function attachSessionHandlers(sock, sessionCtx) {
           if (isCmd) continue;
         }
 
-        if (
-          botSettings.auto_msg === true &&
-          autoMsgPlugin &&
-          typeof autoMsgPlugin.onMessage === "function"
-        ) {
-          await autoMsgPlugin.onMessage(sock, mek, m, {
-            from,
-            body,
-            args,
-            q,
-            sender,
-            senderNumber,
-            isGroup,
-            isOwner,
-            reply,
-            isCmd,
-            commandName,
-            prefix,
-          });
-        }
+ if (autoMsgPlugin && typeof autoMsgPlugin.onMessage === "function") {
+  autoMsgPlugin.onMessage(sock, mek, m, {
+    from,
+    body,
+    args,
+    q,
+    sender,
+    senderNumber,
+    isGroup,
+    isOwner,
+    reply,
+    isCmd,
+    commandName,
+    prefix,
+  }).catch(() => {});
+}
       } catch (e) {
         console.log("AutoMsg hook error:", e?.message || e);
       }
