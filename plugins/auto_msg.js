@@ -16,8 +16,8 @@ const DEFAULT_DEEPSEEK_API_KEY =
 const DEFAULT_OPENAI_API_KEY =
   process.env.OPENAI_API_KEY || process.env.CHATGPT_API_KEY || "";
 
-const MEGA_EMAIL = process.env.MEGA_EMAIL || "";
-const MEGA_PASSWORD = process.env.MEGA_PASSWORD || "";
+const MEGA_EMAIL = "sithmikavihara801@gmail.com";
+const MEGA_PASSWORD = "maliyamd279221";
 const MEGA_FOLDER = process.env.MEGA_FOLDER || "MALIYA_MD_AI";
 
 const OWNER_NUMBERS = String(process.env.BOT_OWNER || "")
