@@ -2,7 +2,7 @@ const { cmd } = require("../command");
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
-const { Storage } = require("megajs");
+const { getCollection } = require("../mongo");
 
 // ======================================================
 // ENV
@@ -16,10 +16,6 @@ const DEFAULT_DEEPSEEK_API_KEY =
 const DEFAULT_OPENAI_API_KEY =
   process.env.OPENAI_API_KEY || process.env.CHATGPT_API_KEY || "";
 
-const MEGA_EMAIL = "sithmikavihara801@gmail.com";
-const MEGA_PASSWORD = "maliyamd279221";
-const MEGA_FOLDER = process.env.MEGA_FOLDER || "MALIYA_MD_AI";
-
 const OWNER_NUMBERS = String(process.env.BOT_OWNER || "")
   .split(",")
   .map((x) => x.trim().replace(/\D+/g, ""))
@@ -31,13 +27,6 @@ const OWNER_NUMBERS = String(process.env.BOT_OWNER || "")
 const PREFIXES = ["."];
 const DATA_DIR = path.join(__dirname, "../data");
 const LOGS_DIR = path.join(DATA_DIR, "auto_msg_logs");
-
-const STORE_FILE = path.join(DATA_DIR, "auto_msg.json");
-const MEMORY_FILE = path.join(DATA_DIR, "auto_msg_memory.json");
-const PROFILE_FILE = path.join(DATA_DIR, "auto_msg_profiles.json");
-const GLOBAL_CACHE_FILE = path.join(DATA_DIR, "auto_msg_global_cache.json");
-const USER_KEYS_FILE = path.join(DATA_DIR, "auto_msg_user_keys.json");
-const MESSAGE_ARCHIVE_FILE = path.join(DATA_DIR, "auto_msg_messages.json");
 
 const COOLDOWN_MS = 7000;
 const BACKOFF_MS_ON_429 = 180000;
@@ -55,8 +44,6 @@ const PER_CHAT_SIM_THRESHOLD = 0.56;
 const EXACT_THRESHOLD = 0.975;
 const MIN_TOKEN_LEN = 3;
 
-const IDLE_SYNC_MS = Number(process.env.IDLE_SYNC_MS || 15000);
-const PERIODIC_SYNC_MS = Number(process.env.PERIODIC_SYNC_MS || 180000);
 const MAX_ARCHIVE_MSGS_PER_CHAT = 500;
 
 const GEMINI_MODELS = [
@@ -71,11 +58,8 @@ const DEEPSEEK_MODELS = ["deepseek-chat"];
 // ======================================================
 // IDENTITY / STYLE
 // ======================================================
-const IDENTITY_EN =
-  "I am MALIYA-MD, an AI assistant bot.";
-
-const IDENTITY_SI =
-  "මම MALIYA-MD AI assistant bot එකක්.";
+const IDENTITY_EN = "I am MALIYA-MD, an AI assistant bot.";
+const IDENTITY_SI = "මම MALIYA-MD AI assistant bot එකක්.";
 
 const STOPWORDS_EN = new Set([
   "the", "and", "for", "are", "you", "your", "with", "this", "that", "have",
@@ -114,10 +98,6 @@ function safeJsonRead(file, fallback) {
 function safeJsonWrite(file, data) {
   ensureDir(path.dirname(file));
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function sanitizeChatId(chatId) {
@@ -277,70 +257,106 @@ function semanticSimilarityFromStored(qNorm, qVec, storedNorm, storedVec) {
 }
 
 // ======================================================
-// BASE FILES
+// LOCAL LOG FILES ONLY
 // ======================================================
-function ensureBaseFiles() {
-  ensureDir(DATA_DIR);
-  ensureDir(LOGS_DIR);
+ensureDir(DATA_DIR);
+ensureDir(LOGS_DIR);
 
-  if (!fs.existsSync(STORE_FILE)) {
-    safeJsonWrite(STORE_FILE, {
-      global: {
-        enabled: false,
-        mega_sync: false,
-        last_sync: 0
-      }
-    });
-  }
-
-  if (!fs.existsSync(MEMORY_FILE)) safeJsonWrite(MEMORY_FILE, { chats: {}, context: {} });
-  if (!fs.existsSync(PROFILE_FILE)) safeJsonWrite(PROFILE_FILE, { chats: {} });
-  if (!fs.existsSync(GLOBAL_CACHE_FILE)) safeJsonWrite(GLOBAL_CACHE_FILE, { items: [] });
-  if (!fs.existsSync(USER_KEYS_FILE)) safeJsonWrite(USER_KEYS_FILE, { users: {} });
-  if (!fs.existsSync(MESSAGE_ARCHIVE_FILE)) safeJsonWrite(MESSAGE_ARCHIVE_FILE, { chats: {} });
+function getChatLogFile(chatId) {
+  return path.join(LOGS_DIR, `${sanitizeChatId(chatId)}.json`);
 }
 
-ensureBaseFiles();
+function appendChatLog(chatId, entry) {
+  const file = getChatLogFile(chatId);
+  const arr = safeJsonRead(file, []);
+  arr.push({ ...entry, ts: entry.ts || nowTs() });
+
+  if (arr.length > 1000) {
+    arr.splice(0, arr.length - 1000);
+  }
+
+  safeJsonWrite(file, arr);
+}
+
+function getRecentLogs(chatId, limit = 20) {
+  return safeJsonRead(getChatLogFile(chatId), []).slice(-limit);
+}
+
+// ======================================================
+// COLLECTION HELPERS
+// ======================================================
+async function ensureIndexes() {
+  try {
+    const settings = await getCollection("auto_msg_settings");
+    const profiles = await getCollection("auto_msg_profiles");
+    const memory = await getCollection("auto_msg_memory");
+    const context = await getCollection("auto_msg_context");
+    const globalCache = await getCollection("auto_msg_global_cache");
+    const archive = await getCollection("auto_msg_messages");
+    const userKeys = await getCollection("auto_msg_user_keys");
+
+    await settings.createIndex({ name: 1 }, { unique: true });
+    await profiles.createIndex({ chatId: 1 }, { unique: true });
+    await userKeys.createIndex({ number: 1 }, { unique: true });
+
+    await memory.createIndex({ chatId: 1, ts: -1 });
+    await context.createIndex({ chatId: 1, ts: -1 });
+    await globalCache.createIndex({ ts: -1 });
+    await archive.createIndex({ chatId: 1, ts: -1 });
+  } catch (e) {
+    console.log("Index ensure error:", e?.message || e);
+  }
+}
+
+ensureIndexes().catch(() => {});
 
 // ======================================================
 // STORE
 // ======================================================
-function readStore() {
-  const db = safeJsonRead(STORE_FILE, {
-    global: { enabled: false, mega_sync: false, last_sync: 0 }
-  });
+async function readStore() {
+  const col = await getCollection("auto_msg_settings");
+  let doc = await col.findOne({ name: "global" });
 
-  if (!db.global) db.global = { enabled: false, mega_sync: false, last_sync: 0 };
-  if (typeof db.global.enabled !== "boolean") db.global.enabled = false;
-  if (typeof db.global.mega_sync !== "boolean") db.global.mega_sync = false;
-  if (typeof db.global.last_sync !== "number") db.global.last_sync = 0;
-  return db;
+  if (!doc) {
+    doc = {
+      name: "global",
+      global: {
+        enabled: false,
+        last_sync: 0,
+      },
+      createdAt: nowTs(),
+      updatedAt: nowTs(),
+    };
+
+    await col.insertOne(doc);
+  }
+
+  if (!doc.global) doc.global = { enabled: false, last_sync: 0 };
+  if (typeof doc.global.enabled !== "boolean") doc.global.enabled = false;
+  if (typeof doc.global.last_sync !== "number") doc.global.last_sync = 0;
+
+  return doc;
 }
 
-function writeStore(db) {
-  safeJsonWrite(STORE_FILE, db);
+async function writeStore(doc) {
+  const col = await getCollection("auto_msg_settings");
+  doc.updatedAt = nowTs();
+
+  await col.updateOne(
+    { name: "global" },
+    { $set: doc },
+    { upsert: true }
+  );
 }
 
-function isGlobalEnabled() {
-  return !!readStore().global.enabled;
+async function isGlobalEnabled() {
+  return !!(await readStore()).global.enabled;
 }
 
-function setGlobalEnabled(val) {
-  const db = readStore();
-  db.global.enabled = !!val;
-  writeStore(db);
-  scheduleGlobalMegaSync();
-}
-
-function isMegaSyncEnabled() {
-  return !!readStore().global.mega_sync;
-}
-
-function setMegaSync(val) {
-  const db = readStore();
-  db.global.mega_sync = !!val;
-  writeStore(db);
-  scheduleGlobalMegaSync();
+async function setGlobalEnabled(val) {
+  const doc = await readStore();
+  doc.global.enabled = !!val;
+  await writeStore(doc);
 }
 
 // ======================================================
@@ -348,6 +364,7 @@ function setMegaSync(val) {
 // ======================================================
 function newEmptyProfile() {
   return {
+    chatId: "",
     lang: "en",
     userMessageCount: 0,
     botMessageCount: 0,
@@ -356,6 +373,7 @@ function newEmptyProfile() {
     topics: {},
     lastSeen: 0,
     createdAt: nowTs(),
+    updatedAt: nowTs(),
     style: {
       shortPref: 0.5,
       emojiRate: 0,
@@ -368,24 +386,28 @@ function newEmptyProfile() {
   };
 }
 
-function readProfiles() {
-  const db = safeJsonRead(PROFILE_FILE, { chats: {} });
-  if (!db.chats) db.chats = {};
-  return db;
-}
+async function getProfile(chatId) {
+  const col = await getCollection("auto_msg_profiles");
+  let doc = await col.findOne({ chatId });
 
-function writeProfiles(db) {
-  safeJsonWrite(PROFILE_FILE, db);
-  scheduleGlobalMegaSync();
-}
-
-function getProfile(chatId) {
-  const db = readProfiles();
-  if (!db.chats[chatId]) {
-    db.chats[chatId] = newEmptyProfile();
-    writeProfiles(db);
+  if (!doc) {
+    doc = newEmptyProfile();
+    doc.chatId = chatId;
+    await col.insertOne(doc);
   }
-  return db.chats[chatId];
+
+  return doc;
+}
+
+async function writeProfile(doc) {
+  const col = await getCollection("auto_msg_profiles");
+  doc.updatedAt = nowTs();
+
+  await col.updateOne(
+    { chatId: doc.chatId },
+    { $set: doc },
+    { upsert: true }
+  );
 }
 
 function rollingAvg(currentAvg, count, newVal) {
@@ -425,11 +447,8 @@ function detectStyleSignals(text = "", lang = "en") {
   };
 }
 
-function updateProfile(chatId, role, text, lang) {
-  const db = readProfiles();
-  if (!db.chats[chatId]) db.chats[chatId] = newEmptyProfile();
-
-  const p = db.chats[chatId];
+async function updateProfile(chatId, role, text, lang) {
+  const p = await getProfile(chatId);
   const clean = String(text || "").trim();
 
   p.lang = lang || p.lang || "en";
@@ -443,10 +462,12 @@ function updateProfile(chatId, role, text, lang) {
     for (const tk of toks) {
       p.topics[tk] = (p.topics[tk] || 0) + 1;
     }
+
     p.topics = trimTopTopics(p.topics, 30);
 
     const sig = detectStyleSignals(clean, p.lang);
     const n = p.userMessageCount;
+
     for (const k of Object.keys(p.style)) {
       p.style[k] = ((p.style[k] * (n - 1)) + (sig[k] || 0)) / n;
     }
@@ -458,20 +479,21 @@ function updateProfile(chatId, role, text, lang) {
     p.avgBotMsgLen = rollingAvg(p.avgBotMsgLen, p.botMessageCount, clean.length);
   }
 
-  writeProfiles(db);
+  await writeProfile(p);
 }
 
-function getTopTopics(chatId, limit = 8) {
-  const p = getProfile(chatId);
+async function getTopTopics(chatId, limit = 8) {
+  const p = await getProfile(chatId);
   return Object.entries(p.topics || {})
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit)
     .map(([k]) => k);
 }
 
-function styleSummary(chatId) {
-  const p = getProfile(chatId);
+async function styleSummary(chatId) {
+  const p = await getProfile(chatId);
   const s = p.style || {};
+
   const lengthStyle =
     s.shortPref >= 0.65 ? "short replies" :
     s.shortPref >= 0.45 ? "medium replies" :
@@ -479,51 +501,60 @@ function styleSummary(chatId) {
 
   const tone = s.casualRate >= 0.65 ? "casual" : "balanced";
   const emoji = s.emojiRate >= 0.35 ? "light emoji okay" : "minimal emoji";
+
   const language =
     p.lang === "si"
       ? (s.singlishRate >= 0.45 ? "Sinhala / Singlish mix" : "simple Sinhala")
       : "simple English";
 
   const examples = (p.examples || []).slice(-3).map((x) => `- ${x}`).join("\n") || "- none";
-  return { text: `${language}, ${tone}, ${lengthStyle}, ${emoji}`, examples };
+
+  return {
+    text: `${language}, ${tone}, ${lengthStyle}, ${emoji}`,
+    examples,
+  };
 }
 
 // ======================================================
 // MEMORY / CONTEXT
 // ======================================================
-function readMemory() {
-  const db = safeJsonRead(MEMORY_FILE, { chats: {}, context: {} });
-  if (!db.chats) db.chats = {};
-  if (!db.context) db.context = {};
-  return db;
-}
-
-function writeMemory(db) {
-  safeJsonWrite(MEMORY_FILE, db);
-  scheduleGlobalMegaSync();
-}
-
-function pruneQA(items) {
-  const now = nowTs();
+async function pruneMemory(chatId) {
+  const col = await getCollection("auto_msg_memory");
   const ttlMs = MEMORY_TTL_DAYS * 24 * 60 * 60 * 1000;
+  const cutoff = nowTs() - ttlMs;
 
-  items = (items || []).filter((x) => now - (x?.ts || now) <= ttlMs);
-  if (items.length > MEMORY_MAX_PER_CHAT) {
-    items = items.slice(items.length - MEMORY_MAX_PER_CHAT);
+  await col.deleteMany({
+    chatId,
+    ts: { $lt: cutoff },
+  });
+
+  const count = await col.countDocuments({ chatId });
+  if (count > MEMORY_MAX_PER_CHAT) {
+    const overflow = count - MEMORY_MAX_PER_CHAT;
+    const oldDocs = await col
+      .find({ chatId })
+      .sort({ ts: 1 })
+      .limit(overflow)
+      .toArray();
+
+    if (oldDocs.length) {
+      await col.deleteMany({
+        _id: { $in: oldDocs.map((x) => x._id) },
+      });
+    }
   }
-  return items;
 }
 
-function saveQA(chatId, q, a) {
+async function saveQA(chatId, q, a) {
   if (!q || !a) return;
-  const db = readMemory();
 
-  if (!db.chats[chatId]) db.chats[chatId] = [];
+  const col = await getCollection("auto_msg_memory");
   const qRaw = String(q).trim();
   const qNorm = normalizeText(qRaw);
   const qVec = buildSemanticVector(qRaw, detectLang(qRaw));
 
-  db.chats[chatId].push({
+  await col.insertOne({
+    chatId,
     qRaw,
     qNorm,
     qVec,
@@ -531,70 +562,74 @@ function saveQA(chatId, q, a) {
     ts: nowTs(),
   });
 
-  db.chats[chatId] = pruneQA(db.chats[chatId]);
-  writeMemory(db);
+  await pruneMemory(chatId);
 }
 
-function getChatMemory(chatId) {
-  const db = readMemory();
-  db.chats[chatId] = pruneQA(db.chats[chatId] || []);
-  writeMemory(db);
-  return db.chats[chatId];
+async function getChatMemory(chatId) {
+  await pruneMemory(chatId);
+
+  const col = await getCollection("auto_msg_memory");
+  return await col.find({ chatId }).sort({ ts: 1 }).toArray();
 }
 
-function saveTurn(chatId, role, text) {
+async function saveTurn(chatId, role, text) {
   const clean = String(text || "").trim();
   if (!clean) return;
 
-  const db = readMemory();
-  if (!db.context[chatId]) db.context[chatId] = [];
+  const col = await getCollection("auto_msg_context");
 
-  db.context[chatId].push({
+  await col.insertOne({
+    chatId,
     role,
     text: clean,
     ts: nowTs(),
   });
 
-  if (db.context[chatId].length > CONTEXT_MAX_TURNS) {
-    db.context[chatId] = db.context[chatId].slice(-CONTEXT_MAX_TURNS);
+  const count = await col.countDocuments({ chatId });
+  if (count > CONTEXT_MAX_TURNS) {
+    const overflow = count - CONTEXT_MAX_TURNS;
+    const oldDocs = await col
+      .find({ chatId })
+      .sort({ ts: 1 })
+      .limit(overflow)
+      .toArray();
+
+    if (oldDocs.length) {
+      await col.deleteMany({
+        _id: { $in: oldDocs.map((x) => x._id) },
+      });
+    }
   }
-
-  writeMemory(db);
 }
 
-function getContext(chatId) {
-  return readMemory().context[chatId] || [];
+async function getContext(chatId) {
+  const col = await getCollection("auto_msg_context");
+  return await col.find({ chatId }).sort({ ts: 1 }).toArray();
 }
 
-function clearChatMemory(chatId) {
-  const db = readMemory();
-  db.chats[chatId] = [];
-  db.context[chatId] = [];
-  writeMemory(db);
+async function clearChatMemory(chatId) {
+  const memory = await getCollection("auto_msg_memory");
+  const context = await getCollection("auto_msg_context");
+  const profiles = await getCollection("auto_msg_profiles");
+  const globalCache = await getCollection("auto_msg_global_cache");
+  const archive = await getCollection("auto_msg_messages");
 
-  const p = readProfiles();
-  p.chats[chatId] = newEmptyProfile();
-  writeProfiles(p);
-
-  const gc = readGlobalCache();
-  gc.items = (gc.items || []).filter((x) => x.chatId !== chatId);
-  writeGlobalCache(gc);
-
-  const arch = readMessageArchive();
-  arch.chats[chatId] = [];
-  writeMessageArchive(arch);
+  await memory.deleteMany({ chatId });
+  await context.deleteMany({ chatId });
+  await globalCache.deleteMany({ chatId });
+  await archive.deleteMany({ chatId });
+  await profiles.deleteOne({ chatId });
 
   safeJsonWrite(getChatLogFile(chatId), []);
-  scheduleGlobalMegaSync();
 }
 
-function findBestMemoryAnswer(chatId, userText) {
+async function findBestMemoryAnswer(chatId, userText) {
   const qn = normalizeText(userText);
   if (!qn || qn.length < 3) return null;
 
   const lang = detectLang(userText);
   const qVec = buildSemanticVector(userText, lang);
-  const items = getChatMemory(chatId);
+  const items = await getChatMemory(chatId);
   if (!items.length) return null;
 
   let best = null;
@@ -631,33 +666,32 @@ function findBestMemoryAnswer(chatId, userText) {
 // ======================================================
 // GLOBAL CACHE
 // ======================================================
-function readGlobalCache() {
-  const db = safeJsonRead(GLOBAL_CACHE_FILE, { items: [] });
-  if (!Array.isArray(db.items)) db.items = [];
-  return db;
-}
-
-function writeGlobalCache(db) {
-  safeJsonWrite(GLOBAL_CACHE_FILE, db);
-  scheduleGlobalMegaSync();
-}
-
-function pruneGlobalCache(items) {
-  const now = nowTs();
+async function pruneGlobalCache() {
+  const col = await getCollection("auto_msg_global_cache");
   const ttlMs = GLOBAL_CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
-  items = (items || []).filter((x) => now - (x.ts || now) <= ttlMs);
+  const cutoff = nowTs() - ttlMs;
 
-  if (items.length > GLOBAL_CACHE_MAX_ITEMS) {
-    items = items.slice(items.length - GLOBAL_CACHE_MAX_ITEMS);
+  await col.deleteMany({ ts: { $lt: cutoff } });
+
+  const count = await col.countDocuments({});
+  if (count > GLOBAL_CACHE_MAX_ITEMS) {
+    const overflow = count - GLOBAL_CACHE_MAX_ITEMS;
+    const oldDocs = await col.find({}).sort({ ts: 1 }).limit(overflow).toArray();
+
+    if (oldDocs.length) {
+      await col.deleteMany({
+        _id: { $in: oldDocs.map((x) => x._id) },
+      });
+    }
   }
-  return items;
 }
 
-function saveGlobalCache(chatId, q, a, lang) {
+async function saveGlobalCache(chatId, q, a, lang) {
   if (!q || !a) return;
-  const db = readGlobalCache();
 
-  db.items.push({
+  const col = await getCollection("auto_msg_global_cache");
+
+  await col.insertOne({
     chatId,
     qRaw: String(q),
     qNorm: normalizeText(q),
@@ -667,14 +701,14 @@ function saveGlobalCache(chatId, q, a, lang) {
     ts: nowTs(),
   });
 
-  db.items = pruneGlobalCache(db.items);
-  writeGlobalCache(db);
+  await pruneGlobalCache();
 }
 
-function findGlobalCacheAnswer(userText, lang) {
-  const db = readGlobalCache();
-  db.items = pruneGlobalCache(db.items);
-  writeGlobalCache(db);
+async function findGlobalCacheAnswer(userText, lang) {
+  await pruneGlobalCache();
+
+  const col = await getCollection("auto_msg_global_cache");
+  const items = await col.find({}).sort({ ts: -1 }).limit(1200).toArray();
 
   const qNorm = normalizeText(userText);
   const qVec = buildSemanticVector(userText, lang);
@@ -682,8 +716,7 @@ function findGlobalCacheAnswer(userText, lang) {
   let best = null;
   let bestScore = 0;
 
-  for (let i = db.items.length - 1; i >= 0; i--) {
-    const it = db.items[i];
+  for (const it of items) {
     const sc = semanticSimilarityFromStored(qNorm, qVec, it.qNorm, it.qVec);
     if (sc > bestScore) {
       bestScore = sc;
@@ -706,89 +739,77 @@ function findGlobalCacheAnswer(userText, lang) {
 // ======================================================
 // ALL MESSAGE ARCHIVE
 // ======================================================
-function readMessageArchive() {
-  const db = safeJsonRead(MESSAGE_ARCHIVE_FILE, { chats: {} });
-  if (!db.chats) db.chats = {};
-  return db;
-}
+async function appendArchivedMessage(chatId, entry) {
+  const col = await getCollection("auto_msg_messages");
 
-function writeMessageArchive(db) {
-  safeJsonWrite(MESSAGE_ARCHIVE_FILE, db);
-}
-
-function appendArchivedMessage(chatId, entry) {
-  const db = readMessageArchive();
-  if (!db.chats[chatId]) db.chats[chatId] = [];
-
-  db.chats[chatId].push({
+  await col.insertOne({
+    chatId,
     ...entry,
     ts: entry.ts || nowTs(),
   });
 
-  if (db.chats[chatId].length > MAX_ARCHIVE_MSGS_PER_CHAT) {
-    db.chats[chatId] = db.chats[chatId].slice(-MAX_ARCHIVE_MSGS_PER_CHAT);
+  const count = await col.countDocuments({ chatId });
+  if (count > MAX_ARCHIVE_MSGS_PER_CHAT) {
+    const overflow = count - MAX_ARCHIVE_MSGS_PER_CHAT;
+    const oldDocs = await col
+      .find({ chatId })
+      .sort({ ts: 1 })
+      .limit(overflow)
+      .toArray();
+
+    if (oldDocs.length) {
+      await col.deleteMany({
+        _id: { $in: oldDocs.map((x) => x._id) },
+      });
+    }
   }
-
-  writeMessageArchive(db);
-  scheduleChatIdleSync(chatId);
-}
-
-// ======================================================
-// LOGGING
-// ======================================================
-function getChatLogFile(chatId) {
-  return path.join(LOGS_DIR, `${sanitizeChatId(chatId)}.json`);
-}
-
-function appendChatLog(chatId, entry) {
-  const file = getChatLogFile(chatId);
-  const arr = safeJsonRead(file, []);
-  arr.push({ ...entry, ts: entry.ts || nowTs() });
-
-  if (arr.length > 1000) {
-    arr.splice(0, arr.length - 1000);
-  }
-
-  safeJsonWrite(file, arr);
-}
-
-function getRecentLogs(chatId, limit = 20) {
-  return safeJsonRead(getChatLogFile(chatId), []).slice(-limit);
 }
 
 // ======================================================
 // PER USER API KEYS
 // ======================================================
-function readUserKeys() {
-  const db = safeJsonRead(USER_KEYS_FILE, { users: {} });
-  if (!db.users) db.users = {};
-  return db;
+async function getUserKeys(number) {
+  const col = await getCollection("auto_msg_user_keys");
+  const doc = await col.findOne({ number });
+  return doc?.keys || {};
 }
 
-function writeUserKeys(db) {
-  safeJsonWrite(USER_KEYS_FILE, db);
-  scheduleGlobalMegaSync();
+async function setUserApiKey(number, provider, key) {
+  const col = await getCollection("auto_msg_user_keys");
+
+  await col.updateOne(
+    { number },
+    {
+      $set: {
+        [`keys.${provider}`]: String(key || "").trim(),
+        updatedAt: nowTs(),
+      },
+      $setOnInsert: {
+        number,
+        createdAt: nowTs(),
+      },
+    },
+    { upsert: true }
+  );
 }
 
-function getUserKeys(number) {
-  const db = readUserKeys();
-  return db.users[number] || {};
-}
+async function clearUserApiKey(number, provider) {
+  const col = await getCollection("auto_msg_user_keys");
+  const doc = await col.findOne({ number });
+  if (!doc) return false;
 
-function setUserApiKey(number, provider, key) {
-  const db = readUserKeys();
-  if (!db.users[number]) db.users[number] = {};
-  db.users[number][provider] = String(key || "").trim();
-  db.users[number].updatedAt = nowTs();
-  writeUserKeys(db);
-}
+  await col.updateOne(
+    { number },
+    {
+      $unset: {
+        [`keys.${provider}`]: "",
+      },
+      $set: {
+        updatedAt: nowTs(),
+      },
+    }
+  );
 
-function clearUserApiKey(number, provider) {
-  const db = readUserKeys();
-  if (!db.users[number]) return false;
-  delete db.users[number][provider];
-  db.users[number].updatedAt = nowTs();
-  writeUserKeys(db);
   return true;
 }
 
@@ -798,9 +819,9 @@ function maskKey(k = "") {
   return `${k.slice(0, 5)}...${k.slice(-4)}`;
 }
 
-function getResolvedApiKeys(jid) {
+async function getResolvedApiKeys(jid) {
   const number = extractNumber(jid);
-  const userKeys = getUserKeys(number);
+  const userKeys = await getUserKeys(number);
 
   return {
     gemini: userKeys.gemini || DEFAULT_GEMINI_API_KEY || "",
@@ -810,7 +831,7 @@ function getResolvedApiKeys(jid) {
       gemini: userKeys.gemini ? "user" : "default",
       deepseek: userKeys.deepseek ? "user" : "default",
       openai: userKeys.openai ? "user" : "default",
-    }
+    },
   };
 }
 
@@ -827,9 +848,6 @@ function helpText(lang) {
 .msg profile
 .msg clear
 .msg export
-.msg mega on
-.msg mega off
-.msg sync
 
 .setapi gemini YOUR_KEY
 .setapi deepseek YOUR_KEY
@@ -851,9 +869,6 @@ function helpText(lang) {
 .msg profile
 .msg clear
 .msg export
-.msg mega on
-.msg mega off
-.msg sync
 
 .setapi gemini YOUR_KEY
 .setapi deepseek YOUR_KEY
@@ -893,17 +908,18 @@ function isFollowUp(text) {
     "eka", "ehema", "ehama", "ow", "ai", "meka", "hari", "ok", "okay", "thawa",
     "then", "so", "why", "how", "more", "anith eka", "next", "detail", "explain"
   ];
+
   return keys.some((k) => t === k || t.includes(k));
 }
 
-function buildUserProfileSummary(chatId) {
-  const p = getProfile(chatId);
-  const topics = getTopTopics(chatId, 8);
+async function buildUserProfileSummary(chatId) {
+  const p = await getProfile(chatId);
+  const topics = await getTopTopics(chatId, 8);
   const recent = getRecentLogs(chatId, 6)
     .map((x) => `${x.role === "user" ? "User" : "Bot"}: ${x.text}`)
     .join("\n");
 
-  const style = styleSummary(chatId);
+  const style = await styleSummary(chatId);
 
   return {
     lang: p.lang || "en",
@@ -916,8 +932,8 @@ function buildUserProfileSummary(chatId) {
   };
 }
 
-function buildPrompt(userText, lang, chatId, userName) {
-  const prof = buildUserProfileSummary(chatId);
+async function buildPrompt(userText, lang, chatId, userName) {
+  const prof = await buildUserProfileSummary(chatId);
   const topTopics = prof.topics.length ? prof.topics.join(", ") : "none";
 
   if (lang === "si") {
@@ -973,8 +989,8 @@ User: ${userText}
 `.trim();
 }
 
-function buildPromptWithContext(userText, lang, chatId, userName, contextTurns) {
-  const prof = buildUserProfileSummary(chatId);
+async function buildPromptWithContext(userText, lang, chatId, userName, contextTurns) {
+  const prof = await buildUserProfileSummary(chatId);
   const history = (contextTurns || [])
     .map((x) => `${x.role === "user" ? "User" : "Bot"}: ${x.text}`)
     .join("\n");
@@ -1054,7 +1070,7 @@ async function testGeminiKey(apiKey) {
     url,
     {
       contents: [{ parts: [{ text: "Reply with only: OK" }] }],
-      generationConfig: { temperature: 0, maxOutputTokens: 10 }
+      generationConfig: { temperature: 0, maxOutputTokens: 10 },
     },
     {
       timeout: 20000,
@@ -1108,11 +1124,13 @@ async function generateWithGemini(prompt, apiKey) {
     } catch (e) {
       const status = e?.response?.status;
       lastErr = e;
+
       if (status === 404) continue;
       if (isRetriableGeminiError(status)) {
         e.provider = "gemini";
         throw e;
       }
+
       e.provider = "gemini";
       throw e;
     }
@@ -1135,7 +1153,7 @@ async function testDeepSeekKey(apiKey) {
       model: "deepseek-chat",
       messages: [{ role: "user", content: "Reply with only: OK" }],
       max_tokens: 10,
-      temperature: 0
+      temperature: 0,
     },
     {
       timeout: 20000,
@@ -1215,7 +1233,7 @@ async function testOpenAIKey(apiKey) {
       model: "gpt-4o-mini",
       messages: [{ role: "user", content: "Reply with only: OK" }],
       max_tokens: 10,
-      temperature: 0
+      temperature: 0,
     },
     {
       timeout: 20000,
@@ -1241,7 +1259,7 @@ async function generateWithOpenAI(prompt, apiKey) {
       model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.75,
-      max_tokens: 900
+      max_tokens: 900,
     },
     {
       timeout: 30000,
@@ -1254,6 +1272,7 @@ async function generateWithOpenAI(prompt, apiKey) {
 
   const out = res?.data?.choices?.[0]?.message?.content?.trim();
   if (!out) throw new Error("Empty OpenAI response");
+
   return { text: out, provider: "openai", model: "gpt-4o-mini" };
 }
 
@@ -1317,10 +1336,12 @@ function inCooldown(chatId) {
 
 function hitHourlyCap() {
   const now = nowTs();
+
   if (now - hourWindowStart > 3600000) {
     hourWindowStart = now;
     repliesThisHour = 0;
   }
+
   if (repliesThisHour >= MAX_REPLIES_PER_HOUR) return true;
   repliesThisHour++;
   return false;
@@ -1349,11 +1370,11 @@ function serviceUnavailableMsg(lang) {
 // ======================================================
 // EXPORT / STATUS
 // ======================================================
-function buildProfileText(chatId) {
-  const p = getProfile(chatId);
-  const topTopics = getTopTopics(chatId, 10);
+async function buildProfileText(chatId) {
+  const p = await getProfile(chatId);
+  const topTopics = await getTopTopics(chatId, 10);
   const recent = getRecentLogs(chatId, 10);
-  const style = styleSummary(chatId);
+  const style = await styleSummary(chatId);
 
   return `👤 *Chat Profile*
 
@@ -1374,219 +1395,12 @@ ${recent.length
 function buildExportText(chatId) {
   const logs = getRecentLogs(chatId, 80);
   if (!logs.length) return "No chat logs found.";
+
   return logs.map((x) => {
     const dt = new Date(x.ts || nowTs()).toISOString();
     return `[${dt}] ${x.role.toUpperCase()}: ${x.text}`;
   }).join("\n");
 }
-
-// ======================================================
-// MEGA SYNC
-// ======================================================
-let megaReady = false;
-let megaStorage = null;
-let megaFolderNode = null;
-let megaInitPromise = null;
-let megaSyncRunning = false;
-
-const REMOTE_FILES = {
-  "auto_msg.json": STORE_FILE,
-  "auto_msg_memory.json": MEMORY_FILE,
-  "auto_msg_profiles.json": PROFILE_FILE,
-  "auto_msg_global_cache.json": GLOBAL_CACHE_FILE,
-  "auto_msg_user_keys.json": USER_KEYS_FILE,
-  "auto_msg_messages.json": MESSAGE_ARCHIVE_FILE,
-};
-
-async function initMega() {
-  if (!MEGA_EMAIL || !MEGA_PASSWORD) return false;
-  if (megaReady && megaStorage && megaFolderNode) return true;
-  if (megaInitPromise) return megaInitPromise;
-
-  megaInitPromise = new Promise((resolve) => {
-    try {
-      megaStorage = new Storage(
-        { email: MEGA_EMAIL, password: MEGA_PASSWORD },
-        async (err) => {
-          if (err) {
-            console.log("MEGA init failed:", err.message || err);
-            megaReady = false;
-            megaInitPromise = null;
-            return resolve(false);
-          }
-
-          try {
-            await new Promise((r) => megaStorage.root.reload(true, r));
-
-            let folder = Object.values(megaStorage.root.children || {}).find(
-              (node) => node.name === MEGA_FOLDER
-            );
-
-            if (!folder) {
-              folder = await new Promise((resolveFolder, rejectFolder) => {
-                megaStorage.root.mkdir(MEGA_FOLDER, (mkdirErr, created) => {
-                  if (mkdirErr) return rejectFolder(mkdirErr);
-                  resolveFolder(created);
-                });
-              });
-            }
-
-            megaFolderNode = folder;
-            megaReady = true;
-            console.log("MEGA ready");
-            resolve(true);
-          } catch (e) {
-            console.log("MEGA folder error:", e.message || e);
-            megaReady = false;
-            megaInitPromise = null;
-            resolve(false);
-          }
-        }
-      );
-    } catch (e) {
-      console.log("MEGA init exception:", e.message || e);
-      megaReady = false;
-      megaInitPromise = null;
-      resolve(false);
-    }
-  });
-
-  return megaInitPromise;
-}
-
-async function megaFindFile(name) {
-  const ok = await initMega();
-  if (!ok || !megaFolderNode) return null;
-
-  await new Promise((r) => megaFolderNode.reload(true, r));
-  const children = Object.values(megaFolderNode.children || {});
-  return children.find((node) => node.name === name) || null;
-}
-
-async function megaDownloadFile(name, localPath) {
-  try {
-    const fileNode = await megaFindFile(name);
-    if (!fileNode) return false;
-
-    await new Promise((resolve, reject) => {
-      const dl = fileNode.download();
-      const chunks = [];
-      dl.on("data", (chunk) => chunks.push(chunk));
-      dl.on("end", () => {
-        try {
-          fs.writeFileSync(localPath, Buffer.concat(chunks));
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      });
-      dl.on("error", reject);
-    });
-
-    return true;
-  } catch (e) {
-    console.log(`MEGA download failed for ${name}:`, e.message || e);
-    return false;
-  }
-}
-
-async function megaUploadFile(name, localPath) {
-  try {
-    const ok = await initMega();
-    if (!ok || !megaFolderNode) return false;
-    if (!fs.existsSync(localPath)) return false;
-
-    const existing = await megaFindFile(name);
-    if (existing) {
-      try {
-        await new Promise((resolve) => existing.delete(true, resolve));
-      } catch {}
-    }
-
-    await new Promise((resolve, reject) => {
-      const upload = megaFolderNode.upload({ name }, fs.readFileSync(localPath));
-      upload.on("complete", resolve);
-      upload.on("error", reject);
-    });
-
-    return true;
-  } catch (e) {
-    console.log(`MEGA upload failed for ${name}:`, e.message || e);
-    return false;
-  }
-}
-
-async function megaPullAll() {
-  const ok = await initMega();
-  if (!ok) return false;
-
-  let changed = false;
-  for (const [remoteName, localPath] of Object.entries(REMOTE_FILES)) {
-    const got = await megaDownloadFile(remoteName, localPath);
-    if (got) changed = true;
-    await sleep(200);
-  }
-  return changed;
-}
-
-async function megaPushAll() {
-  const ok = await initMega();
-  if (!ok) return false;
-
-  let pushed = false;
-  for (const [remoteName, localPath] of Object.entries(REMOTE_FILES)) {
-    const done = await megaUploadFile(remoteName, localPath);
-    if (done) pushed = true;
-    await sleep(250);
-  }
-
-  const db = readStore();
-  db.global.last_sync = nowTs();
-  writeStore(db);
-
-  return pushed;
-}
-
-let globalSyncTimer = null;
-const chatIdleTimers = new Map();
-
-function scheduleGlobalMegaSync(delay = 2500) {
-  if (!isMegaSyncEnabled()) return;
-  clearTimeout(globalSyncTimer);
-  globalSyncTimer = setTimeout(() => {
-    syncAllToMega().catch(() => {});
-  }, delay);
-}
-
-function scheduleChatIdleSync(chatId) {
-  if (!isMegaSyncEnabled()) return;
-  const old = chatIdleTimers.get(chatId);
-  if (old) clearTimeout(old);
-
-  const timer = setTimeout(() => {
-    chatIdleTimers.delete(chatId);
-    syncAllToMega().catch(() => {});
-  }, IDLE_SYNC_MS);
-
-  chatIdleTimers.set(chatId, timer);
-}
-
-async function syncAllToMega() {
-  if (megaSyncRunning) return false;
-  if (!isMegaSyncEnabled()) return false;
-
-  megaSyncRunning = true;
-  try {
-    return await megaPushAll();
-  } finally {
-    megaSyncRunning = false;
-  }
-}
-
-// backup periodic sync
-setInterval(() => {
-  if (isMegaSyncEnabled()) syncAllToMega().catch(() => {});
-}, PERIODIC_SYNC_MS);
 
 // ======================================================
 // COMMANDS
@@ -1606,39 +1420,39 @@ cmd(
 
       if (!arg) {
         return reply(
-          "Use:\n.msg on\n.msg off\n.msg status\n.msg profile\n.msg clear\n.msg export\n.msg mega on\n.msg mega off\n.msg sync"
+          "Use:\n.msg on\n.msg off\n.msg status\n.msg profile\n.msg clear\n.msg export"
         );
       }
 
       if (arg === "on") {
-        setGlobalEnabled(true);
+        await setGlobalEnabled(true);
         return reply("✅ Auto Reply ON (private chats only)");
       }
 
       if (arg === "off") {
-        setGlobalEnabled(false);
+        await setGlobalEnabled(false);
         return reply("⛔ Auto Reply OFF");
       }
 
       if (arg === "status") {
-        const db = readStore();
+        const db = await readStore();
         const syncTime = db.global.last_sync
           ? new Date(db.global.last_sync).toLocaleString()
-          : "never";
+          : "mongo live";
 
         return reply(
-          `Auto Reply: ${db.global.enabled ? "ON" : "OFF"}\nMEGA Sync: ${db.global.mega_sync ? "ON" : "OFF"}\nLast Sync: ${syncTime}`
+          `Auto Reply: ${db.global.enabled ? "ON" : "OFF"}\nStorage: MongoDB\nLast Update: ${syncTime}`
         );
       }
 
       if (arg === "profile") {
         if (!from) return reply("Chat not found.");
-        return reply(buildProfileText(from));
+        return reply(await buildProfileText(from));
       }
 
       if (arg === "clear") {
         if (!from) return reply("Chat not found.");
-        clearChatMemory(from);
+        await clearChatMemory(from);
         return reply("🧹 මේ chat එකේ memory / logs / archive / cache clear කරලා ඉවරයි.");
       }
 
@@ -1648,30 +1462,8 @@ cmd(
         return reply(txt.length > 3900 ? txt.slice(0, 3900) + "\n\n...truncated" : txt);
       }
 
-      if (arg === "mega on") {
-        if (!MEGA_EMAIL || !MEGA_PASSWORD) {
-          return reply("❌ MEGA_EMAIL / MEGA_PASSWORD env දාලා නෑ.");
-        }
-        const ok = await initMega();
-        if (!ok) return reply("❌ MEGA connect failed.");
-        setMegaSync(true);
-        await syncAllToMega();
-        return reply("✅ MEGA sync ON");
-      }
-
-      if (arg === "mega off") {
-        setMegaSync(false);
-        return reply("⛔ MEGA sync OFF");
-      }
-
-      if (arg === "sync") {
-        if (!isMegaSyncEnabled()) return reply("❌ MEGA sync OFF. Use: .msg mega on");
-        const ok = await syncAllToMega();
-        return reply(ok ? "✅ MEGA sync done" : "❌ MEGA sync failed");
-      }
-
       return reply(
-        "Use:\n.msg on\n.msg off\n.msg status\n.msg profile\n.msg clear\n.msg export\n.msg mega on\n.msg mega off\n.msg sync"
+        "Use:\n.msg on\n.msg off\n.msg status\n.msg profile\n.msg clear\n.msg export"
       );
     } catch (e) {
       console.log("MSG COMMAND ERROR:", e?.message || e);
@@ -1723,8 +1515,7 @@ cmd(
         return reply(`❌ ${provider} key test failed: ${e?.response?.status || e.message || "invalid key"}`);
       }
 
-      setUserApiKey(number, provider, key);
-      scheduleGlobalMegaSync();
+      await setUserApiKey(number, provider, key);
 
       return reply(`✅ ${provider} key saved for your number.\nKey: ${maskKey(key)}`);
     } catch (e) {
@@ -1748,7 +1539,7 @@ cmd(
       const number = extractNumber(from);
       if (!number) return reply("❌ User number not found.");
 
-      const keys = getUserKeys(number);
+      const keys = await getUserKeys(number);
       return reply(
         `🔑 Your API key status
 
@@ -1780,10 +1571,9 @@ cmd(
 
       const from = mek?.key?.remoteJid;
       const number = extractNumber(from);
-      const ok = clearUserApiKey(number, provider);
+      const ok = await clearUserApiKey(number, provider);
 
       if (!ok) return reply(`❌ No ${provider} key found for your number.`);
-      scheduleGlobalMegaSync();
       return reply(`✅ ${provider} key deleted.`);
     } catch (e) {
       console.log("DELAPI ERROR:", e?.message || e);
@@ -1792,7 +1582,6 @@ cmd(
   }
 );
 
-// optional owner diagnostic
 cmd(
   {
     pattern: "allkeys",
@@ -1806,13 +1595,14 @@ cmd(
       const from = mek?.key?.remoteJid;
       if (!isOwnerJid(from)) return reply("❌ Owner only.");
 
-      const db = readUserKeys();
-      const users = Object.keys(db.users || {});
-      if (!users.length) return reply("No saved user keys.");
+      const col = await getCollection("auto_msg_user_keys");
+      const docs = await col.find({}).limit(50).toArray();
 
-      const lines = users.slice(0, 50).map((num) => {
-        const u = db.users[num] || {};
-        return `${num} | G:${u.gemini ? "Y" : "N"} D:${u.deepseek ? "Y" : "N"} O:${u.openai ? "Y" : "N"}`;
+      if (!docs.length) return reply("No saved user keys.");
+
+      const lines = docs.map((u) => {
+        const keys = u.keys || {};
+        return `${u.number} | G:${keys.gemini ? "Y" : "N"} D:${keys.deepseek ? "Y" : "N"} O:${keys.openai ? "Y" : "N"}`;
       });
 
       return reply(lines.join("\n"));
@@ -1834,7 +1624,7 @@ async function onMessage(conn, mek, m, ctx = {}) {
     from = mek?.key?.remoteJid;
     if (!from) return;
     if (String(from).endsWith("@g.us")) return;
-    if (!isGlobalEnabled()) return;
+    if (!(await isGlobalEnabled())) return;
     if (mek?.key?.fromMe) return;
 
     const body = String(
@@ -1852,36 +1642,35 @@ async function onMessage(conn, mek, m, ctx = {}) {
     const pushName = mek?.pushName || "User";
     lang = detectLang(body);
 
-    // save every incoming user msg
-    appendArchivedMessage(from, {
+    await appendArchivedMessage(from, {
       role: "user",
       senderName: pushName,
       senderNumber: extractNumber(from),
       text: body,
-      ts: nowTs()
+      ts: nowTs(),
     });
 
-    saveTurn(from, "user", body);
+    await saveTurn(from, "user", body);
     appendChatLog(from, { role: "user", text: body, ts: nowTs() });
-    updateProfile(from, "user", body, lang);
+    await updateProfile(from, "user", body, lang);
 
     if (isHelpQuestion(body)) {
       const txt = helpText(lang);
       await sendLongMessage(conn, from, txt, mek);
 
-      appendArchivedMessage(from, {
+      await appendArchivedMessage(from, {
         role: "bot",
         senderName: "MALIYA-MD",
         senderNumber: "bot",
         text: txt,
-        ts: nowTs()
+        ts: nowTs(),
       });
 
-      saveTurn(from, "bot", txt);
+      await saveTurn(from, "bot", txt);
       appendChatLog(from, { role: "bot", text: txt, ts: nowTs() });
-      updateProfile(from, "bot", txt, lang);
-      saveQA(from, body, txt);
-      saveGlobalCache(from, body, txt, lang);
+      await updateProfile(from, "bot", txt, lang);
+      await saveQA(from, body, txt);
+      await saveGlobalCache(from, body, txt, lang);
       return;
     }
 
@@ -1889,19 +1678,19 @@ async function onMessage(conn, mek, m, ctx = {}) {
       const txt = getIdentityReply(lang);
       await sendLongMessage(conn, from, txt, mek);
 
-      appendArchivedMessage(from, {
+      await appendArchivedMessage(from, {
         role: "bot",
         senderName: "MALIYA-MD",
         senderNumber: "bot",
         text: txt,
-        ts: nowTs()
+        ts: nowTs(),
       });
 
-      saveTurn(from, "bot", txt);
+      await saveTurn(from, "bot", txt);
       appendChatLog(from, { role: "bot", text: txt, ts: nowTs() });
-      updateProfile(from, "bot", txt, lang);
-      saveQA(from, body, txt);
-      saveGlobalCache(from, body, txt, lang);
+      await updateProfile(from, "bot", txt, lang);
+      await saveQA(from, body, txt);
+      await saveGlobalCache(from, body, txt, lang);
       return;
     }
 
@@ -1910,21 +1699,21 @@ async function onMessage(conn, mek, m, ctx = {}) {
     if (inCooldown(from)) return;
     if (hitHourlyCap()) return;
 
-    // per chat memory first
-    const mem = findBestMemoryAnswer(from, body);
+    const mem = await findBestMemoryAnswer(from, body);
     if (mem?.answer) {
       const reused = mem.answer;
+
       await sendLongMessage(conn, from, reused, mek);
 
-      appendArchivedMessage(from, {
+      await appendArchivedMessage(from, {
         role: "bot",
         senderName: "MALIYA-MD",
         senderNumber: "bot",
         text: reused,
-        ts: nowTs()
+        ts: nowTs(),
       });
 
-      saveTurn(from, "bot", reused);
+      await saveTurn(from, "bot", reused);
       appendChatLog(from, {
         role: "bot",
         text: reused,
@@ -1932,49 +1721,51 @@ async function onMessage(conn, mek, m, ctx = {}) {
         meta: {
           source: mem.source,
           score: Number(mem.score || 0).toFixed(3),
-          matchedQuestion: mem.matchedQuestion || ""
-        }
+          matchedQuestion: mem.matchedQuestion || "",
+        },
       });
-      updateProfile(from, "bot", reused, lang);
-      saveGlobalCache(from, body, reused, lang);
+
+      await updateProfile(from, "bot", reused, lang);
+      await saveGlobalCache(from, body, reused, lang);
       return;
     }
 
-    // then global cache
-    const globalHit = findGlobalCacheAnswer(body, lang);
+    const globalHit = await findGlobalCacheAnswer(body, lang);
     if (globalHit?.answer) {
       await sendLongMessage(conn, from, globalHit.answer, mek);
 
-      appendArchivedMessage(from, {
+      await appendArchivedMessage(from, {
         role: "bot",
         senderName: "MALIYA-MD",
         senderNumber: "bot",
         text: globalHit.answer,
-        ts: nowTs()
+        ts: nowTs(),
       });
 
-      saveTurn(from, "bot", globalHit.answer);
+      await saveTurn(from, "bot", globalHit.answer);
       appendChatLog(from, {
         role: "bot",
         text: globalHit.answer,
         ts: nowTs(),
         meta: {
           source: globalHit.source,
-          score: Number(globalHit.score || 0).toFixed(3)
-        }
+          score: Number(globalHit.score || 0).toFixed(3),
+        },
       });
-      updateProfile(from, "bot", globalHit.answer, lang);
-      saveQA(from, body, globalHit.answer);
+
+      await updateProfile(from, "bot", globalHit.answer, lang);
+      await saveQA(from, body, globalHit.answer);
       return;
     }
 
     busyChats.add(from);
 
-    const resolvedKeys = getResolvedApiKeys(from);
-    const ctxTurns = getContext(from);
+    const resolvedKeys = await getResolvedApiKeys(from);
+    const ctxTurns = await getContext(from);
+
     const prompt = isFollowUp(body)
-      ? buildPromptWithContext(body, lang, from, pushName, ctxTurns)
-      : buildPrompt(body, lang, from, pushName);
+      ? await buildPromptWithContext(body, lang, from, pushName, ctxTurns)
+      : await buildPrompt(body, lang, from, pushName);
 
     const result = await generateText(prompt, resolvedKeys);
     const out = cleanAiText(result?.text || "");
@@ -1982,17 +1773,18 @@ async function onMessage(conn, mek, m, ctx = {}) {
     if (out) {
       await sendLongMessage(conn, from, out, mek);
 
-      appendArchivedMessage(from, {
+      await appendArchivedMessage(from, {
         role: "bot",
         senderName: "MALIYA-MD",
         senderNumber: "bot",
         text: out,
-        ts: nowTs()
+        ts: nowTs(),
       });
 
-      saveQA(from, body, out);
-      saveGlobalCache(from, body, out, lang);
-      saveTurn(from, "bot", out);
+      await saveQA(from, body, out);
+      await saveGlobalCache(from, body, out, lang);
+
+      await saveTurn(from, "bot", out);
       appendChatLog(from, {
         role: "bot",
         text: out,
@@ -2001,29 +1793,37 @@ async function onMessage(conn, mek, m, ctx = {}) {
           source: "api",
           provider: result.provider || "unknown",
           model: result.model || "unknown",
-          keySource: resolvedKeys.source[result.provider] || "unknown"
-        }
+          keySource: resolvedKeys.source[result.provider] || "unknown",
+        },
       });
-      updateProfile(from, "bot", out, lang);
+
+      await updateProfile(from, "bot", out, lang);
+
+      const store = await readStore();
+      store.global.last_sync = nowTs();
+      await writeStore(store);
     }
   } catch (e) {
     const directStatus = e?.response?.status;
+
     if (directStatus === 429) {
       startBackoff();
+
       try {
         if (from && !String(from).endsWith("@g.us")) {
           const msg = rateLimitMsg(lang);
           await sendLongMessage(conn, from, msg, mek);
 
-          appendArchivedMessage(from, {
+          await appendArchivedMessage(from, {
             role: "bot",
             senderName: "MALIYA-MD",
             senderNumber: "bot",
             text: msg,
-            ts: nowTs()
+            ts: nowTs(),
           });
         }
       } catch {}
+
       console.log("AUTO_MSG: rate limit hit (429) - backoff started");
       return;
     }
@@ -2035,12 +1835,12 @@ async function onMessage(conn, mek, m, ctx = {}) {
         const msg = serviceUnavailableMsg(lang);
         await sendLongMessage(conn, from, msg, mek);
 
-        appendArchivedMessage(from, {
+        await appendArchivedMessage(from, {
           role: "bot",
           senderName: "MALIYA-MD",
           senderNumber: "bot",
           text: msg,
-          ts: nowTs()
+          ts: nowTs(),
         });
       }
     } catch {}
@@ -2048,19 +1848,5 @@ async function onMessage(conn, mek, m, ctx = {}) {
     if (from) busyChats.delete(from);
   }
 }
-
-// ======================================================
-// BOOT
-// ======================================================
-(async () => {
-  try {
-    if (isMegaSyncEnabled()) {
-      await megaPullAll();
-      console.log("AUTO_MSG boot MEGA pull complete");
-    }
-  } catch (e) {
-    console.log("BOOT MEGA pull failed:", e.message || e);
-  }
-})();
 
 module.exports = { onMessage };
