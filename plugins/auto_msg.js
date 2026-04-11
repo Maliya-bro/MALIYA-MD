@@ -57,7 +57,7 @@ const MIN_TOKEN_LEN = 3;
 
 const IDLE_SYNC_MS = Number(process.env.IDLE_SYNC_MS || 15000);
 const PERIODIC_SYNC_MS = Number(process.env.PERIODIC_SYNC_MS || 180000);
-const MAX_ARCHIVE_MSGS_PER_CHAT = 1500;
+const MAX_ARCHIVE_MSGS_PER_CHAT = 500;
 
 const GEMINI_MODELS = [
   "gemini-2.5-flash",
