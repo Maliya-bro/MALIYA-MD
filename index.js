@@ -691,32 +691,7 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
       } catch {}
 
-      try {
-        const botSettings = getSessionSettings(sessionCtx);
-
-        if (botSettings.mode === "private" && !isOwner) {
-          if (isCmd) continue;
-        }
-
-{
-          await autoMsgPlugin.onMessage(sock, mek, m, {
-            from,
-            body,
-            args,
-            q,
-            sender,
-            senderNumber,
-            isGroup,
-            isOwner,
-            reply,
-            isCmd,
-            commandName,
-            prefix,
-          });
-        }
-      } catch (e) {
-        console.log("AutoMsg hook error:", e?.message || e);
-      }
+     
 
       try {
         if (cmdFixPlugin && typeof cmdFixPlugin.onMessage === "function") {
