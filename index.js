@@ -25,7 +25,7 @@ const { commands, replyHandlers } = require("./command");
 
 
 // ✅ auto msg plugin
-const autoMsgPlugin = require("./plugins/auto_msg.js");
+
 
 // ✅ PDF scanner plugin
 let pdfScannerPlugin = null;
@@ -698,11 +698,7 @@ function attachSessionHandlers(sock, sessionCtx) {
           if (isCmd) continue;
         }
 
-        if (
-          botSettings.auto_msg === true &&
-          autoMsgPlugin &&
-          typeof autoMsgPlugin.onMessage === "function"
-        ) {
+{
           await autoMsgPlugin.onMessage(sock, mek, m, {
             from,
             body,
