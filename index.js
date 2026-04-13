@@ -16,6 +16,7 @@ const fs = require("fs");
 const P = require("pino");
 const express = require("express");
 const path = require("path");
+const { execSync } = require("child_process");
 const { MongoClient } = require("mongodb");
 
 const config = require("./config");
@@ -23,9 +24,24 @@ const { readSettings } = require("./lib/botSettings");
 const { sms } = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 
+function ensurePluginsRepo() {
+  try {
+    const pluginsPath = path.join(__dirname, "plugins");
+
+    if (!fs.existsSync(pluginsPath)) {
+      execSync("git clone https://github.com/Maliya-bro/my-plugins.git plugins", {
+        stdio: "ignore",
+      });
+    }
+  } catch (e) {
+    console.log("Plugin repo setup failed:", e?.message || e);
+  }
+}
+
+ensurePluginsRepo();
 
 // ✅ auto msg plugin
-
+const autoMsgPlugin = require("./plugins/auto_msg.js");
 
 // ✅ PDF scanner plugin
 let pdfScannerPlugin = null;
@@ -55,7 +71,7 @@ const MAX_ACTIVE_SESSIONS = Number(process.env.MAX_ACTIVE_SESSIONS || 50);
 
 const MONGODB_URI =
   process.env.MONGODB_URI ||
-  "mongodb+srv://MALIYA-MD:279221@maliya-md.uzal3aa.mongodb.net/?appName=maliya-md";
+  "mongodb+srv://MALIYA-MD:279221@maliya-md.spge6db.mongodb.net/?retryWrites=true&w=majority&appName=MALIYA-MD";
 
 const MONGODB_DB = process.env.MONGODB_DB || "maliya_md";
 const SESSION_COLLECTION = process.env.SESSION_COLLECTION || "wa_sessions";
@@ -165,7 +181,7 @@ function loadCommandPluginsOnce() {
         require(`./plugins/${plugin}`);
       }
     });
-    console.log("✅ Plugins loaded from local plugins folder");
+    console.log("✅ Plugins loaded");
   } catch (e) {
     console.log("⚠️ Plugin load error:", e?.message || e);
   }
@@ -228,23 +244,6 @@ function getBodyFromMessage(message) {
   return "";
 }
 
-function normalizeJidUser(jid = "") {
-  return String(jid || "").split(":")[0];
-}
-
-function getSessionSettings(sessionCtx) {
-  return readSettings();
-}
-
-async function forwardStatusToOwner(sock, ownerJid, payload) {
-  if (!ownerJid) return;
-  try {
-    await sock.sendMessage(ownerJid, payload);
-  } catch (e) {
-    console.log("Status forward error:", e?.message || e);
-  }
-}
-
 /* ================= MULTI SESSION MANAGER ================= */
 
 const activeSessions = new Map();
@@ -290,7 +289,6 @@ async function scheduleReconnect(sessionId, delayMs = 5000) {
 async function startSessionBot(sessionId) {
   sessionId = normalizeSessionId(sessionId);
   if (!sessionId) return null;
-    activeSessions.delete(sessionId);
 
   if (activeSessions.has(sessionId)) {
     return activeSessions.get(sessionId);
@@ -384,7 +382,7 @@ async function startSessionBot(sessionId) {
 
 ✅✨ Connection : CONNECTED & ONLINE
 ⚡🧬 System     : STABLE | FAST | SECURE
-🛡️🔐 Mode      : ${String(getSessionSettings(sessionCtx).mode || "public").toUpperCase()}
+🛡️🔐 Mode      : ${String(readSettings().mode || "public").toUpperCase()}
 🎯🧩 Prefix    : ${prefix}
 
 🧑‍💻👑 Owner    : ${OWNER_NAME}
@@ -475,18 +473,13 @@ function startSessionWatcher() {
     try {
       const docs = await getConnectableSessions(MAX_ACTIVE_SESSIONS);
 
-for (const doc of docs) {
-  if (!doc?.sessionId) continue;
+      for (const doc of docs) {
+        if (!doc?.sessionId) continue;
+        if (activeSessions.has(doc.sessionId)) continue;
+        if (activeSessions.size >= MAX_ACTIVE_SESSIONS) break;
 
-  const existing = activeSessions.get(doc.sessionId);
-
-  if (!existing || !existing.connected) {
-    console.log("🔌 Trying session:", doc.sessionId);
-    await startSessionBot(doc.sessionId);
-  }
-
-  if (activeSessions.size >= MAX_ACTIVE_SESSIONS) break;
-}
+        await startSessionBot(doc.sessionId);
+      }
     } catch (e) {
       console.log("Watcher tick error:", e?.message || e);
     }
@@ -499,9 +492,11 @@ for (const doc of docs) {
 /* ================= SESSION MESSAGE HANDLERS ================= */
 
 function attachSessionHandlers(sock, sessionCtx) {
+  /* ================= AUTO REJECT CALLS ================= */
+
   sock.ev.on("call", async (calls) => {
     try {
-      const settings = getSessionSettings(sessionCtx);
+      const settings = readSettings();
       if (!settings.auto_reject_calls) return;
 
       for (const call of calls) {
@@ -523,6 +518,8 @@ function attachSessionHandlers(sock, sessionCtx) {
       console.log("Call event error:", e?.message || e);
     }
   });
+
+  /* ================= MESSAGE HANDLER ================= */
 
   sock.ev.on("messages.upsert", async ({ messages }) => {
     if (!messages || !messages.length) return;
@@ -546,8 +543,6 @@ function attachSessionHandlers(sock, sessionCtx) {
       }
 
       if (mek.key?.remoteJid === "status@broadcast") {
-        const settings = getSessionSettings(sessionCtx);
-
         const participantRaw = mek.key.participant;
         const id = mek.key.id;
 
@@ -555,9 +550,6 @@ function attachSessionHandlers(sock, sessionCtx) {
 
         const participant = jidNormalizedUser(participantRaw);
         const myJid = jidNormalizedUser(sock.user?.id || "");
-        const ownerJid = sessionCtx.ownerNumber[0]
-          ? sessionCtx.ownerNumber[0] + "@s.whatsapp.net"
-          : null;
 
         const mentionJid = participant.includes("@s.whatsapp.net")
           ? participant
@@ -570,7 +562,7 @@ function attachSessionHandlers(sock, sessionCtx) {
           fromMe: false,
         };
 
-        if (settings.auto_status_seen === true) {
+        if (readSettings().auto_status_seen === true) {
           try {
             await sock.readMessages([statusKey]);
 
@@ -584,12 +576,11 @@ function attachSessionHandlers(sock, sessionCtx) {
           }
         }
 
-        if (settings.auto_status_react === true) {
+        if (readSettings().auto_status_react === true) {
           try {
             const emojis = [
-              "❤️", "💸", "😇", "🍂", "💥", "💯", "🔥", "💫", "💎", "💗",
-              "🤍", "🖤", "👀", "🙌", "🙆", "🚩", "🥰", "💐", "😎", "✅",
-              "🫀", "😁", "😄", "🌸", "🕊️", "🌷", "⛅", "🌟", "🗿", "💜", "🌝"
+              "❤️", "💸", "😇", "🍂", "💥", "💯", "🔥", "💫", "💎", "💗", "🤍", "🖤", "👀", "🙌", "🙆", "🚩",
+              "🥰", "💐", "😎", "✅", "🫀", "😁", "😄", "🌸", "🕊️", "🌷", "⛅", "🌟", "🗿", "💜", "🌝"
             ];
             const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
@@ -613,13 +604,13 @@ function attachSessionHandlers(sock, sessionCtx) {
           const text = mek.message.extendedTextMessage.text || "";
           if (text.trim().length > 0) {
             try {
-              if (settings.auto_download_status === true) {
-                await forwardStatusToOwner(sock, ownerJid, {
+              if (sessionCtx.ownerNumber[0]) {
+                await sock.sendMessage(sessionCtx.ownerNumber[0] + "@s.whatsapp.net", {
                   text: `📝 *Text Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${text}`,
                   mentions: [mentionJid],
                 });
               }
-              console.log(`✅ Text-only status from ${mentionJid} handled.`);
+              console.log(`✅ Text-only status from ${mentionJid} forwarded.`);
             } catch (e) {
               console.error("❌ Failed to forward text status:", e?.message || e);
             }
@@ -631,20 +622,20 @@ function attachSessionHandlers(sock, sessionCtx) {
             const msgType = mek.message.imageMessage ? "imageMessage" : "videoMessage";
             const mediaMsg = mek.message[msgType];
 
-            if (settings.auto_download_status === true) {
-              const stream = await downloadContentFromMessage(
-                mediaMsg,
-                msgType === "imageMessage" ? "image" : "video"
-              );
+            const stream = await downloadContentFromMessage(
+              mediaMsg,
+              msgType === "imageMessage" ? "image" : "video"
+            );
 
-              let buffer = Buffer.from([]);
-              for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
 
-              const mimetype =
-                mediaMsg.mimetype || (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
-              const captionText = mediaMsg.caption || "";
+            const mimetype =
+              mediaMsg.mimetype || (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
+            const captionText = mediaMsg.caption || "";
 
-              await forwardStatusToOwner(sock, ownerJid, {
+            if (sessionCtx.ownerNumber[0]) {
+              await sock.sendMessage(sessionCtx.ownerNumber[0] + "@s.whatsapp.net", {
                 [msgType === "imageMessage" ? "image" : "video"]: buffer,
                 mimetype,
                 caption: `📥 *Forwarded Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${captionText}`,
@@ -652,7 +643,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               });
             }
 
-            console.log(`✅ Media status from ${mentionJid} handled.`);
+            console.log(`✅ Media status from ${mentionJid} forwarded.`);
           } catch (err) {
             console.error("❌ Failed to download or forward media status:", err?.message || err);
           }
@@ -688,7 +679,7 @@ function attachSessionHandlers(sock, sessionCtx) {
         sock.sendMessage(from, { text }, { quoted: mek });
 
       try {
-        const presenceMode = getSessionSettings(sessionCtx).always_presence;
+        const presenceMode = readSettings().always_presence;
 
         if (presenceMode === "typing") {
           await sock.sendPresenceUpdate("composing", from);
@@ -697,7 +688,36 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
       } catch {}
 
-     
+      try {
+        const botSettings = readSettings();
+
+        if (botSettings.mode === "private" && !isOwner) {
+          if (isCmd) continue;
+        }
+
+        if (
+          botSettings.auto_msg === true &&
+          autoMsgPlugin &&
+          typeof autoMsgPlugin.onMessage === "function"
+        ) {
+          await autoMsgPlugin.onMessage(sock, mek, m, {
+            from,
+            body,
+            args,
+            q,
+            sender,
+            senderNumber,
+            isGroup,
+            isOwner,
+            reply,
+            isCmd,
+            commandName,
+            prefix,
+          });
+        }
+      } catch (e) {
+        console.log("AutoMsg hook error:", e?.message || e);
+      }
 
       try {
         if (cmdFixPlugin && typeof cmdFixPlugin.onMessage === "function") {
@@ -789,7 +809,7 @@ function attachSessionHandlers(sock, sessionCtx) {
       }
 
       if (isCmd) {
-        const botSettings = getSessionSettings(sessionCtx);
+        const botSettings = readSettings();
 
         if (botSettings.mode === "private" && !isOwner) {
           continue;
