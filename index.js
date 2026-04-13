@@ -290,6 +290,7 @@ async function scheduleReconnect(sessionId, delayMs = 5000) {
 async function startSessionBot(sessionId) {
   sessionId = normalizeSessionId(sessionId);
   if (!sessionId) return null;
+    activeSessions.delete(sessionId);
 
   if (activeSessions.has(sessionId)) {
     return activeSessions.get(sessionId);
@@ -474,13 +475,18 @@ function startSessionWatcher() {
     try {
       const docs = await getConnectableSessions(MAX_ACTIVE_SESSIONS);
 
-      for (const doc of docs) {
-        if (!doc?.sessionId) continue;
-        if (activeSessions.has(doc.sessionId)) continue;
-        if (activeSessions.size >= MAX_ACTIVE_SESSIONS) break;
+for (const doc of docs) {
+  if (!doc?.sessionId) continue;
 
-        await startSessionBot(doc.sessionId);
-      }
+  const existing = activeSessions.get(doc.sessionId);
+
+  if (!existing || !existing.connected) {
+    console.log("🔌 Trying session:", doc.sessionId);
+    await startSessionBot(doc.sessionId);
+  }
+
+  if (activeSessions.size >= MAX_ACTIVE_SESSIONS) break;
+}
     } catch (e) {
       console.log("Watcher tick error:", e?.message || e);
     }
