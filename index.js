@@ -304,6 +304,7 @@ async function startSessionBot(sessionId) {
       connected: false,
       connecting: true,
       sock: null,
+      everConnected: false,
     };
 
     const sock = makeWASocket({
@@ -327,6 +328,7 @@ async function startSessionBot(sessionId) {
 
       if (connection === "open") {
         sessionCtx.connected = true;
+        sessionCtx.everConnected = true;
         sessionCtx.connecting = false;
         sessionCtx.ownerNumber = getOwnerNumberForSock(sock);
 
@@ -394,19 +396,20 @@ async function startSessionBot(sessionId) {
       }
 
       if (connection === "close") {
-        sessionCtx.connected = false;
-        sessionCtx.connecting = false;
-
         const code = lastDisconnect?.error?.output?.statusCode;
+
         activeSessions.delete(sessionId);
 
         if (code !== DisconnectReason.loggedOut) {
           console.log(`🔁 Session disconnected, reconnecting: ${sessionId}`);
 
-          await updateSessionStatus(sessionId, {
-            status: "disconnected",
-            connectBot: true,
-          });
+          // ONLY mark disconnected if session was ever connected
+          if (sessionCtx.everConnected === true) {
+            await updateSessionStatus(sessionId, {
+              status: "disconnected",
+              connectBot: true,
+            });
+          }
 
           await scheduleReconnect(sessionId, 5000);
         } else {
