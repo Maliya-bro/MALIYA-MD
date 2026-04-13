@@ -12,7 +12,7 @@
     },  
 
     "ALIVE_IMG": {
-      "description": "Put your alive img here..",
+      "description": "Put your alive img here.",
       "required": true
     },
     
