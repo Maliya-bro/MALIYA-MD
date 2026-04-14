@@ -282,10 +282,7 @@ async function startSessionBot(sessionId) {
     return null;
   }
 
-  const existingDoc = await getSessionById(sessionId);
-  if (!existingDoc || existingDoc.connectBot !== true) {
-    return null;
-  }
+
 
   const { authDir, credsPath } = getSessionPaths(sessionId);
 
@@ -325,40 +322,41 @@ async function startSessionBot(sessionId) {
     sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect } = update;
 
-      if (connection === "open") {
-        sessionCtx.connected = true;
-        sessionCtx.connecting = false;
-        sessionCtx.ownerNumber = getOwnerNumberForSock(sock);
+if (connection === "open") {
+  sessionCtx.connected = true;
+  sessionCtx.connecting = false;
+  sessionCtx.ownerNumber = getOwnerNumberForSock(sock);
 
-        await updateSessionStatus(sessionId, {
-          status: "connected",
-          connectBot: true,
-          botJid: sock.user?.id || null,
-        });
+  await updateSessionStatus(sessionId, {
+    status: "connected",
+    connectBot: true,
+    botJid: sock.user?.id || null,
+  });
 
-        console.log(`✅ Session connected: ${sessionId}`);
+  console.log(`✅ Session connected: ${sessionId}`);
 
-        const OWNER_NAME = "Malindu Nadith";
-        const BOT_VERSION = "v4.0.0";
+  // 🔥 CONNECT MESSAGE
+  const OWNER_NAME = "Malindu Nadith";
+  const BOT_VERSION = "v4.0.0";
 
-        const now = new Date();
+  const now = new Date();
 
-        const time = new Intl.DateTimeFormat("en-GB", {
-          timeZone: "Asia/Colombo",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: true,
-        }).format(now);
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Colombo",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  }).format(now);
 
-        const date = new Intl.DateTimeFormat("en-GB", {
-          timeZone: "Asia/Colombo",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        }).format(now);
+  const date = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Colombo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
 
-        const up = `
+  const up = `
 🌈━━━━━━━━━━━━━🌈
 🔥🤖 *MALIYA-MD* 🤖🔥
 🌈━━━━━━━━━━━━━🌈
@@ -379,19 +377,19 @@ async function startSessionBot(sessionId) {
 🌈━━━━━━━━━━━🌈
 `.trim();
 
-        try {
-          if (sessionCtx.ownerNumber[0]) {
-            await sock.sendMessage(sessionCtx.ownerNumber[0] + "@s.whatsapp.net", {
-              image: {
-                url: "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Screenshot%202026-01-18%20122855.png?raw=true",
-              },
-              caption: up,
-            });
-          }
-        } catch (e) {
-          console.log("⚠️ Connect msg send failed:", e?.message || e);
-        }
-      }
+  try {
+    if (sessionCtx.ownerNumber[0]) {
+      await sock.sendMessage(sessionCtx.ownerNumber[0] + "@s.whatsapp.net", {
+        image: {
+          url: "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Screenshot%202026-01-18%20122855.png?raw=true",
+        },
+        caption: up,
+      });
+    }
+  } catch (e) {
+    console.log("⚠️ Connect msg send failed:", e?.message || e);
+  }
+}
 
       if (connection === "close") {
         sessionCtx.connected = false;
