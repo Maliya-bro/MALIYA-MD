@@ -448,28 +448,45 @@ async function ensureConfiguredSession() {
   await startSessionBot(config.SESSION_ID);
 }
 
+// 🔥 ONLY THIS PART CHANGE (watcher)
+
 function startSessionWatcher() {
   if (watcherStarted) return;
   watcherStarted = true;
 
   const tick = async () => {
     try {
-      const docs = await getConnectableSessions(MAX_ACTIVE_SESSIONS);
+      const db = await getDb();
+      const col = db.collection(SESSION_COLLECTION);
+
+      const docs = await col.find({
+        connectBot: true,
+        primaryFile: { $exists: true }
+      }).toArray();
 
       for (const doc of docs) {
-        if (!doc?.sessionId) continue;
-        if (activeSessions.has(doc.sessionId)) continue;
-        if (activeSessions.size >= MAX_ACTIVE_SESSIONS) break;
+        const id = doc.sessionId;
 
-        await startSessionBot(doc.sessionId);
+        if (!id) continue;
+
+        // ❌ already connected skip
+        if (activeSessions.has(id)) continue;
+
+        // ❌ avoid reconnect loop
+        if (doc.status === "connected") continue;
+
+        console.log("🔌 Connecting NEW session:", id);
+
+        await startSessionBot(id);
       }
+
     } catch (e) {
       console.log("Watcher tick error:", e?.message || e);
     }
   };
 
-  tick();
-  setInterval(tick, 10000);
+  tick(); // run instantly
+  setInterval(tick, 5000); // 🔥 faster detect
 }
 
 /* ================= SESSION MESSAGE HANDLERS ================= */
