@@ -54,7 +54,9 @@ const MAX_ACTIVE_SESSIONS = Number(process.env.MAX_ACTIVE_SESSIONS || 50);
 
 const MONGODB_URI =
   process.env.MONGODB_URI ||
-  "";
+  "mongodb+srv://MALIYA-MD:279221@maliya-md.uzal3aa.mongodb.net/?appName=maliya-md";
+
+console.log("🔗 MongoDB URI in use:", MONGODB_URI.replace(/:([^@]+)@/, ":****@"));
 
 const MONGODB_DB = process.env.MONGODB_DB || "maliya_md";
 const SESSION_COLLECTION = process.env.SESSION_COLLECTION || "wa_sessions";
@@ -457,6 +459,8 @@ function startSessionWatcher() {
         connectBot: true,
         primaryFile: { $exists: true }
       }).toArray();
+
+      console.log(`🔍 Watcher tick: found ${docs.length} session(s) in DB [${MONGODB_DB}/${SESSION_COLLECTION}]`);
 
       for (const doc of docs) {
         const id = doc.sessionId;
