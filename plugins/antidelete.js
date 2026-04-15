@@ -1,4 +1,7 @@
 const { readSettings } = require("../lib/botSettings");
+const {
+  downloadContentFromMessage
+} = require("@whiskeysockets/baileys");
 
 const store = new Map();
 
@@ -18,6 +21,7 @@ module.exports = {
         timestamp: Date.now(),
       });
 
+      // limit memory
       if (store.size > 1000) {
         const firstKey = store.keys().next().value;
         if (firstKey) store.delete(firstKey);
@@ -49,6 +53,7 @@ module.exports = {
         if (!saved) continue;
 
         const jid = key.remoteJid;
+
         const sender =
           key.participant ||
           key.remoteJid ||
@@ -56,10 +61,13 @@ module.exports = {
           saved.key?.remoteJid ||
           "";
 
-        const senderTag = sender ? `@${String(sender).split("@")[0]}` : "Unknown";
+        const senderTag = sender
+          ? `@${String(sender).split("@")[0]}`
+          : "Unknown";
 
         const infoText = `🚨 *ANTI DELETE*\n\n👤 Sender: ${senderTag}\n🕒 Message restored successfully.`;
 
+        // 📝 TEXT
         if (saved.message.conversation || saved.message.extendedTextMessage) {
           const text =
             saved.message.conversation ||
@@ -70,87 +78,154 @@ module.exports = {
             text: `${infoText}\n\n💬 Message:\n${text}`,
             mentions: sender ? [sender] : [],
           });
-        } else if (saved.message.imageMessage) {
-          await conn.sendMessage(jid, {
-            text: infoText,
-            mentions: sender ? [sender] : [],
-          });
+        }
 
-          await conn.sendMessage(jid, {
-            image: { url: saved.message.imageMessage.url || "" },
-            caption: saved.message.imageMessage.caption || "Restored deleted image",
-          }).catch(async () => {
-            await conn.sendMessage(jid, {
-              text: "🖼️ Deleted image detected, but media could not be restored.",
-            });
-          });
-        } else if (saved.message.videoMessage) {
-          await conn.sendMessage(jid, {
-            text: infoText,
-            mentions: sender ? [sender] : [],
-          });
+        // 🖼️ IMAGE
+        else if (saved.message.imageMessage) {
+          await conn.sendMessage(jid, { text: infoText });
 
-          await conn.sendMessage(jid, {
-            video: { url: saved.message.videoMessage.url || "" },
-            caption: saved.message.videoMessage.caption || "Restored deleted video",
-          }).catch(async () => {
-            await conn.sendMessage(jid, {
-              text: "🎥 Deleted video detected, but media could not be restored.",
-            });
-          });
-        } else if (saved.message.audioMessage) {
-          await conn.sendMessage(jid, {
-            text: infoText,
-            mentions: sender ? [sender] : [],
-          });
+          try {
+            const stream = await downloadContentFromMessage(
+              saved.message.imageMessage,
+              "image"
+            );
 
-          await conn.sendMessage(jid, {
-            audio: { url: saved.message.audioMessage.url || "" },
-            mimetype: saved.message.audioMessage.mimetype || "audio/mp4",
-            ptt: false,
-          }).catch(async () => {
-            await conn.sendMessage(jid, {
-              text: "🎵 Deleted audio detected, but media could not be restored.",
-            });
-          });
-        } else if (saved.message.stickerMessage) {
-          await conn.sendMessage(jid, {
-            text: infoText,
-            mentions: sender ? [sender] : [],
-          });
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) {
+              buffer = Buffer.concat([buffer, chunk]);
+            }
 
-          await conn.sendMessage(jid, {
-            sticker: { url: saved.message.stickerMessage.url || "" },
-          }).catch(async () => {
             await conn.sendMessage(jid, {
-              text: "🧩 Deleted sticker detected, but media could not be restored.",
+              image: buffer,
+              caption:
+                saved.message.imageMessage.caption || "Restored image",
             });
-          });
-        } else if (saved.message.documentMessage) {
-          await conn.sendMessage(jid, {
-            text: infoText,
-            mentions: sender ? [sender] : [],
-          });
+          } catch {
+            await conn.sendMessage(jid, {
+              text: "🖼️ Cannot restore image",
+            });
+          }
+        }
 
-          await conn.sendMessage(jid, {
-            document: { url: saved.message.documentMessage.url || "" },
-            mimetype: saved.message.documentMessage.mimetype,
-            fileName: saved.message.documentMessage.fileName || "restored-file",
-            caption: saved.message.documentMessage.caption || "",
-          }).catch(async () => {
+        // 🎥 VIDEO
+        else if (saved.message.videoMessage) {
+          await conn.sendMessage(jid, { text: infoText });
+
+          try {
+            const stream = await downloadContentFromMessage(
+              saved.message.videoMessage,
+              "video"
+            );
+
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) {
+              buffer = Buffer.concat([buffer, chunk]);
+            }
+
             await conn.sendMessage(jid, {
-              text: "📄 Deleted document detected, but media could not be restored.",
+              video: buffer,
+              caption:
+                saved.message.videoMessage.caption || "Restored video",
             });
-          });
-        } else {
+          } catch {
+            await conn.sendMessage(jid, {
+              text: "🎥 Cannot restore video",
+            });
+          }
+        }
+
+        // 🔊 AUDIO / VOICE
+        else if (saved.message.audioMessage) {
+          await conn.sendMessage(jid, { text: infoText });
+
+          try {
+            const stream = await downloadContentFromMessage(
+              saved.message.audioMessage,
+              "audio"
+            );
+
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) {
+              buffer = Buffer.concat([buffer, chunk]);
+            }
+
+            await conn.sendMessage(jid, {
+              audio: buffer,
+              mimetype: "audio/mp4",
+              ptt: true,
+            });
+          } catch {
+            await conn.sendMessage(jid, {
+              text: "🎵 Cannot restore audio",
+            });
+          }
+        }
+
+        // 🧩 STICKER
+        else if (saved.message.stickerMessage) {
+          await conn.sendMessage(jid, { text: infoText });
+
+          try {
+            const stream = await downloadContentFromMessage(
+              saved.message.stickerMessage,
+              "sticker"
+            );
+
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) {
+              buffer = Buffer.concat([buffer, chunk]);
+            }
+
+            await conn.sendMessage(jid, {
+              sticker: buffer,
+            });
+          } catch {
+            await conn.sendMessage(jid, {
+              text: "🧩 Cannot restore sticker",
+            });
+          }
+        }
+
+        // 📄 DOCUMENT
+        else if (saved.message.documentMessage) {
+          await conn.sendMessage(jid, { text: infoText });
+
+          try {
+            const stream = await downloadContentFromMessage(
+              saved.message.documentMessage,
+              "document"
+            );
+
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) {
+              buffer = Buffer.concat([buffer, chunk]);
+            }
+
+            await conn.sendMessage(jid, {
+              document: buffer,
+              mimetype:
+                saved.message.documentMessage.mimetype ||
+                "application/octet-stream",
+              fileName:
+                saved.message.documentMessage.fileName ||
+                "restored-file",
+            });
+          } catch {
+            await conn.sendMessage(jid, {
+              text: "📄 Cannot restore document",
+            });
+          }
+        }
+
+        // ⚠️ OTHER
+        else {
           await conn.sendMessage(jid, {
-            text: `${infoText}\n\n⚠️ Deleted message type detected but could not be fully restored.`,
-            mentions: sender ? [sender] : [],
+            text: `${infoText}\n\n⚠️ Unknown message type.`,
           });
         }
       }
     } catch (e) {
-      console.log("antidelete onDelete error:", e?.message || e);
+      console.log("antidelete error:", e?.message || e);
     }
   },
 };
