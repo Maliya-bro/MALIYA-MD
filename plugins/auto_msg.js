@@ -3,7 +3,6 @@ const { MongoClient } = require("mongodb");
 
 // ========= ENV =========
 const DEFAULT_KEY = process.env.GEMINI_API_KEY2 || "";
-
 const MONGO = process.env.MONGODB_URI || "";
 const DB = "maliya_md";
 const CACHE = "global_ai_cache";
