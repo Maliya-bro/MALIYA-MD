@@ -1,21 +1,61 @@
 const axios = require("axios");
 const { MongoClient } = require("mongodb");
+const { cmd } = require("../command");
 
 // ========= ENV =========
-const DEFAULT_KEY = process.env.GEMINI_API_KEY2 || "";
+const DEFAULT_KEY =
+  process.env.GEMINI_API_KEY2 ||
+  process.env.GEMINI_API_KEY ||
+  "";
+
 const MONGO = process.env.MONGODB_URI || "";
 const DB = "maliya_md";
+
 const CACHE = "global_ai_cache";
+const USER_KEYS = "user_keys";
 
 // ========= MONGO =========
 let db;
+
 async function getDb() {
+  if (!MONGO) return null;
   if (db) return db;
+
   const client = new MongoClient(MONGO);
   await client.connect();
+
   db = client.db(DB);
   console.log("✅ Mongo Connected");
+
   return db;
+}
+
+// ========= USER KEY =========
+function getOwnerNumber(conn) {
+  return String(conn.user.id).split("@")[0];
+}
+
+async function saveUserKey(conn, apiKey) {
+  const d = await getDb();
+  if (!d) return;
+
+  const phone = getOwnerNumber(conn);
+
+  await d.collection(USER_KEYS).updateOne(
+    { phone },
+    { $set: { phone, apiKey } },
+    { upsert: true }
+  );
+}
+
+async function getUserKey(conn) {
+  const d = await getDb();
+  if (!d) return DEFAULT_KEY;
+
+  const phone = getOwnerNumber(conn);
+  const row = await d.collection(USER_KEYS).findOne({ phone });
+
+  return row?.apiKey || DEFAULT_KEY;
 }
 
 // ========= HELPERS =========
@@ -73,12 +113,16 @@ function findCommand(text) {
 // ========= CACHE =========
 async function findCache(q) {
   const d = await getDb();
+  if (!d) return null;
+
   const doc = await d.collection(CACHE).findOne({ q: normalize(q) });
   return doc?.a || null;
 }
 
 async function saveCache(q, a) {
   const d = await getDb();
+  if (!d) return;
+
   const key = normalize(q);
 
   const exist = await d.collection(CACHE).findOne({ q: key });
@@ -93,7 +137,9 @@ async function saveCache(q, a) {
 
 async function getAllCache() {
   const d = await getDb();
-  return await d.collection(CACHE).find().limit(20).toArray();
+  if (!d) return [];
+
+  return await d.collection(CACHE).find().limit(30).toArray();
 }
 
 // ========= PROMPT =========
@@ -106,13 +152,14 @@ RULES:
 - Always say MALIYA-MD.
 - Be friendly and natural.
 - Use emojis sometimes 😊🔥
+- Talk like a real friend
 - Use sender name: ${sender}
 - Owner name: ${owner} (not too much)
 
 සිංහල:
 - ඔයා MALIYA-MD bot එක
 - Gemini/Google කියන්න එපා
-- යාලුවෙක් වගේ කතා කරන්න 😄
+- යාලුවෙක් වගේ natural කතා කරන්න 😄
 
 User: ${user}
 `;
@@ -131,19 +178,46 @@ function clean(text) {
 }
 
 // ========= AI =========
-async function ai(prompt) {
-  const res = await axios.post(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
-    {
-      contents: [{ parts: [{ text: prompt }] }],
-    },
-    {
-      headers: { "x-goog-api-key": DEFAULT_KEY },
-    }
-  );
+async function ai(prompt, conn) {
+  try {
+    const key = await getUserKey(conn);
 
-  return res.data.candidates[0].content.parts[0].text;
+    const res = await axios.post(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+      {
+        contents: [{ parts: [{ text: prompt }] }],
+      },
+      {
+        headers: { "x-goog-api-key": key },
+      }
+    );
+
+    return res.data.candidates?.[0]?.content?.parts?.[0]?.text || "🙂";
+
+  } catch (e) {
+    if (e.response?.status === 429) {
+      return "⚠️ MALIYA-MD busy now 😅 try again later";
+    }
+
+    console.log("AI ERROR:", e.message);
+    return "⚠️ Error 😅";
+  }
 }
+
+// ========= SETKEY COMMAND =========
+cmd(
+  {
+    pattern: "setkey",
+    desc: "Set your API key",
+    category: "AI",
+  },
+  async (conn, mek, m, { q, reply }) => {
+    if (!q) return reply("Use:\n.setkey YOUR_API_KEY");
+
+    await saveUserKey(conn, q.trim());
+    reply("✅ API key saved!");
+  }
+);
 
 // ========= MAIN =========
 async function onMessage(conn, mek, m, ctx = {}) {
@@ -159,7 +233,7 @@ async function onMessage(conn, mek, m, ctx = {}) {
     const sender = mek.pushName || "friend";
     const owner = conn.user.name || "owner";
 
-    // 🔥 HEAVY
+    // 🔥 HEAVY REQUEST
     if (isHeavy(body)) {
       const cmd = findCommand(body);
       if (cmd) {
@@ -173,13 +247,13 @@ async function onMessage(conn, mek, m, ctx = {}) {
       return;
     }
 
-    // 🔥 CACHE EXACT
+    // 🔥 EXACT REUSE
     const exact = await findCache(body);
     if (exact) {
       return conn.sendMessage(from, { text: exact });
     }
 
-    // 🔥 SIMILAR
+    // 🔥 SIMILAR REUSE
     const list = await getAllCache();
     for (const i of list) {
       if (similarity(body, i.raw) > 0.7) {
@@ -187,14 +261,14 @@ async function onMessage(conn, mek, m, ctx = {}) {
       }
     }
 
-    // 🔥 AI
+    // 🔥 AI GENERATE
     const prompt = buildPrompt(body, sender, owner);
-    let reply = await ai(prompt);
+    let reply = await ai(prompt, conn);
     reply = clean(reply);
 
     await conn.sendMessage(from, { text: reply });
 
-    // save short only
+    // save only useful replies
     if (reply.length < 400) {
       await saveCache(body, reply);
     }
