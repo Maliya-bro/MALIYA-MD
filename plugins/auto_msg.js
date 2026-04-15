@@ -1,208 +1,150 @@
-
-const { cmd } = require("../command");
 const axios = require("axios");
 const { MongoClient } = require("mongodb");
 
 // ========= ENV =========
-const DEFAULT_GEMINI_API_KEY = process.env.GEMINI_API_KEY2 || "";
-const DEFAULT_DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || "";
-
-const MONGODB_URI = process.env.MONGODB_URI || "";
-const MONGODB_DB = process.env.MONGODB_DB || "maliya_md";
-const APIKEY_COLLECTION = "user_api_keys";
-
-const BOT_NAME = "MALIYA-MD";
+const DEFAULT_KEY = process.env.GEMINI_API_KEY2 || "";
+const DEFAULT_KEY = process.env.GEMINI_API_KEY || "";
+const MONGO = process.env.MONGODB_URI || "";
+const DB = "maliya_md";
+const CACHE = "global_ai_cache";
 
 // ========= MONGO =========
-let cachedClient = null;
-let cachedDb = null;
-
+let db;
 async function getDb() {
-  if (!MONGODB_URI) return null;
-  if (cachedDb) return cachedDb;
-
-  cachedClient = new MongoClient(MONGODB_URI, { maxPoolSize: 10 });
-  await cachedClient.connect();
-  cachedDb = cachedClient.db(MONGODB_DB);
-
-  console.log("✅ Mongo connected (auto_msg)");
-  return cachedDb;
-}
-
-function getOwnerNumber(conn) {
-  return String(conn?.user?.id || "")
-    .split("@")[0]
-    .split(":")[0]
-    .replace(/\D/g, "");
-}
-
-// ========= KEY SAVE =========
-async function saveKey(conn, apiKey, pushName = "") {
-  const db = await getDb();
-  if (!db) throw new Error("Mongo not connected");
-
-  const phone = getOwnerNumber(conn);
-
-  await db.collection(APIKEY_COLLECTION).updateOne(
-    { phone },
-    {
-      $set: {
-        phone,
-        geminiApiKey: apiKey,
-        pushName,
-        updatedAt: new Date(),
-      },
-    },
-    { upsert: true }
-  );
-}
-
-async function getUserKey(conn) {
-  const db = await getDb();
-  if (!db) return null;
-
-  const phone = getOwnerNumber(conn);
-  const row = await db.collection(APIKEY_COLLECTION).findOne({ phone });
-
-  return row?.geminiApiKey || null;
+  if (db) return db;
+  const client = new MongoClient(MONGO);
+  await client.connect();
+  db = client.db(DB);
+  console.log("✅ Mongo Connected");
+  return db;
 }
 
 // ========= HELPERS =========
+function normalize(t) {
+  return String(t).toLowerCase().trim();
+}
+
+function similarity(a, b) {
+  const x = normalize(a).split(" ");
+  const y = normalize(b).split(" ");
+  const c = x.filter(w => y.includes(w));
+  return c.length / Math.max(x.length, y.length);
+}
+
+// ========= HEAVY =========
+function isHeavy(text) {
+  const t = normalize(text);
+  return (
+    text.length > 80 ||
+    t.includes("essay") ||
+    t.includes("rachana") ||
+    t.includes("composition")
+  );
+}
+
+// ========= LANGUAGE =========
 function detectLang(text) {
   if (/[අ-෴]/.test(text)) return "si";
-  return "en";
+  if (text.toLowerCase().includes("english")) return "en";
+  return "si";
 }
 
-function getSenderName(mek, m) {
-  return mek?.pushName || m?.pushName || "friend";
-}
+// ========= COMMAND SUGGEST =========
+function findCommand(text) {
+  const t = normalize(text);
+  const lang = detectLang(text);
 
-function splitMessage(text, size = 3500) {
-  const arr = [];
-  let str = text;
-
-  while (str.length > size) {
-    arr.push(str.slice(0, size));
-    str = str.slice(size);
+  if (/(essay|rachana|composition|රචනා)/i.test(t)) {
+    return {
+      cmd: `.dec${lang}`,
+      ex: `.dec${lang} amma`,
+    };
   }
-  if (str) arr.push(str);
-  return arr;
+
+  if (/(tts|voice|speak)/i.test(t)) {
+    return {
+      cmd: `.tts ${lang}`,
+      ex: `.tts ${lang} ayubowan`,
+    };
+  }
+
+  return null;
 }
 
-async function sendLong(conn, jid, text, quoted) {
-  const parts = splitMessage(text);
-  for (const p of parts) {
-    await conn.sendMessage(jid, { text: p }, { quoted });
-  }
+// ========= CACHE =========
+async function findCache(q) {
+  const d = await getDb();
+  const doc = await d.collection(CACHE).findOne({ q: normalize(q) });
+  return doc?.a || null;
+}
+
+async function saveCache(q, a) {
+  const d = await getDb();
+  const key = normalize(q);
+
+  const exist = await d.collection(CACHE).findOne({ q: key });
+  if (exist) return;
+
+  await d.collection(CACHE).insertOne({
+    q: key,
+    raw: q,
+    a,
+  });
+}
+
+async function getAllCache() {
+  const d = await getDb();
+  return await d.collection(CACHE).find().limit(20).toArray();
 }
 
 // ========= PROMPT =========
-function buildPrompt(userText, lang, senderName, ownerName) {
-  if (lang === "si") {
-    return `
-ඔබ "${BOT_NAME}" bot එකක්.
-ඔබ ${ownerName} ගේ bot එක.
-
-User නම: ${senderName}
-
-Natural, friendly Sinhala / Singlish reply දෙන්න.
-User ට name එකෙන් කතා කරන්න.
-
-ඔබ ගැන අහුවොත්:
-"මම ${ownerName} ගේ ${BOT_NAME} bot එක"
-
-User: ${userText}
-`;
-  }
-
+function buildPrompt(user, sender, owner) {
   return `
-You are ${BOT_NAME}.
-You belong to ${ownerName}.
+You are MALIYA-MD.
 
-User name: ${senderName}
+RULES:
+- NEVER say Gemini, Google, AI, ChatGPT.
+- Always say MALIYA-MD.
+- Be friendly and natural.
+- Use emojis sometimes 😊🔥
+- Use sender name: ${sender}
+- Owner name: ${owner} (not too much)
 
-Reply naturally and friendly.
+සිංහල:
+- ඔයා MALIYA-MD bot එක
+- Gemini/Google කියන්න එපා
+- යාලුවෙක් වගේ කතා කරන්න 😄
 
-If asked who you are:
-"I am ${BOT_NAME}, owned by ${ownerName}"
-
-User: ${userText}
+User: ${user}
 `;
 }
 
+// ========= CLEAN =========
+function clean(text) {
+  let t = String(text);
+
+  const bad = ["gemini", "google", "chatgpt", "openai"];
+  for (const w of bad) {
+    t = t.replace(new RegExp(w, "gi"), "MALIYA-MD");
+  }
+
+  return t.trim();
+}
+
 // ========= AI =========
-async function generateGemini(prompt, conn) {
-  const userKey = await getUserKey(conn);
-  const apiKey = userKey || DEFAULT_GEMINI_API_KEY;
-
-  if (!apiKey) throw new Error("No Gemini key");
-
+async function ai(prompt) {
   const res = await axios.post(
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
     {
       contents: [{ parts: [{ text: prompt }] }],
     },
     {
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
+      headers: { "x-goog-api-key": DEFAULT_KEY },
     }
   );
 
-  return res?.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  return res.data.candidates[0].content.parts[0].text;
 }
-
-async function generateDeepSeek(prompt) {
-  if (!DEFAULT_DEEPSEEK_API_KEY) throw new Error("No DeepSeek key");
-
-  const res = await axios.post(
-    "https://api.deepseek.com/chat/completions",
-    {
-      model: "deepseek-chat",
-      messages: [{ role: "user", content: prompt }],
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${DEFAULT_DEEPSEEK_API_KEY}`,
-      },
-    }
-  );
-
-  return res?.data?.choices?.[0]?.message?.content;
-}
-
-async function generateText(prompt, conn) {
-  try {
-    return await generateGemini(prompt, conn);
-  } catch {
-    return await generateDeepSeek(prompt);
-  }
-}
-
-// ========= COMMAND =========
-cmd(
-  {
-    pattern: "setkey",
-    desc: "Set your Gemini API key",
-    category: "AI",
-    react: "🔑",
-    filename: __filename,
-  },
-  async (conn, mek, m, { q, reply, isOwner }) => {
-    try {
-      if (!isOwner) return reply("❌ Only owner can set key");
-
-      if (!q) return reply("Use:\n.setkey YOUR_API_KEY");
-
-      await saveKey(conn, q.trim(), mek.pushName || "");
-
-      return reply("✅ API key saved (only for you)");
-    } catch (e) {
-      return reply("❌ Error saving key");
-    }
-  }
-);
 
 // ========= MAIN =========
 async function onMessage(conn, mek, m, ctx = {}) {
@@ -213,21 +155,53 @@ async function onMessage(conn, mek, m, ctx = {}) {
 
     const body = String(ctx.body || "").trim();
     if (!body) return;
-
     if (body.startsWith(".")) return;
 
-    const lang = detectLang(body);
-    const senderName = getSenderName(mek, m);
-    const ownerName = senderName; // simple (no spam owner names)
+    const sender = mek.pushName || "friend";
+    const owner = conn.user.name || "owner";
 
-    const prompt = buildPrompt(body, lang, senderName, ownerName);
+    // 🔥 HEAVY
+    if (isHeavy(body)) {
+      const cmd = findCommand(body);
+      if (cmd) {
+        return conn.sendMessage(from, {
+          text:
+            `⚠️ Heavy request bro 😅\n\n` +
+            `👉 use ${cmd.cmd}\n\n` +
+            `📌 example:\n${cmd.ex}`,
+        });
+      }
+      return;
+    }
 
-    const ai = await generateText(prompt, conn);
-    if (!ai) return;
+    // 🔥 CACHE EXACT
+    const exact = await findCache(body);
+    if (exact) {
+      return conn.sendMessage(from, { text: exact });
+    }
 
-    await sendLong(conn, from, ai, mek);
+    // 🔥 SIMILAR
+    const list = await getAllCache();
+    for (const i of list) {
+      if (similarity(body, i.raw) > 0.7) {
+        return conn.sendMessage(from, { text: i.a });
+      }
+    }
+
+    // 🔥 AI
+    const prompt = buildPrompt(body, sender, owner);
+    let reply = await ai(prompt);
+    reply = clean(reply);
+
+    await conn.sendMessage(from, { text: reply });
+
+    // save short only
+    if (reply.length < 400) {
+      await saveCache(body, reply);
+    }
+
   } catch (e) {
-    console.log("auto_msg error:", e?.message || e);
+    console.log("ERR:", e.message);
   }
 }
 
