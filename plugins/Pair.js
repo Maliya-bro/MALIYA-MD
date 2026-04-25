@@ -18,7 +18,7 @@ const config = require("../config");
 
 const MONGODB_URI =
   process.env.MONGODB_URI ||
-  "mongodb+srv://MALIYA-MD:279221@maliya-md.spge6db.mongodb.net/?retryWrites=true&w=majority&appName=MALIYA-MD";
+  "mongodb+srv://MALIYA-MD:279221@maliya-md.uzal3aa.mongodb.net/?appName=maliya-md";
 
 const MONGODB_DB = process.env.MONGODB_DB || "maliya_md";
 const SESSION_COLLECTION = process.env.SESSION_COLLECTION || "wa_sessions";
@@ -350,26 +350,26 @@ async function generatePairCode({ conn, from, reply, phone }) {
 
     if (finished) return;
 
-await conn.sendMessage(
-  from,
-  {
-    text:
-      "🔗 *MALIYA-MD PAIR CODE*\n\n" +
-      `📱 Number: ${phone}\n\n` +
-      "📌 Open WhatsApp > Linked Devices > Link with phone number\n" +
-      "Then use the code sent below.\n\n" +
-      "⏱️ Code expires in about 1 minute.",
-  },
-  { quoted: null }
-);
+    await conn.sendMessage(
+      from,
+      {
+        text:
+          "🔗 *MALIYA-MD PAIR CODE*\n\n" +
+          `📱 Number: ${phone}\n\n` +
+          "📌 Open WhatsApp > Linked Devices > Link with phone number\n" +
+          "Then use the code sent below.\n\n" +
+          "⏱️ Code expires in about 1 minute.",
+      },
+      { quoted: null }
+    );
 
-await conn.sendMessage(
-  from,
-  {
-    text: code,
-  },
-  { quoted: null }
-);
+    await conn.sendMessage(
+      from,
+      {
+        text: code,
+      },
+      { quoted: null }
+    );
   } catch (e) {
     console.error("PAIR GENERATE ERROR:", e);
     await reply(
