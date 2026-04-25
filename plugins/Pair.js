@@ -227,17 +227,37 @@ async function generatePairCode({ conn, from, reply, phone }) {
   const tempSessionId = `pair_${phone}_${Date.now()}`;
   const authDir = path.join(__dirname, "../temp", tempSessionId);
 
-  let sock = null;
   let finished = false;
-  let timeout = null;
+  let codeSent = false;
+  let overallTimeout = null;
 
-  try {
-    await reply("⏳ Generating pair code... Please wait.");
+  overallTimeout = setTimeout(async () => {
+    if (finished) return;
+    finished = true;
+    try { await reply("⌛ Pair code timed out. Please try again."); } catch {}
+    await deleteFolderSafe(authDir);
+  }, 90 * 1000);
 
-    const { state, saveCreds } = await useMultiFileAuthState(authDir);
-    const { version } = await fetchLatestBaileysVersion();
+  async function connectSocket() {
+    if (finished) return;
 
-    sock = makeWASocket({
+    let state, saveCreds;
+    try {
+      ({ state, saveCreds } = await useMultiFileAuthState(authDir));
+    } catch (e) {
+      console.error("PAIR useMultiFileAuthState error:", e);
+      return;
+    }
+
+    let version;
+    try {
+      ({ version } = await fetchLatestBaileysVersion());
+    } catch (e) {
+      console.error("PAIR fetchLatestBaileysVersion error:", e);
+      return;
+    }
+
+    const sock = makeWASocket({
       version,
       auth: state,
       logger: P({ level: "silent" }),
@@ -254,43 +274,15 @@ async function generatePairCode({ conn, from, reply, phone }) {
 
     sock.ev.on("creds.update", saveCreds);
 
-    const cleanup = async () => {
-      try {
-        if (timeout) clearTimeout(timeout);
-
-        if (sock?.ev) {
-          try {
-            sock.ev.removeAllListeners("connection.update");
-            sock.ev.removeAllListeners("creds.update");
-          } catch {}
-        }
-
-        if (sock?.ws) {
-          try {
-            sock.ws.close();
-          } catch {}
-        }
-      } catch (e) {
-        console.error("PAIR cleanup socket error:", e);
-      }
-
-      await deleteFolderSafe(authDir);
-    };
-
-    timeout = setTimeout(async () => {
-      if (finished) return;
-      finished = true;
-      await reply("⌛ Pair code request timed out. Try again.");
-      await cleanup();
-    }, 90 * 1000);
-
     sock.ev.on("connection.update", async (update) => {
+      if (finished) return;
+
       try {
         const { connection, lastDisconnect } = update;
 
-        if (connection === "open" && !finished) {
+        if (connection === "open") {
           finished = true;
-          clearTimeout(timeout);
+          clearTimeout(overallTimeout);
 
           try {
             const credsPath = path.join(authDir, "creds.json");
@@ -320,62 +312,90 @@ async function generatePairCode({ conn, from, reply, phone }) {
             await reply("✅ Linked, but failed to save session to database.");
           }
 
-          await cleanup();
+          sock.ev.removeAllListeners();
+          try { sock.ws.close(); } catch {}
+          await deleteFolderSafe(authDir);
           return;
         }
 
-        if (connection === "close" && !finished) {
+        if (connection === "close") {
           const statusCode =
             lastDisconnect?.error?.output?.statusCode ||
             lastDisconnect?.error?.data?.statusCode;
 
           if (statusCode === DisconnectReason.loggedOut) {
             finished = true;
-            clearTimeout(timeout);
-            await reply("❌ Logged out. Try again with `.pair`");
-            await cleanup();
+            clearTimeout(overallTimeout);
+            await reply("❌ Logged out. Try `.pair` again.");
+            await deleteFolderSafe(authDir);
+            return;
           }
+
+          console.log(`PAIR: socket closed (code ${statusCode}) — reconnecting to await pairing...`);
+          sock.ev.removeAllListeners();
+          try { sock.ws.close(); } catch {}
+
+          await new Promise((r) => setTimeout(r, 3000));
+          await connectSocket();
         }
       } catch (e) {
         console.error("PAIR connection.update error:", e);
       }
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 8000));
+    if (!codeSent) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      if (finished) return;
 
-    if (finished) return;
+      try {
+        const rawCode = await sock.requestPairingCode(phone);
+        const code = formatPairCode(rawCode);
+        codeSent = true;
 
-    const rawCode = await sock.requestPairingCode(phone);
-    const code = formatPairCode(rawCode);
+        await conn.sendMessage(
+          from,
+          {
+            text:
+              "🔗 *MALIYA-MD PAIR CODE*\n\n" +
+              `📱 Number: ${phone}\n\n` +
+              "📌 Open WhatsApp > Linked Devices > Link with phone number\n" +
+              "Then enter the code sent below.\n\n" +
+              "⏱️ Code expires in about 1 minute.",
+          },
+          { quoted: null }
+        );
 
-    if (finished) return;
+        await conn.sendMessage(from, { text: code }, { quoted: null });
+      } catch (e) {
+        console.error("PAIR CODE REQUEST ERROR:", e);
+        if (!finished) {
+          finished = true;
+          clearTimeout(overallTimeout);
+          await reply(
+            "❌ Failed to generate pair code.\n\n" +
+              (e?.message ? `Error: ${e.message}` : "")
+          );
+          sock.ev.removeAllListeners();
+          try { sock.ws.close(); } catch {}
+          await deleteFolderSafe(authDir);
+        }
+      }
+    }
+  }
 
-    await conn.sendMessage(
-      from,
-      {
-        text:
-          "🔗 *MALIYA-MD PAIR CODE*\n\n" +
-          `📱 Number: ${phone}\n\n` +
-          "📌 Open WhatsApp > Linked Devices > Link with phone number\n" +
-          "Then use the code sent below.\n\n" +
-          "⏱️ Code expires in about 1 minute.",
-      },
-      { quoted: null }
-    );
-
-    await conn.sendMessage(
-      from,
-      {
-        text: code,
-      },
-      { quoted: null }
-    );
+  try {
+    await reply("⏳ Generating pair code... Please wait.");
+    await connectSocket();
   } catch (e) {
     console.error("PAIR GENERATE ERROR:", e);
-    await reply(
-      "❌ Failed to generate pair code.\n\n" +
-        (e?.message ? `Error: ${e.message}` : "")
-    );
-    await deleteFolderSafe(authDir);
+    if (!finished) {
+      finished = true;
+      clearTimeout(overallTimeout);
+      await reply(
+        "❌ Failed to generate pair code.\n\n" +
+          (e?.message ? `Error: ${e.message}` : "")
+      );
+      await deleteFolderSafe(authDir);
+    }
   }
 }
