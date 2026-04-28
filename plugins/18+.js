@@ -6,106 +6,157 @@ const axios = require('axios');
 const pendingXNXX = {};
 
 // Safety Warning Message
-const warningMsg = "\n\n⚠️ *WARNING:* This content violates *WhatsApp Policies*. Using this may lead to your *account being banned*. Please use it *discreetly* and at your own risk.⚠️ *අවවාදයයි:* මේක *whatsapp නීති උල්ලංගනය* කරන බැවින් ඔබගේ *account එක ban වීමට* බොහෝ ඉඩකඩක් පවතී .... *ප්‍රවේශමෙන්* භාවිතා කරන්න";
+const warningMsg = "\n\n⚠️ Use at your own risk.";
 
+// ================= MAIN COMMAND =================
 cmd({
     pattern: "xxx",
     alias: ["hot", "porn", "sex"],
-    desc: "Search and download xxx videos .",
+    desc: "Search and download xxx videos",
     category: "download",
     react: "🔞",
     filename: __filename
 },
 async (bot, mek, m, { from, q, reply, sender, isOwner }) => {
-    if (!isOwner) return reply("This command is restricted to the *Bot Owner* only!");
-    if (!q) return reply(`🎬 *MALIYA-MD XXX SYSTEM*\n\nUsage: .xxx [video name or link]${warningMsg}`);
+
+    if (!isOwner) return reply("❌ Owner only command!");
+
+    if (!q) {
+        return reply(`🎬 *MALIYA-MD XXX SYSTEM*\n\nUsage: .xxx [name/link]${warningMsg}`);
+    }
 
     try {
-        // 1. Direct Link Handling
+
+        // ===== DIRECT LINK =====
         if (q.includes("xnxx.com")) {
             return await downloadXNXXVideo(bot, from, q, mek, reply);
-        } 
+        }
 
-        // 2. Search Mode
-        reply("🔎 Searching on XXX... Please wait. ⏳");
-        const data = await xnxxSearch(q);
-        
-        if (!data.status || data.result.length === 0) return reply("❌ No results found for your query.");
+        // ===== SEARCH =====
+        reply("🔎 Searching... ⏳");
 
-        let results = data.result.slice(0, 5); // Get top 5 results
-        pendingXNXX[sender] = { results, timestamp: Date.now() };
+        let data;
+        try {
+            data = await xnxxSearch(q);
+        } catch (err) {
+            console.log("Search error:", err);
+            return reply("❌ Search failed (site blocked / API error)");
+        }
 
-        let listMsg = `🔞 *MALIYA-MD XXX SEARCH*\n\n🔍 *Query:* ${q}\n\n`;
-        results.forEach((res, index) => {
-            listMsg += `*${index + 1}.* ${res.title}\nℹ️ ${res.info}\n\n`;
+        if (!data || !data.result || data.result.length === 0) {
+            return reply("❌ No results found.");
+        }
+
+        const results = data.result.slice(0, 5);
+
+        pendingXNXX[sender] = {
+            results,
+            timestamp: Date.now()
+        };
+
+        let listMsg = `🔞 *SEARCH RESULTS*\n\n🔍 ${q}\n\n`;
+
+        results.forEach((v, i) => {
+            listMsg += `*${i + 1}.* ${v.title}\n${v.info}\n\n`;
         });
-        listMsg += `*Reply with the number (1-5) to download.*${warningMsg}`;
 
-        return await bot.sendMessage(from, { text: listMsg }, { quoted: mek });
+        listMsg += `Reply with number (1-5)${warningMsg}`;
+
+        await bot.sendMessage(from, { text: listMsg }, { quoted: mek });
 
     } catch (e) {
-        console.error(e);
-        reply("⚠️ A server error occurred. Please try again later.");
+        console.log("Main error:", e);
+        reply("⚠️ Server error. Try again later.");
     }
 });
 
-// Number Reply Handler
+// ================= NUMBER REPLY =================
 cmd({
     on: "body"
-}, async (bot, mek, m, { body, sender, reply, from }) => {
-    if (pendingXNXX[sender] && !isNaN(body) && parseInt(body) > 0 && parseInt(body) <= pendingXNXX[sender].results.length) {
-        
-        const index = parseInt(body.trim()) - 1;
-        const selected = pendingXNXX[sender].results[index];
-        
-        delete pendingXNXX[sender]; // Clear session
+},
+async (bot, mek, m, { body, sender, reply, from }) => {
 
-        await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
-        await downloadXNXXVideo(bot, from, selected.link, mek, reply);
-    }
+    if (!pendingXNXX[sender]) return;
+
+    if (isNaN(body)) return;
+
+    const num = parseInt(body);
+
+    if (num < 1 || num > pendingXNXX[sender].results.length) return;
+
+    const selected = pendingXNXX[sender].results[num - 1];
+
+    delete pendingXNXX[sender];
+
+    await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
+
+    await downloadXNXXVideo(bot, from, selected.link, mek, reply);
 });
 
-// Video Downloader Function
+// ================= DOWNLOAD FUNCTION =================
 async function downloadXNXXVideo(bot, from, url, mek, reply) {
     try {
-        const data = await xnxxDownload(url);
-        if (!data.status) return reply("❌ Could not retrieve the download link.");
 
-        // Priority: High quality, then Low quality
+        let data;
+
+        try {
+            data = await xnxxDownload(url);
+        } catch (err) {
+            console.log("Download error:", err);
+            return reply("❌ Failed to fetch video (site blocked)");
+        }
+
+        if (!data || !data.result) {
+            return reply("❌ Invalid response from server.");
+        }
+
         let videoUrl = data.result.files.high || data.result.files.low;
-        let title = data.result.title;
+        let title = data.result.title || "video";
 
-        // Check File Size
-        const head = await axios.head(videoUrl);
-        const sizeInMB = (head.headers['content-length'] || 0) / (1024 * 1024);
+        if (!videoUrl) return reply("❌ No video link found.");
 
-        let caption = `✅ *MALIYA-MD XXX FETCH*\n\n🎬 *Title:* ${title}\n⚖️ *Size:* ${sizeInMB.toFixed(2)} MB${warningMsg}`;
+        // ===== FILE SIZE CHECK =====
+        let sizeInMB = 0;
 
+        try {
+            const head = await axios.head(videoUrl);
+            sizeInMB = (head.headers['content-length'] || 0) / (1024 * 1024);
+        } catch {
+            console.log("Size check failed");
+        }
+
+        let caption = `✅ *DOWNLOAD SUCCESS*\n\n🎬 ${title}\n⚖️ ${sizeInMB.toFixed(2)} MB${warningMsg}`;
+
+        // ===== SEND =====
         if (sizeInMB > 100) {
-            reply(`⚖️ Size: ${sizeInMB.toFixed(2)}MB. Sending as a *Document* to avoid quality loss...`);
-            return await bot.sendMessage(from, { 
-                document: { url: videoUrl }, 
-                mimetype: 'video/mp4', 
-                fileName: `${title.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20)}.mp4`, 
-                caption 
+            return await bot.sendMessage(from, {
+                document: { url: videoUrl },
+                mimetype: 'video/mp4',
+                fileName: `${title.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 20)}.mp4`,
+                caption
             }, { quoted: mek });
         } else {
-            return await bot.sendMessage(from, { 
-                video: { url: videoUrl }, 
-                caption, 
-                mimetype: 'video/mp4' 
+            return await bot.sendMessage(from, {
+                video: { url: videoUrl },
+                mimetype: 'video/mp4',
+                caption
             }, { quoted: mek });
         }
+
     } catch (e) {
-        console.error(e);
-        reply("❌ Download failed. The link might be expired or restricted.");
+        console.log("Final error:", e);
+        reply("❌ Download failed.");
     }
 }
 
-// Memory Cleanup: Delete sessions older than 10 minutes
+// ================= CLEANUP =================
 setInterval(() => {
     const now = Date.now();
+
     for (const s in pendingXNXX) {
-        if (now - pendingXNXX[s].timestamp > 10 * 60 * 1000) delete pendingXNXX[s];
+        if (now - pendingXNXX[s].timestamp > 10 * 60 * 1000) {
+            delete pendingXNXX[s];
+        }
     }
+
 }, 5 * 60 * 1000);
