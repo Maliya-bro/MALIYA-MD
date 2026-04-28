@@ -63,7 +63,8 @@
     "gifted-btns": "latest",
     "mongodb": "latest",
     "xnxx-scraper": "latest",
-    "soyaxell09/zenbot-scraper": "latest"
+    "@soyaxell09/zenbot-scraper": "latest"
+    
     
   }
 }
