@@ -1,6 +1,40 @@
 // index.js (MULTI USER FULL CODE)
 // ------------------------------------------------------------
 
+/* ================= GLOBAL CRASH GUARD ================= */
+
+process.on("unhandledRejection", (reason) => {
+  const msg = String(reason?.message || reason || "");
+  if (
+    msg.includes("Bad MAC") ||
+    msg.includes("Failed to decrypt") ||
+    msg.includes("Stream Errored") ||
+    msg.includes("Connection Closed") ||
+    msg.includes("Connection Lost") ||
+    msg.includes("ECONNRESET") ||
+    msg.includes("ETIMEDOUT")
+  ) {
+    console.log("⚠️ Non-fatal rejection suppressed:", msg.slice(0, 120));
+    return;
+  }
+  console.error("❌ Unhandled Rejection:", msg);
+});
+
+process.on("uncaughtException", (err) => {
+  const msg = String(err?.message || err || "");
+  if (
+    msg.includes("Bad MAC") ||
+    msg.includes("Failed to decrypt") ||
+    msg.includes("Stream Errored") ||
+    msg.includes("ECONNRESET") ||
+    msg.includes("ETIMEDOUT")
+  ) {
+    console.log("⚠️ Non-fatal exception suppressed:", msg.slice(0, 120));
+    return;
+  }
+  console.error("❌ Uncaught Exception:", msg);
+});
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -320,6 +354,7 @@ async function startSessionBot(sessionId) {
     sock.ev.on("creds.update", saveCreds);
 
     sock.ev.on("connection.update", async (update) => {
+      try {
       const { connection, lastDisconnect } = update;
 
       if (connection === "open") {
@@ -418,6 +453,9 @@ async function startSessionBot(sessionId) {
           await cleanupSessionFolder(sessionId);
         }
       }
+      } catch (e) {
+        console.log("⚠️ connection.update handler error:", e?.message || e);
+      }
     });
 
     attachSessionHandlers(sock, sessionCtx);
@@ -481,7 +519,7 @@ function startSessionWatcher() {
   };
 
   tick(); // run instantly
-  setInterval(tick, 20000); // 🔥 faster detect
+  setInterval(tick, 5000); // 🔥 faster detect
 }
 
 /* ================= SESSION MESSAGE HANDLERS ================= */
@@ -516,6 +554,7 @@ function attachSessionHandlers(sock, sessionCtx) {
     if (!messages || !messages.length) return;
 
     for (const mek of messages) {
+      try {
       if (!mek?.message) continue;
 
       mek.message =
@@ -533,115 +572,143 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
       }
 
-if (mek.key?.remoteJid === "status@broadcast") {
-  const statusKey = mek.key;
+      if (mek.key?.remoteJid === "status@broadcast") {
+        const participantRaw = mek.key.participant;
+        const id = mek.key.id;
 
-  const participant = jidNormalizedUser(
-    mek.key.participant || mek.key.remoteJid
-  );
+        if (!participantRaw || !id) continue;
 
-  const mentionJid = participant.includes("@s.whatsapp.net")
-    ? participant
-    : participant + "@s.whatsapp.net";
+        const participant = jidNormalizedUser(participantRaw);
+        const myJid = jidNormalizedUser(sock.user?.id || "");
 
-  // ✅ SEEN FIX
-  if (readSettings().auto_status_seen === true) {
-    try {
-      await sock.readMessages([statusKey]);
-      console.log(`[✓] Status seen: ${statusKey.id} (${participant})`);
-    } catch (e) {
-      console.error("❌ Seen error:", e?.message || e);
-    }
-  }
+        const mentionJid = participant.includes("@s.whatsapp.net")
+          ? participant
+          : participant + "@s.whatsapp.net";
 
-  // ✅ REACT FIX
-  if (readSettings().auto_status_react === true) {
-    try {
-      const emojis = [
-        "❤️","💸","😇","🍂","💥","💯","🔥","💫","💎","💗",
-        "🤍","🖤","👀","🙌","🙆","🚩","🥰","💐","😎","✅"
-      ];
+        const statusKey = {
+          remoteJid: "status@broadcast",
+          id,
+          participant,
+          fromMe: false,
+        };
 
-      const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+        if (readSettings().auto_status_seen === true) {
+          try {
+            await sock.readMessages([statusKey]);
 
-      await sock.sendMessage(
-        "status@broadcast",
-        { react: { text: randomEmoji, key: statusKey } },
-        { statusJidList: [participant] }
-      );
+            try {
+              await sock.sendReadReceipt("status@broadcast", participant, [id]);
+            } catch {}
 
-      console.log(`[✓] Reacted to ${participant} with ${randomEmoji}`);
-    } catch (e) {
-      console.error("❌ React error:", e?.message || e);
-    }
-  }
-
-  // ✅ TEXT STATUS FORWARD
-  if (
-    mek.message?.extendedTextMessage &&
-    !mek.message.imageMessage &&
-    !mek.message.videoMessage
-  ) {
-    const text = mek.message.extendedTextMessage.text || "";
-    if (text.trim().length > 0) {
-      try {
-        if (sessionCtx.ownerNumber[0]) {
-          await sock.sendMessage(
-            sessionCtx.ownerNumber[0] + "@s.whatsapp.net",
-            {
-              text: `📝 *Text Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${text}`,
-              mentions: [mentionJid],
-            }
-          );
-        }
-      } catch (e) {
-        console.error("❌ Forward text error:", e?.message || e);
-      }
-    }
-  }
-
-  // ✅ MEDIA STATUS DOWNLOAD + FORWARD
-  if (mek.message?.imageMessage || mek.message?.videoMessage) {
-    try {
-      const msgType = mek.message.imageMessage ? "imageMessage" : "videoMessage";
-      const mediaMsg = mek.message[msgType];
-
-      const stream = await downloadContentFromMessage(
-        mediaMsg,
-        msgType === "imageMessage" ? "image" : "video"
-      );
-
-      let buffer = Buffer.from([]);
-      for await (const chunk of stream) {
-        buffer = Buffer.concat([buffer, chunk]);
-      }
-
-      const mimetype =
-        mediaMsg.mimetype ||
-        (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
-
-      const captionText = mediaMsg.caption || "";
-
-      if (sessionCtx.ownerNumber[0]) {
-        await sock.sendMessage(
-          sessionCtx.ownerNumber[0] + "@s.whatsapp.net",
-          {
-            [msgType === "imageMessage" ? "image" : "video"]: buffer,
-            mimetype,
-            caption: `📥 *Forwarded Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${captionText}`,
-            mentions: [mentionJid],
+            console.log(`[✓] Status seen: ${id} (${participant})`);
+          } catch (e) {
+            console.error("❌ Failed to mark status as seen:", e?.message || e);
           }
-        );
+        }
+
+        // ===== ANTI-SPAM FIX =====
+        const processedStatuses = global.processedStatuses || new Set();
+        global.processedStatuses = processedStatuses;
+
+        if (!global.lastReactTime) global.lastReactTime = 0;
+
+        // 🛑 DUPLICATE BLOCK
+        if (processedStatuses.has(statusKey.id)) return;
+        processedStatuses.add(statusKey.id);
+
+        // 🧹 AUTO CLEAN
+        setTimeout(() => {
+          processedStatuses.delete(statusKey.id);
+        }, 300000);
+
+        // ===== REACT SAFE =====
+        if (readSettings().auto_status_react === true) {
+
+          const now = Date.now();
+          const lastReactTime = global.lastReactTime || 0;
+
+          // ⏱️ delay control
+          if (now - lastReactTime < 3000) return;
+
+          global.lastReactTime = now;
+
+          try {
+            const emojis = [
+              "❤️","🔥","😎","💫","💎","💗","🤍","🖤",
+              "👀","🙌","🥰","💐","💥","💯"
+            ];
+
+            const randomEmoji =
+              emojis[Math.floor(Math.random() * emojis.length)];
+
+            await sock.sendMessage(
+              "status@broadcast",
+              { react: { text: randomEmoji, key: statusKey } },
+              { statusJidList: [participant] }
+            );
+
+            console.log(`[✓] Reacted to ${participant} with ${randomEmoji}`);
+
+          } catch (e) {
+            console.error("❌ React error:", e?.message || e);
+          }
+        }
+
+        if (
+          mek.message?.extendedTextMessage &&
+          !mek.message.imageMessage &&
+          !mek.message.videoMessage
+        ) {
+          const text = mek.message.extendedTextMessage.text || "";
+          if (text.trim().length > 0) {
+            try {
+              if (sessionCtx.ownerNumber[0]) {
+                await sock.sendMessage(sessionCtx.ownerNumber[0] + "@s.whatsapp.net", {
+                  text: `📝 *Text Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${text}`,
+                  mentions: [mentionJid],
+                });
+              }
+              console.log(`✅ Text-only status from ${mentionJid} forwarded.`);
+            } catch (e) {
+              console.error("❌ Failed to forward text status:", e?.message || e);
+            }
+          }
+        }
+
+        if (mek.message?.imageMessage || mek.message?.videoMessage) {
+          try {
+            const msgType = mek.message.imageMessage ? "imageMessage" : "videoMessage";
+            const mediaMsg = mek.message[msgType];
+
+            const stream = await downloadContentFromMessage(
+              mediaMsg,
+              msgType === "imageMessage" ? "image" : "video"
+            );
+
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+
+            const mimetype =
+              mediaMsg.mimetype || (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
+            const captionText = mediaMsg.caption || "";
+
+            if (sessionCtx.ownerNumber[0]) {
+              await sock.sendMessage(sessionCtx.ownerNumber[0] + "@s.whatsapp.net", {
+                [msgType === "imageMessage" ? "image" : "video"]: buffer,
+                mimetype,
+                caption: `📥 *Forwarded Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${captionText}`,
+                mentions: [mentionJid],
+              });
+            }
+
+            console.log(`✅ Media status from ${mentionJid} forwarded.`);
+          } catch (err) {
+            console.error("❌ Failed to download or forward media status:", err?.message || err);
+          }
+        }
+
+        continue;
       }
-
-      console.log(`✅ Media status from ${mentionJid} forwarded.`);
-    } catch (err) {
-      console.error("❌ Media forward error:", err?.message || err);
-    }
-  }
-
-  continue;
-}
 
       const m = sms(sock, mek);
 
@@ -827,6 +894,9 @@ if (mek.key?.remoteJid === "status@broadcast") {
             reply,
           });
         }
+      }
+      } catch (e) {
+        console.log("⚠️ Message process error:", e?.message || e);
       }
     }
   });
