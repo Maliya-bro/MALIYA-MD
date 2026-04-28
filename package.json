@@ -62,7 +62,8 @@
     "pdf-parse": "latest",
     "gifted-btns": "latest",
     "mongodb": "latest",
-    "xnxx-scraper": "latest"
+    "xnxx-scraper": "latest",
+    "soyaxell09/zenbot-scraper": "latest"
     
   }
 }
