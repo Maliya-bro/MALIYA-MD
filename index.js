@@ -460,7 +460,7 @@ function startSessionWatcher() {
         primaryFile: { $exists: true }
       }).toArray();
 
-      //console.log(`🔍 Watcher tick: found ${docs.length} session(s) in DB [${MONGODB_DB}/${SESSION_COLLECTION}]`);
+      console.log(`🔍 Watcher tick: found ${docs.length} session(s) in DB [${MONGODB_DB}/${SESSION_COLLECTION}]`);
 
       for (const doc of docs) {
         const id = doc.sessionId;
@@ -481,7 +481,7 @@ function startSessionWatcher() {
   };
 
   tick(); // run instantly
-  setInterval(tick, 5000); // 🔥 faster detect
+  setInterval(tick, 20000); // 🔥 faster detect
 }
 
 /* ================= SESSION MESSAGE HANDLERS ================= */
