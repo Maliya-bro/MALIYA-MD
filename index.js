@@ -533,115 +533,115 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
       }
 
-      if (mek.key?.remoteJid === "status@broadcast") {
-        const participantRaw = mek.key.participant;
-        const id = mek.key.id;
+if (mek.key?.remoteJid === "status@broadcast") {
+  const statusKey = mek.key;
 
-        if (!participantRaw || !id) continue;
+  const participant = jidNormalizedUser(
+    mek.key.participant || mek.key.remoteJid
+  );
 
-        const participant = jidNormalizedUser(participantRaw);
-        const myJid = jidNormalizedUser(sock.user?.id || "");
+  const mentionJid = participant.includes("@s.whatsapp.net")
+    ? participant
+    : participant + "@s.whatsapp.net";
 
-        const mentionJid = participant.includes("@s.whatsapp.net")
-          ? participant
-          : participant + "@s.whatsapp.net";
+  // ✅ SEEN FIX
+  if (readSettings().auto_status_seen === true) {
+    try {
+      await sock.readMessages([statusKey]);
+      console.log(`[✓] Status seen: ${statusKey.id} (${participant})`);
+    } catch (e) {
+      console.error("❌ Seen error:", e?.message || e);
+    }
+  }
 
-        const statusKey = {
-          remoteJid: "status@broadcast",
-          id,
-          participant,
-          fromMe: false,
-        };
+  // ✅ REACT FIX
+  if (readSettings().auto_status_react === true) {
+    try {
+      const emojis = [
+        "❤️","💸","😇","🍂","💥","💯","🔥","💫","💎","💗",
+        "🤍","🖤","👀","🙌","🙆","🚩","🥰","💐","😎","✅"
+      ];
 
-        if (readSettings().auto_status_seen === true) {
-          try {
-            await sock.readMessages([statusKey]);
+      const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-            try {
-              await sock.sendReadReceipt("status@broadcast", participant, [id]);
-            } catch {}
+      await sock.sendMessage(
+        "status@broadcast",
+        { react: { text: randomEmoji, key: statusKey } },
+        { statusJidList: [participant] }
+      );
 
-            console.log(`[✓] Status seen: ${id} (${participant})`);
-          } catch (e) {
-            console.error("❌ Failed to mark status as seen:", e?.message || e);
-          }
-        }
+      console.log(`[✓] Reacted to ${participant} with ${randomEmoji}`);
+    } catch (e) {
+      console.error("❌ React error:", e?.message || e);
+    }
+  }
 
-        if (readSettings().auto_status_react === true) {
-          try {
-            const emojis = [
-              "❤️", "💸", "😇", "🍂", "💥", "💯", "🔥", "💫", "💎", "💗", "🤍", "🖤", "👀", "🙌", "🙆", "🚩",
-              "🥰", "💐", "😎", "✅", "🫀", "😁", "😄", "🌸", "🕊️", "🌷", "⛅", "🌟", "🗿", "💜", "🌝"
-            ];
-            const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-
-            await sock.sendMessage(
-              "status@broadcast",
-              { react: { text: randomEmoji, key: statusKey } },
-              { statusJidList: [participant, myJid].filter(Boolean) }
-            );
-
-            console.log(`[✓] Reacted to status of ${participant} with ${randomEmoji}`);
-          } catch (e) {
-            console.error("❌ Failed to react to status:", e?.message || e);
-          }
-        }
-
-        if (
-          mek.message?.extendedTextMessage &&
-          !mek.message.imageMessage &&
-          !mek.message.videoMessage
-        ) {
-          const text = mek.message.extendedTextMessage.text || "";
-          if (text.trim().length > 0) {
-            try {
-              if (sessionCtx.ownerNumber[0]) {
-                await sock.sendMessage(sessionCtx.ownerNumber[0] + "@s.whatsapp.net", {
-                  text: `📝 *Text Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${text}`,
-                  mentions: [mentionJid],
-                });
-              }
-              console.log(`✅ Text-only status from ${mentionJid} forwarded.`);
-            } catch (e) {
-              console.error("❌ Failed to forward text status:", e?.message || e);
+  // ✅ TEXT STATUS FORWARD
+  if (
+    mek.message?.extendedTextMessage &&
+    !mek.message.imageMessage &&
+    !mek.message.videoMessage
+  ) {
+    const text = mek.message.extendedTextMessage.text || "";
+    if (text.trim().length > 0) {
+      try {
+        if (sessionCtx.ownerNumber[0]) {
+          await sock.sendMessage(
+            sessionCtx.ownerNumber[0] + "@s.whatsapp.net",
+            {
+              text: `📝 *Text Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${text}`,
+              mentions: [mentionJid],
             }
-          }
+          );
         }
-
-        if (mek.message?.imageMessage || mek.message?.videoMessage) {
-          try {
-            const msgType = mek.message.imageMessage ? "imageMessage" : "videoMessage";
-            const mediaMsg = mek.message[msgType];
-
-            const stream = await downloadContentFromMessage(
-              mediaMsg,
-              msgType === "imageMessage" ? "image" : "video"
-            );
-
-            let buffer = Buffer.from([]);
-            for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-
-            const mimetype =
-              mediaMsg.mimetype || (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
-            const captionText = mediaMsg.caption || "";
-
-            if (sessionCtx.ownerNumber[0]) {
-              await sock.sendMessage(sessionCtx.ownerNumber[0] + "@s.whatsapp.net", {
-                [msgType === "imageMessage" ? "image" : "video"]: buffer,
-                mimetype,
-                caption: `📥 *Forwarded Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${captionText}`,
-                mentions: [mentionJid],
-              });
-            }
-
-            console.log(`✅ Media status from ${mentionJid} forwarded.`);
-          } catch (err) {
-            console.error("❌ Failed to download or forward media status:", err?.message || err);
-          }
-        }
-
-        continue;
+      } catch (e) {
+        console.error("❌ Forward text error:", e?.message || e);
       }
+    }
+  }
+
+  // ✅ MEDIA STATUS DOWNLOAD + FORWARD
+  if (mek.message?.imageMessage || mek.message?.videoMessage) {
+    try {
+      const msgType = mek.message.imageMessage ? "imageMessage" : "videoMessage";
+      const mediaMsg = mek.message[msgType];
+
+      const stream = await downloadContentFromMessage(
+        mediaMsg,
+        msgType === "imageMessage" ? "image" : "video"
+      );
+
+      let buffer = Buffer.from([]);
+      for await (const chunk of stream) {
+        buffer = Buffer.concat([buffer, chunk]);
+      }
+
+      const mimetype =
+        mediaMsg.mimetype ||
+        (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
+
+      const captionText = mediaMsg.caption || "";
+
+      if (sessionCtx.ownerNumber[0]) {
+        await sock.sendMessage(
+          sessionCtx.ownerNumber[0] + "@s.whatsapp.net",
+          {
+            [msgType === "imageMessage" ? "image" : "video"]: buffer,
+            mimetype,
+            caption: `📥 *Forwarded Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${captionText}`,
+            mentions: [mentionJid],
+          }
+        );
+      }
+
+      console.log(`✅ Media status from ${mentionJid} forwarded.`);
+    } catch (err) {
+      console.error("❌ Media forward error:", err?.message || err);
+    }
+  }
+
+  continue;
+}
 
       const m = sms(sock, mek);
 
