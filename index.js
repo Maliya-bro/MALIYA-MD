@@ -572,27 +572,39 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
       }
 
-if (mek.key && mek.key.remoteJid === "status@broadcast" && !mek.key.fromMe) {
-
+if (mek.key && mek.key.remoteJid === "status@broadcast") {
   const participantRaw = mek.key.participant;
   const id = mek.key.id;
 
   if (!participantRaw || !id) continue;
 
   const participant = jidNormalizedUser(participantRaw);
+  const botJid = jidNormalizedUser(sock.user?.id || "");
+
+  // 🔥 FIX: own status skip
+  if (participant === botJid || mek.key.fromMe) {
+    console.log(`⏭️ Skipped own status: ${id}`);
+    continue;
+  }
+
+  const statusKey = {
+    remoteJid: "status@broadcast",
+    id,
+    participant,
+    fromMe: false,
+  };
 
   // ===== SEEN =====
   if (readSettings().auto_status_seen === true) {
     try {
       await sock.readMessages([
-        {
-          remoteJid: "status@broadcast",
-          id: mek.key.id,
-          participant: mek.key.participant,
-        },
-      ]);
-
-      console.log(`[✓] Status seen: ${id}`);
+  {
+    remoteJid: "status@broadcast",
+    id: id,
+    participant: participant,
+  },
+]);
+      console.log(`[✓] Status seen: ${id} (${participant})`);
     } catch (e) {
       console.error("❌ Seen error:", e?.message || e);
     }
@@ -602,10 +614,14 @@ if (mek.key && mek.key.remoteJid === "status@broadcast" && !mek.key.fromMe) {
   const processedStatuses = global.processedStatuses || new Set();
   global.processedStatuses = processedStatuses;
 
-  if (processedStatuses.has(id)) continue;
-  processedStatuses.add(id);
+  const uniqueStatusId = `${participant}:${id}`;
 
-  setTimeout(() => processedStatuses.delete(id), 300000);
+  if (processedStatuses.has(uniqueStatusId)) continue;
+  processedStatuses.add(uniqueStatusId);
+
+  setTimeout(() => {
+    processedStatuses.delete(uniqueStatusId);
+  }, 300000);
 
   // ===== REACT =====
   if (readSettings().auto_status_react === true) {
@@ -618,20 +634,27 @@ if (mek.key && mek.key.remoteJid === "status@broadcast" && !mek.key.fromMe) {
 
       const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-      await sock.sendMessage(participant, {
-        react: {
-          text: randomEmoji,
-          key: mek.key,
+      // 🔥 FIX: proper status reaction method
+      await sock.sendMessage(
+        "status@broadcast",
+        {
+          react: {
+            text: randomEmoji,
+            key: statusKey,
+          },
         },
-      });
+        {
+          statusJidList: [participant],
+        }
+      );
 
-      console.log(`[✓] Reacted: ${randomEmoji}`);
+      console.log(`[✓] Reacted to ${participant}: ${randomEmoji}`);
     } catch (e) {
       console.error("❌ React error:", e?.message || e);
     }
   }
 
-  // ===== AUTO DOWNLOAD (ONLY WHEN ON) =====
+  // ===== AUTO DOWNLOAD ONLY WHEN ON =====
   if (
     readSettings().auto_download_status === true &&
     (mek.message?.imageMessage || mek.message?.videoMessage)
