@@ -64,7 +64,7 @@ module.exports = {
 
   ANTI_DELETE: toBool(process.env.ANTI_DELETE, true),
 
-  AUTO_MSG: toBool(process.env.AUTO_MSG, true),
+  AUTO_MSG: toBool(process.env.AUTO_MSG, false),
 
   AUTO_REJECT_CALLS: toBool(process.env.AUTO_REJECT_CALLS, false),
 
