@@ -582,7 +582,13 @@ if (
 
   if (!participantRaw || !id) continue;
 
-  const participant = jidNormalizedUser(participantRaw);
+  let participant = jidNormalizedUser(participantRaw);
+
+// 🔥 convert @lid → @s.whatsapp.net
+if (participant.endsWith("@lid")) {
+  participant =
+    participant.split("@")[0] + "@s.whatsapp.net";
+}
   const botJid = jidNormalizedUser(sock.user?.id || "");
 
   // 🔥 FIX: own status skip
