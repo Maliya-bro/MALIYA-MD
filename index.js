@@ -572,7 +572,11 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
       }
 
-if (mek.key && mek.key.remoteJid === "status@broadcast") {
+if (
+  mek.key &&
+  mek.key.remoteJid === "status@broadcast" &&
+  !mek.message?.reactionMessage
+) {
   const participantRaw = mek.key.participant;
   const id = mek.key.id;
 
@@ -611,30 +615,51 @@ if (mek.key && mek.key.remoteJid === "status@broadcast") {
   }
 
   // ===== DUPLICATE CONTROL =====
-  const processedStatuses = global.processedStatuses || new Set();
-  global.processedStatuses = processedStatuses;
+const processedStatuses = global.processedStatuses || new Map();
+global.processedStatuses = processedStatuses;
 
-  const uniqueStatusId = `${participant}:${id}`;
+const uniqueStatusId = `${participant}:${id}`;
+const now = Date.now();
 
-  if (processedStatuses.has(uniqueStatusId)) continue;
-  processedStatuses.add(uniqueStatusId);
+// 🔥 already reacted recently
+if (processedStatuses.has(uniqueStatusId)) {
+  const lastReact = processedStatuses.get(uniqueStatusId);
 
-  setTimeout(() => {
-    processedStatuses.delete(uniqueStatusId);
-  }, 300000);
+  // 5 min cooldown
+  if (now - lastReact < 300000) {
+    continue;
+  }
+}
+
+// save timestamp
+processedStatuses.set(uniqueStatusId, now);
+
+// auto cleanup
+setTimeout(() => {
+  processedStatuses.delete(uniqueStatusId);
+}, 300000);
 
   // ===== REACT =====
   if (readSettings().auto_status_react === true) {
     try {
       const emojis = [
-        "❤️","🔥","😎","💫","💎","💗","💯","✨","🌟","⚡",
-        "💥","🎯","🥰","😍","😘","🤩","😊","😇","😋","😜",
-        "😏","👀","🙌","👏","👌","👍","🤝","🌈","🌸","🚀"
+     // 🔥 AURA
+  "😎","🔥","⚡","👑","💯","💎","🚀","😈",
+
+  // 💔 SAD
+  "💔","🥺","😔","😭","🥀","😞","🌧️","❤️‍🩹",
+
+  // 😂 FUNNY
+  "😂","🤣","🤡","💀","🗿","😜","🙈","🍿",
+
+  // 🎉 OTHERS
+  "❤️","✨","🌈","🎶","🌟","🎧"
       ];
 
       const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
       // 🔥 FIX: proper status reaction method
+     await new Promise(r => setTimeout(r, 1500));
       await sock.sendMessage(
         "status@broadcast",
         {
