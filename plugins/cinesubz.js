@@ -21,15 +21,7 @@ function cleanTitle(title = "") {
     .trim();
 }
 
-// Parse size string → MB number
-function parseSizeMB(sizeStr = "") {
-  const s = sizeStr.toUpperCase().trim();
-  const num = parseFloat(s);
-  if (isNaN(num)) return 9999;
-  if (s.includes("GB")) return num * 1024;
-  if (s.includes("MB")) return num;
-  return 9999;
-}
+
 
 function normalizeQuality(text = "") {
   const t = text.toUpperCase();
@@ -211,7 +203,7 @@ cmd(
     }
 
     if (!results.length)
-      return reply(`*❌ "${q}" No results found.*\nTry correct name.`);
+      return reply(`*❌ "${q}" ගැන results නැහැ.*\nවෙනත් නමකින් try කරන්න.`);
 
     pendingSearch[sender] = { results, timestamp: Date.now() };
 
@@ -245,7 +237,7 @@ cmd(
     const selected = pendingSearch[sender].results[idx];
     delete pendingSearch[sender];
 
-    reply("*⏳ Connecting To MALIYA-MD FILM DB...*");
+    reply("*⏳ Movie details සහ download links ගන්නවා...*");
 
     let meta;
     try {
@@ -264,15 +256,9 @@ cmd(
     if (meta.directors.length) msg += `🎥 *Director:* ${meta.directors.join(", ")}\n`;
     if (meta.subtitleBy) msg += `📝 *Sub By:* ${meta.subtitleBy}\n`;
 
-    // Filter: only links ≤ 2 GB
-    const under2gb = meta.links.filter((l) => {
-      const mb = parseSizeMB(l.size);
-      return mb <= 2048;
-    });
-
-    if (!under2gb.length) {
-      msg += `\n⚠️ *2GB යට links නැහැ.*\nAvailable sizes:\n`;
-      meta.links.forEach((l) => (msg += `• ${l.label}\n`));
+    // Show ALL qualities (no size limit)
+    if (!meta.links.length) {
+      msg += `\n⚠️ *Download links නැහැ.*`;
       try {
         if (meta.thumb)
           await maliya.sendMessage(from, { image: { url: meta.thumb }, caption: msg }, { quoted: mek });
@@ -284,14 +270,14 @@ cmd(
       return;
     }
 
-    msg += `\n*📥 Quality Select (2GB යට පමණයි):*\n`;
-    under2gb.forEach((l, i) => {
+    msg += `\n*📥 Quality Select කරන්න:*\n`;
+    meta.links.forEach((l, i) => {
       const q = normalizeQuality(l.quality || l.label);
       msg += `*${i + 1}.* ${q}  —  ${l.size}\n`;
     });
     msg += `\n*Number reply කරන්න quality select කරන්න*`;
 
-    pendingQuality[sender] = { title, thumb: meta.thumb, links: under2gb, timestamp: Date.now() };
+    pendingQuality[sender] = { title, thumb: meta.thumb, links: meta.links, timestamp: Date.now() };
 
     try {
       if (meta.thumb)
