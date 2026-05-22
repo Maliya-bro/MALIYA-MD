@@ -42,11 +42,10 @@ function presenceText(val) {
   return "OFF";
 }
 
-// 🆕 Emoji reaction mode text
-function emojiReactionModeText(val) {
-  if (val === "group") return "GROUP ONLY";
+function reactModeText(val) {
   if (val === "private") return "PRIVATE ONLY";
-  return "BOTH";
+  if (val === "group") return "GROUP ONLY";
+  return "ALL CHATS";
 }
 
 function getStatusCard() {
@@ -58,12 +57,13 @@ function getStatusCard() {
 🍀 | *WORK TYPE:* ${String(s.mode || "public").toUpperCase()}
 🍀 | *PRESENCE:* ${presenceText(String(s.always_presence || "off"))}
 🍀 | *AI CHAT:* ${onOff(!!s.auto_msg)}
+🍀 | *AUTO MSG REACT:* ${onOff(!!s.auto_react_msg)}
+🍀 | *REACT MODE:* ${reactModeText(String(s.auto_react_mode || "all"))}
 🍀 | *ANTI DELETE:* ${onOff(!!s.anti_delete)}
 🍀 | *ANTI CALL:* ${onOff(!!s.auto_reject_calls)}
 🍀 | *AUTO STATUS:* ${onOff(!!s.auto_status_seen)}
 🍀 | *AUTO REACT:* ${onOff(!!s.auto_status_react)}
 🍀 | *AUTO DOWNLOAD STATUS:* ${onOff(!!s.auto_download_status)}
-🍀 | *EMOJI REACT MODE:* ${emojiReactionModeText(String(s.emoji_reaction_mode || "both"))}
 
 © MALIYA-MD
 `.trim();
@@ -102,9 +102,12 @@ function mapKey(name = "") {
     return "mode";
   }
 
-  // 🆕 Emoji reaction mode
-  if (["emojireactionmode", "emoji_reaction_mode", "emojimode", "reactmode"].includes(k)) {
-    return "emoji_reaction_mode";
+  if (["autoreactmsg", "auto_react_msg", "msgreact"].includes(k)) {
+    return "auto_react_msg";
+  }
+
+  if (["reactmode", "auto_react_mode"].includes(k)) {
+    return "auto_react_mode";
   }
 
   return null;
@@ -158,23 +161,20 @@ function applySettingAction(action, value) {
     return "✅ Bot mode set to PUBLIC";
   }
 
+  if (action === "reactmode") {
+    if (!["private", "group", "all"].includes(value)) {
+      return "❌ Invalid react mode. Use: private, group, or all";
+    }
+    setSetting("auto_react_mode", value);
+    return `✅ React Mode set to ${reactModeText(value)}`;
+  }
+
   if (action === "presence") {
     if (!["off", "typing", "recording"].includes(value)) {
       return "❌ Invalid presence mode.";
     }
-
     setSetting("always_presence", value);
     return `✅ Always presence set to ${presenceText(value)}`;
-  }
-
-  // 🆕 Emoji reaction mode setting
-  if (action === "emojimode") {
-    if (!["both", "group", "private"].includes(value)) {
-      return "❌ Invalid emoji reaction mode.";
-    }
-
-    setSetting("emoji_reaction_mode", value);
-    return `✅ Emoji reaction mode set to ${emojiReactionModeText(value)}`;
   }
 
   if (action === "toggle") {
@@ -190,24 +190,17 @@ function applySettingAction(action, value) {
 
     const updated = toggleSetting(key);
 
-    if (key === "auto_status_seen") {
-      return `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`;
-    }
-    if (key === "auto_status_react") {
-      return `✅ Auto Status React: ${onOff(updated.auto_status_react)}`;
-    }
-    if (key === "auto_download_status") {
-      return `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`;
-    }
-    if (key === "auto_msg") {
-      return `✅ AI Chat: ${onOff(updated.auto_msg)}`;
-    }
-    if (key === "anti_delete") {
-      return `✅ Anti Delete: ${onOff(updated.anti_delete)}`;
-    }
-    if (key === "auto_reject_calls") {
-      return `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`;
-    }
+    const responses = {
+      auto_status_seen: `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`,
+      auto_status_react: `✅ Auto Status React: ${onOff(updated.auto_status_react)}`,
+      auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
+      auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
+      anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)}`,
+      auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
+      auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
+    };
+
+    return responses[key] || `✅ Toggled ${key}`;
   }
 
   if (action === "on" || action === "off") {
@@ -220,24 +213,17 @@ function applySettingAction(action, value) {
     const boolVal = action === "on";
     const updated = setSetting(key, boolVal);
 
-    if (key === "auto_status_seen") {
-      return `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`;
-    }
-    if (key === "auto_status_react") {
-      return `✅ Auto Status React: ${onOff(updated.auto_status_react)}`;
-    }
-    if (key === "auto_download_status") {
-      return `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`;
-    }
-    if (key === "auto_msg") {
-      return `✅ AI Chat: ${onOff(updated.auto_msg)}`;
-    }
-    if (key === "anti_delete") {
-      return `✅ Anti Delete: ${onOff(updated.anti_delete)}`;
-    }
-    if (key === "auto_reject_calls") {
-      return `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`;
-    }
+    const responses = {
+      auto_status_seen: `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`,
+      auto_status_react: `✅ Auto Status React: ${onOff(updated.auto_status_react)}`,
+      auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
+      auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
+      anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)}`,
+      auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
+      auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
+    };
+
+    return responses[key] || `✅ Set ${key} to ${action.toUpperCase()}`;
   }
 
   return getStatusCard();
@@ -279,17 +265,24 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "presence", value: "off" };
   }
 
-  // 🆕 Emoji reaction mode commands
-  if (t === ".setting emojimode both" || t === "emoji reaction both") {
-    return { action: "emojimode", value: "both" };
+  if (t === ".setting on autoreactmsg" || t === "enable auto react msg") {
+    return { action: "on", value: "autoreactmsg" };
   }
 
-  if (t === ".setting emojimode group" || t === "emoji reaction group only") {
-    return { action: "emojimode", value: "group" };
+  if (t === ".setting off autoreactmsg" || t === "disable auto react msg") {
+    return { action: "off", value: "autoreactmsg" };
   }
 
-  if (t === ".setting emojimode private" || t === "emoji reaction private only") {
-    return { action: "emojimode", value: "private" };
+  if (t === ".setting reactmode private") {
+    return { action: "reactmode", value: "private" };
+  }
+
+  if (t === ".setting reactmode group") {
+    return { action: "reactmode", value: "group" };
+  }
+
+  if (t === ".setting reactmode all") {
+    return { action: "reactmode", value: "all" };
   }
 
   if (t === ".setting on automsg" || t === "enable ai chat") {
@@ -354,6 +347,10 @@ function resolveSettingsActionFromText(text = "") {
 
   if (t === ".setting toggle automsg" || t === "toggle ai chat") {
     return { action: "toggle", value: "automsg" };
+  }
+
+  if (t === ".setting toggle autoreactmsg" || t === "toggle auto react msg") {
+    return { action: "toggle", value: "autoreactmsg" };
   }
 
   if (t === ".setting toggle antidelete" || t === "toggle anti delete") {
@@ -505,6 +502,41 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
                   ],
                 },
                 {
+                  title: "🤖 AUTO REACT SETTINGS",
+                  rows: [
+                    {
+                      title: "Auto React Msg ON",
+                      description: "Enable message auto react",
+                      id: ".setting on autoreactmsg",
+                    },
+                    {
+                      title: "Auto React Msg OFF",
+                      description: "Disable message auto react",
+                      id: ".setting off autoreactmsg",
+                    },
+                    {
+                      title: "Toggle Auto React Msg",
+                      description: "Switch auto react on/off",
+                      id: ".setting toggle autoreactmsg",
+                    },
+                    {
+                      title: "React Mode: Private Only",
+                      description: "React only in private chats",
+                      id: ".setting reactmode private",
+                    },
+                    {
+                      title: "React Mode: Group Only",
+                      description: "React only in groups",
+                      id: ".setting reactmode group",
+                    },
+                    {
+                      title: "React Mode: All Chats",
+                      description: "React in all chats",
+                      id: ".setting reactmode all",
+                    },
+                  ],
+                },
+                {
                   title: "🤖 AI & TOOLS",
                   rows: [
                     {
@@ -571,57 +603,6 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
                       title: "Auto Download Status OFF",
                       description: "Disable auto status download",
                       id: ".setting off autodownloadstatus",
-                    },
-                    {
-                      title: "Toggle Auto Seen",
-                      description: "Switch auto seen",
-                      id: ".setting toggle autoseen",
-                    },
-                    {
-                      title: "Toggle Auto React",
-                      description: "Switch auto react",
-                      id: ".setting toggle autoreact",
-                    },
-                    {
-                      title: "Toggle Auto Download Status",
-                      description: "Switch auto download status",
-                      id: ".setting toggle autodownloadstatus",
-                    },
-                    {
-                      title: "Toggle AI Chat",
-                      description: "Switch auto msg",
-                      id: ".setting toggle automsg",
-                    },
-                    {
-                      title: "Toggle Anti Delete",
-                      description: "Switch anti delete",
-                      id: ".setting toggle antidelete",
-                    },
-                    {
-                      title: "Toggle Reject Calls",
-                      description: "Switch reject calls",
-                      id: ".setting toggle rejectcalls",
-                    },
-                  ],
-                },
-                // 🆕 Emoji reaction mode section
-                {
-                  title: "😂 EMOJI REACTION MODE",
-                  rows: [
-                    {
-                      title: "Emoji on Both",
-                      description: "React on group + private chats",
-                      id: ".setting emojimode both",
-                    },
-                    {
-                      title: "Emoji on Group Only",
-                      description: "React only on group chats",
-                      id: ".setting emojimode group",
-                    },
-                    {
-                      title: "Emoji on Private Only",
-                      description: "React only on private chats",
-                      id: ".setting emojimode private",
                     },
                     {
                       title: "Show Full Status",
@@ -691,27 +672,24 @@ cmd(
         return reply("✅ Bot mode set to PUBLIC");
       }
 
+      if (action === "reactmode") {
+        if (!["private", "group", "all"].includes(value)) {
+          return reply(
+            "❌ Use:\n.setting reactmode private\n.setting reactmode group\n.setting reactmode all"
+          );
+        }
+        setSetting("auto_react_mode", value);
+        return reply(`✅ React Mode set to ${reactModeText(value)}`);
+      }
+
       if (action === "presence") {
         if (!["off", "typing", "recording"].includes(value)) {
           return reply(
             "❌ Use:\n.setting presence off\n.setting presence typing\n.setting presence recording"
           );
         }
-
         setSetting("always_presence", value);
         return reply(`✅ Always presence set to ${presenceText(value)}`);
-      }
-
-      // 🆕 Emoji reaction mode command
-      if (action === "emojimode") {
-        if (!["both", "group", "private"].includes(value)) {
-          return reply(
-            "❌ Use:\n.setting emojimode both\n.setting emojimode group\n.setting emojimode private"
-          );
-        }
-
-        setSetting("emoji_reaction_mode", value);
-        return reply(`✅ Emoji reaction mode set to ${emojiReactionModeText(value)}`);
       }
 
       if (action === "toggle") {
@@ -726,25 +704,18 @@ cmd(
         }
 
         const updated = toggleSetting(key);
-
-        if (key === "auto_status_seen") {
-          return reply(`✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`);
-        }
-        if (key === "auto_status_react") {
-          return reply(`✅ Auto Status React: ${onOff(updated.auto_status_react)}`);
-        }
-        if (key === "auto_download_status") {
-          return reply(`✅ Auto Download Status: ${onOff(updated.auto_download_status)}`);
-        }
-        if (key === "auto_msg") {
-          return reply(`✅ AI Chat: ${onOff(updated.auto_msg)}`);
-        }
-        if (key === "anti_delete") {
-          return reply(`✅ Anti Delete: ${onOff(updated.anti_delete)}`);
-        }
-        if (key === "auto_reject_calls") {
-          return reply(`✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`);
-        }
+        
+        const responses = {
+          auto_status_seen: `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`,
+          auto_status_react: `✅ Auto Status React: ${onOff(updated.auto_status_react)}`,
+          auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
+          auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
+          anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)}`,
+          auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
+          auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
+        };
+        
+        return reply(responses[key] || `✅ Toggled ${key}`);
       }
 
       if (action === "on" || action === "off") {
@@ -757,24 +728,17 @@ cmd(
         const boolVal = action === "on";
         const updated = setSetting(key, boolVal);
 
-        if (key === "auto_status_seen") {
-          return reply(`✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`);
-        }
-        if (key === "auto_status_react") {
-          return reply(`✅ Auto Status React: ${onOff(updated.auto_status_react)}`);
-        }
-        if (key === "auto_download_status") {
-          return reply(`✅ Auto Download Status: ${onOff(updated.auto_download_status)}`);
-        }
-        if (key === "auto_msg") {
-          return reply(`✅ AI Chat: ${onOff(updated.auto_msg)}`);
-        }
-        if (key === "anti_delete") {
-          return reply(`✅ Anti Delete: ${onOff(updated.anti_delete)}`);
-        }
-        if (key === "auto_reject_calls") {
-          return reply(`✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`);
-        }
+        const responses = {
+          auto_status_seen: `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`,
+          auto_status_react: `✅ Auto Status React: ${onOff(updated.auto_status_react)}`,
+          auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
+          auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
+          anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)}`,
+          auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
+          auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
+        };
+
+        return reply(responses[key] || `✅ Set ${key} to ${action.toUpperCase()}`);
       }
 
       return reply(getStatusCard());
