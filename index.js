@@ -59,6 +59,7 @@ const { commands, replyHandlers } = require("./command");
 
 // ✅ auto msg plugin
 const autoMsgPlugin = require("./plugins/auto_msg.js");
+const autoReactPlugin = require("./plugins/auto-react.js");
 
 // ✅ PDF scanner plugin
 let pdfScannerPlugin = null;
