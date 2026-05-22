@@ -750,6 +750,28 @@ setTimeout(() => {
         }
       } catch {}
 
+      // ✅ AUTO REACT PLUGIN - CALLED FIRST
+      try {
+        if (autoReactPlugin && typeof autoReactPlugin.onMessage === "function") {
+          await autoReactPlugin.onMessage(sock, mek, m, {
+            from,
+            body,
+            args,
+            q,
+            sender,
+            senderNumber,
+            isGroup,
+            isOwner,
+            reply,
+            isCmd,
+            commandName,
+            prefix,
+          });
+        }
+      } catch (e) {
+        console.log("AutoReact hook error:", e?.message || e);
+      }
+
       try {
         const botSettings = readSettings();
 
