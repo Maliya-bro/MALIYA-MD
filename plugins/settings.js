@@ -42,6 +42,13 @@ function presenceText(val) {
   return "OFF";
 }
 
+// 🆕 Emoji reaction mode text
+function emojiReactionModeText(val) {
+  if (val === "group") return "GROUP ONLY";
+  if (val === "private") return "PRIVATE ONLY";
+  return "BOTH";
+}
+
 function getStatusCard() {
   const s = readSettings();
 
@@ -56,6 +63,7 @@ function getStatusCard() {
 🍀 | *AUTO STATUS:* ${onOff(!!s.auto_status_seen)}
 🍀 | *AUTO REACT:* ${onOff(!!s.auto_status_react)}
 🍀 | *AUTO DOWNLOAD STATUS:* ${onOff(!!s.auto_download_status)}
+🍀 | *EMOJI REACT MODE:* ${emojiReactionModeText(String(s.emoji_reaction_mode || "both"))}
 
 © MALIYA-MD
 `.trim();
@@ -92,6 +100,11 @@ function mapKey(name = "") {
 
   if (["mode", "botmode", "privatepublic"].includes(k)) {
     return "mode";
+  }
+
+  // 🆕 Emoji reaction mode
+  if (["emojireactionmode", "emoji_reaction_mode", "emojimode", "reactmode"].includes(k)) {
+    return "emoji_reaction_mode";
   }
 
   return null;
@@ -152,6 +165,16 @@ function applySettingAction(action, value) {
 
     setSetting("always_presence", value);
     return `✅ Always presence set to ${presenceText(value)}`;
+  }
+
+  // 🆕 Emoji reaction mode setting
+  if (action === "emojimode") {
+    if (!["both", "group", "private"].includes(value)) {
+      return "❌ Invalid emoji reaction mode.";
+    }
+
+    setSetting("emoji_reaction_mode", value);
+    return `✅ Emoji reaction mode set to ${emojiReactionModeText(value)}`;
   }
 
   if (action === "toggle") {
@@ -254,6 +277,19 @@ function resolveSettingsActionFromText(text = "") {
 
   if (t === ".setting presence off" || t === "presence off") {
     return { action: "presence", value: "off" };
+  }
+
+  // 🆕 Emoji reaction mode commands
+  if (t === ".setting emojimode both" || t === "emoji reaction both") {
+    return { action: "emojimode", value: "both" };
+  }
+
+  if (t === ".setting emojimode group" || t === "emoji reaction group only") {
+    return { action: "emojimode", value: "group" };
+  }
+
+  if (t === ".setting emojimode private" || t === "emoji reaction private only") {
+    return { action: "emojimode", value: "private" };
   }
 
   if (t === ".setting on automsg" || t === "enable ai chat") {
@@ -566,6 +602,27 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
                       description: "Switch reject calls",
                       id: ".setting toggle rejectcalls",
                     },
+                  ],
+                },
+                // 🆕 Emoji reaction mode section
+                {
+                  title: "😂 EMOJI REACTION MODE",
+                  rows: [
+                    {
+                      title: "Emoji on Both",
+                      description: "React on group + private chats",
+                      id: ".setting emojimode both",
+                    },
+                    {
+                      title: "Emoji on Group Only",
+                      description: "React only on group chats",
+                      id: ".setting emojimode group",
+                    },
+                    {
+                      title: "Emoji on Private Only",
+                      description: "React only on private chats",
+                      id: ".setting emojimode private",
+                    },
                     {
                       title: "Show Full Status",
                       description: "View current settings",
@@ -643,6 +700,18 @@ cmd(
 
         setSetting("always_presence", value);
         return reply(`✅ Always presence set to ${presenceText(value)}`);
+      }
+
+      // 🆕 Emoji reaction mode command
+      if (action === "emojimode") {
+        if (!["both", "group", "private"].includes(value)) {
+          return reply(
+            "❌ Use:\n.setting emojimode both\n.setting emojimode group\n.setting emojimode private"
+          );
+        }
+
+        setSetting("emoji_reaction_mode", value);
+        return reply(`✅ Emoji reaction mode set to ${emojiReactionModeText(value)}`);
       }
 
       if (action === "toggle") {
@@ -766,3 +835,5 @@ setInterval(() => {
     }
   }
 }, 30000);
+
+module.exports = { sendSettingsHome, sendSettingsRolesMenu };
