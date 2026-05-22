@@ -3,6 +3,7 @@ const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const { MongoClient } = require("mongodb");
+const fetch = require("node-fetch");
 
 // ========= ENV =========
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY2;
@@ -871,23 +872,81 @@ async function generateWithDeepSeek(prompt) {
   throw Object.assign(new Error("DeepSeek failed"), { provider: "deepseek" });
 }
 
-async function generateText(prompt, ownerApiKey) {
-  let geminiError = null;
+async function generateWithPuter(prompt) {
+  try {
+    const response = await fetch("https://api.puter.com/v2/ai/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-5.4-nano",
+        messages: [
+          {
+            role: "user",
+            content: prompt
+          }
+        ]
+      })
+    });
 
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Puter API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    let out = null;
+
+    // Extract response from different possible formats
+    if (data?.message?.content?.[0]?.text) {
+      out = data.message.content[0].text;
+    } else if (data?.choices?.[0]?.message?.content) {
+      out = data.choices[0].message.content;
+    } else if (data?.text) {
+      out = data.text;
+    }
+
+    if (out && out.trim().length > 1) {
+      console.log("✅ Puter AI generated response");
+      return {
+        text: out.trim(),
+        provider: "puter",
+        model: "openai/gpt-5.4-nano"
+      };
+    }
+
+    throw new Error("Empty or invalid response from Puter AI");
+  } catch (error) {
+    console.log("PUTER AI FAILED:", error.message || error);
+    error.provider = "puter";
+    throw error;
+  }
+}
+
+async function generateText(prompt, ownerApiKey) {
+  // Try Gemini first
   try {
     return await generateWithGemini(prompt, ownerApiKey);
-  } catch (e) {
-    geminiError = e;
-    if (e?.response?.status === 429) startBackoff();
-    console.log("GEMINI FAILED → DeepSeek:", e?.response?.status || "", e?.message || e);
-  }
-
-  try {
-    return await generateWithDeepSeek(prompt);
-  } catch (deepErr) {
-    if (deepErr?.response?.status === 429) startBackoff();
-    console.log("DEEPSEEK FAILED:", deepErr?.response?.status || "", deepErr?.message || deepErr);
-    throw new Error("Both AI services failed");
+  } catch (geminiError) {
+    console.log("GEMINI FAILED → Trying DeepSeek:", geminiError?.response?.status || "", geminiError?.message || geminiError);
+    if (geminiError?.response?.status === 429) startBackoff();
+    
+    // Try DeepSeek second
+    try {
+      return await generateWithDeepSeek(prompt);
+    } catch (deepSeekError) {
+      console.log("DEEPSEEK FAILED → Trying Puter AI:", deepSeekError?.response?.status || "", deepSeekError?.message || deepSeekError);
+      if (deepSeekError?.response?.status === 429) startBackoff();
+      
+      // Try Puter AI third
+      try {
+        return await generateWithPuter(prompt);
+      } catch (puterError) {
+        console.log("PUTER AI FAILED as well:", puterError?.message || puterError);
+        throw new Error("All AI services failed (Gemini, DeepSeek, Puter)");
+      }
+    }
   }
 }
 
