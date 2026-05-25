@@ -9,16 +9,17 @@ const MONGODB_URI =
   process.env.MONGODB_URI ||
   "mongodb+srv://MALIYA-MD:279221@maliya-md.uzal3aa.mongodb.net/?appName=maliya-md";
 
-// ========= MALIYA-MDAPI CONFIG (No API Key Required!) =========
+// ========= NPMAI API CONFIG (No API Key Required!) =========
+// npmai works with Node.js 20 - no puppeteer needed!
 const NPMAI_API_URL = "https://npmai-api.onrender.com";
 
 // Multiple models in order - if one fails, try next
 const NPMAI_MODELS = [
-  "llama3.2",           // Meta Llama 3.2 - Best general purpose
-  "gemma-2-instruct-9b", // Google Gemma 2 - Good for instructions
-  "qwen-2.5-coder-7b",   // Alibaba Qwen - Good for code & reasoning
-  "mistral-7b-instruct", // Mistral 7B - Balanced performance
-  "phi-3-medium"         // Microsoft Phi-3 - Lightweight & fast
+  "llama3.2",
+  "gemma-2-instruct-9b",
+  "qwen-2.5-coder-7b",
+  "mistral-7b-instruct",
+  "phi-3-medium"
 ];
 
 // ========= SETTINGS =========
@@ -29,7 +30,7 @@ const MEMORY_STORE = path.join(DATA_DIR, "auto_msg_memory.json");
 const PROFILE_STORE = path.join(DATA_DIR, "auto_msg_profiles.json");
 const LOGS_DIR = path.join(DATA_DIR, "auto_msg_logs");
 
-const COOLDOWN_MS = 8000;  // 8 seconds cooldown (MALIYA-MDis faster)
+const COOLDOWN_MS = 8000;
 const MAX_REPLIES_PER_HOUR = 100;
 const MEMORY_MAX_PER_CHAT = 400;
 const MEMORY_TTL_DAYS = 120;
@@ -284,7 +285,7 @@ function ensureBaseFiles() {
 }
 
 ensureBaseFiles();
-console.log("✅ auto_msg plugin loaded with MALIYA-MDAPI | Models:", NPMAI_MODELS.length);
+console.log("✅ auto_msg plugin loaded with NPMAI API | Node.js 20 compatible | Models:", NPMAI_MODELS.length);
 
 // ========= GLOBAL ENABLE/DISABLE =========
 function readStore() {
@@ -297,16 +298,6 @@ function readStore() {
 function writeStore(db) {
   ensureBaseFiles();
   safeJsonWrite(STORE, db);
-}
-
-function setGlobalEnabled(val) {
-  const db = readStore();
-  db.global.enabled = !!val;
-  writeStore(db);
-}
-
-function isGlobalEnabled() {
-  return !!readStore().global.enabled;
 }
 
 // ========= MEMORY (FILE-BASED PER-CHAT) =========
@@ -340,13 +331,6 @@ function saveQA(chatId, q, a) {
   db.chats[chatId].push({ qRaw, qNorm, a: String(a), ts: Date.now() });
   db.chats[chatId] = pruneQA(db.chats[chatId]);
   writeMemory(db);
-}
-
-function getChatMemory(chatId) {
-  const db = readMemory();
-  db.chats[chatId] = pruneQA(db.chats[chatId] || []);
-  writeMemory(db);
-  return db.chats[chatId];
 }
 
 function saveTurn(chatId, role, text) {
@@ -753,14 +737,14 @@ function serviceUnavailableMsg(lang) {
     : "❌ AI service unavailable right now. Please try again later.\n> MALIYA-MD ❤️";
 }
 
-// ========= MALIYA-MDAPI CALL WITH MULTIPLE MODEL FALLBACK =========
+// ========= NPMAI API CALL WITH MULTIPLE MODEL FALLBACK =========
 async function generateWithNpmai(prompt) {
   let lastError = null;
   
   for (let i = 0; i < NPMAI_MODELS.length; i++) {
     const model = NPMAI_MODELS[i];
     try {
-      console.log(`🔄 Trying MALIYA-MDmodel (${i + 1}/${NPMAI_MODELS.length}): ${model}`);
+      console.log(`🔄 Trying npmai model (${i + 1}/${NPMAI_MODELS.length}): ${model}`);
       
       const response = await axios.post(
         NPMAI_API_URL,
@@ -778,23 +762,21 @@ async function generateWithNpmai(prompt) {
       let reply = response.data?.response || response.data?.message || null;
       
       if (reply && reply.trim().length > 5) {
-        console.log(`✅ MALIYA-MDsuccess with model: ${model}`);
+        console.log(`✅ npmai success with model: ${model}`);
         return { text: reply.trim(), provider: "npmai", model: model };
       }
       
       console.log(`⚠️ Model ${model} returned empty response, trying next...`);
       lastError = new Error(`Empty response from ${model}`);
     } catch (err) {
-      console.log(`❌ MALIYA-MDmodel ${model} failed:`, err.message);
+      console.log(`❌ npmai model ${model} failed:`, err.message);
       lastError = err;
-      // Continue to next model
       continue;
     }
   }
   
-  // All models failed
-  console.log("❌ All MALIYA-MD AI MODELS failed!");
-  throw lastError || new Error("All MALIYA-MD AI MODELS failed");
+  console.log("❌ All npmai models failed!");
+  throw lastError || new Error("All npmai models failed");
 }
 
 // ========= MAIN GENERATION FUNCTION =========
@@ -878,18 +860,18 @@ cmd(
   }
 );
 
-// ========= COMMAND: .models (Check which models are working) =========
+// ========= COMMAND: .models =========
 cmd(
   {
     pattern: "models",
-    desc: "Check available MALIYA-MD AI MODELS",
+    desc: "Check available npmai models",
     category: "AI",
     react: "🤖",
     filename: __filename,
   },
   async (conn, mek, m, { reply }) => {
     const modelsList = NPMAI_MODELS.map((m, i) => `${i + 1}. ${m}`).join("\n");
-    reply(`🤖 *Available MALIYA-MD AI MODELS*\n\n${modelsList}\n\n*Note:* If one model fails, bot auto-switches to next model.\n\n> MALIYA-MD ❤️`);
+    reply(`🤖 *Available NPMAI Models (Node.js 20)*\n\n${modelsList}\n\n*Note:* If one model fails, bot auto-switches to next model.\n\n> MALIYA-MD ❤️`);
   }
 );
 
@@ -918,7 +900,7 @@ async function onMessage(conn, mek, m, ctx = {}) {
     appendChatLog(from, { role: "user", text: body, ts: Date.now() });
     updateProfile(from, "user", body, lang);
 
-    // ── Identity / Help shortcuts ──────────────────────
+    // Identity / Help shortcuts
     if (isIdentityQuestion(body)) {
       const txt = getIdentityReply(lang);
       await sendLongMessage(conn, from, txt, mek);
@@ -937,14 +919,14 @@ async function onMessage(conn, mek, m, ctx = {}) {
       return;
     }
 
-    // ── Heavy request detection ────────────────────────
+    // Heavy request detection
     if (isHeavyRequest(body)) {
       const txt = getHeavyRequestReply(body, lang);
       await sendLongMessage(conn, from, txt, mek);
       return;
     }
 
-    // ── Rate limiting ──────────────────────────────────
+    // Rate limiting
     if (inCooldown(from)) return;
     if (hitHourlyCap()) {
       await sendLongMessage(conn, from, rateLimitMsg(lang), mek);
@@ -955,7 +937,7 @@ async function onMessage(conn, mek, m, ctx = {}) {
     busyChats.add(from);
 
     try {
-      // ── MongoDB global cache lookup ────────────────────
+      // MongoDB global cache lookup
       const cached = await findMongoCache(body);
       if (cached) {
         const reply = cleanAiOutput(cached.answer);
@@ -966,14 +948,14 @@ async function onMessage(conn, mek, m, ctx = {}) {
         return;
       }
 
-      // ── Build prompt ───────────────────────────────────
+      // Build prompt
       const contextTurns = getContext(from);
       const useContext = isFollowUp(body) && contextTurns.length > 0;
       const prompt = useContext
         ? buildPromptWithContext(body, lang, from, contextTurns, senderName)
         : buildPrompt(body, lang, from, senderName);
 
-      // ── Generate AI response using MALIYA-MDwith fallback models ──
+      // Generate AI response using npmai with fallback models
       const result = await generateText(prompt);
       const rawText = result?.text || serviceUnavailableMsg(lang);
       const replyText = cleanAiOutput(rawText);
@@ -984,7 +966,7 @@ async function onMessage(conn, mek, m, ctx = {}) {
       updateProfile(from, "bot", replyText, lang);
       saveQA(from, body, replyText);
 
-      // ── Save to MongoDB global cache ───────────────────
+      // Save to MongoDB global cache
       await saveMongoCache(body, replyText);
 
     } catch (e) {
