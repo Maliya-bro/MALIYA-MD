@@ -3,27 +3,23 @@ const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const { MongoClient } = require("mongodb");
-const fetch = require("node-fetch");
 
 // ========= ENV =========
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY2;
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const MONGODB_URI =
   process.env.MONGODB_URI ||
   "mongodb+srv://MALIYA-MD:279221@maliya-md.uzal3aa.mongodb.net/?appName=maliya-md";
 
-if (!GEMINI_API_KEY) console.error("⚠️ GEMINI_API_KEY2 is not set (auto_msg plugin)");
-if (!DEEPSEEK_API_KEY) console.error("⚠️ DEEPSEEK_API_KEY is not set (auto_msg plugin)");
+// ========= MALIYA-MDAPI CONFIG (No API Key Required!) =========
+const NPMAI_API_URL = "https://npmai-api.onrender.com";
 
-// ========= MODELS =========
-const GEMINI_MODELS = [
-  "gemini-2.0-flash",
-  "gemini-2.5-flash",
-  "gemini-flash-latest",
-  "gemini-2.5-pro",
+// Multiple models in order - if one fails, try next
+const NPMAI_MODELS = [
+  "llama3.2",           // Meta Llama 3.2 - Best general purpose
+  "gemma-2-instruct-9b", // Google Gemma 2 - Good for instructions
+  "qwen-2.5-coder-7b",   // Alibaba Qwen - Good for code & reasoning
+  "mistral-7b-instruct", // Mistral 7B - Balanced performance
+  "phi-3-medium"         // Microsoft Phi-3 - Lightweight & fast
 ];
-
-const DEEPSEEK_MODELS = ["deepseek-chat"];
 
 // ========= SETTINGS =========
 const PREFIXES = ["."];
@@ -33,14 +29,10 @@ const MEMORY_STORE = path.join(DATA_DIR, "auto_msg_memory.json");
 const PROFILE_STORE = path.join(DATA_DIR, "auto_msg_profiles.json");
 const LOGS_DIR = path.join(DATA_DIR, "auto_msg_logs");
 
-const COOLDOWN_MS = 12000;
-const BACKOFF_MS_ON_429 = 180000;
-const MAX_REPLIES_PER_HOUR = 60;
+const COOLDOWN_MS = 8000;  // 8 seconds cooldown (MALIYA-MDis faster)
+const MAX_REPLIES_PER_HOUR = 100;
 const MEMORY_MAX_PER_CHAT = 400;
 const MEMORY_TTL_DAYS = 120;
-const MEMORY_MIN_CHARS = 3;
-const SIM_THRESHOLD = 0.56;
-const EXACT_THRESHOLD = 0.975;
 const CONTEXT_MAX_TURNS = 14;
 const MONGO_CACHE_SIM_THRESHOLD = 0.70;
 const PROFILE_MAX_TOPICS = 30;
@@ -53,12 +45,12 @@ const IDENTITY_SI =
   "මම MALIYA-MD bot. මම Malindu Nadith විසින් හදපු AI powered advanced bot එකක්.";
 
 // ========= FORBIDDEN WORDS =========
-const FORBIDDEN_WORDS = ["gemini", "google", "chatgpt", "openai", "gpt"];
+const FORBIDDEN_WORDS = ["gemini", "google", "chatgpt", "openai", "gpt", "deepseek", "puter", "npmai"];
 
 function cleanAiOutput(text) {
   let out = String(text || "");
   for (const word of FORBIDDEN_WORDS) {
-    const re = new RegExp(word, "gi");
+    const re = new RegExp(`\\b${word}\\b`, "gi");
     out = out.replace(re, "MALIYA-MD");
   }
   return out.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
@@ -101,11 +93,6 @@ async function getGlobalCacheCol() {
   return db.collection("global_ai_cache");
 }
 
-async function getUserKeysCol() {
-  const db = await getMongoDB();
-  return db.collection("user_keys");
-}
-
 async function getUserSettingsCol() {
   const db = await getMongoDB();
   return db.collection("user_settings");
@@ -142,27 +129,6 @@ async function isAutoMsgOn(conn) {
   } catch {
     return true;
   }
-}
-
-// ========= MULTI-OWNER API KEY =========
-async function getOwnerApiKey(ownerPhone) {
-  try {
-    if (!ownerPhone) return null;
-    const col = await getUserKeysCol();
-    const doc = await col.findOne({ phone: String(ownerPhone) });
-    return doc?.apiKey || null;
-  } catch {
-    return null;
-  }
-}
-
-async function setOwnerApiKey(ownerPhone, apiKey) {
-  const col = await getUserKeysCol();
-  await col.updateOne(
-    { phone: String(ownerPhone) },
-    { $set: { phone: String(ownerPhone), apiKey: String(apiKey), updatedAt: new Date() } },
-    { upsert: true }
-  );
 }
 
 // ========= MONGO CACHE =========
@@ -318,7 +284,7 @@ function ensureBaseFiles() {
 }
 
 ensureBaseFiles();
-console.log("✅ auto_msg plugin loaded | DATA_DIR:", DATA_DIR);
+console.log("✅ auto_msg plugin loaded with MALIYA-MDAPI | Models:", NPMAI_MODELS.length);
 
 // ========= GLOBAL ENABLE/DISABLE =========
 function readStore() {
@@ -629,7 +595,6 @@ function helpText(lang) {
    - Profile: .msg profile
    - Clear memory: .msg clear
    - Export logs: .msg export
-✅ *Set your API key:* .setkey YOUR_KEY
 
 > MALIYA-MD ❤️`;
 }
@@ -671,14 +636,13 @@ function buildPrompt(userText, lang, chatId, senderName) {
   const name = senderName || "friend";
 
   if (lang === "si") {
-    return `ඔබ smart, friendly chat friend කෙනෙක්.
-ඔබේ name හෝ ඔබ හැදුවේ කවුද කියලා user DIRECTLY නොඅහෙනකල් කවදාවත් කියන්න එපා.
-User ගේ name "${name}" - reply දෙද්දී ස්වභාවිකව name use කරන්න (හැමවිටම නෙවෙයි).
+    return `ඔබ MALIYA-MD bot එකක්. ඔබ හැදුවේ Malindu Nadith විසින්.
+ඔබ friendly chat companion කෙනෙක්.
+User ගේ name "${name}" - ස්වභාවිකව reply දෙන්න.
 Natural, casual Sinhala/Singlish mix reply දෙන්න. Real friend කෙනෙක් වගේ කතා කරන්න.
 User short ගැහුවා නම් short reply. Detail ඕනනම් complete reply.
 Emoji naturally use කරන්න: 😄 🙂 🔥 🤔 😅
 Same phrases repeat කරන්න එපා. Robotic ලෙස reply කරන්න එපා.
-"MALIYA-MD" හෝ "Malindu Nadith" නිකම් reply වලට add කරන්න එපා.
 
 User info:
 - Name: ${name}
@@ -689,12 +653,11 @@ User info:
 ${name}: ${userText}`.trim();
   }
 
-  return `You are a smart, friendly chat companion.
-NEVER mention your name or who created you UNLESS the user directly asks about your identity.
-The user's name is "${name}" — use it naturally in replies (not in every message).
+  return `You are MALIYA-MD bot. You were created by Malindu Nadith.
+You are a friendly chat companion.
+The user's name is "${name}" — use it naturally in replies.
 Talk like a real friend: casual, warm, short when the message is short, detailed when needed.
 Use emojis naturally: 😄 🙂 🔥 🤔 😅
-Do NOT repeat "MALIYA-MD" or "Malindu Nadith" in normal replies.
 Do NOT sound robotic. Match the user's tone and energy.
 
 User info:
@@ -713,13 +676,13 @@ function buildPromptWithContext(userText, lang, chatId, contextTurns, senderName
   const name = senderName || "friend";
 
   if (lang === "si") {
-    return `ඔබ smart, friendly chat friend කෙනෙක්.
-ඔබේ name හෝ ඔබ හැදුවේ කවුද කියලා user DIRECTLY නොඅහෙනකල් කවදාවත් කියන්න එපා.
-User ගේ name "${name}" - reply දෙද්දී ස්වභාවිකව name use කරන්න (හැමවිටම නෙවෙයි).
+    return `ඔබ MALIYA-MD bot එකක්. ඔබ හැදුවේ Malindu Nadith විසින්.
+ඔබ friendly chat companion කෙනෙක්.
+User ගේ name "${name}" - ස්වභාවිකව reply දෙන්න.
 කලින් conversation context බලලා natural follow-up reply දෙන්න.
-Natural, casual Sinhala/Singlish mix. Real friend කෙනෙක් වගේ කතා කරන්න.
-User short ගැහුවා නම් short. Detail ඕනනම් complete. Emoji naturally use කරන්න.
-"MALIYA-MD" හෝ "Malindu Nadith" නිකම් add කරන්න එපා.
+Natural, casual Sinhala/Singlish mix.
+User short ගැහුවා නම් short. Detail ඕනනම් complete.
+Emoji naturally use කරන්න.
 
 User info:
 - Name: ${name}
@@ -733,13 +696,13 @@ ${history || "(none)"}
 ${name}: ${userText}`.trim();
   }
 
-  return `You are a smart, friendly chat companion.
-NEVER mention your name or who created you UNLESS the user directly asks about your identity.
-The user's name is "${name}" — use it naturally in replies (not every time).
+  return `You are MALIYA-MD bot. You were created by Malindu Nadith.
+You are a friendly chat companion.
+The user's name is "${name}" — use it naturally in replies.
 Use the previous conversation context to give natural follow-up replies.
 Talk like a real friend: casual, warm, short when the message is short, detailed when needed.
 Use emojis naturally: 😄 🙂 🔥 🤔 😅
-Do NOT say "MALIYA-MD" or "Malindu Nadith" in normal replies. Do NOT sound robotic.
+Do NOT sound robotic.
 
 User info:
 - Name: ${name}
@@ -775,10 +738,6 @@ function hitHourlyCap() {
   return false;
 }
 
-let backoffUntil = 0;
-function inBackoff() { return Date.now() < backoffUntil; }
-function startBackoff() { backoffUntil = Date.now() + BACKOFF_MS_ON_429; }
-
 const busyChats = new Set();
 
 // ========= USER MESSAGES =========
@@ -794,160 +753,53 @@ function serviceUnavailableMsg(lang) {
     : "❌ AI service unavailable right now. Please try again later.\n> MALIYA-MD ❤️";
 }
 
-// ========= AI CALLS =========
-async function generateWithGemini(prompt, apiKey) {
-  const key = apiKey || GEMINI_API_KEY;
-  if (!key) throw Object.assign(new Error("Missing Gemini API key"), { provider: "gemini" });
-
-  let lastErr = null;
-
-  for (const model of GEMINI_MODELS) {
+// ========= MALIYA-MDAPI CALL WITH MULTIPLE MODEL FALLBACK =========
+async function generateWithNpmai(prompt) {
+  let lastError = null;
+  
+  for (let i = 0; i < NPMAI_MODELS.length; i++) {
+    const model = NPMAI_MODELS[i];
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-      const res = await axios.post(
-        url,
-        {
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.75, topP: 0.95, maxOutputTokens: 900 },
-        },
-        {
-          timeout: 30000,
-          headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-        }
-      );
-
-      const out = res?.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (out && out.length > 1) return { text: out, provider: "gemini", model };
-
-      lastErr = new Error(`Empty Gemini response from ${model}`);
-    } catch (e) {
-      const status = e?.response?.status;
-      lastErr = e;
-      if (status === 429) { e.provider = "gemini"; throw e; }
-      if (status === 404) continue;
-      e.provider = "gemini";
-      throw e;
-    }
-  }
-
-  if (lastErr) { lastErr.provider = "gemini"; throw lastErr; }
-  throw Object.assign(new Error("Gemini failed"), { provider: "gemini" });
-}
-
-async function generateWithDeepSeek(prompt) {
-  if (!DEEPSEEK_API_KEY) throw Object.assign(new Error("Missing DEEPSEEK_API_KEY"), { provider: "deepseek" });
-
-  let lastErr = null;
-
-  for (const model of DEEPSEEK_MODELS) {
-    try {
-      const res = await axios.post(
-        "https://api.deepseek.com/chat/completions",
-        {
-          model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.75,
-          top_p: 0.95,
-          max_tokens: 900,
-          stream: false,
-        },
-        {
-          timeout: 30000,
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DEEPSEEK_API_KEY}` },
-        }
-      );
-
-      const out = res?.data?.choices?.[0]?.message?.content?.trim();
-      if (out && out.length > 1) return { text: out, provider: "deepseek", model };
-      lastErr = new Error(`Empty DeepSeek response from ${model}`);
-    } catch (e) {
-      e.provider = "deepseek";
-      lastErr = e;
-      if ([429, 402].includes(e?.response?.status)) throw e;
-      throw e;
-    }
-  }
-
-  if (lastErr) { lastErr.provider = "deepseek"; throw lastErr; }
-  throw Object.assign(new Error("DeepSeek failed"), { provider: "deepseek" });
-}
-
-async function generateWithPuter(prompt) {
-  try {
-    const response = await fetch("https://api.puter.com/v2/ai/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "openai/gpt-5.4-nano",
-        messages: [
-          {
-            role: "user",
-            content: prompt
-          }
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Puter API error: ${response.status} - ${errorText}`);
-    }
-
-    const data = await response.json();
-    let out = null;
-
-    // Extract response from different possible formats
-    if (data?.message?.content?.[0]?.text) {
-      out = data.message.content[0].text;
-    } else if (data?.choices?.[0]?.message?.content) {
-      out = data.choices[0].message.content;
-    } else if (data?.text) {
-      out = data.text;
-    }
-
-    if (out && out.trim().length > 1) {
-      console.log("✅ Puter AI generated response");
-      return {
-        text: out.trim(),
-        provider: "puter",
-        model: "openai/gpt-5.4-nano"
-      };
-    }
-
-    throw new Error("Empty or invalid response from Puter AI");
-  } catch (error) {
-    console.log("PUTER AI FAILED:", error.message || error);
-    error.provider = "puter";
-    throw error;
-  }
-}
-
-async function generateText(prompt, ownerApiKey) {
-  // Try Gemini first
-  try {
-    return await generateWithGemini(prompt, ownerApiKey);
-  } catch (geminiError) {
-    console.log("GEMINI FAILED → Trying DeepSeek:", geminiError?.response?.status || "", geminiError?.message || geminiError);
-    if (geminiError?.response?.status === 429) startBackoff();
-    
-    // Try DeepSeek second
-    try {
-      return await generateWithDeepSeek(prompt);
-    } catch (deepSeekError) {
-      console.log("DEEPSEEK FAILED → Trying Puter AI:", deepSeekError?.response?.status || "", deepSeekError?.message || deepSeekError);
-      if (deepSeekError?.response?.status === 429) startBackoff();
+      console.log(`🔄 Trying MALIYA-MDmodel (${i + 1}/${NPMAI_MODELS.length}): ${model}`);
       
-      // Try Puter AI third
-      try {
-        return await generateWithPuter(prompt);
-      } catch (puterError) {
-        console.log("PUTER AI FAILED as well:", puterError?.message || puterError);
-        throw new Error("All AI services failed (Gemini, DeepSeek, Puter)");
+      const response = await axios.post(
+        NPMAI_API_URL,
+        {
+          prompt: prompt,
+          model: model,
+          temperature: 0.75
+        },
+        {
+          timeout: 45000,
+          headers: { "Content-Type": "application/json" }
+        }
+      );
+      
+      let reply = response.data?.response || response.data?.message || null;
+      
+      if (reply && reply.trim().length > 5) {
+        console.log(`✅ MALIYA-MDsuccess with model: ${model}`);
+        return { text: reply.trim(), provider: "npmai", model: model };
       }
+      
+      console.log(`⚠️ Model ${model} returned empty response, trying next...`);
+      lastError = new Error(`Empty response from ${model}`);
+    } catch (err) {
+      console.log(`❌ MALIYA-MDmodel ${model} failed:`, err.message);
+      lastError = err;
+      // Continue to next model
+      continue;
     }
   }
+  
+  // All models failed
+  console.log("❌ All MALIYA-MD AI MODELS failed!");
+  throw lastError || new Error("All MALIYA-MD AI MODELS failed");
+}
+
+// ========= MAIN GENERATION FUNCTION =========
+async function generateText(prompt) {
+  return await generateWithNpmai(prompt);
 }
 
 // ========= PROFILE / EXPORT =========
@@ -977,35 +829,6 @@ function buildExportText(chatId) {
   if (!logs.length) return "No chat logs found.";
   return logs.map((x) => `[${new Date(x.ts || Date.now()).toISOString()}] ${x.role.toUpperCase()}: ${x.text}`).join("\n");
 }
-
-// ========= COMMAND: .setkey =========
-cmd(
-  {
-    pattern: "setkey",
-    desc: "Set your personal Gemini API key",
-    category: "AI",
-    react: "🔑",
-    filename: __filename,
-  },
-  async (conn, mek, m, { q, reply, isOwner }) => {
-    try {
-      if (!isOwner) return reply("❌ Only the bot owner can set an API key.");
-      const key = (q || "").trim();
-      if (!key) return reply("Usage: .setkey YOUR_GEMINI_API_KEY");
-      if (!key.startsWith("AI") && key.length < 30) return reply("❌ That doesn't look like a valid Gemini API key.");
-
-      const ownerJid = mek?.key?.remoteJid || "";
-      const ownerPhone = ownerJid.split("@")[0].split(":")[0].replace(/\D/g, "");
-      if (!ownerPhone) return reply("❌ Could not detect your phone number.");
-
-      await setOwnerApiKey(ownerPhone, key);
-      return reply("✅ Your Gemini API key has been saved!\nThis key will now be used for AI replies on your bot.\n\n> MALIYA-MD ❤️");
-    } catch (e) {
-      console.log("SETKEY ERROR:", e?.message || e);
-      return reply("❌ Failed to save API key. Try again later.");
-    }
-  }
-);
 
 // ========= COMMAND: .msg =========
 cmd(
@@ -1052,6 +875,21 @@ cmd(
       console.log("MSG COMMAND ERROR:", e?.message || e);
       return reply("❌ Command error");
     }
+  }
+);
+
+// ========= COMMAND: .models (Check which models are working) =========
+cmd(
+  {
+    pattern: "models",
+    desc: "Check available MALIYA-MD AI MODELS",
+    category: "AI",
+    react: "🤖",
+    filename: __filename,
+  },
+  async (conn, mek, m, { reply }) => {
+    const modelsList = NPMAI_MODELS.map((m, i) => `${i + 1}. ${m}`).join("\n");
+    reply(`🤖 *Available MALIYA-MD AI MODELS*\n\n${modelsList}\n\n*Note:* If one model fails, bot auto-switches to next model.\n\n> MALIYA-MD ❤️`);
   }
 );
 
@@ -1112,10 +950,6 @@ async function onMessage(conn, mek, m, ctx = {}) {
       await sendLongMessage(conn, from, rateLimitMsg(lang), mek);
       return;
     }
-    if (inBackoff()) {
-      await sendLongMessage(conn, from, rateLimitMsg(lang), mek);
-      return;
-    }
     if (busyChats.has(from)) return;
 
     busyChats.add(from);
@@ -1132,10 +966,6 @@ async function onMessage(conn, mek, m, ctx = {}) {
         return;
       }
 
-      // ── Get owner's custom API key ─────────────────────
-      const ownerPhone = conn?.user?.id?.split("@")[0]?.split(":")[0]?.replace(/\D/g, "") || null;
-      const ownerApiKey = ownerPhone ? await getOwnerApiKey(ownerPhone) : null;
-
       // ── Build prompt ───────────────────────────────────
       const contextTurns = getContext(from);
       const useContext = isFollowUp(body) && contextTurns.length > 0;
@@ -1143,8 +973,8 @@ async function onMessage(conn, mek, m, ctx = {}) {
         ? buildPromptWithContext(body, lang, from, contextTurns, senderName)
         : buildPrompt(body, lang, from, senderName);
 
-      // ── Generate AI response ───────────────────────────
-      const result = await generateText(prompt, ownerApiKey);
+      // ── Generate AI response using MALIYA-MDwith fallback models ──
+      const result = await generateText(prompt);
       const rawText = result?.text || serviceUnavailableMsg(lang);
       const replyText = cleanAiOutput(rawText);
 
