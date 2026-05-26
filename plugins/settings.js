@@ -233,11 +233,11 @@ function resolveSettingsActionFromText(text = "") {
   const t = String(text).trim().toLowerCase();
   if (!t) return null;
 
-  if (t === ".setting menuopen" || t === "change settings") {
+  if (t === ".setting menuopen" || t === "change settings" || t === ".setting menu") {
     return { action: "menuopen" };
   }
 
-  if (t === ".setting status" || t === "show full status") {
+  if (t === ".setting status" || t === "show full status" || t === ".setting show") {
     return { action: "status" };
   }
 
@@ -265,18 +265,16 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "presence", value: "off" };
   }
 
-  // ✅ AUTO REACT MSG ON
-  if (t === ".setting on autoreactmsg" || t === "enable auto react msg" || t === ".setting on auto_react_msg") {
+  // AUTO REACT MSG
+  if (t === ".setting on autoreactmsg" || t === "enable auto react msg" || t === "auto react msg on" || t === ".setting on auto_react_msg") {
     return { action: "on", value: "autoreactmsg" };
   }
 
-  // ✅ AUTO REACT MSG OFF
-  if (t === ".setting off autoreactmsg" || t === "disable auto react msg" || t === ".setting off auto_react_msg") {
+  if (t === ".setting off autoreactmsg" || t === "disable auto react msg" || t === "auto react msg off" || t === ".setting off auto_react_msg") {
     return { action: "off", value: "autoreactmsg" };
   }
 
-  // ✅ AUTO REACT MSG TOGGLE (FIXED - මේක එකතු කළා)
-  if (t === ".setting toggle autoreactmsg" || t === "toggle auto react msg" || t === ".setting toggle auto_react_msg") {
+  if (t === ".setting toggle autoreactmsg" || t === "toggle auto react msg" || t === "auto react msg toggle" || t === ".setting toggle auto_react_msg") {
     return { action: "toggle", value: "autoreactmsg" };
   }
 
@@ -300,12 +298,20 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "off", value: "automsg" };
   }
 
+  if (t === ".setting toggle automsg" || t === "toggle ai chat") {
+    return { action: "toggle", value: "automsg" };
+  }
+
   if (t === ".setting on antidelete" || t === "enable anti delete") {
     return { action: "on", value: "antidelete" };
   }
 
   if (t === ".setting off antidelete" || t === "disable anti delete") {
     return { action: "off", value: "antidelete" };
+  }
+
+  if (t === ".setting toggle antidelete" || t === "toggle anti delete") {
+    return { action: "toggle", value: "antidelete" };
   }
 
   if (t === ".setting on rejectcalls" || t === "reject calls on") {
@@ -316,12 +322,20 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "off", value: "rejectcalls" };
   }
 
+  if (t === ".setting toggle rejectcalls" || t === "toggle reject calls") {
+    return { action: "toggle", value: "rejectcalls" };
+  }
+
   if (t === ".setting on autoseen" || t === "auto status view on") {
     return { action: "on", value: "autoseen" };
   }
 
   if (t === ".setting off autoseen" || t === "auto status view off") {
     return { action: "off", value: "autoseen" };
+  }
+
+  if (t === ".setting toggle autoseen" || t === "toggle auto seen") {
+    return { action: "toggle", value: "autoseen" };
   }
 
   if (t === ".setting on autoreact" || t === "auto status react on") {
@@ -332,6 +346,10 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "off", value: "autoreact" };
   }
 
+  if (t === ".setting toggle autoreact" || t === "toggle auto react") {
+    return { action: "toggle", value: "autoreact" };
+  }
+
   if (t === ".setting on autodownloadstatus" || t === "auto download status on") {
     return { action: "on", value: "autodownloadstatus" };
   }
@@ -340,28 +358,8 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "off", value: "autodownloadstatus" };
   }
 
-  if (t === ".setting toggle autoseen" || t === "toggle auto seen") {
-    return { action: "toggle", value: "autoseen" };
-  }
-
-  if (t === ".setting toggle autoreact" || t === "toggle auto react") {
-    return { action: "toggle", value: "autoreact" };
-  }
-
   if (t === ".setting toggle autodownloadstatus" || t === "toggle auto download status") {
     return { action: "toggle", value: "autodownloadstatus" };
-  }
-
-  if (t === ".setting toggle automsg" || t === "toggle ai chat") {
-    return { action: "toggle", value: "automsg" };
-  }
-
-  if (t === ".setting toggle antidelete" || t === "toggle anti delete") {
-    return { action: "toggle", value: "antidelete" };
-  }
-
-  if (t === ".setting toggle rejectcalls" || t === "toggle reject calls") {
-    return { action: "toggle", value: "rejectcalls" };
   }
 
   return null;
@@ -508,32 +506,32 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
                   title: "🤖 AUTO REACT SETTINGS",
                   rows: [
                     {
-                      title: "Auto React Msg ON",
+                      title: "✅ Auto React Msg ON",
                       description: "Enable message auto react",
                       id: ".setting on autoreactmsg",
                     },
                     {
-                      title: "Auto React Msg OFF",
+                      title: "❌ Auto React Msg OFF",
                       description: "Disable message auto react",
                       id: ".setting off autoreactmsg",
                     },
                     {
-                      title: "Toggle Auto React Msg",
+                      title: "🔄 Toggle Auto React Msg",
                       description: "Switch auto react on/off",
                       id: ".setting toggle autoreactmsg",
                     },
                     {
-                      title: "React Mode: Private Only",
+                      title: "🔒 React Mode: Private Only",
                       description: "React only in private chats",
                       id: ".setting reactmode private",
                     },
                     {
-                      title: "React Mode: Group Only",
+                      title: "👥 React Mode: Group Only",
                       description: "React only in groups",
                       id: ".setting reactmode group",
                     },
                     {
-                      title: "React Mode: All Chats",
+                      title: "🌍 React Mode: All Chats",
                       description: "React in all chats",
                       id: ".setting reactmode all",
                     },
