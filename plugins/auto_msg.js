@@ -728,6 +728,11 @@ function serviceUnavailableMsg(lang) {
 const AI_APIS = [
   q => `https://vapis.my.id/api/openai?q=${encodeURIComponent(q)}`,
   q => `https://api.ryzendesu.vip/api/ai/chatgpt?text=${encodeURIComponent(q)}`
+  q => `https://api.nexoracle.com/ai/chatgpt?q=${encodeURIComponent(q)}`,
+  q => `https://api.siputzx.my.id/api/ai/gpt4?text=${encodeURIComponent(q)}`,
+  q => `https://delirius-apiofc.vercel.app/ai/gpt?q=${encodeURIComponent(q)}`,
+  q => `https://skizo.tech/api/openai?apikey=skizo&q=${encodeURIComponent(q)}`
+  q => `https://chatgpt.apkstore.workers.dev/?question=${encodeURIComponent(q)}`
 ];
 
 async function generateText(prompt) {
