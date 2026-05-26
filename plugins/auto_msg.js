@@ -9,19 +9,6 @@ const MONGODB_URI =
   process.env.MONGODB_URI ||
   "mongodb+srv://MALIYA-MD:279221@maliya-md.uzal3aa.mongodb.net/?appName=maliya-md";
 
-// ========= NPMAI API CONFIG (No API Key Required!) =========
-// npmai works with Node.js 20 - no puppeteer needed!
-const NPMAI_API_URL = "https://npmai-api.onrender.com";
-
-// Multiple models in order - if one fails, try next
-const NPMAI_MODELS = [
-  "llama3.2",
-  "gemma-2-instruct-9b",
-  "qwen-2.5-coder-7b",
-  "mistral-7b-instruct",
-  "phi-3-medium"
-];
-
 // ========= SETTINGS =========
 const PREFIXES = ["."];
 const DATA_DIR = path.join(__dirname, "../data");
@@ -285,7 +272,7 @@ function ensureBaseFiles() {
 }
 
 ensureBaseFiles();
-console.log("✅ auto_msg plugin loaded with NPMAI API | Node.js 20 compatible | Models:", NPMAI_MODELS.length);
+console.log("✅ auto_msg plugin loaded with Custom AI APIs | Node.js 20 compatible");
 
 // ========= GLOBAL ENABLE/DISABLE =========
 function readStore() {
@@ -737,51 +724,58 @@ function serviceUnavailableMsg(lang) {
     : "❌ AI service unavailable right now. Please try again later.\n> MALIYA-MD ❤️";
 }
 
-// ========= NPMAI API CALL WITH MULTIPLE MODEL FALLBACK =========
-async function generateWithNpmai(prompt) {
+// ========= CUSTOM AI API WITH FALLBACK =========
+const AI_APIS = [
+  q => `https://vapis.my.id/api/openai?q=${encodeURIComponent(q)}`,
+  q => `https://api.ryzendesu.vip/api/ai/chatgpt?text=${encodeURIComponent(q)}`
+];
+
+async function generateText(prompt) {
   let lastError = null;
   
-  for (let i = 0; i < NPMAI_MODELS.length; i++) {
-    const model = NPMAI_MODELS[i];
+  for (let i = 0; i < AI_APIS.length; i++) {
+    const buildUrl = AI_APIS[i];
+    const apiUrl = buildUrl(prompt);
+    
     try {
-      console.log(`🔄 Trying npmai model (${i + 1}/${NPMAI_MODELS.length}): ${model}`);
+      console.log(`🔄 Trying Custom AI API (${i + 1}/${AI_APIS.length}): ${apiUrl.substring(0, 60)}...`);
       
-      const response = await axios.post(
-        NPMAI_API_URL,
-        {
-          prompt: prompt,
-          model: model,
-          temperature: 0.75
-        },
-        {
-          timeout: 45000,
-          headers: { "Content-Type": "application/json" }
+      const response = await axios.get(apiUrl, {
+        timeout: 30000,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
-      );
+      });
       
-      let reply = response.data?.response || response.data?.message || null;
+      let reply = null;
       
-      if (reply && reply.trim().length > 5) {
-        console.log(`✅ npmai success with model: ${model}`);
-        return { text: reply.trim(), provider: "npmai", model: model };
+      // Handle different response formats
+      if (response.data?.message) {
+        reply = response.data.message;
+      } else if (response.data?.response) {
+        reply = response.data.response;
+      } else if (response.data?.result) {
+        reply = response.data.result;
+      } else if (response.data?.data) {
+        reply = typeof response.data.data === 'string' ? response.data.data : null;
       }
       
-      console.log(`⚠️ Model ${model} returned empty response, trying next...`);
-      lastError = new Error(`Empty response from ${model}`);
+      if (reply && reply.trim().length > 5) {
+        console.log(`✅ Custom AI API success (${i === 0 ? 'vapis' : 'ryzendesu'})`);
+        return { text: reply.trim(), provider: i === 0 ? "vapis" : "ryzendesu" };
+      }
+      
+      console.log(`⚠️ API ${i + 1} returned empty response, trying next...`);
+      lastError = new Error(`Empty response from API ${i + 1}`);
     } catch (err) {
-      console.log(`❌ npmai model ${model} failed:`, err.message);
+      console.log(`❌ Custom AI API ${i + 1} failed:`, err.message);
       lastError = err;
       continue;
     }
   }
   
-  console.log("❌ All npmai models failed!");
-  throw lastError || new Error("All npmai models failed");
-}
-
-// ========= MAIN GENERATION FUNCTION =========
-async function generateText(prompt) {
-  return await generateWithNpmai(prompt);
+  console.log("❌ All Custom AI APIs failed!");
+  throw lastError || new Error("All Custom AI APIs failed");
 }
 
 // ========= PROFILE / EXPORT =========
@@ -860,18 +854,84 @@ cmd(
   }
 );
 
-// ========= COMMAND: .models =========
+// ========= COMMAND: .ai =========
 cmd(
   {
-    pattern: "models",
-    desc: "Check available npmai models",
-    category: "AI",
+    pattern: "ai",
+    desc: "Ask AI a question",
     react: "🤖",
+    category: "AI",
     filename: __filename,
   },
-  async (conn, mek, m, { reply }) => {
-    const modelsList = NPMAI_MODELS.map((m, i) => `${i + 1}. ${m}`).join("\n");
-    reply(`🤖 *Available NPMAI Models (Node.js 20)*\n\n${modelsList}\n\n*Note:* If one model fails, bot auto-switches to next model.\n\n> MALIYA-MD ❤️`);
+  async (conn, mek, m, { q, reply, from }) => {
+    try {
+      if (!q) {
+        return reply(`❌ *Please ask a question!*
+
+📌 *Examples:*
+• .ai What is JavaScript?
+• .ai How to make tea?
+• .ai Tell me a joke
+
+> MALIYA-MD ❤️`);
+      }
+
+      await conn.sendMessage(from, { text: "🤔 *Thinking...*" }, { quoted: mek });
+
+      let response = null;
+      let usedApi = null;
+
+      for (let i = 0; i < AI_APIS.length; i++) {
+        const buildUrl = AI_APIS[i];
+        const apiUrl = buildUrl(q);
+        
+        try {
+          console.log(`[AI] Trying API ${i + 1}: ${apiUrl.substring(0, 60)}...`);
+          
+          const res = await axios.get(apiUrl, {
+            timeout: 30000,
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+          });
+          
+          if (res.data?.message) {
+            response = res.data.message;
+            usedApi = i === 0 ? "vapis" : "ryzendesu";
+            break;
+          } else if (res.data?.response) {
+            response = res.data.response;
+            usedApi = i === 0 ? "vapis" : "ryzendesu";
+            break;
+          } else if (res.data?.result) {
+            response = res.data.result;
+            usedApi = i === 0 ? "vapis" : "ryzendesu";
+            break;
+          } else if (res.data?.data) {
+            response = res.data.data;
+            usedApi = i === 0 ? "vapis" : "ryzendesu";
+            break;
+          }
+        } catch (err) {
+          console.log(`[AI] API ${i + 1} failed:`, err.message);
+          continue;
+        }
+      }
+
+      if (!response) {
+        response = "⚠️ *AI Service Unavailable*\n\nAll AI servers are busy. Please try again later.\n\n> MALIYA-MD ❤️";
+      }
+
+      const cleanResponse = cleanAiOutput(response);
+      
+      await conn.sendMessage(from, {
+        text: `🤖 *AI Response*\n${usedApi ? `📡 *API:* ${usedApi}\n` : ""}\n${cleanResponse}\n\n⚡ *MALIYA-MD*`
+      }, { quoted: mek });
+
+    } catch (e) {
+      console.log("AI COMMAND ERROR:", e?.message || e);
+      reply(`❌ *Error:* ${e?.message || "Something went wrong!"}`);
+    }
   }
 );
 
@@ -955,7 +1015,7 @@ async function onMessage(conn, mek, m, ctx = {}) {
         ? buildPromptWithContext(body, lang, from, contextTurns, senderName)
         : buildPrompt(body, lang, from, senderName);
 
-      // Generate AI response using npmai with fallback models
+      // Generate AI response using custom APIs with fallback
       const result = await generateText(prompt);
       const rawText = result?.text || serviceUnavailableMsg(lang);
       const replyText = cleanAiOutput(rawText);
