@@ -233,14 +233,17 @@ function resolveSettingsActionFromText(text = "") {
   const t = String(text).trim().toLowerCase();
   if (!t) return null;
 
-  if (t === ".setting menuopen" || t === "change settings") {
+  // Menu open
+  if (t === ".setting menuopen" || t === "change settings" || t === ".setting menu") {
     return { action: "menuopen" };
   }
 
-  if (t === ".setting status" || t === "show full status") {
+  // Status
+  if (t === ".setting status" || t === "show full status" || t === ".setting show") {
     return { action: "status" };
   }
 
+  // Mode
   if (t === ".setting public" || t === "public mode") {
     return { action: "public" };
   }
@@ -253,6 +256,7 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "toggle", value: "mode" };
   }
 
+  // Presence
   if (t === ".setting presence typing" || t === "auto typing") {
     return { action: "presence", value: "typing" };
   }
@@ -265,14 +269,20 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "presence", value: "off" };
   }
 
-  if (t === ".setting on autoreactmsg" || t === "enable auto react msg") {
+  // ✅ AUTO REACT MSG (FIXED)
+  if (t === ".setting on autoreactmsg" || t === "enable auto react msg" || t === ".setting on auto_react_msg") {
     return { action: "on", value: "autoreactmsg" };
   }
 
-  if (t === ".setting off autoreactmsg" || t === "disable auto react msg") {
+  if (t === ".setting off autoreactmsg" || t === "disable auto react msg" || t === ".setting off auto_react_msg") {
     return { action: "off", value: "autoreactmsg" };
   }
 
+  if (t === ".setting toggle autoreactmsg" || t === "toggle auto react msg" || t === ".setting toggle auto_react_msg") {
+    return { action: "toggle", value: "autoreactmsg" };
+  }
+
+  // React Mode
   if (t === ".setting reactmode private") {
     return { action: "reactmode", value: "private" };
   }
@@ -285,6 +295,7 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "reactmode", value: "all" };
   }
 
+  // AI Chat
   if (t === ".setting on automsg" || t === "enable ai chat") {
     return { action: "on", value: "automsg" };
   }
@@ -293,6 +304,11 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "off", value: "automsg" };
   }
 
+  if (t === ".setting toggle automsg" || t === "toggle ai chat") {
+    return { action: "toggle", value: "automsg" };
+  }
+
+  // Anti Delete
   if (t === ".setting on antidelete" || t === "enable anti delete") {
     return { action: "on", value: "antidelete" };
   }
@@ -301,6 +317,11 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "off", value: "antidelete" };
   }
 
+  if (t === ".setting toggle antidelete" || t === "toggle anti delete") {
+    return { action: "toggle", value: "antidelete" };
+  }
+
+  // Reject Calls
   if (t === ".setting on rejectcalls" || t === "reject calls on") {
     return { action: "on", value: "rejectcalls" };
   }
@@ -309,6 +330,11 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "off", value: "rejectcalls" };
   }
 
+  if (t === ".setting toggle rejectcalls" || t === "toggle reject calls") {
+    return { action: "toggle", value: "rejectcalls" };
+  }
+
+  // Auto Status Seen
   if (t === ".setting on autoseen" || t === "auto status view on") {
     return { action: "on", value: "autoseen" };
   }
@@ -317,6 +343,11 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "off", value: "autoseen" };
   }
 
+  if (t === ".setting toggle autoseen" || t === "toggle auto seen") {
+    return { action: "toggle", value: "autoseen" };
+  }
+
+  // Auto Status React
   if (t === ".setting on autoreact" || t === "auto status react on") {
     return { action: "on", value: "autoreact" };
   }
@@ -325,6 +356,11 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "off", value: "autoreact" };
   }
 
+  if (t === ".setting toggle autoreact" || t === "toggle auto react") {
+    return { action: "toggle", value: "autoreact" };
+  }
+
+  // Auto Download Status
   if (t === ".setting on autodownloadstatus" || t === "auto download status on") {
     return { action: "on", value: "autodownloadstatus" };
   }
@@ -333,32 +369,8 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "off", value: "autodownloadstatus" };
   }
 
-  if (t === ".setting toggle autoseen" || t === "toggle auto seen") {
-    return { action: "toggle", value: "autoseen" };
-  }
-
-  if (t === ".setting toggle autoreact" || t === "toggle auto react") {
-    return { action: "toggle", value: "autoreact" };
-  }
-
   if (t === ".setting toggle autodownloadstatus" || t === "toggle auto download status") {
     return { action: "toggle", value: "autodownloadstatus" };
-  }
-
-  if (t === ".setting toggle automsg" || t === "toggle ai chat") {
-    return { action: "toggle", value: "automsg" };
-  }
-
-  if (t === ".setting toggle autoreactmsg" || t === "toggle auto react msg") {
-    return { action: "toggle", value: "autoreactmsg" };
-  }
-
-  if (t === ".setting toggle antidelete" || t === "toggle anti delete") {
-    return { action: "toggle", value: "antidelete" };
-  }
-
-  if (t === ".setting toggle rejectcalls" || t === "toggle reject calls") {
-    return { action: "toggle", value: "rejectcalls" };
   }
 
   return null;
@@ -505,32 +517,32 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
                   title: "🤖 AUTO REACT SETTINGS",
                   rows: [
                     {
-                      title: "Auto React Msg ON",
+                      title: "✅ Auto React Msg ON",
                       description: "Enable message auto react",
                       id: ".setting on autoreactmsg",
                     },
                     {
-                      title: "Auto React Msg OFF",
+                      title: "❌ Auto React Msg OFF",
                       description: "Disable message auto react",
                       id: ".setting off autoreactmsg",
                     },
                     {
-                      title: "Toggle Auto React Msg",
+                      title: "🔄 Toggle Auto React Msg",
                       description: "Switch auto react on/off",
                       id: ".setting toggle autoreactmsg",
                     },
                     {
-                      title: "React Mode: Private Only",
+                      title: "🔒 React Mode: Private Only",
                       description: "React only in private chats",
                       id: ".setting reactmode private",
                     },
                     {
-                      title: "React Mode: Group Only",
+                      title: "👥 React Mode: Group Only",
                       description: "React only in groups",
                       id: ".setting reactmode group",
                     },
                     {
-                      title: "React Mode: All Chats",
+                      title: "🌍 React Mode: All Chats",
                       description: "React in all chats",
                       id: ".setting reactmode all",
                     },
@@ -540,32 +552,32 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
                   title: "🤖 AI & TOOLS",
                   rows: [
                     {
-                      title: "Enable AI Chat",
+                      title: "✅ Enable AI Chat",
                       description: "Turn ON auto msg",
                       id: ".setting on automsg",
                     },
                     {
-                      title: "Disable AI Chat",
+                      title: "❌ Disable AI Chat",
                       description: "Turn OFF auto msg",
                       id: ".setting off automsg",
                     },
                     {
-                      title: "Enable Anti Delete",
+                      title: "✅ Enable Anti Delete",
                       description: "Turn ON anti delete",
                       id: ".setting on antidelete",
                     },
                     {
-                      title: "Disable Anti Delete",
+                      title: "❌ Disable Anti Delete",
                       description: "Turn OFF anti delete",
                       id: ".setting off antidelete",
                     },
                     {
-                      title: "Reject Calls ON",
+                      title: "✅ Reject Calls ON",
                       description: "Turn ON reject calls",
                       id: ".setting on rejectcalls",
                     },
                     {
-                      title: "Reject Calls OFF",
+                      title: "❌ Reject Calls OFF",
                       description: "Turn OFF reject calls",
                       id: ".setting off rejectcalls",
                     },
@@ -575,37 +587,37 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
                   title: "👁 AUTO FUNCTIONS",
                   rows: [
                     {
-                      title: "Auto Status View ON",
+                      title: "✅ Auto Status View ON",
                       description: "Enable auto status seen",
                       id: ".setting on autoseen",
                     },
                     {
-                      title: "Auto Status View OFF",
+                      title: "❌ Auto Status View OFF",
                       description: "Disable auto status seen",
                       id: ".setting off autoseen",
                     },
                     {
-                      title: "Auto Status React ON",
+                      title: "✅ Auto Status React ON",
                       description: "Enable auto react",
                       id: ".setting on autoreact",
                     },
                     {
-                      title: "Auto Status React OFF",
+                      title: "❌ Auto Status React OFF",
                       description: "Disable auto react",
                       id: ".setting off autoreact",
                     },
                     {
-                      title: "Auto Download Status ON",
+                      title: "✅ Auto Download Status ON",
                       description: "Enable auto status download",
                       id: ".setting on autodownloadstatus",
                     },
                     {
-                      title: "Auto Download Status OFF",
+                      title: "❌ Auto Download Status OFF",
                       description: "Disable auto status download",
                       id: ".setting off autodownloadstatus",
                     },
                     {
-                      title: "Show Full Status",
+                      title: "📊 Show Full Status",
                       description: "View current settings",
                       id: ".setting status",
                     },
