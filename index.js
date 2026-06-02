@@ -554,9 +554,10 @@ function attachSessionHandlers(sock, sessionCtx) {
   sock.ev.on("messages.upsert", async ({ messages }) => {
     if (!messages || !messages.length) return;
 
-    for (const mek of messages) {
+    // ✅ FIX: messageLoop label එක දාන්න — continue properly work වෙන්න
+    messageLoop: for (const mek of messages) {
       try {
-      if (!mek?.message) continue;
+      if (!mek?.message) continue messageLoop;
 
       mek.message =
         getContentType(mek.message) === "ephemeralMessage"
@@ -581,7 +582,7 @@ if (
   const participantRaw = mek.key.participant;
   const id = mek.key.id;
 
-  if (!participantRaw || !id) continue;
+  if (!participantRaw || !id) continue messageLoop;
 
   let participant = jidNormalizedUser(participantRaw);
 
@@ -595,7 +596,7 @@ if (participant.endsWith("@lid")) {
   // 🔥 FIX: own status skip
   if (participant === botJid || mek.key.fromMe) {
     console.log(`⏭️ Skipped own status: ${id}`);
-    continue;
+    continue messageLoop;
   }
 
   const statusKey = {
@@ -634,7 +635,7 @@ if (processedStatuses.has(uniqueStatusId)) {
 
   // 5 min cooldown
   if (now - lastReact < 300000) {
-    continue;
+    continue messageLoop;
   }
 }
 
@@ -711,7 +712,7 @@ setTimeout(() => {
     }
   }
 
-  continue;
+  continue messageLoop;
 }
 
       const m = sms(sock, mek);
@@ -776,7 +777,7 @@ setTimeout(() => {
         const botSettings = readSettings();
 
         if (botSettings.mode === "private" && !isOwner) {
-          if (isCmd) continue;
+          if (isCmd) continue messageLoop;
         }
 
         if (
@@ -821,7 +822,7 @@ setTimeout(() => {
             commands,
           });
 
-          if (res?.handled && !res?.newBody) continue;
+          if (res?.handled && !res?.newBody) continue messageLoop;
 
           if (res?.handled && res?.newBody) {
             body = String(res.newBody || "");
@@ -896,7 +897,7 @@ setTimeout(() => {
         const botSettings = readSettings();
 
         if (botSettings.mode === "private" && !isOwner) {
-          continue;
+          continue messageLoop;
         }
 
         const cmd = commands.find(
