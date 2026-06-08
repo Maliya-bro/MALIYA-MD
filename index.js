@@ -417,7 +417,7 @@ async function startSessionBot(sessionId) {
           if (sessionCtx.ownerNumber[0]) {
             await sock.sendMessage(sessionCtx.ownerNumber[0] + "@s.whatsapp.net", {
               image: {
-                url: "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/ChatGPT%20Image%20Jan%2018%2C%202026%2C%2012_27_25%20PM.png?token=GHSAT0AAAAAAD6J7JTJB3ZHMOUIJBAY5KNS2RGVLJQ",
+                url: "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/ChatGPT%20Image%20Jan%2018%2C%202026%2C%2012_27_25%20PM.png",
               },
               caption: up,
             });
