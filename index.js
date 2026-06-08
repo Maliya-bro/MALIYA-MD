@@ -584,38 +584,20 @@ if (
 
   if (!participantRaw || !id) continue messageLoop;
 
-  let participant = jidNormalizedUser(participantRaw);
+  // ✅ FIX 1: @lid convert කරන්නේ නෑ — original JID use කරනවා
+  const participant = participantRaw;
 
-// 🔥 convert @lid → @s.whatsapp.net
-if (participant.endsWith("@lid")) {
-  participant =
-    participant.split("@")[0] + "@s.whatsapp.net";
-}
-  const botJid = jidNormalizedUser(sock.user?.id || "");
-
-  // 🔥 FIX: own status skip
-  if (participant === botJid || mek.key.fromMe) {
+  // own status skip
+  if (mek.key.fromMe) {
     console.log(`⏭️ Skipped own status: ${id}`);
     continue messageLoop;
   }
 
-  const statusKey = {
-    remoteJid: "status@broadcast",
-    id,
-    participant,
-    fromMe: false,
-  };
-
   // ===== SEEN =====
   if (readSettings().auto_status_seen === true) {
     try {
-      await sock.readMessages([
-  {
-    remoteJid: "status@broadcast",
-    id: id,
-    participant: participant,
-  },
-]);
+      // ✅ FIX 2: mek.key directly use කරනවා — custom key හදන්නේ නෑ
+      await sock.readMessages([mek.key]);
       console.log(`[✓] Status seen: ${id} (${participant})`);
     } catch (e) {
       console.error("❌ Seen error:", e?.message || e);
@@ -623,71 +605,59 @@ if (participant.endsWith("@lid")) {
   }
 
   // ===== DUPLICATE CONTROL =====
-const processedStatuses = global.processedStatuses || new Map();
-global.processedStatuses = processedStatuses;
+  const processedStatuses = global.processedStatuses || new Map();
+  global.processedStatuses = processedStatuses;
 
-const uniqueStatusId = `${participant}:${id}`;
-const now = Date.now();
+  const uniqueStatusId = `${participant}:${id}`;
+  const now = Date.now();
 
-// 🔥 already reacted recently
-if (processedStatuses.has(uniqueStatusId)) {
-  const lastReact = processedStatuses.get(uniqueStatusId);
-
-  // 5 min cooldown
-  if (now - lastReact < 300000) {
-    continue messageLoop;
+  if (processedStatuses.has(uniqueStatusId)) {
+    const lastReact = processedStatuses.get(uniqueStatusId);
+    if (now - lastReact < 300000) {
+      continue messageLoop;
+    }
   }
-}
 
-// save timestamp
-processedStatuses.set(uniqueStatusId, now);
-
-// auto cleanup
-setTimeout(() => {
-  processedStatuses.delete(uniqueStatusId);
-}, 300000);
+  processedStatuses.set(uniqueStatusId, now);
+  setTimeout(() => {
+    processedStatuses.delete(uniqueStatusId);
+  }, 300000);
 
   // ===== REACT =====
   if (readSettings().auto_status_react === true) {
     try {
       const emojis = [
-     // 🔥 AURA
-  "😎","🔥","⚡","👑","💯","💎","🚀","😈",
-
-  // 💔 SAD
-  "💔","🥺","😔","😭","🥀","😞","🌧️","❤️‍🩹",
-
-  // 😂 FUNNY
-  "😂","🤣","🤡","💀","🗿","😜","🙈","🍿",
-
-  // 🎉 OTHERS
-  "❤️","✨","🌈","🎶","🌟","🎧"
+        "😎","🔥","⚡","👑","💯","💎","🚀","😈",
+        "💔","🥺","😔","😭","🥀","😞","🌧️","❤️‍🩹",
+        "😂","🤣","🤡","💀","🗿","😜","🙈","🍿",
+        "❤️","✨","🌈","🎶","🌟","🎧"
       ];
-
       const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-      // 🔥 FIX: proper status reaction method
-     await new Promise(r => setTimeout(r, 1500));
-      await sock.sendMessage(
-        "status@broadcast",
-        {
-          react: {
-            text: randomEmoji,
-            key: statusKey,
-          },
-        },
-        {
-          statusJidList: [participant],
-        }
-      );
+      await new Promise(r => setTimeout(r, 1500));
 
-      console.log(`[✓] Reacted to ${participant}: ${randomEmoji}`);
+      // ✅ FIX 3: mek.key directly use කරනවා — statusKey object හදන්නේ නෑ
+      try {
+        await sock.sendMessage(
+          "status@broadcast",
+          { react: { text: randomEmoji, key: mek.key } },
+          { statusJidList: [participant] }
+        );
+        console.log(`[✓] Reacted (new method): ${participant} ${randomEmoji}`);
+      } catch (e1) {
+        // fallback: old direct method
+        await sock.sendMessage(participant, {
+          react: { text: randomEmoji, key: mek.key }
+        });
+        console.log(`[✓] Reacted (fallback): ${participant} ${randomEmoji}`);
+      }
+
     } catch (e) {
       console.error("❌ React error:", e?.message || e);
     }
   }
 
-  // ===== AUTO DOWNLOAD ONLY WHEN ON =====
+  // ===== DOWNLOAD + FORWARD TO OWNER =====
   if (
     readSettings().auto_download_status === true &&
     (mek.message?.imageMessage || mek.message?.videoMessage)
@@ -706,9 +676,23 @@ setTimeout(() => {
         buffer = Buffer.concat([buffer, chunk]);
       }
 
-      console.log("✅ Status downloaded");
+      const mimetype = mediaMsg.mimetype ||
+        (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
+      const captionText = mediaMsg.caption || "";
+
+      // ✅ FIX 4: owner ට forward කරනවා (new code ඒ part miss වුණා)
+      const ownerJid = sessionCtx.ownerNumber[0] + "@s.whatsapp.net";
+      if (ownerJid && ownerJid !== "@s.whatsapp.net") {
+        await sock.sendMessage(ownerJid, {
+          [msgType === "imageMessage" ? "image" : "video"]: buffer,
+          mimetype,
+          caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
+        });
+        console.log(`✅ Status forwarded to owner from ${participant}`);
+      }
+
     } catch (e) {
-      console.log("Download error:", e?.message);
+      console.log("Download/forward error:", e?.message);
     }
   }
 
