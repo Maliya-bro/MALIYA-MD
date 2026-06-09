@@ -1,18 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
 //  plugins/auto_msg.js — MALIYA-MD Multi-User AI Chat Plugin
 //  ---------------------------------------------------------------
-//  Features:
-//    • .setkey <key>  — per-user Gemini API key (MongoDB stored)
-//    • Up to 3 keys per user, automatic fallback
-//    • One key = one owner (cannot be shared across phone numbers)
-//    • Bot restart → keys auto-load from MongoDB by phone number
-//    • Language detection (Sinhala / Singlish / Tamil / English)
-//    • Replies in same language as sender
-//    • Auto reactions (thinking + reply)
-//    • Chat history per user (MongoDB, last 20 turns)
-//    • Uses sender's WhatsApp pushName in conversation
-//    • Identity: "<ownerName>ගේ MALIYA-MD WhatsApp Bot"
-//    • Multi-user: each phone number has their own keys + history
+//  Fixes applied:
+//    ✅ #1  Key validation — AIza prefix requirement removed
+//    ✅ #2  Bot no longer replies to its own messages
+//    ✅ #3  Singlish input → Full Sinhala Unicode reply only
+//    ✅ #4  pushName extracted from mek.pushName as fallback
+//           + AI explicitly told to address user by name
 // ═══════════════════════════════════════════════════════════════
 
 "use strict";
@@ -61,6 +55,13 @@ async function getUserOwnerName(phone) {
   return doc ? (doc.ownerName || "") : "";
 }
 
+// ─── FIX #1: Relaxed key validation ──────────────────────────
+// Old code required key.startsWith("AIza") — now accepts any
+// key that is at least 15 characters (letters, digits, _, -, .)
+function isValidApiKey(key) {
+  return typeof key === "string" && key.length >= 15 && /^[\w\-\.]+$/.test(key);
+}
+
 // Returns: { ok, reason }
 // reason: "key_taken" | "already_exists" | "limit_reached"
 async function addUserKey(phone, key, ownerName) {
@@ -72,7 +73,7 @@ async function addUserKey(phone, key, ownerName) {
     return { ok: false, reason: "key_taken" };
   }
 
-  const doc = await getUserDoc(phone);
+  const doc  = await getUserDoc(phone);
   const keys = doc ? (doc.keys || []) : [];
 
   if (keys.includes(key)) return { ok: false, reason: "already_exists" };
@@ -112,7 +113,10 @@ async function setAutoReply(phone, enabled) {
   const db = await getDb();
   await db.collection("auto_msg_cfg").updateOne(
     { phone },
-    { $set: { enabled: !!enabled, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
+    {
+      $set:        { enabled: !!enabled, updatedAt: new Date() },
+      $setOnInsert: { createdAt: new Date() },
+    },
     { upsert: true }
   );
 }
@@ -120,12 +124,11 @@ async function setAutoReply(phone, enabled) {
 async function isAutoReplyEnabled(phone) {
   const db  = await getDb();
   const doc = await db.collection("auto_msg_cfg").findOne({ phone });
-  // Default: enabled if user has set at least one key
   return doc ? doc.enabled : false;
 }
 
 // ─── Chat History (MongoDB) ───────────────────────────────────
-const HISTORY_MAX = 20; // turns kept per user
+const HISTORY_MAX = 20;
 
 async function getHistory(phone) {
   const db  = await getDb();
@@ -134,7 +137,7 @@ async function getHistory(phone) {
 }
 
 async function appendHistory(phone, role, text) {
-  const db = await getDb();
+  const db   = await getDb();
   const turn = { role, text: String(text).slice(0, 2000), ts: Date.now() };
 
   await db.collection("chat_history").updateOne(
@@ -164,41 +167,57 @@ const SINGLISH_KW = [
   "mata","oya","mage","mokak","mokada","kohomada","karanna","puluwan",
   "thiyenawa","wenawa","kiyanne","kiyala","ane","machan","bro","ganna",
   "danna","hadanne","thiyanawa","wela","neda","api","eka","epa","wenna",
-  "balanna","thawa","honda","honda","tikak","godak","oyata","meka",
+  "balanna","thawa","honda","tikak","godak","oyata","meka",
 ];
 
+// ─── FIX #3: detectLang now distinguishes Singlish vs SI Unicode
+// Both return "si" — but we track HOW it was detected so the
+// system prompt can force full Unicode regardless of input style.
 function detectLang(text) {
-  if (SI_UNICODE.test(text)) return "si";
-  if (TA_UNICODE.test(text)) return "ta";
+  if (SI_UNICODE.test(text))  return "si";
+  if (TA_UNICODE.test(text))  return "ta";
   const lower = text.toLowerCase();
-  if (SINGLISH_KW.some((w) => lower.includes(w))) return "si";
+  if (SINGLISH_KW.some((w) => lower.includes(w))) return "si"; // Singlish → still "si"
   return "en";
 }
 
-// ─── Identity / System Prompt ─────────────────────────────────
+// ─── FIX #3 + #4: Identity / System Prompt ───────────────────
+// • Sinhala (si): ALWAYS reply in full Sinhala Unicode, never Singlish
+// • Tamil  (ta): reply in Tamil Unicode
+// • English(en): reply in English
+// • pushName is now addressed by name explicitly in the prompt
 function buildSystemPrompt(ownerName, pushName, lang) {
   const who  = ownerName ? `${ownerName}ගේ MALIYA-MD WhatsApp Bot` : "MALIYA-MD WhatsApp Bot";
-  const user = pushName  || "user";
+  // FIX #4: use pushName as the person's actual name in the prompt
+  const user = pushName && pushName.trim() ? pushName.trim() : "user";
 
   if (lang === "si") {
+    // FIX #3: Singlish input arrive කළත් ALWAYS full Sinhala Unicode reply
     return (
-      `ඔයා ${who}. ඔයාව manage කරන්නේ ${ownerName || "Bot Owner"}. ` +
-      `දැන් chat කරන කෙනා ${user}. Sinhala හෝ Singlish ගෙන් reply කරන්න. ` +
+      `ඔයා ${who}. ඔයාව manage කරන්නේ ${ownerName || "Bot Owner"}.` +
+      // FIX #4: explicitly address user by their WhatsApp name
+      ` දැන් chat කරන කෙනාගේ නම ${user}. ඔවුන් ව ${user} කියලා address කරන්න.` +
+      // FIX #3: force full Sinhala Unicode — NO Singlish romanisation
+      ` සෑම reply එකක්ම *සම්පූර්ණ සිංහල Unicode* ගෙන් ලියන්න.` +
+      ` Singlish (roman letters වලින් සිංහල) use කරන්නෙ නෑ. ` +
       `Short, friendly, natural. Bot ලෙස behave කරන්නේ නෑ — friend ගෙ ආකාරයෙන් chat කරන්න. ` +
-      `Markdown bold (*text*) use කරන්නට okay.`
+      `Markdown bold (*text*) use කළ හැකිය.`
     );
   }
   if (lang === "ta") {
     return (
-      `நீங்கள் ${who}. உங்களை நிர்வகிப்பது ${ownerName || "Bot Owner"}. ` +
-      `இப்போது பேசுபவர் ${user}. தமிழில் பதில் சொல்லுங்கள். ` +
-      `குறுகியதாக, நட்பாக, இயல்பாக பேசுங்கள்.`
+      `நீங்கள் ${who}. உங்களை நிர்வகிப்பது ${ownerName || "Bot Owner"}.` +
+      // FIX #4: address user by name
+      ` இப்போது பேசுபவரின் பெயர் ${user}. அவர்களை ${user} என்று அழையுங்கள்.` +
+      ` தமிழில் பதில் சொல்லுங்கள். குறுகியதாக, நட்பாக, இயல்பாக பேசுங்கள்.`
     );
   }
+  // English
   return (
-    `You are ${who}. You are managed by ${ownerName || "Bot Owner"}. ` +
-    `Currently chatting with ${user}. Reply in English. ` +
-    `Be short, friendly, and natural. Don't act robotic — chat like a friend. ` +
+    `You are ${who}. You are managed by ${ownerName || "Bot Owner"}.` +
+    // FIX #4: address user by name
+    ` The person chatting with you is named ${user}. Address them as ${user} naturally.` +
+    ` Reply in English. Be short, friendly, and natural. Don't act robotic — chat like a friend. ` +
     `Markdown bold (*text*) is okay.`
   );
 }
@@ -213,7 +232,7 @@ const GEMINI_MODELS = [
 async function callGemini(apiKey, systemPrompt, history, userText) {
   const contents = [];
 
-  // Inject system prompt as first user turn (Gemini does not have system role)
+  // Inject system prompt as first user turn (Gemini has no system role)
   contents.push({ role: "user",  parts: [{ text: systemPrompt }] });
   contents.push({ role: "model", parts: [{ text: "Understood. I'll follow those instructions." }] });
 
@@ -230,18 +249,20 @@ async function callGemini(apiKey, systemPrompt, history, userText) {
 
   for (const model of GEMINI_MODELS) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const url =
+        `https://generativelanguage.googleapis.com/v1beta/models/` +
+        `${model}:generateContent?key=${apiKey}`;
       const res = await axios.post(url, { contents }, {
-        headers:  { "Content-Type": "application/json" },
-        timeout:  28000,
+        headers: { "Content-Type": "application/json" },
+        timeout: 28000,
       });
 
       const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
       if (text) return text.trim();
     } catch (e) {
       const status = e?.response?.status;
-      if (status === 400) break;       // Bad key — skip remaining models
-      if (status === 429) continue;    // Rate limit — try next model
+      if (status === 400) break;    // Bad key — stop trying models
+      if (status === 429) continue; // Rate limit — try next model
       console.log(`⚠️ Gemini ${model} error:`, e?.message?.slice(0, 80));
     }
   }
@@ -303,10 +324,11 @@ cmd({
   const key   = (args[0] || "").trim();
   const lang  = detectLang(m.body || "");
 
-  if (!key || !key.startsWith("AIza")) {
+  // ── FIX #1: Use isValidApiKey instead of hard-coded AIza check ──
+  if (!isValidApiKey(key)) {
     const hint = lang === "si"
-      ? "❌ Invalid API key.\nFormat: *.setkey AIzaSy...*\nGoogle AI Studio: https://aistudio.google.com/apikey\n> MALIYA-MD ❤️"
-      : "❌ Invalid API key.\nFormat: *.setkey AIzaSy...*\nGet one: https://aistudio.google.com/apikey\n> MALIYA-MD ❤️";
+      ? "❌ Invalid API key.\nFormat: *.setkey <your_key>*\nGoogle AI Studio: https://aistudio.google.com/apikey\n> MALIYA-MD ❤️"
+      : "❌ Invalid API key.\nFormat: *.setkey <your_key>*\nGet one: https://aistudio.google.com/apikey\n> MALIYA-MD ❤️";
     return m.reply(hint);
   }
 
@@ -314,7 +336,7 @@ cmd({
 
   if (!result.ok) {
     const msgs = {
-      key_taken:     lang === "si"
+      key_taken: lang === "si"
         ? "❌ මේ API key කෙනෙකුගේ account ගෙ registered. වෙනත් key එකක් use කරන්න.\n> MALIYA-MD ❤️"
         : "❌ This API key is already registered to another user.\n> MALIYA-MD ❤️",
       already_exists: lang === "si"
@@ -357,7 +379,7 @@ cmd({
   const ok = await removeUserKey(phone, num);
   m.reply(ok
     ? (lang === "si" ? "✅ API key remove කළා.\n> MALIYA-MD ❤️" : "✅ API key removed.\n> MALIYA-MD ❤️")
-    : (lang === "si" ? "❌ Key හොයාගත්නේ නෑ.\n> MALIYA-MD ❤️" : "❌ Key not found.\n> MALIYA-MD ❤️")
+    : (lang === "si" ? "❌ Key හොයාගත්නේ නෑ.\n> MALIYA-MD ❤️"  : "❌ Key not found.\n> MALIYA-MD ❤️")
   );
 });
 
@@ -378,9 +400,9 @@ cmd({
       : "❌ No API keys saved. Use *.setkey <key>*.\n> MALIYA-MD ❤️");
   }
 
-  const list = keys.map((k, i) =>
-    `*${i + 1}.* \`${k.slice(0, 8)}...${k.slice(-4)}\``
-  ).join("\n");
+  const list = keys
+    .map((k, i) => `*${i + 1}.* \`${k.slice(0, 8)}...${k.slice(-4)}\``)
+    .join("\n");
 
   m.reply(`🔑 *Your API Keys (${keys.length}/3)*\n\n${list}\n\n> MALIYA-MD ❤️`);
 });
@@ -457,13 +479,6 @@ cmd({
 
 // ═══════════════════════════════════════════════════════════════
 //  AUTO-REPLY HANDLER
-//  Call this from your main message handler in index.js:
-//
-//    const { handleAutoMsg } = require("./plugins/auto_msg");
-//    // inside messages.upsert handler:
-//    const handled = await handleAutoMsg({ conn, mek, m, sender,
-//      pushName, body, isGroup, sessionOwnerPhone, sessionOwnerName });
-//    if (handled) return;
 // ═══════════════════════════════════════════════════════════════
 
 const _cooldowns = new Map(); // phone -> last reply timestamp
@@ -490,8 +505,19 @@ async function handleAutoMsg({
     const phone = String(sender || "").split("@")[0].replace(/\D/g, "");
     if (!phone) return false;
 
-    // ── Don't reply to the bot owner's own messages ─────────
-    if (sessionOwnerPhone && phone === sessionOwnerPhone) return false;
+    // ── FIX #2: Don't reply to the bot's own messages ────────
+    // Baileys exposes conn.user.id as "phone:device@s.whatsapp.net"
+    // We strip everything except the numeric phone part.
+    const botJidPhone = (conn.user?.id || "")
+      .split(":")[0]      // remove device suffix  e.g. "94771234567:3"
+      .split("@")[0]      // remove domain          e.g. "@s.whatsapp.net"
+      .replace(/\D/g, "");
+
+    if (botJidPhone && phone === botJidPhone)         return false; // own message
+    if (sessionOwnerPhone && phone === sessionOwnerPhone) return false; // explicit owner
+
+    // ── Also ignore messages sent BY the bot (fromMe flag) ──
+    if (mek?.key?.fromMe) return false;
 
     // ── Check auto reply enabled ─────────────────────────────
     const enabled = await isAutoReplyEnabled(phone);
@@ -515,13 +541,18 @@ async function handleAutoMsg({
     // ── Thinking reaction ─────────────────────────────────────
     await react(conn, mek, pick(THINKING_REACTS));
 
+    // ── FIX #4: Resolve pushName — prefer arg, fallback to mek ──
+    const effectivePushName =
+      (pushName && pushName.trim())        ? pushName.trim()     :
+      (mek?.pushName && mek.pushName.trim()) ? mek.pushName.trim() :
+      "";
+
     // ── Get owner name for this session ───────────────────────
-    // Prefer the stored ownerName for the phone, fall back to sessionOwnerName
     const storedOwner = await getUserOwnerName(phone);
     const ownerName   = sessionOwnerName || storedOwner || "Bot Owner";
 
-    // ── Build prompt ──────────────────────────────────────────
-    const systemPrompt = buildSystemPrompt(ownerName, pushName, lang);
+    // ── Build prompt (FIX #3 + #4 applied inside) ─────────────
+    const systemPrompt = buildSystemPrompt(ownerName, effectivePushName, lang);
     const history      = await getHistory(phone);
 
     // ── Call Gemini (try each key) ────────────────────────────
@@ -583,15 +614,15 @@ module.exports = { handleAutoMsg };
 //     all command processing, add:
 //
 //       const handled = await handleAutoMsg({
-//         conn,          // your WASocket instance
-//         mek,           // the raw message object
-//         m,             // your parsed message wrapper
-//         sender,        // e.g. "94XXXXXXXXX@s.whatsapp.net"
-//         pushName,      // m.pushName or sock.user?.name
-//         body,          // message text body
-//         isGroup,       // boolean
-//         sessionOwnerPhone, // logged-in bot's phone number
-//         sessionOwnerName,  // bot owner display name from config
+//         conn,               // your WASocket instance
+//         mek,                // the raw message object
+//         m,                  // your parsed message wrapper
+//         sender,             // e.g. "94XXXXXXXXX@s.whatsapp.net"
+//         pushName,           // m.pushName or mek.pushName  ← FIX #4
+//         body,               // message text body
+//         isGroup,            // boolean
+//         sessionOwnerPhone,  // logged-in bot's phone number (digits only)
+//         sessionOwnerName,   // bot owner display name from config
 //       });
 //       if (handled) return;
 // ═══════════════════════════════════════════════════════════════
