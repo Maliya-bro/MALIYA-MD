@@ -22,16 +22,30 @@ const axios   = require("axios");
 const { MongoClient } = require("mongodb");
 
 // ─── MongoDB ──────────────────────────────────────────────────
-const MONGO_URI = process.env.MONGODB_URI;
-const MONGO_DB  = process.env.MONGODB_DB || "maliya_md";
+// URI කෙළින්ම bot_index.js ගෙන් inject කෙරෙනවා (initMongoUri).
+// Fallback: process.env.MONGODB_URI
+let _injectedUri = null;
+let _client      = null;
+let _db          = null;
 
-let _client = null;
-let _db     = null;
+function initMongoUri(uri) {
+  if (uri && !_injectedUri) {
+    _injectedUri = uri;
+    console.log("🤖 auto_msg: MongoDB URI received from bot");
+  }
+}
+
+function resolveUri() {
+  return _injectedUri || process.env.MONGODB_URI || null;
+}
+
+const MONGO_DB = process.env.MONGODB_DB || "maliya_md";
 
 async function getDb() {
   if (_db) return _db;
-  if (!MONGO_URI) throw new Error("MONGODB_URI not set");
-  _client = new MongoClient(MONGO_URI, { maxPoolSize: 10 });
+  const uri = resolveUri();
+  if (!uri) throw new Error("auto_msg: MONGODB_URI not configured. Call initMongoUri(uri) from index.js");
+  _client = new MongoClient(uri, { maxPoolSize: 10 });
   await _client.connect();
   _db = _client.db(MONGO_DB);
   console.log("🤖 auto_msg: MongoDB connected");
@@ -569,7 +583,7 @@ async function handleAutoMsg({
   }
 }
 
-module.exports = { handleAutoMsg };
+module.exports = { handleAutoMsg, initMongoUri };
 
 // ═══════════════════════════════════════════════════════════════
 //  HOW TO INTEGRATE IN index.js
