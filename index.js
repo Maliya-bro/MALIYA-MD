@@ -61,7 +61,10 @@ const { commands, replyHandlers } = require("./command");
 
 // ── Plugins ──────────────────────────────────────────────────
 // NEW: per-user Gemini key plugin
-const { handleAutoMsg } = require("./plugins/auto_msg.js");
+const { handleAutoMsg, initMongoUri } = require("./plugins/auto_msg.js");
+
+// ── Plugin ට MongoDB URI pass කරනවා ──────────────────────────
+initMongoUri(MONGODB_URI);
 
 const autoReactPlugin   = require("./plugins/auto-react.js");
 
@@ -831,3 +834,4 @@ app.listen(port, () => {
 /* ==================== START ==================== */
 ensureConfiguredSession();
 startSessionWatcher();
+
