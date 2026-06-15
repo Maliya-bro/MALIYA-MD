@@ -262,7 +262,7 @@ async function generatePairCode({ conn, from, reply, phone }) {
       auth: state,
       logger: P({ level: "silent" }),
       printQRInTerminal: false,
-      browser: Browsers.macOS("Firefox"),
+      browser: Browsers.macOS("Safari"),
       markOnlineOnConnect: false,
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
