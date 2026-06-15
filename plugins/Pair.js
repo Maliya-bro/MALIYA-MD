@@ -18,7 +18,7 @@ const config = require("../config");
 
 const MONGODB_URI =
   process.env.MONGODB_URI ||
-  "mongodb+srv://MALIYA-MD:279221@maliya-md.uzal3aa.mongodb.net/?appName=maliya-md";
+  "mongodb+srv://MALIYA-MD:279221279221@maliya-md.uzal3aa.mongodb.net/?appName=maliya-md";
 
 const MONGODB_DB = process.env.MONGODB_DB || "maliya_md";
 const SESSION_COLLECTION = process.env.SESSION_COLLECTION || "wa_sessions";
