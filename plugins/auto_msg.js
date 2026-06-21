@@ -15,9 +15,9 @@ const { cmd }         = require("../command");
 const axios           = require("axios");
 const { MongoClient } = require("mongodb");
 
-// ─── Config — set OWNER_NUMBER in your bot's config/env ───────
-// e.g. process.env.OWNER_NUMBER = "94711234567"  (digits only, no +)
-const OWNER_NUMBER = (process.env.OWNER_NUMBER || "").replace(/\D/g, "");
+// ─── Config — reads BOT_OWNER from your config.js / config.env ─
+const { BOT_OWNER } = require("../config");
+const OWNER_NUMBER = String(BOT_OWNER || process.env.BOT_OWNER || "").replace(/\D/g, "");
 
 // ─── MongoDB ──────────────────────────────────────────────────
 const MONGO_URI = process.env.MONGODB_URI ||
@@ -348,99 +348,98 @@ cmd({
   m.reply(`🔑 *Gemini Keys (${keys.length}/3)*\n\n${list}\n\n> MALIYA-MD ❤️`);
 });
 
-// .msg on | on all | off | status | clear | help
+// .msg on | on all | off | global off | status | clear | help
 cmd({
   pattern: "msg",
   desc:    "Control AI auto-reply",
   type:    "all",
   react:   "🤖",
 }, async (conn, mek, m, { args, sender }) => {
-  const phone     = sender.split("@")[0].replace(/\D/g, "");
-  const sub       = (args[0] || "").toLowerCase().trim();
-  const sub2      = (args[1] || "").toLowerCase().trim(); // "all" for groups
-  const lang      = detectLang(m.body || "");
-  const ownerMode = isOwner(phone, null); // sessionOwnerPhone not available in cmd handler
+  const phone = sender.split("@")[0].replace(/\D/g, "");
+  const sub   = (args[0] || "").toLowerCase().trim();
+  const sub2  = (args[1] || "").toLowerCase().trim();
+  const lang  = detectLang(m.body || "");
 
-  // ── OWNER COMMANDS ────────────────────────────────────────
-  if (ownerMode && sub === "on") {
-    const includeGroups = sub2 === "all";
-    await setGlobalMode(true, includeGroups);
-
-    const scopeMsg = includeGroups
-      ? "✅ *Global AI ON* — Private + Groups *okkotama* AI replies! 🌐"
-      : "✅ *Global AI ON* — Okkoma private chats AI replies! 📱";
-
+  // ── .msg on → per-user private AI on ─────────────────────
+  if (sub === "on" && sub2 !== "all") {
+    await setAutoReply(phone, true);
+    const keys   = await getUserKeys(phone);
+    const source = keys.length ? "🚀 Gemini AI" : "⚡ Free AI (ch.at + pollinations)";
     return m.reply(
-      `${scopeMsg}\n\n` +
-      `🧠 AI Source: ${OWNER_NUMBER ? "Auto (Gemini → free)" : "Free (ch.at + pollinations)"}\n` +
-      `⚠️ Off karanna: *.msg off*\n` +
+      `✅ *AI auto reply ON* 📱\n` +
+      `🧠 ${source}\n\n` +
+      `> oma eka wena eken ena msg walata AI reply labheyi\n` +
       `> MALIYA-MD ❤️`
     );
   }
 
-  if (ownerMode && sub === "off") {
-    await setGlobalMode(false, false);
-    return m.reply("⛔ *Global AI OFF*\nThamath eka ena msg walata AI reply nati vuna.\n> MALIYA-MD ❤️");
+  // ── .msg on all → GLOBAL mode (private + groups) ─────────
+  if (sub === "on" && sub2 === "all") {
+    await setGlobalMode(true, true);
+    return m.reply(
+      `✅ *Global AI ON* 🌐\n\n` +
+      `📱 Private chats — ✅\n` +
+      `👥 Groups        — ✅\n\n` +
+      `> Okkotama AI reply labheyi!\n` +
+      `> Off karanna: *.msg global off*\n` +
+      `> MALIYA-MD ❤️`
+    );
   }
 
-  // ── REGULAR USER: .msg on/off (per-user) ──────────────────
-  if (!ownerMode && sub === "on") {
-    await setAutoReply(phone, true);
-    const keys   = await getUserKeys(phone);
-    const source = keys.length ? "🚀 Gemini AI" : "⚡ Free AI (ch.at + pollinations)";
-    return m.reply(`✅ AI auto reply *ON*\n${source}\n> MALIYA-MD ❤️`);
-  }
-
-  if (sub === "off" && !ownerMode) {
+  // ── .msg off → turn off per-user (keeps global unchanged) ─
+  if (sub === "off") {
     await setAutoReply(phone, false);
-    return m.reply("⛔ AI auto reply *OFF*\n> MALIYA-MD ❤️");
+    return m.reply("⛔ *AI auto reply OFF* (oma eka)\n> MALIYA-MD ❤️");
   }
 
-  // ── STATUS ────────────────────────────────────────────────
+  // ── .msg global off → turn off global mode ────────────────
+  if (sub === "global" && sub2 === "off") {
+    await setGlobalMode(false, false);
+    return m.reply(
+      `⛔ *Global AI OFF*\n\n` +
+      `> Group + okkoma global reply binda\n` +
+      `> Per-user .msg on still works\n` +
+      `> MALIYA-MD ❤️`
+    );
+  }
+
+  // ── .msg clear ────────────────────────────────────────────
+  if (sub === "clear") {
+    await clearHistory(phone);
+    return m.reply("🗑️ Chat history cleared.\n> MALIYA-MD ❤️");
+  }
+
+  // ── .msg status ───────────────────────────────────────────
   if (sub === "status") {
     const global  = await getGlobalMode();
     const keys    = await getUserKeys(phone);
     const userOn  = await isAutoReplyEnabled(phone);
     const history = await getHistory(phone);
     const source  = keys.length ? `🚀 Gemini (${keys.length} key/s)` : "⚡ Free AI (ch.at + pollinations)";
-
-    let statusLines = `📊 *AI Status*\n\n`;
-    if (ownerMode) {
-      statusLines += `🌐 Global Mode  : ${global.enabled ? "ON ✅" : "OFF ⛔"}\n`;
-      statusLines += `👥 Groups      : ${global.includeGroups ? "ON ✅" : "OFF ⛔"}\n`;
-    }
-    statusLines += `🤖 My Auto Reply: ${userOn ? "ON ✅" : "OFF ⛔"}\n`;
-    statusLines += `🧠 AI Source    : ${source}\n`;
-    statusLines += `💬 History      : ${history.length} turns\n`;
-    statusLines += `> MALIYA-MD ❤️`;
-    return m.reply(statusLines);
+    return m.reply(
+      `📊 *AI Status*\n\n` +
+      `🌐 Global Mode : ${global.enabled ? "ON ✅" : "OFF ⛔"}\n` +
+      `👥 Groups      : ${global.includeGroups ? "ON ✅" : "OFF ⛔"}\n` +
+      `🤖 My Reply    : ${userOn ? "ON ✅" : "OFF ⛔"}\n` +
+      `🧠 AI Source   : ${source}\n` +
+      `💬 History     : ${history.length} turns\n` +
+      `> MALIYA-MD ❤️`
+    );
   }
 
-  if (sub === "clear") {
-    await clearHistory(phone);
-    return m.reply("🗑️ Chat history cleared.\n> MALIYA-MD ❤️");
-  }
-
-  // ── HELP ─────────────────────────────────────────────────
-  const ownerHelp = ownerMode
-    ? `\n👑 *Owner Commands:*\n` +
-      `*.msg on*     — Global AI ON (private only)\n` +
-      `*.msg on all* — Global AI ON (private + groups)\n` +
-      `*.msg off*    — Global AI OFF\n`
-    : "";
-
+  // ── Help ──────────────────────────────────────────────────
   m.reply(
-    `🤖 *AI Chat Commands*\n` +
-    ownerHelp +
-    `\n👤 *User Commands:*\n` +
-    `*.msg on*      — My AI reply on\n` +
-    `*.msg off*     — My AI reply off\n` +
-    `*.msg clear*   — Clear my history\n` +
-    `*.msg status*  — Check status\n` +
-    `*.setkey <key>* — Add Gemini key (optional)\n` +
-    `*.mykeys*      — List my keys\n` +
-    `*.removekey <n>* — Remove a key\n` +
-    `\n💡 Free AI (ch.at + pollinations) works without any key.\n` +
+    `🤖 *AI Chat Commands*\n\n` +
+    `*.msg on*          — Oma eka private AI on\n` +
+    `*.msg on all*      — *Okkotama* (private + groups) AI on 🌐\n` +
+    `*.msg off*         — Oma eka AI off\n` +
+    `*.msg global off*  — Okkoma global AI off\n` +
+    `*.msg clear*       — History clear\n` +
+    `*.msg status*      — Status check\n\n` +
+    `*.setkey <key>*    — Gemini key add (optional upgrade)\n` +
+    `*.mykeys*          — Keys list\n` +
+    `*.removekey <n>*   — Key remove\n\n` +
+    `💡 API key nathi wath free AI (ch.at + pollinations) use weyyi.\n` +
     `> MALIYA-MD ❤️`
   );
 });
