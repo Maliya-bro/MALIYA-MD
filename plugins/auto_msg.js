@@ -267,8 +267,22 @@ async function askAI(phone, systemPrompt, history, userText) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
-const THINKING_REACTS = ["🤔", "💭", "⏳", "🔍", "✨"];
-const REPLY_REACTS    = ["❤️", "🔥", "😊", "👍", "💫", "🌟", "🎯", "⚡"];
+const THINKING_REACTS = [
+  "🤔","💭","⏳","🔍","✨","🧠","🌀","⚙️","🔄","💡",
+  "🕵️","📡","🛸","🔬","🧩","🌊","🎯","🔮","💫","🌙",
+  "🤖","📟","🧬","🔭","💻","⌛","🕐","🧪","🗂️","📊",
+  "🌐","📡","🎲","🧿","🔑","🗺️","📌","🏹","🌌","🔒",
+  "⚗️","🧲","💠","🔵","🟣","🌀","🎴","🀄","🎮","🕹️",
+];
+
+const REPLY_REACTS = [
+  "❤️","🔥","😊","👍","💫","🌟","🎯","⚡","🥰","💕",
+  "😍","🤩","💯","🏆","👑","✅","🎉","🎊","🙌","👏",
+  "💪","🚀","✨","🌈","💎","🦋","🌸","🌺","🌻","🌹",
+  "🍀","🎀","🎁","🎵","🎶","🎸","🥳","🤗","😎","🦁",
+  "🐯","🦊","🦄","🐉","⭐","🌠","💥","🎆","🎇","🪄",
+];
+
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 async function react(conn, mek, emoji) {
   try { await conn.sendMessage(mek.key.remoteJid, { react: { text: emoji, key: mek.key } }); } catch (_) {}
