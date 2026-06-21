@@ -85,28 +85,40 @@ async function removeUserKey(phone, oneBasedIndex) {
   return true;
 }
 
-// ─── Global Mode (bot owner controls ALL users) ───────────────
-// global_cfg collection: { _id: "global", enabled: bool, includeGroups: bool }
-async function setGlobalMode(enabled, includeGroups = false) {
-  const db = await getDb();
+// ─── Global Mode — scoped per bot-owner session ───────────────
+// Each bot owner gets their own isolated global_cfg document.
+// Key: "global_<ownerPhone>" so one owner's setting never affects another.
+async function setGlobalMode(enabled, includeGroups = false, scopePhone = "default") {
+  const db  = await getDb();
+  const key = `global_${String(scopePhone || "default").replace(/\D/g, "") || "default"}`;
   await db.collection("global_cfg").updateOne(
-    { _id: "global" },
+    { _id: key },
     { $set: { enabled: !!enabled, includeGroups: !!includeGroups, updatedAt: new Date() } },
     { upsert: true }
   );
 }
-async function getGlobalMode() {
+async function getGlobalMode(scopePhone = "default") {
   const db  = await getDb();
-  const doc = await db.collection("global_cfg").findOne({ _id: "global" });
+  const key = `global_${String(scopePhone || "default").replace(/\D/g, "") || "default"}`;
+  const doc = await db.collection("global_cfg").findOne({ _id: key });
   return doc ? { enabled: doc.enabled, includeGroups: doc.includeGroups } : { enabled: false, includeGroups: false };
 }
 
-// ─── Per-user Auto-reply toggle ───────────────────────────────
+// ─── Per-user Auto-reply toggle + Opt-out ────────────────────
+// optedOut = true  → user explicitly turned off (even in global mode)
+// optedOut = false → user is active (receives global + personal replies)
 async function setAutoReply(phone, enabled) {
   const db = await getDb();
   await db.collection("auto_msg_cfg").updateOne(
     { phone },
-    { $set: { enabled: !!enabled, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
+    {
+      $set: {
+        enabled:  !!enabled,
+        optedOut: !enabled,   // off = opted out, on = not opted out
+        updatedAt: new Date(),
+      },
+      $setOnInsert: { createdAt: new Date() },
+    },
     { upsert: true }
   );
 }
@@ -114,6 +126,11 @@ async function isAutoReplyEnabled(phone) {
   const db  = await getDb();
   const doc = await db.collection("auto_msg_cfg").findOne({ phone });
   return doc ? doc.enabled : false;
+}
+async function isOptedOut(phone) {
+  const db  = await getDb();
+  const doc = await db.collection("auto_msg_cfg").findOne({ phone });
+  return doc ? (doc.optedOut === true) : false;
 }
 
 // ─── Chat History ─────────────────────────────────────────────
@@ -374,45 +391,54 @@ cmd({
   const sub2  = (args[1] || "").toLowerCase().trim();
   const lang  = detectLang(m.body || "");
 
-  // ── .msg on → per-user private AI on ─────────────────────
+  // Scope: each bot session (owner) has its own global mode
+  const scopePhone = (conn.user?.id || "").split(":")[0].split("@")[0].replace(/\D/g, "");
+
+  // ── .msg on → per-user AI on + remove opt-out ────────────
   if (sub === "on" && sub2 !== "all") {
-    await setAutoReply(phone, true);
+    await setAutoReply(phone, true);   // clears optedOut too
+    const global = await getGlobalMode(scopePhone);
     const keys   = await getUserKeys(phone);
     const source = keys.length ? "🚀 Gemini AI" : "⚡ Free AI (ch.at + pollinations)";
+    const note   = global.enabled
+      ? "> Global mode ON wath oya receive karanawa ✅"
+      : "> Oma private chat walata AI reply labheyi";
     return m.reply(
-      `✅ *AI auto reply ON* 📱\n` +
-      `🧠 ${source}\n\n` +
-      `> oma eka wena eken ena msg walata AI reply labheyi\n` +
-      `> MALIYA-MD ❤️`
+      `✅ *AI reply ON* 📱\n🧠 ${source}\n\n${note}\n> MALIYA-MD ❤️`
     );
   }
 
-  // ── .msg on all → GLOBAL mode (private + groups) ─────────
+  // ── .msg on all → GLOBAL mode (this session only) ────────
   if (sub === "on" && sub2 === "all") {
-    await setGlobalMode(true, true);
+    await setGlobalMode(true, true, scopePhone);
     return m.reply(
       `✅ *Global AI ON* 🌐\n\n` +
       `📱 Private chats — ✅\n` +
       `👥 Groups        — ✅\n\n` +
-      `> Okkotama AI reply labheyi!\n` +
-      `> Off karanna: *.msg global off*\n` +
+      `> Oba wena bot owners walata බලපාන්නේ නැහැ!\n` +
+      `> Personally off karanna: *.msg off*\n` +
+      `> Okkoma off karanna: *.msg global off*\n` +
       `> MALIYA-MD ❤️`
     );
   }
 
-  // ── .msg off → turn off per-user (keeps global unchanged) ─
+  // ── .msg off → personal opt-out (works even in global mode)
   if (sub === "off") {
-    await setAutoReply(phone, false);
-    return m.reply("⛔ *AI auto reply OFF* (oma eka)\n> MALIYA-MD ❤️");
+    await setAutoReply(phone, false);   // sets optedOut = true
+    const global = await getGlobalMode(scopePhone);
+    const note   = global.enabled
+      ? "> Global mode ON wath oya AI reply labenne na 🚫\n> Wapas on karanna: *.msg on*"
+      : "> AI auto reply off";
+    return m.reply(`⛔ *AI reply OFF* (oma eka pමණai)\n\n${note}\n> MALIYA-MD ❤️`);
   }
 
-  // ── .msg global off → turn off global mode ────────────────
+  // ── .msg global off → turn off THIS session's global mode ──
   if (sub === "global" && sub2 === "off") {
-    await setGlobalMode(false, false);
+    await setGlobalMode(false, false, scopePhone);
     return m.reply(
-      `⛔ *Global AI OFF*\n\n` +
-      `> Group + okkoma global reply binda\n` +
-      `> Per-user .msg on still works\n` +
+      `⛔ *Global AI OFF* (oba session eka)\n\n` +
+      `> Wena bot owners walata බලපාන්නේ නැහැ!\n` +
+      `> Per-user *.msg on* still works\n` +
       `> MALIYA-MD ❤️`
     );
   }
@@ -425,16 +451,25 @@ cmd({
 
   // ── .msg status ───────────────────────────────────────────
   if (sub === "status") {
-    const global  = await getGlobalMode();
-    const keys    = await getUserKeys(phone);
-    const userOn  = await isAutoReplyEnabled(phone);
-    const history = await getHistory(phone);
-    const source  = keys.length ? `🚀 Gemini (${keys.length} key/s)` : "⚡ Free AI (ch.at + pollinations)";
+    const global   = await getGlobalMode(scopePhone);
+    const keys     = await getUserKeys(phone);
+    const userOn   = await isAutoReplyEnabled(phone);
+    const optedOut = await isOptedOut(phone);
+    const history  = await getHistory(phone);
+    const source   = keys.length ? `🚀 Gemini (${keys.length} key/s)` : "⚡ Free AI (ch.at + pollinations)";
+
+    // What actually happens to THIS user
+    let myStatus;
+    if (global.enabled && optedOut)  myStatus = "OFF ⛔ (personally opted out)";
+    else if (global.enabled)         myStatus = "ON ✅ (via global mode)";
+    else if (userOn)                 myStatus = "ON ✅ (personal)";
+    else                             myStatus = "OFF ⛔";
+
     return m.reply(
       `📊 *AI Status*\n\n` +
       `🌐 Global Mode : ${global.enabled ? "ON ✅" : "OFF ⛔"}\n` +
       `👥 Groups      : ${global.includeGroups ? "ON ✅" : "OFF ⛔"}\n` +
-      `🤖 My Reply    : ${userOn ? "ON ✅" : "OFF ⛔"}\n` +
+      `🤖 My AI       : ${myStatus}\n` +
       `🧠 AI Source   : ${source}\n` +
       `💬 History     : ${history.length} turns\n` +
       `> MALIYA-MD ❤️`
@@ -476,8 +511,9 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
     if (botJidPhone && phone === botJidPhone) return false;
     if (mek?.key?.fromMe)                    return false;
 
-    // ── Check global mode ────────────────────────────────────
-    const global = await getGlobalMode();
+    // ── Check global mode — scoped to this bot session ───────
+    const scopePhone = String(sessionOwnerPhone || botJidPhone || "").replace(/\D/g, "");
+    const global = await getGlobalMode(scopePhone);
 
     // Owner's own messages — never auto-reply to owner
     const senderIsOwner = isOwner(phone, sessionOwnerPhone);
@@ -487,8 +523,10 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
     let shouldReply = false;
 
     if (global.enabled) {
-      // Global ON → reply to all private chats
-      // If includeGroups also ON → reply to groups too
+      // Global ON — but check if user personally opted out (.msg off)
+      const optedOut = await isOptedOut(phone);
+      if (optedOut) return false;   // user said "stop" — respect it
+
       if (isGroup && global.includeGroups) shouldReply = true;
       if (!isGroup) shouldReply = true;
     } else {
