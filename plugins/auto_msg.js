@@ -1,18 +1,23 @@
 // ═══════════════════════════════════════════════════════════════
 //  auto_msg.js — MALIYA-MD Upgraded AI Chat Plugin
 //  ---------------------------------------------------------------
-//  ✅ No API key needed  — free AI (ch.at + pollinations) built-in
-//  ✅ Add Gemini key     — auto upgrades to Gemini (better quality)
-//  ✅ .msg on works for EVERYONE without any setup
+//  ✅ Bot owner .msg on  → ALL private chats get AI replies
+//  ✅ Bot owner .msg on all → Groups + private both get AI replies
+//  ✅ Bot owner .msg off → Global mode off
+//  ✅ No API key needed — free AI (ch.at + pollinations) built-in
+//  ✅ Add Gemini key (.setkey) → auto upgrades to Gemini
 //  ✅ Fallback chain: Gemini → ch.at → pollinations.ai
-//  ✅ All original fixes retained (#1 #2 #3 #4)
 // ═══════════════════════════════════════════════════════════════
 
 "use strict";
 
-const { cmd }       = require("../command");
-const axios         = require("axios");
+const { cmd }         = require("../command");
+const axios           = require("axios");
 const { MongoClient } = require("mongodb");
+
+// ─── Config — set OWNER_NUMBER in your bot's config/env ───────
+// e.g. process.env.OWNER_NUMBER = "94711234567"  (digits only, no +)
+const OWNER_NUMBER = (process.env.OWNER_NUMBER || "").replace(/\D/g, "");
 
 // ─── MongoDB ──────────────────────────────────────────────────
 const MONGO_URI = process.env.MONGODB_URI ||
@@ -44,11 +49,9 @@ async function getUserOwnerName(phone) {
   const doc = await getUserDoc(phone);
   return doc ? (doc.ownerName || "") : "";
 }
-
 function isValidApiKey(key) {
   return typeof key === "string" && key.length >= 15 && /^[\w\-\.]+$/.test(key);
 }
-
 async function addUserKey(phone, key, ownerName) {
   const db = await getDb();
   const existing = await db.collection("user_api_keys").findOne({ keys: key });
@@ -68,7 +71,6 @@ async function addUserKey(phone, key, ownerName) {
   );
   return { ok: true };
 }
-
 async function removeUserKey(phone, oneBasedIndex) {
   const db   = await getDb();
   const doc  = await getUserDoc(phone);
@@ -83,7 +85,23 @@ async function removeUserKey(phone, oneBasedIndex) {
   return true;
 }
 
-// ─── Auto-reply toggle ────────────────────────────────────────
+// ─── Global Mode (bot owner controls ALL users) ───────────────
+// global_cfg collection: { _id: "global", enabled: bool, includeGroups: bool }
+async function setGlobalMode(enabled, includeGroups = false) {
+  const db = await getDb();
+  await db.collection("global_cfg").updateOne(
+    { _id: "global" },
+    { $set: { enabled: !!enabled, includeGroups: !!includeGroups, updatedAt: new Date() } },
+    { upsert: true }
+  );
+}
+async function getGlobalMode() {
+  const db  = await getDb();
+  const doc = await db.collection("global_cfg").findOne({ _id: "global" });
+  return doc ? { enabled: doc.enabled, includeGroups: doc.includeGroups } : { enabled: false, includeGroups: false };
+}
+
+// ─── Per-user Auto-reply toggle ───────────────────────────────
 async function setAutoReply(phone, enabled) {
   const db = await getDb();
   await db.collection("auto_msg_cfg").updateOne(
@@ -100,7 +118,6 @@ async function isAutoReplyEnabled(phone) {
 
 // ─── Chat History ─────────────────────────────────────────────
 const HISTORY_MAX = 20;
-
 async function getHistory(phone) {
   const db  = await getDb();
   const doc = await db.collection("chat_history").findOne({ phone });
@@ -154,7 +171,7 @@ function buildSystemPrompt(ownerName, pushName, lang) {
       `ඔයා ${who}. ඔයාව manage කරන්නේ ${ownerName || "Bot Owner"}.` +
       ` දැන් chat කරන කෙනාගේ නම ${user}. ඔවුන් ව ${user} කියලා address කරන්න.` +
       ` සෑම reply එකක්ම *සම්පූර්ණ සිංහල Unicode* ගෙන් ලියන්න.` +
-      ` Singlish use කරන්නෙ නෑ. Short, friendly, natural. Markdown bold (*text*) use කළ හැකිය.`
+      ` Singlish use කරන්නෙ නෑ. Short, friendly, natural.`
     );
   }
   if (lang === "ta") {
@@ -165,25 +182,21 @@ function buildSystemPrompt(ownerName, pushName, lang) {
   }
   return (
     `You are ${who}. The person chatting is named ${user}. Address them as ${user} naturally.` +
-    ` Reply in English. Be short, friendly, and natural. Don't act robotic.`
+    ` Reply in English. Be short, friendly, and natural.`
   );
 }
 
 // ══════════════════════════════════════════════════════════════
-//  FREE AI PROVIDERS (no API key needed)
+//  FREE AI PROVIDERS
 // ══════════════════════════════════════════════════════════════
 
-// Provider 1 — ch.at (~400ms, reliable)
 async function callChAt(prompt, retries = 3) {
   for (let i = 1; i <= retries; i++) {
     try {
       const res = await axios.post(
         "https://ch.at/api/chat",
         { message: prompt },
-        {
-          headers: { "Content-Type": "application/json", "User-Agent": "MALIYA-MD-Bot/2.0" },
-          timeout: 12000,
-        }
+        { headers: { "Content-Type": "application/json", "User-Agent": "MALIYA-MD-Bot/2.0" }, timeout: 12000 }
       );
       const t = res.data?.answer || res.data?.reply || res.data?.message ||
                 res.data?.response || res.data?.result;
@@ -194,7 +207,6 @@ async function callChAt(prompt, retries = 3) {
   return null;
 }
 
-// Provider 2 — pollinations.ai (free, ~3-5s)
 async function callPollinations(prompt) {
   try {
     const res = await axios.get(
@@ -208,22 +220,16 @@ async function callPollinations(prompt) {
   } catch { return null; }
 }
 
-// Provider 3 — Gemini (requires user API key, best quality)
-const GEMINI_MODELS = [
-  "gemini-2.0-flash",
-  "gemini-2.5-flash",
-  "gemini-1.5-flash",
-];
+const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
 
 async function callGemini(apiKey, systemPrompt, history, userText) {
   const contents = [];
   contents.push({ role: "user",  parts: [{ text: systemPrompt }] });
-  contents.push({ role: "model", parts: [{ text: "Understood. I'll follow those instructions." }] });
+  contents.push({ role: "model", parts: [{ text: "Understood." }] });
   for (const turn of history) {
     contents.push({ role: turn.role === "user" ? "user" : "model", parts: [{ text: turn.text }] });
   }
   contents.push({ role: "user", parts: [{ text: userText }] });
-
   for (const model of GEMINI_MODELS) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
@@ -235,18 +241,15 @@ async function callGemini(apiKey, systemPrompt, history, userText) {
       if (text) return { text: text.trim(), source: `gemini/${model}` };
     } catch (e) {
       const status = e?.response?.status;
-      if (status === 400) break;    // Bad key — stop
-      if (status === 429) continue; // Rate limit — try next model
+      if (status === 400) break;
+      if (status === 429) continue;
     }
   }
   return null;
 }
 
-// ══════════════════════════════════════════════════════════════
-//  SMART AI CALLER — Gemini first, then free fallbacks
-// ══════════════════════════════════════════════════════════════
+// Smart caller: Gemini → ch.at → pollinations
 async function askAI(phone, systemPrompt, history, userText) {
-  // 1. Try Gemini with user keys (best quality)
   const keys = await getUserKeys(phone);
   if (keys.length) {
     for (const key of keys) {
@@ -254,46 +257,41 @@ async function askAI(phone, systemPrompt, history, userText) {
       if (result) return result;
     }
   }
-
-  // Build a simple prompt string for free providers
-  const freePrompt = systemPrompt
-    ? `${systemPrompt}\n\nUser: ${userText}`
-    : userText;
-
-  // 2. Try ch.at (fast, free)
+  const freePrompt = systemPrompt ? `${systemPrompt}\n\nUser: ${userText}` : userText;
   const chAtResult = await Promise.race([
     callChAt(freePrompt),
     new Promise(r => setTimeout(() => r(null), 14000)),
   ]);
   if (chAtResult) return chAtResult;
-
-  // 3. Try pollinations.ai (free fallback)
-  const pollinationsResult = await callPollinations(freePrompt);
-  if (pollinationsResult) return pollinationsResult;
-
-  return null;
+  return await callPollinations(freePrompt);
 }
 
-// ─── Reactions ────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────
 const THINKING_REACTS = ["🤔", "💭", "⏳", "🔍", "✨"];
 const REPLY_REACTS    = ["❤️", "🔥", "😊", "👍", "💫", "🌟", "🎯", "⚡"];
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 async function react(conn, mek, emoji) {
   try { await conn.sendMessage(mek.key.remoteJid, { react: { text: emoji, key: mek.key } }); } catch (_) {}
 }
-
-// ─── Error messages ───────────────────────────────────────────
 function failMsg(lang) {
   if (lang === "si") return "❌ AI service unavailable. ටිකක් wait කරලා try කරන්න.\n> MALIYA-MD ❤️";
-  if (lang === "ta") return "❌ AI சேவை கிடைக்கவில்லை. சிறிது நேரம் கழித்து முயற்சிக்கவும்.\n> MALIYA-MD ❤️";
+  if (lang === "ta") return "❌ AI சேவை இல்லை. சிறிது நேரம் கழித்து முயற்சிக்கவும்.\n> MALIYA-MD ❤️";
   return "❌ AI unavailable right now. Try again later.\n> MALIYA-MD ❤️";
+}
+
+// ─── Is sender the bot owner? ─────────────────────────────────
+function isOwner(phone, sessionOwnerPhone) {
+  const clean = String(phone || "").replace(/\D/g, "");
+  if (OWNER_NUMBER && clean === OWNER_NUMBER)      return true;
+  if (sessionOwnerPhone && clean === String(sessionOwnerPhone).replace(/\D/g, "")) return true;
+  return false;
 }
 
 // ══════════════════════════════════════════════════════════════
 //  COMMANDS
 // ══════════════════════════════════════════════════════════════
 
-// .setkey — optional, upgrades to Gemini
+// .setkey — optional Gemini upgrade
 cmd({
   pattern: "setkey",
   desc:    "Add Gemini API key (optional — upgrades AI quality)",
@@ -303,26 +301,21 @@ cmd({
   const phone = sender.split("@")[0].replace(/\D/g, "");
   const key   = (args[0] || "").trim();
   const lang  = detectLang(m.body || "");
-
   if (!isValidApiKey(key)) {
     return m.reply(lang === "si"
-      ? "❌ Invalid API key.\nFormat: *.setkey <your_key>*\nGet one free: https://aistudio.google.com/apikey\n> MALIYA-MD ❤️"
-      : "❌ Invalid API key.\nFormat: *.setkey <your_key>*\nGet free key: https://aistudio.google.com/apikey\n> MALIYA-MD ❤️");
+      ? "❌ Invalid key.\n*.setkey <your_key>*\nFree: https://aistudio.google.com/apikey\n> MALIYA-MD ❤️"
+      : "❌ Invalid key.\n*.setkey <your_key>*\nFree: https://aistudio.google.com/apikey\n> MALIYA-MD ❤️");
   }
-
   const result = await addUserKey(phone, key, pushName || phone);
   if (!result.ok) {
     const msgs = {
-      key_taken:      lang === "si" ? "❌ මේ API key කෙනෙකුගේ account ගෙ registered.\n> MALIYA-MD ❤️" : "❌ This key is registered to another user.\n> MALIYA-MD ❤️",
-      already_exists: lang === "si" ? "⚠️ මේ key දැනටමත් save කර ඇත.\n> MALIYA-MD ❤️"              : "⚠️ This key is already saved.\n> MALIYA-MD ❤️",
-      limit_reached:  lang === "si" ? "❌ Keys 3 ක් limit. *.removekey <n>* ගෙන් remove කරන්න.\n> MALIYA-MD ❤️" : "❌ Max 3 keys. Use *.removekey <n>* first.\n> MALIYA-MD ❤️",
+      key_taken:      "❌ Key is registered to another user.\n> MALIYA-MD ❤️",
+      already_exists: "⚠️ Key already saved.\n> MALIYA-MD ❤️",
+      limit_reached:  "❌ Max 3 keys. Use *.removekey <n>* first.\n> MALIYA-MD ❤️",
     };
     return m.reply(msgs[result.reason] || "❌ Error saving key.\n> MALIYA-MD ❤️");
   }
-
-  m.reply(lang === "si"
-    ? `✅ *Gemini API key save වුණා!*\n🚀 AI quality upgrade වෙලා — Gemini use කරයි.\n> MALIYA-MD ❤️`
-    : `✅ *Gemini API key saved!*\n🚀 AI upgraded — Gemini will be used now.\n> MALIYA-MD ❤️`);
+  m.reply("✅ *Gemini API key saved!*\n🚀 AI upgraded to Gemini.\n> MALIYA-MD ❤️");
 });
 
 // .removekey
@@ -334,12 +327,9 @@ cmd({
 }, async (conn, mek, m, { args, sender }) => {
   const phone = sender.split("@")[0].replace(/\D/g, "");
   const num   = parseInt(args[0]);
-  const lang  = detectLang(m.body || "");
   if (!num || num < 1 || num > 3) return m.reply("Usage: *.removekey <1-3>*\n> MALIYA-MD ❤️");
   const ok = await removeUserKey(phone, num);
-  m.reply(ok
-    ? (lang === "si" ? "✅ API key remove කළා.\n> MALIYA-MD ❤️" : "✅ Key removed.\n> MALIYA-MD ❤️")
-    : (lang === "si" ? "❌ Key හොයාගත්නේ නෑ.\n> MALIYA-MD ❤️"  : "❌ Key not found.\n> MALIYA-MD ❤️"));
+  m.reply(ok ? "✅ Key removed.\n> MALIYA-MD ❤️" : "❌ Key not found.\n> MALIYA-MD ❤️");
 });
 
 // .mykeys
@@ -351,39 +341,79 @@ cmd({
 }, async (conn, mek, m, { sender }) => {
   const phone = sender.split("@")[0].replace(/\D/g, "");
   const keys  = await getUserKeys(phone);
-  const lang  = detectLang(m.body || "");
   if (!keys.length) {
-    return m.reply(lang === "si"
-      ? "ℹ️ Gemini API keys නෑ.\nFree AI (ch.at + pollinations) use කෙරෙයි.\n*.setkey <key>* — Upgrade to Gemini\n> MALIYA-MD ❤️"
-      : "ℹ️ No Gemini keys saved.\nFree AI (ch.at + pollinations) is active.\n*.setkey <key>* — Upgrade to Gemini\n> MALIYA-MD ❤️");
+    return m.reply("ℹ️ No Gemini keys.\nFree AI is active.\n*.setkey <key>* — Upgrade\n> MALIYA-MD ❤️");
   }
   const list = keys.map((k, i) => `*${i + 1}.* \`${k.slice(0, 8)}...${k.slice(-4)}\``).join("\n");
   m.reply(`🔑 *Gemini Keys (${keys.length}/3)*\n\n${list}\n\n> MALIYA-MD ❤️`);
 });
 
-// .msg on | off | status | clear | help
+// .msg on | on all | off | status | clear | help
 cmd({
   pattern: "msg",
-  desc:    "Control AI auto-reply (works without API key)",
+  desc:    "Control AI auto-reply",
   type:    "all",
   react:   "🤖",
 }, async (conn, mek, m, { args, sender }) => {
-  const phone = sender.split("@")[0].replace(/\D/g, "");
-  const sub   = (args[0] || "").toLowerCase().trim();
-  const lang  = detectLang(m.body || "");
+  const phone     = sender.split("@")[0].replace(/\D/g, "");
+  const sub       = (args[0] || "").toLowerCase().trim();
+  const sub2      = (args[1] || "").toLowerCase().trim(); // "all" for groups
+  const lang      = detectLang(m.body || "");
+  const ownerMode = isOwner(phone, null); // sessionOwnerPhone not available in cmd handler
 
-  if (sub === "on") {
-    await setAutoReply(phone, true);
-    const keys   = await getUserKeys(phone);
-    const source = keys.length ? "🚀 Gemini AI (high quality)" : "⚡ Free AI (ch.at + pollinations)";
-    return m.reply(lang === "si"
-      ? `✅ AI auto reply *ON*\n${source}\n\n💡 Upgrade: *.setkey <gemini_key>*\n> MALIYA-MD ❤️`
-      : `✅ AI auto reply *ON*\n${source}\n\n💡 Upgrade: *.setkey <gemini_key>*\n> MALIYA-MD ❤️`);
+  // ── OWNER COMMANDS ────────────────────────────────────────
+  if (ownerMode && sub === "on") {
+    const includeGroups = sub2 === "all";
+    await setGlobalMode(true, includeGroups);
+
+    const scopeMsg = includeGroups
+      ? "✅ *Global AI ON* — Private + Groups *okkotama* AI replies! 🌐"
+      : "✅ *Global AI ON* — Okkoma private chats AI replies! 📱";
+
+    return m.reply(
+      `${scopeMsg}\n\n` +
+      `🧠 AI Source: ${OWNER_NUMBER ? "Auto (Gemini → free)" : "Free (ch.at + pollinations)"}\n` +
+      `⚠️ Off karanna: *.msg off*\n` +
+      `> MALIYA-MD ❤️`
+    );
   }
 
-  if (sub === "off") {
+  if (ownerMode && sub === "off") {
+    await setGlobalMode(false, false);
+    return m.reply("⛔ *Global AI OFF*\nThamath eka ena msg walata AI reply nati vuna.\n> MALIYA-MD ❤️");
+  }
+
+  // ── REGULAR USER: .msg on/off (per-user) ──────────────────
+  if (!ownerMode && sub === "on") {
+    await setAutoReply(phone, true);
+    const keys   = await getUserKeys(phone);
+    const source = keys.length ? "🚀 Gemini AI" : "⚡ Free AI (ch.at + pollinations)";
+    return m.reply(`✅ AI auto reply *ON*\n${source}\n> MALIYA-MD ❤️`);
+  }
+
+  if (sub === "off" && !ownerMode) {
     await setAutoReply(phone, false);
     return m.reply("⛔ AI auto reply *OFF*\n> MALIYA-MD ❤️");
+  }
+
+  // ── STATUS ────────────────────────────────────────────────
+  if (sub === "status") {
+    const global  = await getGlobalMode();
+    const keys    = await getUserKeys(phone);
+    const userOn  = await isAutoReplyEnabled(phone);
+    const history = await getHistory(phone);
+    const source  = keys.length ? `🚀 Gemini (${keys.length} key/s)` : "⚡ Free AI (ch.at + pollinations)";
+
+    let statusLines = `📊 *AI Status*\n\n`;
+    if (ownerMode) {
+      statusLines += `🌐 Global Mode  : ${global.enabled ? "ON ✅" : "OFF ⛔"}\n`;
+      statusLines += `👥 Groups      : ${global.includeGroups ? "ON ✅" : "OFF ⛔"}\n`;
+    }
+    statusLines += `🤖 My Auto Reply: ${userOn ? "ON ✅" : "OFF ⛔"}\n`;
+    statusLines += `🧠 AI Source    : ${source}\n`;
+    statusLines += `💬 History      : ${history.length} turns\n`;
+    statusLines += `> MALIYA-MD ❤️`;
+    return m.reply(statusLines);
   }
 
   if (sub === "clear") {
@@ -391,42 +421,27 @@ cmd({
     return m.reply("🗑️ Chat history cleared.\n> MALIYA-MD ❤️");
   }
 
-  if (sub === "status") {
-    const keys    = await getUserKeys(phone);
-    const enabled = await isAutoReplyEnabled(phone);
-    const history = await getHistory(phone);
-    const source  = keys.length ? `🚀 Gemini AI (${keys.length} key/s)` : "⚡ Free AI (ch.at + pollinations)";
-    return m.reply(
-      `📊 *AI Status*\n\n` +
-      `🤖 Auto Reply : ${enabled ? "ON ✅" : "OFF ⛔"}\n` +
-      `🧠 AI Source  : ${source}\n` +
-      `💬 History    : ${history.length} turns\n` +
-      `> MALIYA-MD ❤️`
-    );
-  }
+  // ── HELP ─────────────────────────────────────────────────
+  const ownerHelp = ownerMode
+    ? `\n👑 *Owner Commands:*\n` +
+      `*.msg on*     — Global AI ON (private only)\n` +
+      `*.msg on all* — Global AI ON (private + groups)\n` +
+      `*.msg off*    — Global AI OFF\n`
+    : "";
 
-  // Help
-  m.reply(lang === "si"
-    ? `🤖 *AI Chat Commands*\n\n` +
-      `*.msg on*      — AI reply on (API key නැතිව ත් works)\n` +
-      `*.msg off*     — AI reply off\n` +
-      `*.msg clear*   — History clear\n` +
-      `*.msg status*  — Status check\n` +
-      `*.setkey <key>* — Gemini key add (optional upgrade)\n` +
-      `*.mykeys*      — Keys list\n` +
-      `*.removekey <n>* — Key remove\n` +
-      `\n💡 Gemini key නැතිව ch.at + pollinations free AI use කෙරෙයි.\n` +
-      `> MALIYA-MD ❤️`
-    : `🤖 *AI Chat Commands*\n\n` +
-      `*.msg on*      — Enable AI reply (works without API key)\n` +
-      `*.msg off*     — Disable AI reply\n` +
-      `*.msg clear*   — Clear history\n` +
-      `*.msg status*  — Check status\n` +
-      `*.setkey <key>* — Add Gemini key (optional upgrade)\n` +
-      `*.mykeys*      — List keys\n` +
-      `*.removekey <n>* — Remove a key\n` +
-      `\n💡 Without a Gemini key, free AI (ch.at + pollinations) is used.\n` +
-      `> MALIYA-MD ❤️`
+  m.reply(
+    `🤖 *AI Chat Commands*\n` +
+    ownerHelp +
+    `\n👤 *User Commands:*\n` +
+    `*.msg on*      — My AI reply on\n` +
+    `*.msg off*     — My AI reply off\n` +
+    `*.msg clear*   — Clear my history\n` +
+    `*.msg status*  — Check status\n` +
+    `*.setkey <key>* — Add Gemini key (optional)\n` +
+    `*.mykeys*      — List my keys\n` +
+    `*.removekey <n>* — Remove a key\n` +
+    `\n💡 Free AI (ch.at + pollinations) works without any key.\n` +
+    `> MALIYA-MD ❤️`
   );
 });
 
@@ -438,42 +453,60 @@ const COOLDOWN_MS = 8000;
 
 async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, sessionOwnerPhone, sessionOwnerName }) {
   try {
-    if (isGroup) return false;
     if (!body || body.startsWith(".")) return false;
 
     const phone = String(sender || "").split("@")[0].replace(/\D/g, "");
     if (!phone) return false;
 
-    // Don't reply to bot's own messages (Fix #2)
+    // Don't reply to bot's own messages
     const botJidPhone = (conn.user?.id || "").split(":")[0].split("@")[0].replace(/\D/g, "");
-    if (botJidPhone && phone === botJidPhone)          return false;
-    if (sessionOwnerPhone && phone === sessionOwnerPhone) return false;
-    if (mek?.key?.fromMe) return false;
+    if (botJidPhone && phone === botJidPhone) return false;
+    if (mek?.key?.fromMe)                    return false;
 
-    const enabled = await isAutoReplyEnabled(phone);
-    if (!enabled) return false;
+    // ── Check global mode ────────────────────────────────────
+    const global = await getGlobalMode();
 
-    // Cooldown
+    // Owner's own messages — never auto-reply to owner
+    const senderIsOwner = isOwner(phone, sessionOwnerPhone);
+    if (senderIsOwner) return false;
+
+    // Determine if we should reply
+    let shouldReply = false;
+
+    if (global.enabled) {
+      // Global ON → reply to all private chats
+      // If includeGroups also ON → reply to groups too
+      if (isGroup && global.includeGroups) shouldReply = true;
+      if (!isGroup) shouldReply = true;
+    } else {
+      // Global OFF → check per-user setting (private only)
+      if (isGroup) return false;
+      shouldReply = await isAutoReplyEnabled(phone);
+    }
+
+    if (!shouldReply) return false;
+
+    // ── Cooldown ─────────────────────────────────────────────
+    const cooldownKey = isGroup ? (mek.key?.remoteJid + phone) : phone;
     const now  = Date.now();
-    const last = _cooldowns.get(phone) || 0;
+    const last = _cooldowns.get(cooldownKey) || 0;
     if (now - last < COOLDOWN_MS) return false;
-    _cooldowns.set(phone, now);
+    _cooldowns.set(cooldownKey, now);
 
     await react(conn, mek, pick(THINKING_REACTS));
 
     const lang = detectLang(body);
 
-    // Fix #4: resolve pushName
     const effectivePushName =
-      (pushName && pushName.trim())            ? pushName.trim()      :
-      (mek?.pushName && mek.pushName.trim())   ? mek.pushName.trim()  : "";
+      (pushName && pushName.trim())          ? pushName.trim()     :
+      (mek?.pushName && mek.pushName.trim()) ? mek.pushName.trim() : "";
 
     const storedOwner  = await getUserOwnerName(phone);
     const ownerName    = sessionOwnerName || storedOwner || "Bot Owner";
     const systemPrompt = buildSystemPrompt(ownerName, effectivePushName, lang);
     const history      = await getHistory(phone);
 
-    // Call AI — Gemini first, then free fallbacks
+    // AI call — Gemini (user key) → ch.at → pollinations
     const result = await askAI(phone, systemPrompt, history, body);
 
     if (!result) {
@@ -514,12 +547,16 @@ module.exports = { handleAutoMsg };
 // ══════════════════════════════════════════════════════════════
 //  HOW TO INTEGRATE IN index.js
 //  -----------------------------------------------------------
-//  const { handleAutoMsg } = require("./plugins/auto_msg");
+//  1. Set owner number in your bot config/env:
+//       process.env.OWNER_NUMBER = "94711234567"  // digits only
 //
-//  // inside messages.upsert handler, after command processing:
-//  const handled = await handleAutoMsg({
-//    conn, mek, m, sender, pushName, body,
-//    isGroup, sessionOwnerPhone, sessionOwnerName,
-//  });
-//  if (handled) return;
+//  2. Import at top of index.js:
+//       const { handleAutoMsg } = require("./plugins/auto_msg");
+//
+//  3. Inside messages.upsert handler, after command processing:
+//       const handled = await handleAutoMsg({
+//         conn, mek, m, sender, pushName, body,
+//         isGroup, sessionOwnerPhone, sessionOwnerName,
+//       });
+//       if (handled) return;
 // ══════════════════════════════════════════════════════════════
