@@ -163,43 +163,71 @@ async function clearHistory(phone) {
 }
 
 // ─── Language Detection ───────────────────────────────────────
+// Returns: "si" (Sinhala Unicode) | "singlish" | "ta" (Tamil) | "en"
 const SI_UNICODE  = /[\u0D80-\u0DFF]/;
 const TA_UNICODE  = /[\u0B80-\u0BFF]/;
 const SINGLISH_KW = [
   "mata","oya","mage","mokak","mokada","kohomada","karanna","puluwan",
   "thiyenawa","wenawa","kiyanne","kiyala","ane","machan","bro","ganna",
   "danna","hadanne","thiyanawa","wela","neda","api","eka","epa","wenna",
-  "balanna","thawa","honda","tikak","godak","oyata","meka",
+  "balanna","thawa","honda","tikak","godak","oyata","meka","oyage","meka",
+  "kawda","kawruwat","mona","hari","naha","inne","hitiye","giye","aawa",
+  "gawa","danne","thene","wenne","denne","lassana","honda","nangi","aiya",
+  "akka","ayye","malli","duwa","putha","ammae","thaathae","apita","apige",
 ];
 function detectLang(text) {
-  if (SI_UNICODE.test(text))  return "si";
-  if (TA_UNICODE.test(text))  return "ta";
+  if (SI_UNICODE.test(text))  return "si";        // Sinhala Unicode chars
+  if (TA_UNICODE.test(text))  return "ta";        // Tamil Unicode chars
   const lower = text.toLowerCase();
-  if (SINGLISH_KW.some((w) => lower.includes(w))) return "si";
+  if (SINGLISH_KW.some((w) => lower.includes(w))) return "singlish"; // Sinhala in Roman
   return "en";
 }
 
 // ─── System Prompt ────────────────────────────────────────────
 function buildSystemPrompt(ownerName, pushName, lang) {
-  const who  = ownerName ? `${ownerName}ගේ MALIYA-MD WhatsApp Bot` : "MALIYA-MD WhatsApp Bot";
+  const who  = ownerName ? `${ownerName}ge MALIYA-MD WhatsApp Bot` : "MALIYA-MD WhatsApp Bot";
+  const whoSi = ownerName ? `${ownerName}ගේ MALIYA-MD WhatsApp Bot` : "MALIYA-MD WhatsApp Bot";
   const user = pushName && pushName.trim() ? pushName.trim() : "user";
+
+  // Singlish: reply in Singlish (Sinhala words written in Roman/English letters)
+  if (lang === "singlish") {
+    return (
+      `Oya ${who}. Oya manage karanney ${ownerName || "Bot Owner"}.` +
+      ` Dan chat karana kenage nam ${user}. Ovunta ${user} kiyala address karanna.` +
+      ` වැදගත්: Reply karanna Singlish walin — Sinhala words Roman letters walin liyanna (Sinhala Unicode use karagannna epa!).` +
+      ` Example: "kohomada ${user}? 😊 mokak karannada?"` +
+      ` Emojis use karanna replies walata. Short, friendly, natural chat style.` +
+      ` Previous conversation context use karala relevant replies denna.`
+    );
+  }
+
+  // Sinhala Unicode: reply fully in Sinhala Unicode
   if (lang === "si") {
     return (
-      `ඔයා ${who}. ඔයාව manage කරන්නේ ${ownerName || "Bot Owner"}.` +
-      ` දැන් chat කරන කෙනාගේ නම ${user}. ඔවුන් ව ${user} කියලා address කරන්න.` +
-      ` සෑම reply එකක්ම *සම්පූර්ණ සිංහල Unicode* ගෙන් ලියන්න.` +
-      ` Singlish use කරන්නෙ නෑ. Short, friendly, natural.`
+      `ඔයා ${whoSi}. ඔයාව manage කරන්නේ ${ownerName || "Bot Owner"}.` +
+      ` දැන් chat කරන කෙනාගේ නම ${user}. ඔවුන්ව ${user} කියලා address කරන්න.` +
+      ` වැදගත්: සෑම reply එකක්ම සම්පූර්ණ *සිංහල Unicode* ගෙන් ලියන්න — Singlish use කරන්නෙ නෑ.` +
+      ` Emojis use කරන්න replies වලට. Short, friendly, natural chat style.` +
+      ` කලින් conversation context use කරලා relevant replies දෙන්න.`
     );
   }
+
+  // Tamil
   if (lang === "ta") {
     return (
-      `நீங்கள் ${who}. இப்போது பேசுபவரின் பெயர் ${user}. அவர்களை ${user} என்று அழையுங்கள்.` +
-      ` தமிழில் பதில் சொல்லுங்கள். குறுகியதாக, நட்பாக பேசுங்கள்.`
+      `நீங்கள் ${ownerName ? `${ownerName}இன் MALIYA-MD WhatsApp Bot` : "MALIYA-MD WhatsApp Bot"}.` +
+      ` இப்போது பேசுபவரின் பெயர் ${user}. அவர்களை ${user} என்று அழையுங்கள்.` +
+      ` IMPORTANT: தமிழில் மட்டும் பதில் சொல்லுங்கள். Emojis பயன்படுத்துங்கள். குறுகியதாக, நட்பாக பேசுங்கள்.` +
+      ` முந்தைய உரையாடல் context பயன்படுத்தி பதில் சொல்லுங்கள்.`
     );
   }
+
+  // English (default)
   return (
     `You are ${who}. The person chatting is named ${user}. Address them as ${user} naturally.` +
-    ` Reply in English. Be short, friendly, and natural.`
+    ` IMPORTANT: Reply ONLY in English. Use emojis to make replies feel warm and expressive.` +
+    ` Be short, friendly, and conversational.` +
+    ` Use the previous conversation history for context when replying.`
   );
 }
 
@@ -265,6 +293,29 @@ async function callGemini(apiKey, systemPrompt, history, userText) {
   return null;
 }
 
+// Build a text-based conversation prompt for free AI providers
+// Includes up to last 8 history turns so the AI has full context
+function buildFreePrompt(systemPrompt, history, userText) {
+  const lines = [];
+  if (systemPrompt) lines.push(`[System]: ${systemPrompt}`);
+  lines.push("");
+
+  // Include last 8 turns of history (older → newer)
+  const recent = history.slice(-8);
+  if (recent.length > 0) {
+    lines.push("[Conversation so far]:");
+    for (const turn of recent) {
+      const role = turn.role === "user" ? "User" : "Bot";
+      lines.push(`${role}: ${turn.text}`);
+    }
+    lines.push("");
+  }
+
+  lines.push(`User: ${userText}`);
+  lines.push("Bot:");
+  return lines.join("\n");
+}
+
 // Smart caller: Gemini → ch.at → pollinations
 async function askAI(phone, systemPrompt, history, userText) {
   const keys = await getUserKeys(phone);
@@ -274,7 +325,8 @@ async function askAI(phone, systemPrompt, history, userText) {
       if (result) return result;
     }
   }
-  const freePrompt = systemPrompt ? `${systemPrompt}\n\nUser: ${userText}` : userText;
+  // Free providers — include history in the text prompt
+  const freePrompt = buildFreePrompt(systemPrompt, history, userText);
   const chAtResult = await Promise.race([
     callChAt(freePrompt),
     new Promise(r => setTimeout(() => r(null), 14000)),
@@ -305,9 +357,10 @@ async function react(conn, mek, emoji) {
   try { await conn.sendMessage(mek.key.remoteJid, { react: { text: emoji, key: mek.key } }); } catch (_) {}
 }
 function failMsg(lang) {
-  if (lang === "si") return "❌ AI service unavailable. ටිකක් wait කරලා try කරන්න.\n> MALIYA-MD ❤️";
-  if (lang === "ta") return "❌ AI சேவை இல்லை. சிறிது நேரம் கழித்து முயற்சிக்கவும்.\n> MALIYA-MD ❤️";
-  return "❌ AI unavailable right now. Try again later.\n> MALIYA-MD ❤️";
+  if (lang === "si")       return "❌ AI service unavailable. ටිකක් wait කරලා try කරන්න. 🙏\n> MALIYA-MD ❤️";
+  if (lang === "singlish") return "❌ AI service epa wela. Tikak wait karala try karanna 🙏\n> MALIYA-MD ❤️";
+  if (lang === "ta")       return "❌ AI சேவை இல்லை. சிறிது நேரம் கழித்து முயற்சிக்கவும் 🙏\n> MALIYA-MD ❤️";
+  return "❌ AI unavailable right now. Try again later 🙏\n> MALIYA-MD ❤️";
 }
 
 // ─── Is sender the bot owner? ─────────────────────────────────
