@@ -290,11 +290,11 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "reactmode", value: "all" };
   }
 
-  if (t === ".setting on automsg" || t === "enable ai chat") {
+  if (t === ".setting msg on" || t === "enable ai chat") {
     return { action: "on", value: "automsg" };
   }
 
-  if (t === ".setting off automsg" || t === "disable ai chat") {
+  if (t === ".setting msg off" || t === "disable ai chat") {
     return { action: "off", value: "automsg" };
   }
 
