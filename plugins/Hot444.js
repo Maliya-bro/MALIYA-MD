@@ -5,7 +5,7 @@ const cheerio = require('cheerio');
 
 cmd({
     pattern: "xvideos",
-    alias: ["xv"],
+    alias: ["xv", "xxx", "xvideos", "porn", "hot"],
     desc: "Search and download videos from Xvideos.",
     react: "⌛",
     category: "download",
