@@ -30,15 +30,23 @@ const HEADERS = {
 let _browser = null;
 
 async function getBrowser() {
-  if (_browser && _browser.isConnected()) return _browser;
+  try {
+    if (_browser) {
+      const pages = await _browser.pages();
+      if (pages) return _browser; // still alive
+    }
+  } catch (_) {
+    _browser = null;
+  }
   _browser = await puppeteer.launch({
-    headless : true,
+    headless : "new",
     args     : [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
       "--no-zygote",
+      "--single-process",
     ],
   });
   return _browser;
