@@ -236,113 +236,80 @@ async function resolveZtLink(ztUrl) {
     if (!sonicLink && tgLink) return tgLink.href;
     if (!sonicLink) return null;
 
-    // Step 2: Open sonic-cloud download page
+    // Step 2: Open sonic-cloud download page — wait for countdown timer
     const dlPage = await browser.newPage();
     try {
       await dlPage.setUserAgent(HEADERS["User-Agent"]);
       await dlPage.setExtraHTTPHeaders({ Referer: ztUrl });
 
-      let interceptedUrl = null;
+      await dlPage.goto(sonicLink.href, { waitUntil: "domcontentloaded", timeout: 20000 })
+        .catch(() => {});
 
-      await dlPage.setRequestInterception(true);
-      dlPage.on("request", req => {
-        const url  = req.url();
-        const type = req.resourceType();
+      // Wait for countdown timer (1-5 seconds) + extra buffer
+      await new Promise(r => setTimeout(r, 7000));
 
-        // Catch actual file download requests
-        if (type === "media" || (url.includes(".mp4") && url.includes("sonic-cloud"))) {
-          interceptedUrl = url;
-          req.abort();
-          return;
-        }
-        if (["image", "stylesheet", "font"].includes(type)) {
-          req.abort(); return;
-        }
-        req.continue();
-      });
-
-      dlPage.on("response", res => {
-        const url = res.url();
-        const ct  = res.headers()["content-type"] || "";
-        // Real file: video content type or .mp4 in URL
-        if (ct.includes("video") || ct.includes("octet-stream")) {
-          interceptedUrl = url;
-        }
-      });
-
-      await dlPage.goto(sonicLink.href, { waitUntil: "domcontentloaded", timeout: 20000 });
-      await dlPage.waitForSelector("a, button", { timeout: 8000 }).catch(() => {});
-
-      // Get all links on sonic-cloud page
-      const dlPageLinks = await dlPage.evaluate(() =>
-        Array.from(document.querySelectorAll("a[href]")).map(a => ({
+      // Try to find and click "Direct Download (New) 1" button
+      // after timer — it should be enabled now
+      const clickedUrl = await dlPage.evaluate(async () => {
+        // Find all anchors/buttons
+        const allLinks = Array.from(document.querySelectorAll("a[href]")).map(a => ({
           text: a.textContent.trim(),
           href: a.href,
-        }))
-      );
+        }));
+        return allLinks;
+      });
 
-      // Find "Direct Download (New) 1" — real file link
-      const directBtn = dlPageLinks.find(l =>
+      console.log("[cinesubz] sonic-cloud links after wait:", JSON.stringify(clickedUrl));
+
+      // Find direct download button
+      const directBtn = clickedUrl.find(l =>
         l.text.toLowerCase().includes("direct download") &&
         l.href &&
+        l.href !== "#" &&
+        l.href !== sonicLink.href &&
         !l.href.includes("CineSubzAdmin") &&
-        !l.href.includes("cinesubz.co") &&
-        l.href !== sonicLink.href
+        !l.href.includes("cinesubz.co")
       );
 
-      if (directBtn) {
-        // Follow that link — get actual file URL
+      const tgBtn = clickedUrl.find(l =>
+        l.text.toLowerCase().includes("telegram download") &&
+        !l.href.includes("CineSubzAdmin")
+      );
+
+      if (directBtn && directBtn.href !== "#") {
+        // Navigate to the direct download link
         const filePage = await browser.newPage();
         try {
           await filePage.setUserAgent(HEADERS["User-Agent"]);
-          await filePage.setRequestInterception(true);
-
-          let fileUrl = null;
-
-          filePage.on("request", req => {
-            const url  = req.url();
-            const type = req.resourceType();
-            if (type === "media" || url.includes(".mp4")) {
-              fileUrl = url;
-              req.abort(); return;
-            }
-            if (["image", "stylesheet", "font"].includes(type)) {
-              req.abort(); return;
-            }
-            req.continue();
-          });
-
-          filePage.on("response", res => {
-            const url = res.url();
-            const ct  = res.headers()["content-type"] || "";
-            if (ct.includes("video") || ct.includes("octet-stream")) {
-              fileUrl = url;
-            }
-          });
-
           await filePage.goto(directBtn.href, {
             waitUntil: "networkidle0",
             timeout  : 20000,
           }).catch(() => {});
 
           const finalUrl = filePage.url();
-          realUrl = fileUrl || (finalUrl.includes(".mp4") ? finalUrl : null) || directBtn.href;
+          console.log("[cinesubz] final file URL:", finalUrl);
 
+          // If redirected to actual file
+          if (finalUrl.includes(".mp4") || finalUrl.includes("sonic-cloud")) {
+            realUrl = finalUrl;
+          } else {
+            realUrl = directBtn.href;
+          }
         } finally {
           await filePage.close().catch(() => {});
         }
+      } else if (tgBtn) {
+        realUrl = tgBtn.href;
       } else {
-        // No button found — use sonic-cloud URL directly (it might stream)
-        realUrl = interceptedUrl || sonicLink.href;
-      }
+        // Buttons might still be disabled — wait more and try click
+        await new Promise(r => setTimeout(r, 5000));
 
-      // Telegram fallback from sonic page
-      if (!realUrl) {
-        const tg = dlPageLinks.find(l =>
-          l.text.toLowerCase().includes("telegram") &&
-          !l.href.includes("CineSubzAdmin")
-        );
-        if (tg) realUrl = tg.href;
+        // Click the first direct download button
+        try {
+          await dlPage.click("a:not([href='#']):not([href*='CineSubzAdmin'])");
+          await new Promise(r => setTimeout(r, 2000));
+          realUrl = dlPage.url();
+        } catch (_) {}
       }
 
     } finally {
