@@ -66,7 +66,8 @@
     "http": "latest",
     "https": "latest",
     "@soyaxell09/zenbot-scraper": "latest",
-    "qrcode": "latest"
+    "qrcode": "latest",
+    "cors": "latest"
     
     
   }
