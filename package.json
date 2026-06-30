@@ -65,7 +65,8 @@
     "xnxx-scraper": "latest",
     "http": "latest",
     "https": "latest",
-    "@soyaxell09/zenbot-scraper": "latest"
+    "@soyaxell09/zenbot-scraper": "latest",
+    "qrcode": "latest"
     
     
   }
