@@ -197,96 +197,147 @@ async function resolveZtLink(ztUrl) {
     await page.setUserAgent(HEADERS["User-Agent"]);
     await page.setExtraHTTPHeaders({ Referer: BASE });
 
-    let realMp4Url = null;
+    let realUrl = null;
 
-    // Intercept requests — catch real CDN URL (not google.com fake)
     await page.setRequestInterception(true);
     page.on("request", req => {
       const url  = req.url();
       const type = req.resourceType();
-
-      // Block images/css/fonts — speed up
       if (["image", "stylesheet", "font", "media"].includes(type)) {
-        req.abort();
-        return;
+        req.abort(); return;
       }
-
-      // Catch real .mp4 URL (not from google.com fake server)
-      if (url.includes(".mp4") && !url.includes("google.com/server")) {
-        realMp4Url = url;
-        req.abort(); // don't actually download
-        return;
+      // Catch real CDN URLs (sonic-cloud, cdn, etc — NOT google.com fake)
+      if (
+        (url.includes(".mp4") || url.includes("sonic-cloud") || url.includes("cdn")) &&
+        !url.includes("google.com/server")
+      ) {
+        realUrl = url;
       }
-
       req.continue();
     });
 
-    // Also catch redirects via response
     page.on("response", res => {
       const url = res.url();
-      if (url.includes(".mp4") && !url.includes("google.com/server")) {
-        realMp4Url = url;
+      if (
+        (url.includes(".mp4") || url.includes("sonic-cloud")) &&
+        !url.includes("google.com/server")
+      ) {
+        realUrl = url;
       }
     });
 
     // Load zt-link page
     await page.goto(ztUrl, { waitUntil: "domcontentloaded", timeout: TIMEOUT });
 
-    // Get the "Click Here" link href (google.com/server...)
-    const clickUrl = await page.$eval("a[href*='.mp4']", el => el.href).catch(() => null);
+    // Wait for buttons to appear
+    await page.waitForSelector("a, button", { timeout: 10000 }).catch(() => {});
 
-    // Check for telegram/pixeldrain
-    if (!clickUrl) {
-      const tgUrl = await page.$eval(
-        "a[href*='t.me'], a[href*='pixeldrain']", el => el.href
-      ).catch(() => null);
-      if (tgUrl) return tgUrl;
-      return null;
-    }
+    // Strategy 1: Get all anchor hrefs — find Direct Download links
+    const allLinks = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll("a[href]")).map(a => ({
+        text: a.textContent.trim(),
+        href: a.href,
+      }));
+    });
 
-    // Now navigate to the google.com/server URL — puppeteer will follow redirects
-    // The real CDN URL will be captured by request interceptor
-    const newPage = await browser.newPage();
-    try {
-      await newPage.setUserAgent(HEADERS["User-Agent"]);
-      await newPage.setRequestInterception(true);
+    // Find direct download link (not telegram, not admin contact)
+    const directLink = allLinks.find(l =>
+      (l.text.toLowerCase().includes("direct download") ||
+       l.text.toLowerCase().includes("download (new)") ||
+       l.href.includes("sonic-cloud") ||
+       l.href.includes(".mp4")) &&
+      !l.href.includes("t.me/CineSubzAdmin") &&
+      !l.href.includes("telegram.me/CineSubzAdmin")
+    );
 
-      newPage.on("request", req => {
-        const url = req.url();
-        if (url.includes(".mp4") && !url.includes("google.com/server")) {
-          realMp4Url = url;
-          req.abort();
-          return;
-        }
-        if (["image", "stylesheet", "font"].includes(req.resourceType())) {
-          req.abort(); return;
-        }
-        req.continue();
-      });
-
-      newPage.on("response", res => {
-        const url = res.url();
-        if (url.includes(".mp4") && !url.includes("google.com/server")) {
-          realMp4Url = url;
-        }
-      });
-
-      await newPage.goto(clickUrl, {
-        waitUntil : "networkidle0",
-        timeout   : 20000,
-      }).catch(() => {});
-
-      // Final URL after all redirects
-      const finalUrl = newPage.url();
-      if (finalUrl.includes(".mp4") && !finalUrl.includes("google.com/server")) {
-        realMp4Url = finalUrl;
+    if (directLink) {
+      // If it's already a direct CDN link
+      if (
+        directLink.href.includes("sonic-cloud") ||
+        directLink.href.includes(".mp4")
+      ) {
+        return directLink.href;
       }
 
-    } finally {
-      await newPage.close().catch(() => {});
+      // Follow the link in new page
+      const newPage = await browser.newPage();
+      try {
+        await newPage.setUserAgent(HEADERS["User-Agent"]);
+        await newPage.setRequestInterception(true);
+
+        newPage.on("request", req => {
+          const url = req.url();
+          if (["image", "stylesheet", "font", "media"].includes(req.resourceType())) {
+            req.abort(); return;
+          }
+          if (
+            (url.includes(".mp4") || url.includes("sonic-cloud") || url.includes("cdn")) &&
+            !url.includes("google.com/server")
+          ) {
+            realUrl = url;
+          }
+          req.continue();
+        });
+
+        newPage.on("response", res => {
+          const url = res.url();
+          if (
+            (url.includes(".mp4") || url.includes("sonic-cloud")) &&
+            !url.includes("google.com/server")
+          ) {
+            realUrl = url;
+          }
+        });
+
+        await newPage.goto(directLink.href, {
+          waitUntil: "networkidle0",
+          timeout  : 20000,
+        }).catch(() => {});
+
+        const finalUrl = newPage.url();
+        if (
+          (finalUrl.includes(".mp4") || finalUrl.includes("sonic-cloud")) &&
+          !finalUrl.includes("google.com/server")
+        ) {
+          realUrl = finalUrl;
+        }
+
+        // Also check page for download links
+        if (!realUrl) {
+          const pageLinks = await newPage.evaluate(() =>
+            Array.from(document.querySelectorAll("a[href]")).map(a => a.href)
+          );
+          realUrl = pageLinks.find(h =>
+            (h.includes(".mp4") || h.includes("sonic-cloud")) &&
+            !h.includes("google.com/server") &&
+            !h.includes("t.me/CineSubzAdmin")
+          ) || null;
+        }
+
+      } finally {
+        await newPage.close().catch(() => {});
+      }
     }
 
-    return realMp4Url;
+    // Telegram Download fallback (not admin link)
+    if (!realUrl) {
+      const tgLink = allLinks.find(l =>
+        l.text.toLowerCase().includes("telegram download") &&
+        !l.href.includes("CineSubzAdmin")
+      );
+      if (tgLink) realUrl = tgLink.href;
+    }
+
+    // Last resort — any t.me link that's not admin
+    if (!realUrl) {
+      const anyTg = allLinks.find(l =>
+        l.href.includes("t.me") &&
+        !l.href.includes("CineSubzAdmin")
+      );
+      if (anyTg) realUrl = anyTg.href;
+    }
+
+    return realUrl;
 
   } finally {
     await page.close().catch(() => {});
