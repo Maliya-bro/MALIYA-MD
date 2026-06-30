@@ -206,135 +206,147 @@ async function resolveZtLink(ztUrl) {
       if (["image", "stylesheet", "font", "media"].includes(type)) {
         req.abort(); return;
       }
-      // Catch real CDN URLs (sonic-cloud, cdn, etc — NOT google.com fake)
-      if (
-        (url.includes(".mp4") || url.includes("sonic-cloud") || url.includes("cdn")) &&
-        !url.includes("google.com/server")
-      ) {
-        realUrl = url;
-      }
       req.continue();
     });
 
-    page.on("response", res => {
-      const url = res.url();
-      if (
-        (url.includes(".mp4") || url.includes("sonic-cloud")) &&
-        !url.includes("google.com/server")
-      ) {
-        realUrl = url;
-      }
-    });
-
-    // Load zt-link page
+    // Step 1: Load zt-link page, get all anchor links
     await page.goto(ztUrl, { waitUntil: "domcontentloaded", timeout: TIMEOUT });
+    await page.waitForSelector("a", { timeout: 8000 }).catch(() => {});
 
-    // Wait for buttons to appear
-    await page.waitForSelector("a, button", { timeout: 10000 }).catch(() => {});
-
-    // Strategy 1: Get all anchor hrefs — find Direct Download links
-    const allLinks = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll("a[href]")).map(a => ({
+    const allLinks = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("a[href]")).map(a => ({
         text: a.textContent.trim(),
         href: a.href,
-      }));
-    });
-
-    // Find direct download link (not telegram, not admin contact)
-    const directLink = allLinks.find(l =>
-      (l.text.toLowerCase().includes("direct download") ||
-       l.text.toLowerCase().includes("download (new)") ||
-       l.href.includes("sonic-cloud") ||
-       l.href.includes(".mp4")) &&
-      !l.href.includes("t.me/CineSubzAdmin") &&
-      !l.href.includes("telegram.me/CineSubzAdmin")
+      }))
     );
 
-    if (directLink) {
-      // If it's already a direct CDN link
-      if (
-        directLink.href.includes("sonic-cloud") ||
-        directLink.href.includes(".mp4")
-      ) {
-        return directLink.href;
+    // Find sonic-cloud or direct download link (not admin)
+    const sonicLink = allLinks.find(l =>
+      l.href.includes("sonic-cloud") ||
+      l.href.includes("bot3.") ||
+      (l.text.toLowerCase().includes("direct download") && !l.href.includes("CineSubzAdmin"))
+    );
+
+    // Telegram channel fallback (not admin)
+    const tgLink = allLinks.find(l =>
+      l.text.toLowerCase().includes("telegram download") ||
+      (l.href.includes("t.me") && !l.href.includes("CineSubzAdmin"))
+    );
+
+    if (!sonicLink && tgLink) return tgLink.href;
+    if (!sonicLink) return null;
+
+    // Step 2: Open sonic-cloud download page
+    const dlPage = await browser.newPage();
+    try {
+      await dlPage.setUserAgent(HEADERS["User-Agent"]);
+      await dlPage.setExtraHTTPHeaders({ Referer: ztUrl });
+
+      let interceptedUrl = null;
+
+      await dlPage.setRequestInterception(true);
+      dlPage.on("request", req => {
+        const url  = req.url();
+        const type = req.resourceType();
+
+        // Catch actual file download requests
+        if (type === "media" || (url.includes(".mp4") && url.includes("sonic-cloud"))) {
+          interceptedUrl = url;
+          req.abort();
+          return;
+        }
+        if (["image", "stylesheet", "font"].includes(type)) {
+          req.abort(); return;
+        }
+        req.continue();
+      });
+
+      dlPage.on("response", res => {
+        const url = res.url();
+        const ct  = res.headers()["content-type"] || "";
+        // Real file: video content type or .mp4 in URL
+        if (ct.includes("video") || ct.includes("octet-stream")) {
+          interceptedUrl = url;
+        }
+      });
+
+      await dlPage.goto(sonicLink.href, { waitUntil: "domcontentloaded", timeout: 20000 });
+      await dlPage.waitForSelector("a, button", { timeout: 8000 }).catch(() => {});
+
+      // Get all links on sonic-cloud page
+      const dlPageLinks = await dlPage.evaluate(() =>
+        Array.from(document.querySelectorAll("a[href]")).map(a => ({
+          text: a.textContent.trim(),
+          href: a.href,
+        }))
+      );
+
+      // Find "Direct Download (New) 1" — real file link
+      const directBtn = dlPageLinks.find(l =>
+        l.text.toLowerCase().includes("direct download") &&
+        l.href &&
+        !l.href.includes("CineSubzAdmin") &&
+        !l.href.includes("cinesubz.co") &&
+        l.href !== sonicLink.href
+      );
+
+      if (directBtn) {
+        // Follow that link — get actual file URL
+        const filePage = await browser.newPage();
+        try {
+          await filePage.setUserAgent(HEADERS["User-Agent"]);
+          await filePage.setRequestInterception(true);
+
+          let fileUrl = null;
+
+          filePage.on("request", req => {
+            const url  = req.url();
+            const type = req.resourceType();
+            if (type === "media" || url.includes(".mp4")) {
+              fileUrl = url;
+              req.abort(); return;
+            }
+            if (["image", "stylesheet", "font"].includes(type)) {
+              req.abort(); return;
+            }
+            req.continue();
+          });
+
+          filePage.on("response", res => {
+            const url = res.url();
+            const ct  = res.headers()["content-type"] || "";
+            if (ct.includes("video") || ct.includes("octet-stream")) {
+              fileUrl = url;
+            }
+          });
+
+          await filePage.goto(directBtn.href, {
+            waitUntil: "networkidle0",
+            timeout  : 20000,
+          }).catch(() => {});
+
+          const finalUrl = filePage.url();
+          realUrl = fileUrl || (finalUrl.includes(".mp4") ? finalUrl : null) || directBtn.href;
+
+        } finally {
+          await filePage.close().catch(() => {});
+        }
+      } else {
+        // No button found — use sonic-cloud URL directly (it might stream)
+        realUrl = interceptedUrl || sonicLink.href;
       }
 
-      // Follow the link in new page
-      const newPage = await browser.newPage();
-      try {
-        await newPage.setUserAgent(HEADERS["User-Agent"]);
-        await newPage.setRequestInterception(true);
-
-        newPage.on("request", req => {
-          const url = req.url();
-          if (["image", "stylesheet", "font", "media"].includes(req.resourceType())) {
-            req.abort(); return;
-          }
-          if (
-            (url.includes(".mp4") || url.includes("sonic-cloud") || url.includes("cdn")) &&
-            !url.includes("google.com/server")
-          ) {
-            realUrl = url;
-          }
-          req.continue();
-        });
-
-        newPage.on("response", res => {
-          const url = res.url();
-          if (
-            (url.includes(".mp4") || url.includes("sonic-cloud")) &&
-            !url.includes("google.com/server")
-          ) {
-            realUrl = url;
-          }
-        });
-
-        await newPage.goto(directLink.href, {
-          waitUntil: "networkidle0",
-          timeout  : 20000,
-        }).catch(() => {});
-
-        const finalUrl = newPage.url();
-        if (
-          (finalUrl.includes(".mp4") || finalUrl.includes("sonic-cloud")) &&
-          !finalUrl.includes("google.com/server")
-        ) {
-          realUrl = finalUrl;
-        }
-
-        // Also check page for download links
-        if (!realUrl) {
-          const pageLinks = await newPage.evaluate(() =>
-            Array.from(document.querySelectorAll("a[href]")).map(a => a.href)
-          );
-          realUrl = pageLinks.find(h =>
-            (h.includes(".mp4") || h.includes("sonic-cloud")) &&
-            !h.includes("google.com/server") &&
-            !h.includes("t.me/CineSubzAdmin")
-          ) || null;
-        }
-
-      } finally {
-        await newPage.close().catch(() => {});
+      // Telegram fallback from sonic page
+      if (!realUrl) {
+        const tg = dlPageLinks.find(l =>
+          l.text.toLowerCase().includes("telegram") &&
+          !l.href.includes("CineSubzAdmin")
+        );
+        if (tg) realUrl = tg.href;
       }
-    }
 
-    // Telegram Download fallback (not admin link)
-    if (!realUrl) {
-      const tgLink = allLinks.find(l =>
-        l.text.toLowerCase().includes("telegram download") &&
-        !l.href.includes("CineSubzAdmin")
-      );
-      if (tgLink) realUrl = tgLink.href;
-    }
-
-    // Last resort — any t.me link that's not admin
-    if (!realUrl) {
-      const anyTg = allLinks.find(l =>
-        l.href.includes("t.me") &&
-        !l.href.includes("CineSubzAdmin")
-      );
-      if (anyTg) realUrl = anyTg.href;
+    } finally {
+      await dlPage.close().catch(() => {});
     }
 
     return realUrl;
@@ -474,6 +486,13 @@ cmd({
     }, { quoted: mek });
   }
 
+  // Normalize URL — move ?ext=mp4 to proper extension
+  if (directUrl.includes("?ext=mp4") && !directUrl.includes(".mp4")) {
+    directUrl = directUrl.replace("?ext=mp4", "") + ".mp4";
+  }
+  // Remove any duplicate extensions
+  directUrl = directUrl.replace(/\.mp4\.mp4/gi, ".mp4");
+
   reply(`*⬇️ Sending the film.. (${chosen.size})*\nPlease wait.. 🙏`);
 
   const fileName = `${title} [${quality}] [CineSubz].mp4`
@@ -481,7 +500,13 @@ cmd({
 
   try {
     await maliya.sendMessage(from, {
-      document: { url: directUrl },
+      document: { 
+        url    : directUrl,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124",
+          "Referer"   : "https://cinesubz.net",
+        }
+      },
       mimetype : "video/mp4",
       fileName,
       caption:
@@ -491,11 +516,25 @@ cmd({
         `*Enjoy! 🍿*\n_Sinhala subtitles සමඟ_`,
     }, { quoted: mek });
   } catch (err) {
-    await maliya.sendMessage(from, {
-      text:
-        `*🎬 ${title}*  [${quality}]  ${chosen.size}\n\n` +
-        `⚠️ Document send failed.\n📥 Direct link:\n${directUrl}`,
-    }, { quoted: mek });
+    // Fallback: try sending as video
+    try {
+      await maliya.sendMessage(from, {
+        video  : { url: directUrl },
+        mimetype: "video/mp4",
+        caption:
+          `*🎬 ${title}*\n` +
+          `*📊 Quality:* ${quality}\n` +
+          `*💾 Size:* ${chosen.size}\n\n` +
+          `*Enjoy! 🍿*`,
+      }, { quoted: mek });
+    } catch (err2) {
+      await maliya.sendMessage(from, {
+        text:
+          `*🎬 ${title}*  [${quality}]  ${chosen.size}\n\n` +
+          `⚠️ Send failed: ${err2.message}\n\n` +
+          `📥 *Direct Download Link:*\n${directUrl}`,
+      }, { quoted: mek });
+    }
   }
 });
 
