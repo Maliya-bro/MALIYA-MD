@@ -1,20 +1,22 @@
 /**
  * CineSubz.lk Movie Download Plugin for MALIYA-MD
- * npm install axios cheerio
+ * ─────────────────────────────────────────────────
+ * npm install axios cheerio puppeteer
+ * 
+ * Heroku paid plan recommended (RAM + no IP block)
  */
 
-const { cmd } = require("../command");
-const axios   = require("axios");
-const cheerio = require("cheerio");
-const https   = require("https");
-const http    = require("http");
+const { cmd }    = require("../command");
+const axios      = require("axios");
+const cheerio    = require("cheerio");
+const puppeteer  = require("puppeteer");
 
 const pendingSearch  = {};
 const pendingQuality = {};
 
 const BASE    = "https://cinesubz.net";
 const MAX_MB  = 2048;
-const TIMEOUT = 20_000;
+const TIMEOUT = 30_000;
 
 const HEADERS = {
   "User-Agent"      : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -24,14 +26,28 @@ const HEADERS = {
   "Referer"         : BASE,
 };
 
+// ─── Browser pool (single reusable instance) ──────────────────────────────────
+let _browser = null;
+
+async function getBrowser() {
+  if (_browser && _browser.isConnected()) return _browser;
+  _browser = await puppeteer.launch({
+    headless : true,
+    args     : [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--no-zygote",
+    ],
+  });
+  return _browser;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function get(url, extra = {}) {
-  return axios.get(url, {
-    headers: { ...HEADERS, ...extra },
-    timeout: TIMEOUT,
-    maxRedirects: 15,
-  });
+function get(url) {
+  return axios.get(url, { headers: HEADERS, timeout: TIMEOUT, maxRedirects: 15 });
 }
 
 function cleanTitle(t = "") {
@@ -63,59 +79,12 @@ function normalizeQuality(t = "") {
   return t.trim() || "Unknown";
 }
 
-// ─── Follow redirect manually (for fake google.com URLs) ─────────────────────
-// google.com/server11/... is a custom server that redirects to the real CDN.
-// axios follows redirects but loses the final URL sometimes.
-// We use Node's built-in http/https to manually follow and capture final URL.
-
-function followRedirect(url, referer, maxRedirects = 10) {
-  return new Promise((resolve, reject) => {
-    let redirectCount = 0;
-
-    function request(currentUrl) {
-      if (redirectCount >= maxRedirects) return reject(new Error("Too many redirects"));
-
-      const parsed   = new URL(currentUrl);
-      const lib      = parsed.protocol === "https:" ? https : http;
-      const options  = {
-        hostname: parsed.hostname,
-        path    : parsed.pathname + parsed.search,
-        method  : "HEAD",
-        headers : {
-          "User-Agent": HEADERS["User-Agent"],
-          "Referer"   : referer,
-          "Range"     : "bytes=0-1",
-        },
-        timeout: 15000,
-      };
-
-      const req = lib.request(options, (res) => {
-        const location = res.headers["location"];
-        if ([301, 302, 303, 307, 308].includes(res.statusCode) && location) {
-          redirectCount++;
-          const nextUrl = location.startsWith("http") ? location : new URL(location, currentUrl).href;
-          request(nextUrl);
-        } else {
-          resolve(currentUrl); // final URL after redirects
-        }
-      });
-
-      req.on("error", reject);
-      req.on("timeout", () => { req.destroy(); reject(new Error("Timeout")); });
-      req.end();
-    }
-
-    request(url);
-  });
-}
-
-// ─── 1. Search ────────────────────────────────────────────────────────────────
+// ─── 1. Search (axios+cheerio — fast) ────────────────────────────────────────
 
 async function searchMovies(query) {
   const { data } = await get(`${BASE}/?s=${encodeURIComponent(query)}`);
   const $        = cheerio.load(data);
-  const results  = [];
-  const seen     = new Set();
+  const results  = [], seen = new Set();
 
   $(".display-item .item-box, article, .post").each((_, el) => {
     const a     = $(el).find("a[href*='/movies/'], a[href*='/tvshows/']").first();
@@ -126,7 +95,7 @@ async function searchMovies(query) {
     results.push({
       title,
       url  : href,
-      imdb : $(el).find("[class*='data-imdb']").first().text().replace(/imdb[:\s]*/i,"").trim(),
+      imdb : $(el).find("[class*='data-imdb']").first().text().replace(/imdb[:\s]*/i, "").trim(),
       year : $(el).find("[class*='year']").first().text().trim(),
       thumb: $(el).find("img").first().attr("src") || "",
     });
@@ -145,18 +114,16 @@ async function searchMovies(query) {
   return results.slice(0, 10);
 }
 
-// ─── 2. Movie page ────────────────────────────────────────────────────────────
+// ─── 2. Movie page (axios+cheerio — fast) ────────────────────────────────────
 
 async function getMovieMeta(movieUrl) {
   const { data } = await get(movieUrl);
   const $        = cheerio.load(data);
 
-  // Title — specific selector to avoid "Direct & Telegram..." text
   const title = cleanTitle(
     $(".info-details .details-title h3").first().text().trim() ||
     $(".sheader .data h1").first().text().trim() ||
     $("h1.entry-title").first().text().trim() ||
-    $(".details-title h3").first().text().trim() ||
     $("h1").first().text().trim()
   );
 
@@ -164,32 +131,25 @@ async function getMovieMeta(movieUrl) {
                 $(".poster img").first().attr("src") ||
                 $(".wp-post-image").first().attr("src") || "";
 
-  // IMDb — only from specific element
-  const imdb = $(".data-imdb").first().text().replace(/imdb[:\s]*/i,"").trim();
-
+  const imdb     = $(".data-imdb").first().text().replace(/imdb[:\s]*/i, "").trim();
   const duration = $("[itemprop='duration']").first().text().trim() ||
                    $(".runtime").first().text().trim();
 
-  // Genres — ONLY from .details-genre (not nav menu)
   const genres = [];
   $(".details-genre a, .sgeneros a").each((_, el) => {
     const g = $(el).text().trim();
     if (g && genres.length < 6) genres.push(g);
   });
 
-  // Directors
   const directors = [];
-  $(".info-col a[href*='/director/'], a[href*='director']").each((_, el) => {
+  $(".info-col a[href*='/director/']").each((_, el) => {
     const d = $(el).text().trim();
     if (d && !directors.includes(d)) directors.push(d);
   });
 
   const subBy = (data.match(/Subtitle By[:\s]*([^\n<]+)/i) || [])[1]?.trim() || "";
 
-  // Download links — /zt-links/ and /api- both
-  const links    = [];
-  const linkSeen = new Set();
-
+  const links = [], linkSeen = new Set();
   $("a[href*='/zt-links/'], a[href*='/api-']").each((_, el) => {
     const href = $(el).attr("href") || "";
     if (!href || linkSeen.has(href)) return;
@@ -212,76 +172,117 @@ async function getMovieMeta(movieUrl) {
   return { title, thumb, imdb, duration, genres, directors, subBy, links };
 }
 
-// ─── 3. Resolve zt-link → REAL direct .mp4 URL ───────────────────────────────
+// ─── 3. Resolve zt-link → REAL .mp4 URL via puppeteer ───────────────────────
 //
-//  zt-link page has "Click Here" <a> with href like:
-//    https://google.com/server11/1:/abc.../Film.mp4
-//
-//  That "google.com/server11" is a FAKE domain — it's a custom redirect server.
-//  Real file is on a CDN. We follow the redirect chain manually to get the true URL.
+//  Strategy:
+//  - Open zt-link page
+//  - Intercept ALL network requests
+//  - When "Click Here" is clicked, google.com/server → redirects → real CDN .mp4
+//  - Capture that real URL from network intercept
+//  - Never download the file — just get the URL
 
 async function resolveZtLink(ztUrl) {
-  // Step 1: fetch zt-link page, get raw mp4 URL from "Click Here"
-  let rawUrl = null;
-  try {
-    const { data } = await get(ztUrl);
-    const $ = cheerio.load(data);
+  const browser = await getBrowser();
+  const page    = await browser.newPage();
 
-    $("a").each((_, el) => {
-      const h = $(el).attr("href") || "";
-      if (h.toLowerCase().includes(".mp4")) { rawUrl = h; return false; }
+  try {
+    await page.setUserAgent(HEADERS["User-Agent"]);
+    await page.setExtraHTTPHeaders({ Referer: BASE });
+
+    let realMp4Url = null;
+
+    // Intercept requests — catch real CDN URL (not google.com fake)
+    await page.setRequestInterception(true);
+    page.on("request", req => {
+      const url  = req.url();
+      const type = req.resourceType();
+
+      // Block images/css/fonts — speed up
+      if (["image", "stylesheet", "font", "media"].includes(type)) {
+        req.abort();
+        return;
+      }
+
+      // Catch real .mp4 URL (not from google.com fake server)
+      if (url.includes(".mp4") && !url.includes("google.com/server")) {
+        realMp4Url = url;
+        req.abort(); // don't actually download
+        return;
+      }
+
+      req.continue();
     });
 
-    if (!rawUrl) {
-      $("a").each((_, el) => {
-        const h = $(el).attr("href") || "";
-        if (h.includes("t.me") || h.includes("pixeldrain") || h.includes("telegram")) {
-          rawUrl = h; return false;
+    // Also catch redirects via response
+    page.on("response", res => {
+      const url = res.url();
+      if (url.includes(".mp4") && !url.includes("google.com/server")) {
+        realMp4Url = url;
+      }
+    });
+
+    // Load zt-link page
+    await page.goto(ztUrl, { waitUntil: "domcontentloaded", timeout: TIMEOUT });
+
+    // Get the "Click Here" link href (google.com/server...)
+    const clickUrl = await page.$eval("a[href*='.mp4']", el => el.href).catch(() => null);
+
+    // Check for telegram/pixeldrain
+    if (!clickUrl) {
+      const tgUrl = await page.$eval(
+        "a[href*='t.me'], a[href*='pixeldrain']", el => el.href
+      ).catch(() => null);
+      if (tgUrl) return tgUrl;
+      return null;
+    }
+
+    // Now navigate to the google.com/server URL — puppeteer will follow redirects
+    // The real CDN URL will be captured by request interceptor
+    const newPage = await browser.newPage();
+    try {
+      await newPage.setUserAgent(HEADERS["User-Agent"]);
+      await newPage.setRequestInterception(true);
+
+      newPage.on("request", req => {
+        const url = req.url();
+        if (url.includes(".mp4") && !url.includes("google.com/server")) {
+          realMp4Url = url;
+          req.abort();
+          return;
+        }
+        if (["image", "stylesheet", "font"].includes(req.resourceType())) {
+          req.abort(); return;
+        }
+        req.continue();
+      });
+
+      newPage.on("response", res => {
+        const url = res.url();
+        if (url.includes(".mp4") && !url.includes("google.com/server")) {
+          realMp4Url = url;
         }
       });
+
+      await newPage.goto(clickUrl, {
+        waitUntil : "networkidle0",
+        timeout   : 20000,
+      }).catch(() => {});
+
+      // Final URL after all redirects
+      const finalUrl = newPage.url();
+      if (finalUrl.includes(".mp4") && !finalUrl.includes("google.com/server")) {
+        realMp4Url = finalUrl;
+      }
+
+    } finally {
+      await newPage.close().catch(() => {});
     }
-  } catch (e) {
-    throw new Error(`zt-link fetch failed: ${e.message}`);
+
+    return realMp4Url;
+
+  } finally {
+    await page.close().catch(() => {});
   }
-
-  if (!rawUrl) return null;
-
-  // Telegram / pixeldrain → return directly
-  if (rawUrl.includes("t.me") || rawUrl.includes("pixeldrain") || rawUrl.includes("telegram.me")) {
-    return rawUrl;
-  }
-
-  // Step 2: Follow redirect on the fake google.com/server URL
-  // to get the REAL CDN URL (CloudFront / S3 / direct server)
-  try {
-    const realUrl = await followRedirect(rawUrl, ztUrl);
-    if (realUrl && realUrl !== rawUrl) return realUrl;
-  } catch (_) {}
-
-  // Step 3: Try axios GET with responseType stream to catch final URL
-  try {
-    const res = await axios.get(rawUrl, {
-      headers: {
-        ...HEADERS,
-        Referer: ztUrl,
-        Range  : "bytes=0-1",
-      },
-      timeout      : TIMEOUT,
-      maxRedirects : 15,
-      validateStatus: s => s < 500,
-      responseType : "stream",
-    });
-
-    const finalUrl = res.request?.res?.responseUrl ||
-                     res.request?.responseURL       ||
-                     res.config?.url                || "";
-    res.data.destroy();
-
-    if (finalUrl && finalUrl !== rawUrl) return finalUrl;
-  } catch (_) {}
-
-  // Step 4: Return rawUrl as last resort — Baileys might follow it
-  return rawUrl;
 }
 
 // ─── Bot Commands ─────────────────────────────────────────────────────────────
@@ -297,7 +298,7 @@ cmd({
   if (!q) return reply(
     "*🎬 CineSubz Movie Search*\n\n" +
     "Usage: *film <name>*\nExample: *film spider man*\n\n" +
-    "Sinhala subtitle සමඟ film/series! 🍿"
+    "Sinhala subtitles සමඟ film/series! 🍿"
   );
 
   await maliya.sendMessage(from, { react: { text: "🔍", key: mek.key } });
@@ -323,7 +324,7 @@ cmd({
   reply(text);
 });
 
-// ── Step 2: movie selected ────────────────────────────────────────────────────
+// ── Step 2 ────────────────────────────────────────────────────────────────────
 
 cmd({
   filter: (text, { sender }) =>
@@ -377,7 +378,7 @@ cmd({
   } catch (_) { await maliya.sendMessage(from, { text: msg }, { quoted: mek }); }
 });
 
-// ── Step 3: quality → resolve → send document ────────────────────────────────
+// ── Step 3 ────────────────────────────────────────────────────────────────────
 
 cmd({
   filter: (text, { sender }) =>
@@ -393,7 +394,7 @@ cmd({
   const chosen  = links[+body.trim() - 1];
   const quality = normalizeQuality(chosen.quality || chosen.label);
 
-  reply(`*⏳ ${quality} (${chosen.size}) — Getting Direct Link..*`);
+  reply(`*⏳ ${quality} (${chosen.size}) — Getting real download URL...*`);
 
   let directUrl;
   try       { directUrl = await resolveZtLink(chosen.ztUrl); }
@@ -414,7 +415,7 @@ cmd({
     }, { quoted: mek });
   }
 
-  reply(`*⬇️ Sending the film.. (${chosen.size})*\nPlease wait a moment.. 🙏`);
+  reply(`*⬇️ Sending the film.. (${chosen.size})*\nPlease wait.. 🙏`);
 
   const fileName = `${title} [${quality}] [CineSubz].mp4`
     .replace(/[^\w\s.\-\[\]()]/gi, "").trim();
@@ -431,12 +432,10 @@ cmd({
         `*Enjoy! 🍿*\n_Sinhala subtitles සමඟ_`,
     }, { quoted: mek });
   } catch (err) {
-    // Document send failed — send direct link as fallback
     await maliya.sendMessage(from, {
       text:
         `*🎬 ${title}*  [${quality}]  ${chosen.size}\n\n` +
-        `⚠️ Document send failed.\n` +
-        `📥 *Direct Download Link:*\n${directUrl}`,
+        `⚠️ Document send failed.\n📥 Direct link:\n${directUrl}`,
     }, { quoted: mek });
   }
 });
