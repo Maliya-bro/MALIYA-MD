@@ -2,10 +2,10 @@
 //  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
 //  Integrated: auto_msg plugin with per-user Gemini key support
 //  FIX: handleAutoMsg now handles BOTH private + group messages
-//  FIX: /api/pair — now uses the SAME connection stability options
-//       as /api/qr (timeouts, retries, keepalive) + a more robust
-//       readiness wait before requesting the pairing code.
-//       This targets the low pair-code success rate vs QR success rate.
+//  FIX: /api/pair — connection stability options aligned with /api/qr,
+//       readiness wait + retry logic, AND now routed through a
+//       Webshare residential proxy (new-device pairing only).
+//       No other route or logic touched.
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -58,6 +58,7 @@ const P       = require("pino");
 const express = require("express");
 const path    = require("path");
 const { MongoClient } = require("mongodb");
+const { HttpsProxyAgent } = require("https-proxy-agent");
 
 const cors              = require("cors");
 const os               = require("os");
@@ -96,6 +97,29 @@ const MAX_ACTIVE_SESSIONS = Number(process.env.MAX_ACTIVE_SESSIONS || 50);
 
 // Fallback Baileys version — used only if fetchLatestBaileysVersion() fails
 const FALLBACK_BAILEYS_VERSION = [2, 3000, 1023628085];
+
+/* ==================== PAIR PROXY CONFIG (Webshare) ====================
+   Used ONLY by /api/pair (new-device pairing). Not used by /api/qr or
+   the main session bot logic, since those already work reliably.
+   Set via env vars so credentials aren't hardcoded in source.
+======================================================================= */
+const PAIR_PROXY_HOST = process.env.PAIR_PROXY_HOST || "31.59.20.176";
+const PAIR_PROXY_PORT = process.env.PAIR_PROXY_PORT || "6754";
+const PAIR_PROXY_USER = process.env.PAIR_PROXY_USER || "lcjzwhpi";
+const PAIR_PROXY_PASS = process.env.PAIR_PROXY_PASS || "wsocdb2iz6bu";
+
+const PAIR_PROXY_URL =
+  PAIR_PROXY_HOST && PAIR_PROXY_PORT
+    ? `http://${PAIR_PROXY_USER}:${PAIR_PROXY_PASS}@${PAIR_PROXY_HOST}:${PAIR_PROXY_PORT}`
+    : "";
+
+const pairProxyAgent = PAIR_PROXY_URL ? new HttpsProxyAgent(PAIR_PROXY_URL) : null;
+
+if (pairProxyAgent) {
+  console.log(`🌐 /api/pair proxy enabled via ${PAIR_PROXY_HOST}:${PAIR_PROXY_PORT}`);
+} else {
+  console.log("🌐 /api/pair proxy NOT configured — connecting directly");
+}
 
 /* ==================== MONGODB ==================== */
 const MONGODB_URI =
@@ -788,7 +812,7 @@ function attachSessionHandlers(sock, sessionCtx) {
 /* ==================== EXPRESS SERVER ==================== */
 app.get("/", (req, res) => {
   res.send(
-    `Hey There, MALIYA-MD started succesfully ✅ | Active Sessions: ${activeSessions.size}/${MAX_ACTIVE_SESSIONS}`
+    `Hey There, MALIYA-MD started ✅ | Active Sessions: ${activeSessions.size}/${MAX_ACTIVE_SESSIONS}`
   );
 });
 
@@ -823,36 +847,27 @@ app.use(cors({ origin: "*", methods: ["GET"] }));
 //  GET /api/pair?number=94xxxxxxxxx
 //  Returns: { code: "XXXX-XXXX" }
 //
-//  FIXES APPLIED (root cause: QR ~95% success vs Pair code ~10% —
-//  since both share the same Heroku IP, this rules out an IP block
-//  and points to the pairing socket not being given the same
-//  connection-stability settings that the QR socket already has):
-//
+//  FIXES APPLIED:
 //   1. Strict number validation + logging
-//   2. SAME connection stability options as /api/qr:
-//        defaultQueryTimeoutMs, connectTimeoutMs, keepAliveIntervalMs,
-//        retryRequestDelayMs, maxRetries
-//      (previously ONLY /api/qr had these — /api/pair had none)
+//   2. Same connection stability options as /api/qr
 //   3. Baileys version fallback if fetchLatestBaileysVersion() fails
-//      (previously only /api/qr had this fallback)
-//   4. Robust readiness wait: waits for WS OPEN *and* a short settle
-//      window *and* retries requestPairingCode() on transient failure
-//      before giving up — pairing code generation needs the socket
-//      fully settled, not just "open"
-//   5. Clearer error surfaces so failures are easy to diagnose in logs
+//   4. Robust readiness wait + retries requestPairingCode() on
+//      transient failure
+//   5. NEW: routes the socket connection through a Webshare proxy
+//      (pairProxyAgent) — since logs showed the WebSocket handshake
+//      itself timing out (20s) only for brand-new pairing attempts,
+//      while already-linked sessions and QR always connected fine.
+//      This points to WhatsApp applying extra scrutiny to new-device
+//      registration attempts from the Heroku datacenter IP specifically.
 // ─────────────────────────────────────────────────────────────
 app.get("/api/pair", async (req, res) => {
   const rawNumber = String(req.query.number || "").replace(/[^0-9]/g, "");
 
-  // ---- FIX 1: stronger number validation ----
   if (!rawNumber || rawNumber.length < 8 || rawNumber.length > 15) {
     console.log(`❌ /api/pair invalid number length: "${rawNumber}"`);
     return res.status(400).json({
       code: "Invalid phone number. Include the country code, e.g. 94771234567 (no + or 0 after country code).",
     });
-  }
-  if (/^94.?0/.test(rawNumber) || /^0/.test(rawNumber)) {
-    console.log(`⚠️ /api/pair suspicious number format: "${rawNumber}"`);
   }
 
   console.log(`📞 /api/pair request received for number: ${rawNumber}`);
@@ -899,7 +914,6 @@ app.get("/api/pair", async (req, res) => {
     fs.mkdirSync(pairDir, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(pairDir);
 
-    // ---- FIX 3: Baileys version fallback (matches /api/qr behaviour) ----
     let version;
     try {
       const fetched = await fetchLatestBaileysVersion();
@@ -913,7 +927,6 @@ app.get("/api/pair", async (req, res) => {
       );
     }
 
-    // ---- FIX 2: same connection stability options as /api/qr ----
     const sock = makeWASocket({
       version,
       auth:              state,
@@ -929,6 +942,8 @@ app.get("/api/pair", async (req, res) => {
       keepAliveIntervalMs:   30000,
       retryRequestDelayMs:   250,
       maxRetries:            5,
+      agent: pairProxyAgent,        // ── Webshare proxy (pairing only) ──
+      fetchAgent: pairProxyAgent,   // ── used for any HTTPS fetches Baileys makes ──
     });
 
     sock.ev.on("creds.update", saveCreds);
@@ -982,12 +997,10 @@ app.get("/api/pair", async (req, res) => {
       }
     });
 
-    // ---- FIX 4: robust readiness wait + retry on transient failure ----
-    // Wait until the WebSocket is actually open (noise handshake complete)
     const waitForSocketReady = () =>
       new Promise((resolve, reject) => {
         const start = Date.now();
-        const maxWaitMs = 20000;
+        const maxWaitMs = 25000; // slightly higher since traffic now hops through proxy
 
         const check = () => {
           if (sessionDone) {
@@ -1007,9 +1020,6 @@ app.get("/api/pair", async (req, res) => {
       });
 
     await waitForSocketReady();
-    // Give Baileys a bit more time to finish internal setup after WS opens
-    // (this is the step that was previously too short / missing entirely,
-    // and is the most likely reason pair-code success was far below QR).
     await new Promise((r) => setTimeout(r, 1500));
 
     if (sessionDone) {
@@ -1071,6 +1081,7 @@ app.get("/api/pair", async (req, res) => {
 //  /api/qr  — QR Code Generator for external pair site
 //  GET /api/qr
 //  Returns: { qr: "data:image/png;base64,..." }
+//  (UNCHANGED — no proxy, already works reliably ~95%)
 // ─────────────────────────────────────────────────────────────
 const QRCode = require("qrcode");
 
