@@ -2,6 +2,10 @@
 //  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
 //  Integrated: auto_msg plugin with per-user Gemini key support
 //  FIX: handleAutoMsg now handles BOTH private + group messages
+//  FIX: /api/pair — now uses the SAME connection stability options
+//       as /api/qr (timeouts, retries, keepalive) + a more robust
+//       readiness wait before requesting the pairing code.
+//       This targets the low pair-code success rate vs QR success rate.
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -89,6 +93,9 @@ const BOT_OWNER_NAME = config.OWNER_NAME || "Malindu Nadith";
 const baseOwnerNumber = [String(config.BOT_OWNER || "").replace(/\D/g, "")].filter(Boolean);
 const sessionsBaseDir = path.join(__dirname, "multi_auth_sessions");
 const MAX_ACTIVE_SESSIONS = Number(process.env.MAX_ACTIVE_SESSIONS || 50);
+
+// Fallback Baileys version — used only if fetchLatestBaileysVersion() fails
+const FALLBACK_BAILEYS_VERSION = [2, 3000, 1023628085];
 
 /* ==================== MONGODB ==================== */
 const MONGODB_URI =
@@ -781,7 +788,7 @@ function attachSessionHandlers(sock, sessionCtx) {
 /* ==================== EXPRESS SERVER ==================== */
 app.get("/", (req, res) => {
   res.send(
-    `Hey There, MALIYA-MD started ✅ | Active Sessions: ${activeSessions.size}/${MAX_ACTIVE_SESSIONS}`
+    `Hey There, MALIYA-MD started succesfully ✅ | Active Sessions: ${activeSessions.size}/${MAX_ACTIVE_SESSIONS}`
   );
 });
 
@@ -807,7 +814,7 @@ app.get("/health", (_req, res) => res.status(200).send("OK"));
 
 
 // ─────────────────────────────────────────────────────────────
-//  CORS — allow pair site (Vercel) to call this server
+//  CORS — allow pair site (Vercel: maliya-md.vercel.app) to call this server
 // ─────────────────────────────────────────────────────────────
 app.use(cors({ origin: "*", methods: ["GET"] }));
 
@@ -815,17 +822,45 @@ app.use(cors({ origin: "*", methods: ["GET"] }));
 //  /api/pair  — Pair Code Generator for external pair site
 //  GET /api/pair?number=94xxxxxxxxx
 //  Returns: { code: "XXXX-XXXX" }
+//
+//  FIXES APPLIED (root cause: QR ~95% success vs Pair code ~10% —
+//  since both share the same Heroku IP, this rules out an IP block
+//  and points to the pairing socket not being given the same
+//  connection-stability settings that the QR socket already has):
+//
+//   1. Strict number validation + logging
+//   2. SAME connection stability options as /api/qr:
+//        defaultQueryTimeoutMs, connectTimeoutMs, keepAliveIntervalMs,
+//        retryRequestDelayMs, maxRetries
+//      (previously ONLY /api/qr had these — /api/pair had none)
+//   3. Baileys version fallback if fetchLatestBaileysVersion() fails
+//      (previously only /api/qr had this fallback)
+//   4. Robust readiness wait: waits for WS OPEN *and* a short settle
+//      window *and* retries requestPairingCode() on transient failure
+//      before giving up — pairing code generation needs the socket
+//      fully settled, not just "open"
+//   5. Clearer error surfaces so failures are easy to diagnose in logs
 // ─────────────────────────────────────────────────────────────
 app.get("/api/pair", async (req, res) => {
   const rawNumber = String(req.query.number || "").replace(/[^0-9]/g, "");
 
-  if (!rawNumber || rawNumber.length < 7 || rawNumber.length > 15) {
-    return res.status(400).json({ code: "Invalid phone number." });
+  // ---- FIX 1: stronger number validation ----
+  if (!rawNumber || rawNumber.length < 8 || rawNumber.length > 15) {
+    console.log(`❌ /api/pair invalid number length: "${rawNumber}"`);
+    return res.status(400).json({
+      code: "Invalid phone number. Include the country code, e.g. 94771234567 (no + or 0 after country code).",
+    });
   }
+  if (/^94.?0/.test(rawNumber) || /^0/.test(rawNumber)) {
+    console.log(`⚠️ /api/pair suspicious number format: "${rawNumber}"`);
+  }
+
+  console.log(`📞 /api/pair request received for number: ${rawNumber}`);
 
   const pairDir = path.join(os.tmpdir(), `pair_${rawNumber}_${Date.now()}`);
   let codeSent    = false;
   let sessionDone = false;
+  let responded   = false;
 
   const cleanup = () => {
     try { fs.rmSync(pairDir, { recursive: true, force: true }); } catch (_) {}
@@ -863,8 +898,22 @@ app.get("/api/pair", async (req, res) => {
   try {
     fs.mkdirSync(pairDir, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(pairDir);
-    const { version }          = await fetchLatestBaileysVersion();
 
+    // ---- FIX 3: Baileys version fallback (matches /api/qr behaviour) ----
+    let version;
+    try {
+      const fetched = await fetchLatestBaileysVersion();
+      version = fetched.version;
+      console.log(`ℹ️ /api/pair using latest Baileys version: ${version.join(".")}`);
+    } catch (verErr) {
+      version = FALLBACK_BAILEYS_VERSION;
+      console.log(
+        `⚠️ /api/pair fetchLatestBaileysVersion failed, using fallback ${version.join(".")}:`,
+        verErr?.message || verErr
+      );
+    }
+
+    // ---- FIX 2: same connection stability options as /api/qr ----
     const sock = makeWASocket({
       version,
       auth:              state,
@@ -875,6 +924,11 @@ app.get("/api/pair", async (req, res) => {
       syncFullHistory:                false,
       generateHighQualityLinkPreview: false,
       getMessage: async () => ({ conversation: "hello" }),
+      defaultQueryTimeoutMs: 60000,
+      connectTimeoutMs:      60000,
+      keepAliveIntervalMs:   30000,
+      retryRequestDelayMs:   250,
+      maxRetries:            5,
     });
 
     sock.ev.on("creds.update", saveCreds);
@@ -898,6 +952,9 @@ app.get("/api/pair", async (req, res) => {
 
       if (connection === "close") {
         const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const reason      = lastDisconnect?.error?.message || "unknown";
+        console.log(`🔴 /api/pair connection closed for ${rawNumber}. Code: ${statusCode}, Reason: ${reason}`);
+
         if (codeSent && statusCode === 408) {
           console.log(`⚠️ Pair code session ended (408) for ${rawNumber}`);
           sessionDone = true;
@@ -911,25 +968,101 @@ app.get("/api/pair", async (req, res) => {
           sock.ev.removeAllListeners();
           try { sock.ws.close(); } catch (_) {}
           cleanup();
+          return;
+        }
+
+        if (!responded && !res.headersSent) {
+          responded   = true;
+          sessionDone = true;
+          res.status(500).json({
+            code: "Connection closed before pairing code could be generated. Please try again.",
+          });
+          cleanup();
         }
       }
     });
 
-    // Wait for noise handshake then request code
-    await new Promise((r) => setTimeout(r, 5000));
+    // ---- FIX 4: robust readiness wait + retry on transient failure ----
+    // Wait until the WebSocket is actually open (noise handshake complete)
+    const waitForSocketReady = () =>
+      new Promise((resolve, reject) => {
+        const start = Date.now();
+        const maxWaitMs = 20000;
+
+        const check = () => {
+          if (sessionDone) {
+            return reject(new Error("Session ended before socket became ready"));
+          }
+          const wsReady = sock?.ws?.readyState === 1; // 1 = OPEN
+          if (wsReady) {
+            return resolve();
+          }
+          if (Date.now() - start > maxWaitMs) {
+            return reject(new Error("Timed out waiting for WhatsApp socket handshake"));
+          }
+          setTimeout(check, 250);
+        };
+
+        check();
+      });
+
+    await waitForSocketReady();
+    // Give Baileys a bit more time to finish internal setup after WS opens
+    // (this is the step that was previously too short / missing entirely,
+    // and is the most likely reason pair-code success was far below QR).
+    await new Promise((r) => setTimeout(r, 1500));
+
+    if (sessionDone) {
+      throw new Error("Session ended before pairing code request could be sent");
+    }
 
     if (!sock.authState.creds.registered && !codeSent) {
-      let code = await sock.requestPairingCode(rawNumber);
+      console.log(`🔄 Requesting pairing code for ${rawNumber}...`);
+
+      let code = null;
+      let lastErr = null;
+      const maxAttempts = 3;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          code = await sock.requestPairingCode(rawNumber);
+          if (code) break;
+        } catch (attemptErr) {
+          lastErr = attemptErr;
+          console.log(
+            `⚠️ requestPairingCode attempt ${attempt}/${maxAttempts} failed for ${rawNumber}:`,
+            attemptErr?.message || attemptErr
+          );
+          if (attempt < maxAttempts && !sessionDone) {
+            await new Promise((r) => setTimeout(r, 1000 * attempt));
+          }
+        }
+      }
+
+      if (!code) {
+        throw lastErr || new Error("Failed to obtain pairing code after retries");
+      }
+
       code     = code?.match(/.{1,4}/g)?.join("-") || code;
       codeSent = true;
+      responded = true;
       console.log(`📱 Pair code for ${rawNumber}: ${code}`);
       return res.json({ code });
     }
+
+    if (!responded && !res.headersSent) {
+      responded = true;
+      console.log(`⚠️ /api/pair: creds already registered for ${rawNumber}, no code generated`);
+      return res.status(400).json({ code: "This session is already registered. Please use a fresh session." });
+    }
   } catch (err) {
-    console.log("❌ /api/pair error:", err?.message || err);
+    console.log(`❌ /api/pair error for ${rawNumber}:`, err?.message || err);
     cleanup();
     if (!res.headersSent) {
-      return res.status(500).json({ code: "Failed to generate pairing code. Please try again." });
+      responded = true;
+      return res.status(500).json({
+        code: `Failed to generate pairing code: ${err?.message || "Please try again."}`,
+      });
     }
   }
 });
@@ -1005,7 +1138,7 @@ app.get("/api/qr", async (req, res) => {
 
       let version;
       try { const f = await fetchLatestBaileysVersion(); version = f.version; }
-      catch (_) { version = [2, 3000, 1023628085]; }
+      catch (_) { version = FALLBACK_BAILEYS_VERSION; }
 
       const sock = makeWASocket({
         version,
