@@ -57,6 +57,7 @@ function getStatusCard() {
 🍀 | *WORK TYPE:* ${String(s.mode || "public").toUpperCase()}
 🍀 | *PRESENCE:* ${presenceText(String(s.always_presence || "off"))}
 🍀 | *AI CHAT:* ${onOff(!!s.auto_msg)}
+🍀 | *SEEN ALL MSG:* ${onOff(!!s.seen_all_msg)}
 🍀 | *AUTO MSG REACT:* ${onOff(!!s.auto_react_msg)}
 🍀 | *REACT MODE:* ${reactModeText(String(s.auto_react_mode || "all"))}
 🍀 | *ANTI DELETE:* ${onOff(!!s.anti_delete)}
@@ -88,6 +89,10 @@ function mapKey(name = "") {
 
   if (["automsg", "auto_msg", "msg", "aichat", "ai"].includes(k)) {
     return "auto_msg";
+  }
+
+  if (["seenallmsg", "seen_all_msg", "seenall", "allmsgseen"].includes(k)) {
+    return "seen_all_msg";
   }
 
   if (["antidelete", "anti_delete", "delete"].includes(k)) {
@@ -195,6 +200,7 @@ function applySettingAction(action, value) {
       auto_status_react: `✅ Auto Status React: ${onOff(updated.auto_status_react)}`,
       auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
       auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
+      seen_all_msg: `✅ Seen All Msg: ${onOff(updated.seen_all_msg)}`,
       anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)}`,
       auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
       auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
@@ -218,6 +224,7 @@ function applySettingAction(action, value) {
       auto_status_react: `✅ Auto Status React: ${onOff(updated.auto_status_react)}`,
       auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
       auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
+      seen_all_msg: `✅ Seen All Msg: ${onOff(updated.seen_all_msg)}`,
       anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)}`,
       auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
       auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
@@ -300,6 +307,19 @@ function resolveSettingsActionFromText(text = "") {
 
   if (t === ".setting toggle automsg" || t === "toggle ai chat") {
     return { action: "toggle", value: "automsg" };
+  }
+
+  // SEEN ALL MSG
+  if (t === ".setting on seenallmsg" || t === "enable seen all msg" || t === "seen all msg on") {
+    return { action: "on", value: "seenallmsg" };
+  }
+
+  if (t === ".setting off seenallmsg" || t === "disable seen all msg" || t === "seen all msg off") {
+    return { action: "off", value: "seenallmsg" };
+  }
+
+  if (t === ".setting toggle seenallmsg" || t === "toggle seen all msg") {
+    return { action: "toggle", value: "seenallmsg" };
   }
 
   if (t === ".setting on antidelete" || t === "enable anti delete") {
@@ -551,6 +571,21 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
                       id: ".setting off automsg",
                     },
                     {
+                      title: "✅ Seen All Msg ON",
+                      description: "Auto-read every private + group msg",
+                      id: ".setting on seenallmsg",
+                    },
+                    {
+                      title: "❌ Seen All Msg OFF",
+                      description: "Stop auto-reading every message",
+                      id: ".setting off seenallmsg",
+                    },
+                    {
+                      title: "🔄 Toggle Seen All Msg",
+                      description: "Switch seen-all on/off",
+                      id: ".setting toggle seenallmsg",
+                    },
+                    {
                       title: "Enable Anti Delete",
                       description: "Turn ON anti delete",
                       id: ".setting on antidelete",
@@ -705,17 +740,18 @@ cmd(
         }
 
         const updated = toggleSetting(key);
-        
+
         const responses = {
           auto_status_seen: `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`,
           auto_status_react: `✅ Auto Status React: ${onOff(updated.auto_status_react)}`,
           auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
           auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
+          seen_all_msg: `✅ Seen All Msg: ${onOff(updated.seen_all_msg)}`,
           anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)}`,
           auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
           auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
         };
-        
+
         return reply(responses[key] || `✅ Toggled ${key}`);
       }
 
@@ -734,6 +770,7 @@ cmd(
           auto_status_react: `✅ Auto Status React: ${onOff(updated.auto_status_react)}`,
           auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
           auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
+          seen_all_msg: `✅ Seen All Msg: ${onOff(updated.seen_all_msg)}`,
           anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)}`,
           auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
           auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
