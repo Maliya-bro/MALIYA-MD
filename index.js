@@ -105,7 +105,7 @@ let cachedDb     = null;
 
 async function getDb() {
   if (cachedDb) return cachedDb;
-  cachedClient = new MongoClient(MONGODB_URI, { maxPoolSize: 30 });
+  cachedClient = new MongoClient(MONGODB_URI, { maxPoolSize: 10 });
   await cachedClient.connect();
   cachedDb = cachedClient.db(MONGODB_DB);
   console.log("✅ Connected to MongoDB");
