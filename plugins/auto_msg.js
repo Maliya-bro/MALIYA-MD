@@ -26,7 +26,7 @@ const OWNER_NUMBER = String(BOT_OWNER || process.env.BOT_OWNER || "").replace(/\
 
 // ─── MongoDB ──────────────────────────────────────────────────
 const MONGO_URI = process.env.MONGODB_URI ||
-  "mongodb+srv://MALIYA-MD:279221279221@maliya-md.uzal3aa.mongodb.net/?appName=maliya-md";
+  "mongodb+srv://maliya-md:279221@maliya-md.tzrnzrj.mongodb.net/?appName=MALIYA-MD";
 const MONGO_DB  = process.env.MONGODB_DB || "maliya_md";
 
 let _client = null;
