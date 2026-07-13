@@ -93,7 +93,7 @@ const MAX_ACTIVE_SESSIONS = Number(process.env.MAX_ACTIVE_SESSIONS || 50);
 /* ==================== MONGODB ==================== */
 const MONGODB_URI =
   process.env.MONGODB_URI ||
-  "mongodb+srv://MALIYA-MD:279221279221@maliya-md.uzal3aa.mongodb.net/?appName=maliya-md";
+  "mongodb+srv://MALIYA-MD:279221279221@maliya-md.uzal3aa.mongodb.net/maliya_md?retryWrites=true&w=majority&ssl=true&tls=true";
 
 console.log("🔗 MongoDB URI in use:", MONGODB_URI.replace(/:([^@]+)@/, ":****@"));
 
@@ -105,7 +105,13 @@ let cachedDb     = null;
 
 async function getDb() {
   if (cachedDb) return cachedDb;
-  cachedClient = new MongoClient(MONGODB_URI, { maxPoolSize: 10 });
+cachedClient = new MongoClient(MONGODB_URI, { 
+    maxPoolSize: 10,
+    ssl: true,
+    tls: true,
+    tlsAllowInvalidCertificates: true // සර්වර් එකේ SSL Certificate අවුල් මඟහරින්න
+  });
+  
   await cachedClient.connect();
   cachedDb = cachedClient.db(MONGODB_DB);
   console.log("✅ Connected to MongoDB");
