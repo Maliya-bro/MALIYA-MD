@@ -548,10 +548,14 @@ function attachSessionHandlers(sock, sessionCtx) {
           if (readSettings().auto_status_react === true) {
             try {
               const emojis = [
-                "😎","🔥","⚡","👑","💯","💎","🚀","😈",
-                "💔","🥺","😔","😭","🥀","😞","🌧️","❤️‍🩹",
-                "😂","🤣","🤡","💀","🗿","😜","🙈","🍿",
-                "❤️","✨","🌈","🎶","🌟","🎧",
+   "😂", "🤣", "😍", "🥰", "😎", "🤔", "😭", "😱", "🔥", "💀",
+  "🥺", "😊", "😈", "👻", "🤖", "😤", "🥳", "🤯", "😨", "🥶",
+  "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💕", "💞", "💓",
+  "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤞", "🤙", "💪", "🖕",
+  "🙏", "💅", "✨", "⭐", "🌟", "💫", "⚡", "🎉", "🎊", "🥳",
+  "🎈", "🎯", "🏆", "💯", "🔞", "❓", "❗", "💢", "🐱", "🐶",
+  "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐸", "🍿", "🍕",
+  "🍔", "🌮", "🍩", "🍪", "☕", "🍺", "👀", "👁️", "💩", "👽"
               ];
               const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
               await new Promise((r) => setTimeout(r, 1500));
@@ -729,6 +733,8 @@ function attachSessionHandlers(sock, sessionCtx) {
             if (cmd.react) sock.sendMessage(from, { react: { text: cmd.react, key: mek.key } });
             await cmd.function(sock, mek, m, {
               from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
+              sessionOwnerPhone: sessionCtx.ownerNumber[0] || "",
+              sessionOwnerName:  BOT_OWNER_NAME,
             });
           }
         }
