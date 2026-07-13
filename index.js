@@ -307,7 +307,7 @@ async function startSessionBot(sessionId) {
     const sock = makeWASocket({
       logger:                         P({ level: "silent" }),
       printQRInTerminal:              false,
-      browser:                        Browsers.macOS("Firefox"),
+      browser:                        Browsers.appropriate("Desktop"),
       auth:                           state,
       version,
       syncFullHistory:                true,
