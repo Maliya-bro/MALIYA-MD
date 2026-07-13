@@ -499,13 +499,15 @@ cmd({
   desc:    "AI auto-reply — oma eka on/off karanna",
   type:    "all",
   react:   "🤖",
-}, async (conn, mek, m, { args, sender }) => {
+}, async (conn, mek, m, { args, sender, sessionOwnerPhone }) => {
   const phone       = sender.split("@")[0].replace(/\D/g, "");
   const sub         = (args[0] || "").toLowerCase().trim();
   const sub2        = (args[1] || "").toLowerCase().trim();
-  const senderIsOwner = isOwner(phone, "");
-  // scope global mode per-owner using the bot owner's own number as the key
-  const scopePhone = OWNER_NUMBER || phone;
+  const senderIsOwner = isOwner(phone, sessionOwnerPhone || "");
+  // scope global mode per-owner using THIS session's actual connected number
+  // (must match the scopePhone that handleAutoMsg() uses, or "on all" silently
+  // writes to a global_cfg doc that resolveShouldReply() never reads back)
+  const scopePhone = sessionOwnerPhone || OWNER_NUMBER || phone;
 
   // ── .msg on all → GLOBAL: private + group AI on (owner only) ─
   if (sub === "on" && sub2 === "all") {
