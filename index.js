@@ -10,7 +10,7 @@
 //         restores the LATEST session state instead of a stale one
 //  FIX 3: restore-from-Mongo now skipped if local creds.json already
 //         exists on disk (avoids clobbering a live, already-valid
-//         session with older Mongo data mid-run)
+//         session with older Mongo data mid-run).
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
