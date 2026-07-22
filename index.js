@@ -1,7 +1,16 @@
 // ╔══════════════════════════════════════════════════════════════╗
 //  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
 //  Integrated: auto_msg plugin with per-user Gemini key support
-//  FIX: handleAutoMsg now handles BOTH private + group messages
+//  FIX 1: startSessionBot now has a starting-lock to prevent the
+//         watcher tick from starting the SAME session twice while
+//         the first start() is still awaiting (this caused two
+//         live sockets for one number -> WhatsApp "conflict" close)
+//  FIX 2: creds are now synced BACK to MongoDB on every creds.update,
+//         so on Railway (ephemeral disk) a reconnect/restart always
+//         restores the LATEST session state instead of a stale one
+//  FIX 3: restore-from-Mongo now skipped if local creds.json already
+//         exists on disk (avoids clobbering a live, already-valid
+//         session with older Mongo data mid-run)
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -165,6 +174,41 @@ async function restoreCredsToFile(sessionId, targetFilePath) {
   return targetFilePath;
 }
 
+// ── FIX 2: push local creds.json back into MongoDB ────────────
+// Railway's filesystem is ephemeral, so MongoDB must always hold
+// the LATEST creds, not just the one captured at pairing time.
+// Debounced so we don't hammer Mongo on every key-update event.
+const credsSyncTimers = new Map();
+
+function scheduleCredsSync(sessionId, credsPath, delayMs = 2000) {
+  if (credsSyncTimers.has(sessionId)) {
+    clearTimeout(credsSyncTimers.get(sessionId));
+  }
+  const timer = setTimeout(async () => {
+    credsSyncTimers.delete(sessionId);
+    try {
+      if (!fs.existsSync(credsPath)) return;
+      const data = fs.readFileSync(credsPath).toString("base64");
+      const db   = await getDb();
+      const col  = db.collection(SESSION_COLLECTION);
+      await col.updateOne(
+        { sessionId: normalizeSessionId(sessionId) },
+        {
+          $set: {
+            "primaryFile.name":     "creds.json",
+            "primaryFile.mimeType": "application/json",
+            "primaryFile.data":     data,
+            updatedAt:              new Date(),
+          },
+        }
+      );
+    } catch (e) {
+      console.log(`⚠️ creds sync error (${sessionId}):`, e?.message || e);
+    }
+  }, delayMs);
+  credsSyncTimers.set(sessionId, timer);
+}
+
 /* ==================== PLUGINS LOADER ==================== */
 const antiDeletePlugin = require("./plugins/antidelete.js");
 
@@ -238,7 +282,13 @@ function getBodyFromMessage(message) {
 /* ==================== MULTI-SESSION MANAGER ==================== */
 const activeSessions  = new Map();
 const reconnectTimers = new Map();
-let   watcherStarted  = false;
+// FIX 1: lock for sessions currently in the process of starting
+// (i.e. between the activeSessions.has() check and the socket
+// actually being registered). Prevents the 5s watcher tick from
+// starting a duplicate socket for the same sessionId while the
+// first start is still awaiting mkdir/restore/useMultiFileAuthState.
+const startingSessions = new Set();
+let   watcherStarted   = false;
 
 function getSessionPaths(sessionId) {
   const safeId    = safeSessionFolderName(sessionId);
@@ -280,8 +330,19 @@ async function startSessionBot(sessionId) {
 
   if (activeSessions.has(sessionId)) return activeSessions.get(sessionId);
 
+  // FIX 1: bail out if this session is already mid-start elsewhere
+  // (e.g. a watcher tick fired again before the previous start()
+  // finished its awaits). This is what was causing two live sockets
+  // for the same number -> WhatsApp closing one as a conflict.
+  if (startingSessions.has(sessionId)) {
+    console.log(`⏳ Session ${sessionId} is already starting — skipping duplicate start`);
+    return null;
+  }
+  startingSessions.add(sessionId);
+
   if (activeSessions.size >= MAX_ACTIVE_SESSIONS) {
     console.log(`⚠️ Active session limit reached (${MAX_ACTIVE_SESSIONS}). Skipping ${sessionId}`);
+    startingSessions.delete(sessionId);
     return null;
   }
 
@@ -289,7 +350,14 @@ async function startSessionBot(sessionId) {
 
   try {
     fs.mkdirSync(authDir, { recursive: true });
-    await restoreCredsToFile(sessionId, credsPath);
+
+    // FIX 3: only pull from Mongo if we don't already have local
+    // creds for this session (cold start / fresh container). If
+    // creds.json already exists on disk, it's newer than or equal
+    // to what's in Mongo (thanks to FIX 2), so don't clobber it.
+    if (!fs.existsSync(credsPath)) {
+      await restoreCredsToFile(sessionId, credsPath);
+    }
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version }          = await fetchLatestBaileysVersion();
@@ -317,8 +385,17 @@ async function startSessionBot(sessionId) {
 
     sessionCtx.sock = sock;
     activeSessions.set(sessionId, sessionCtx);
+    // We've registered the socket in activeSessions now, so it's
+    // safe to release the starting-lock — any future watcher tick
+    // will correctly find it via activeSessions.has() instead.
+    startingSessions.delete(sessionId);
 
-    sock.ev.on("creds.update", saveCreds);
+    sock.ev.on("creds.update", async () => {
+      await saveCreds();
+      // FIX 2: keep Mongo in sync with the latest local creds so a
+      // Railway restart/redeploy restores current state, not stale.
+      scheduleCredsSync(sessionId, credsPath);
+    });
 
     sock.ev.on("connection.update", async (update) => {
       try {
@@ -390,7 +467,7 @@ async function startSessionBot(sessionId) {
           activeSessions.delete(sessionId);
 
           if (code !== DisconnectReason.loggedOut) {
-            console.log(`🔁 Session disconnected, reconnecting: ${sessionId}`);
+            console.log(`🔁 Session disconnected, reconnecting: ${sessionId} (code: ${code})`);
             await updateSessionStatus(sessionId, {
               status:     "disconnected",
               connectBot: true,
@@ -421,6 +498,7 @@ async function startSessionBot(sessionId) {
   } catch (e) {
     console.log(`❌ Failed to start session ${sessionId}:`, e?.message || e);
     activeSessions.delete(sessionId);
+    startingSessions.delete(sessionId);
     await updateSessionStatus(sessionId, {
       status:    "connect_error",
       lastError: String(e?.message || e),
@@ -438,7 +516,13 @@ function startSessionWatcher() {
   if (watcherStarted) return;
   watcherStarted = true;
 
+  let tickRunning = false;
+
   const tick = async () => {
+    // Extra guard: don't let overlapping ticks run concurrently if
+    // a previous tick's DB query/loop is still in flight.
+    if (tickRunning) return;
+    tickRunning = true;
     try {
       const db  = await getDb();
       const col = db.collection(SESSION_COLLECTION);
@@ -454,13 +538,16 @@ function startSessionWatcher() {
 
       for (const doc of docs) {
         const id = doc.sessionId;
-        if (!id)                    continue;
-        if (activeSessions.has(id)) continue;
+        if (!id)                      continue;
+        if (activeSessions.has(id))   continue;
+        if (startingSessions.has(id)) continue;
         console.log("🔌 Connecting NEW session:", id);
         await startSessionBot(id);
       }
     } catch (e) {
       console.log("Watcher tick error:", e?.message || e);
+    } finally {
+      tickRunning = false;
     }
   };
 
