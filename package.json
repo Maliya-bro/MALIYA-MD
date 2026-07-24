@@ -58,7 +58,8 @@
     "https": "latest",
     "@soyaxell09/zenbot-scraper": "latest",
     "qrcode": "latest",
-    "cors": "latest"
+    "cors": "latest",
+    "mime-types": "latest"
     
     
   }
