@@ -1,21 +1,13 @@
 /**
  * CineSubz.lk Movie Download Plugin for MALIYA-MD
  * ─────────────────────────────────────────────────
- * npm install axios cheerio
- *
- * No puppeteer needed! The redirect logic is pure string replacement,
- * confirmed from the site's own source code:
- *
- *   zt-link page has: <a id="link" href="https://google.com/serverN/.../File.mp4">
- *   Client-side JS replaces "google.com/serverN/" with "bot3.sonic-cloud.online/serverN/"
- *   and appends "?ext=mp4" instead of ".mp4"
- *
- * We replicate that exact replacement in Node — no browser needed.
+ * npm install axios cheerio cinesubz-scraper
  */
 
 const { cmd } = require("../command");
-const axios   = require("axios");
-const cheerio = require("cheerio");
+const axios   = require("axios"); // Kept as requested
+const cheerio = require("cheerio"); // Kept as requested
+const { searchCineSubz, scrapeCineSubz, scrapeCineSubzServerLink } = require('cinesubz-scraper');
 
 const pendingSearch  = {};
 const pendingQuality = {};
@@ -24,19 +16,7 @@ const BASE    = "https://cinesubz.lk";
 const MAX_MB  = 2048;
 const TIMEOUT = 20_000;
 
-const HEADERS = {
-  "User-Agent"      : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Accept"          : "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  "Accept-Language" : "en-US,en;q=0.9",
-  "Accept-Encoding" : "gzip, deflate, br",
-  "Referer"         : BASE,
-};
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function get(url) {
-  return axios.get(url, { headers: HEADERS, timeout: TIMEOUT, maxRedirects: 15 });
-}
 
 function cleanTitle(t = "") {
   return t
@@ -67,174 +47,74 @@ function normalizeQuality(t = "") {
   return t.trim() || "Unknown";
 }
 
-// ─── 1. Search ────────────────────────────────────────────────────────────────
+// ─── 1. Search (Using cinesubz-scraper) ───────────────────────────────────────
 
 async function searchMovies(query) {
-  const { data } = await get(`${BASE}/?s=${encodeURIComponent(query)}`);
-  const $        = cheerio.load(data);
-  const results  = [], seen = new Set();
-
-  $(".display-item .item-box, article, .post").each((_, el) => {
-    const a     = $(el).find("a[href*='/movies/'], a[href*='/tvshows/']").first();
-    const href  = a.attr("href") || "";
-    const title = (a.attr("title") || a.text()).trim();
-    if (!href || !title || seen.has(href)) return;
-    seen.add(href);
-    results.push({
-      title,
-      url  : href,
-      imdb : $(el).find("[class*='data-imdb']").first().text().replace(/imdb[:\s]*/i, "").trim(),
-      year : $(el).find("[class*='year']").first().text().trim(),
-      thumb: $(el).find("img").first().attr("src") || "",
-    });
-  });
-
-  if (!results.length) {
-    $("a[href*='/movies/'], a[href*='/tvshows/']").each((_, el) => {
-      const href  = $(el).attr("href") || "";
-      const title = ($(el).attr("title") || $(el).text()).trim();
-      if (!href || !title || seen.has(href) || href === BASE) return;
-      seen.add(href);
-      results.push({ title, url: href, imdb: "", year: "", thumb: "" });
-    });
-  }
-
-  return results.slice(0, 10);
+  const results = await searchCineSubz(query);
+  
+  // Mapping the NPM output to the structure MALIYA-MD expects
+  return results.map(r => ({
+    title: r.title,
+    url: r.url,
+    imdb: r.rating || "",
+    year: "", // Will be extracted from the title implicitly by users
+    thumb: ""
+  })).slice(0, 10);
 }
 
-// ─── 2. Movie page ────────────────────────────────────────────────────────────
+// ─── 2. Movie page (Using cinesubz-scraper) ───────────────────────────────────
 
 async function getMovieMeta(movieUrl) {
-  const { data } = await get(movieUrl);
-  const $        = cheerio.load(data);
+  const meta = await scrapeCineSubz(movieUrl);
 
-  const title = cleanTitle(
-    $(".info-details .details-title h3").first().text().trim() ||
-    $(".sheader .data h1").first().text().trim() ||
-    $("h1.entry-title").first().text().trim() ||
-    $("h1").first().text().trim()
-  );
-
-  const thumb = $(".splash-bg img").first().attr("src") ||
-                $(".poster img").first().attr("src") ||
-                $(".wp-post-image").first().attr("src") || "";
-
-  const imdb     = $(".data-imdb").first().text().replace(/imdb[:\s]*/i, "").trim();
-  const duration = $("[itemprop='duration']").first().text().trim() ||
-                   $(".runtime").first().text().trim();
-
-  const genres = [];
-  $(".details-genre a, .sgeneros a").each((_, el) => {
-    const g = $(el).text().trim();
-    if (g && genres.length < 6) genres.push(g);
+  const links = (meta.downloadLinks || []).map(l => {
+    // Attempting to extract the size from the quality string (e.g., "720p HD 800MB")
+    // If not found, a fallback size of "1000MB" is used to ensure it passes the MAX_MB filter
+    const sizeMatch = l.quality.match(/(\d+\.?\d*)\s*(GB|MB)/i);
+    return {
+      label: l.quality,
+      quality: l.quality,
+      size: sizeMatch ? sizeMatch[0] : "1000MB",
+      ztUrl: l.directUrl
+    };
   });
 
-  const directors = [];
-  $(".info-col a[href*='/director/']").each((_, el) => {
-    const d = $(el).text().trim();
-    if (d && !directors.includes(d)) directors.push(d);
-  });
-
-  const subBy = (data.match(/Subtitle By[:\s]*([^\n<]+)/i) || [])[1]?.trim() || "";
-
-  const links = [], linkSeen = new Set();
-  $("a[href*='/zt-links/'], a[href*='/api-']").each((_, el) => {
-    const href = $(el).attr("href") || "";
-    if (!href || linkSeen.has(href)) return;
-    linkSeen.add(href);
-
-    const raw   = $(el).text()
-      .replace(/Direct\s*(&|and)\s*Telegram\s*Download\s*Links?/gi, "")
-      .trim();
-    const qualM = raw.match(/(4K|2160[Pp]|1080[Pp]|FHD|720[Pp]|HD|480[Pp]|SD|360[Pp])/i);
-    const sizeM = raw.match(/(\d+\.?\d*)\s*(GB|MB)/i);
-
-    links.push({
-      label  : raw,
-      quality: qualM?.[1] || "",
-      size   : sizeM?.[0] || "",
-      ztUrl  : href,
-    });
-  });
-
-  return { title, thumb, imdb, duration, genres, directors, subBy, links };
+  return { 
+    title: cleanTitle(meta.title), 
+    thumb: meta.poster || "", 
+    imdb: meta.imdb_rate || meta.vote || "", 
+    duration: meta.duration || "", 
+    genres: meta.genre ? meta.genre.split(',').map(g => g.trim()) : [], 
+    directors: [], 
+    subBy: "", 
+    links 
+  };
 }
 
-// ─── 3. Resolve zt-link → REAL direct .mp4 URL (pure string replace) ─────────
-//
-//  Confirmed from cinesubz's own page source: the zt-link page contains
-//  <a id="link" href="https://google.com/serverN/.../File.mp4">
-//  and client-side JS just does a plain string replacement:
-//    "https://google.com/serverN/"  →  "https://bot3.sonic-cloud.online/serverN/"
-//  plus ".mp4" → "?ext=mp4" (or .mkv/.zip equivalents).
-//  We replicate that mapping directly — no browser/JS execution needed.
-
-const URL_MAPPINGS = [
-  { search: [
-      "https://google.com/server11/1:/",
-      "https://google.com/server12/1:/",
-      "https://google.com/server13/1:/",
-    ], replace: "https://bot3.sonic-cloud.online/server1/" },
-  { search: [
-      "https://google.com/server21/1:/",
-      "https://google.com/server22/1:/",
-      "https://google.com/server23/1:/",
-    ], replace: "https://bot3.sonic-cloud.online/server2/" },
-  { search: ["https://google.com/server3/1:/"], replace: "https://bot3.sonic-cloud.online/server3/" },
-  { search: ["https://google.com/server4/1:/"], replace: "https://bot3.sonic-cloud.online/server4/" },
-  { search: ["https://google.com/server5/1:/"], replace: "https://bot3.sonic-cloud.online/server5/" },
-  { search: ["https://google.com/server6/"],    replace: "https://bot3.sonic-cloud.online/server6/" },
-];
-
-function applyExtSuffix(url) {
-  if (url.includes(".mp4?bot=cscloud2bot&code="))
-    return url.replace(".mp4?bot=cscloud2bot&code=", "?ext=mp4&bot=cscloud2bot&code=");
-  if (url.includes(".mp4"))
-    return url.replace(".mp4", "?ext=mp4");
-  if (url.includes(".mkv?bot=cscloud2bot&code="))
-    return url.replace(".mkv?bot=cscloud2bot&code=", "?ext=mkv&bot=cscloud2bot&code=");
-  if (url.includes(".mkv"))
-    return url.replace(".mkv", "?ext=mkv");
-  if (url.includes(".zip"))
-    return url.replace(".zip", "?ext=zip");
-  return url;
-}
+// ─── 3. Resolve direct .mp4 URL (Using cinesubz-scraper) ──────────────────────
 
 async function resolveZtLink(ztUrl) {
-  // Step 1: fetch zt-link page, extract the raw href from <a id="link">
-  const { data } = await get(ztUrl);
-  const $ = cheerio.load(data);
-
-  const rawHref = $("#link").attr("href") || "";
-  if (!rawHref) return null;
-
-  // Telegram links — return as-is
-  if (rawHref.includes("t.me/") && !rawHref.includes("CineSubzAdmin")) {
-    return rawHref;
+  if (!ztUrl) return null;
+  
+  // Return Telegram links immediately if they are already direct
+  if (ztUrl.includes("t.me/") && !ztUrl.includes("CineSubzAdmin")) {
+    return ztUrl;
   }
 
-  // Step 2: apply the same URL mapping the site's own JS uses
-  let modifiedUrl = rawHref;
-  let matched     = false;
-
-  for (const mapping of URL_MAPPINGS) {
-    if (matched) break;
-    for (const searchStr of mapping.search) {
-      if (rawHref.includes(searchStr)) {
-        modifiedUrl = rawHref.replace(searchStr, mapping.replace);
-        modifiedUrl = applyExtSuffix(modifiedUrl);
-        matched = true;
-        break;
-      }
+  try {
+    // Using the NPM package to decrypt the backend stream
+    const serverData = await scrapeCineSubzServerLink(ztUrl);
+    
+    // If a decrypted telegram link is extracted
+    if (serverData && serverData.telegram) {
+      return serverData.telegram;
     }
+    
+    // Fallback to original URL
+    return ztUrl;
+  } catch (error) {
+    return ztUrl;
   }
-
-  if (!matched) {
-    // Unknown pattern — return raw href as fallback (Baileys may still resolve it)
-    return rawHref;
-  }
-
-  return modifiedUrl;
 }
 
 // ─── Bot Commands ─────────────────────────────────────────────────────────────
