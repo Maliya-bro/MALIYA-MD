@@ -59,7 +59,8 @@
     "@soyaxell09/zenbot-scraper": "latest",
     "qrcode": "latest",
     "cors": "latest",
-    "mime-types": "latest"
+    "mime-types": "latest",
+    "cinesubz-scraper": "latest"
     
     
   }
