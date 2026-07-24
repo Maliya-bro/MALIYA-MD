@@ -5,8 +5,10 @@
  */
 
 const { cmd } = require("../command");
-const axios   = require("axios"); // Kept as requested
-const cheerio = require("cheerio"); // Kept as requested
+const axios   = require("axios"); 
+const cheerio = require("cheerio"); 
+const fs = require('fs');
+const path = require('path');
 const { searchCineSubz, scrapeCineSubz, scrapeCineSubzServerLink } = require('cinesubz-scraper');
 
 const pendingSearch  = {};
@@ -14,7 +16,6 @@ const pendingQuality = {};
 
 const BASE    = "https://cinesubz.lk";
 const MAX_MB  = 2048;
-const TIMEOUT = 20_000;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -52,12 +53,11 @@ function normalizeQuality(t = "") {
 async function searchMovies(query) {
   const results = await searchCineSubz(query);
   
-  // Mapping the NPM output to the structure MALIYA-MD expects
   return results.map(r => ({
     title: r.title,
     url: r.url,
     imdb: r.rating || "",
-    year: "", // Will be extracted from the title implicitly by users
+    year: "", 
     thumb: ""
   })).slice(0, 10);
 }
@@ -68,14 +68,12 @@ async function getMovieMeta(movieUrl) {
   const meta = await scrapeCineSubz(movieUrl);
 
   const links = (meta.downloadLinks || []).map(l => {
-    // Attempting to extract the size from the quality string (e.g., "720p HD 800MB")
-    // If not found, a fallback size of "1000MB" is used to ensure it passes the MAX_MB filter
     const sizeMatch = l.quality.match(/(\d+\.?\d*)\s*(GB|MB)/i);
     return {
       label: l.quality,
       quality: l.quality,
       size: sizeMatch ? sizeMatch[0] : "1000MB",
-      ztUrl: l.directUrl
+      directUrl: l.directUrl
     };
   });
 
@@ -89,32 +87,6 @@ async function getMovieMeta(movieUrl) {
     subBy: "", 
     links 
   };
-}
-
-// ─── 3. Resolve direct .mp4 URL (Using cinesubz-scraper) ──────────────────────
-
-async function resolveZtLink(ztUrl) {
-  if (!ztUrl) return null;
-  
-  // Return Telegram links immediately if they are already direct
-  if (ztUrl.includes("t.me/") && !ztUrl.includes("CineSubzAdmin")) {
-    return ztUrl;
-  }
-
-  try {
-    // Using the NPM package to decrypt the backend stream
-    const serverData = await scrapeCineSubzServerLink(ztUrl);
-    
-    // If a decrypted telegram link is extracted
-    if (serverData && serverData.telegram) {
-      return serverData.telegram;
-    }
-    
-    // Fallback to original URL
-    return ztUrl;
-  } catch (error) {
-    return ztUrl;
-  }
 }
 
 // ─── Bot Commands ─────────────────────────────────────────────────────────────
@@ -210,7 +182,7 @@ cmd({
   } catch (_) { await maliya.sendMessage(from, { text: msg }, { quoted: mek }); }
 });
 
-// ── Step 3: quality → resolve → send document ────────────────────────────────
+// ── Step 3: NPM Package Download Option ───────────────────────────────────────
 
 cmd({
   filter: (text, { sender }) =>
@@ -226,48 +198,79 @@ cmd({
   const chosen  = links[+body.trim() - 1];
   const quality = normalizeQuality(chosen.quality || chosen.label);
 
-  reply(`*⏳ ${quality} (${chosen.size}) — Getting direct link..*`);
+  reply(`*⏳ Extracting Decrypted Streams..*\nUsing cinesubz-scraper automation...`);
 
-  let directUrl;
-  try       { directUrl = await resolveZtLink(chosen.ztUrl); }
-  catch (e) { return reply(`*❌ Resolve error:* ${e.message}`); }
+  let serverData;
+  try { 
+      // Using NPM module to bypass protection and extract backend streams
+      serverData = await scrapeCineSubzServerLink(chosen.directUrl); 
+  } catch (e) { 
+      return reply(`*❌ NPM Scraper Error:* ${e.message}`); 
+  }
 
-  if (!directUrl) {
+  if (!serverData) {
     return maliya.sendMessage(from, {
-      text: `*❌ Can't get direct link.*\nTry manually:\n${chosen.ztUrl}`,
+      text: `*❌ Can't get direct link from scraper.*\nTry manually:\n${chosen.directUrl}`,
     }, { quoted: mek });
   }
 
-  // Telegram
-  if (directUrl.includes("t.me") || directUrl.includes("telegram.me")) {
+  // If the NPM package returned a Telegram stream
+  if (serverData.telegram) {
     return maliya.sendMessage(from, {
       text:
-        `*🎬 ${title}*\n*Quality:* ${quality}  |  *Size:* ${chosen.size}\n\n` +
-        `📲 *Telegram Download:*\n${directUrl}\n\nEnjoy! 🍿`,
+        `*🎬 ${serverData.title || title}*\n*Quality:* ${quality}  |  *Size:* ${serverData.size || chosen.size}\n\n` +
+        `📲 *Telegram Direct Stream:*\n${serverData.telegram}\n\nEnjoy! 🍿`,
     }, { quoted: mek });
   }
 
-  reply(`*⬇️ Sending the film.. (${chosen.size})*\nPlease wait.. 🙏`);
+  // If it's a direct file URL, process it via the RAM-friendly method
+  const finalDirectUrl = serverData.directUrl || chosen.directUrl;
+  reply(`*⬇️ Downloading to server.. (${chosen.size})*\nPlease wait.. 🙏`);
 
-  const fileName = `${title} [${quality}] [CineSubz].mp4`
-    .replace(/[^\w\s.\-\[\]()]/gi, "").trim();
+  const fileName = `${title} [${quality}] [CineSubz].mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
+  const tempFilePath = path.join(__dirname, fileName);
 
   try {
+    const response = await axios({
+      url: finalDirectUrl,
+      method: 'GET',
+      responseType: 'stream',
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://cinesubz.lk/",
+        "Accept": "*/*"
+      }
+    });
+
+    const writer = fs.createWriteStream(tempFilePath);
+    response.data.pipe(writer);
+
+    await new Promise((resolve, reject) => {
+      writer.on('finish', resolve);
+      writer.on('error', reject);
+    });
+
+    reply(`*📤 Uploading to WhatsApp.. (${chosen.size})*\nAlmost done..`);
+
     await maliya.sendMessage(from, {
-      document: { url: directUrl },
+      document: fs.readFileSync(tempFilePath),
       mimetype : "video/mp4",
-      fileName,
+      fileName: fileName,
       caption:
         `*🎬 ${title}*\n` +
         `*📊 Quality:* ${quality}\n` +
         `*💾 Size:* ${chosen.size}\n\n` +
         `*Enjoy! 🍿*\n_Sinhala subtitles සමඟ_`,
     }, { quoted: mek });
+
+    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+
   } catch (err) {
+    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
     await maliya.sendMessage(from, {
       text:
         `*🎬 ${title}*  [${quality}]  ${chosen.size}\n\n` +
-        `⚠️ Document send failed.\n📥 Direct link:\n${directUrl}`,
+        `⚠️ Document send failed.\nError: ${err.message}\n\n📥 Direct link:\n${finalDirectUrl}`,
     }, { quoted: mek });
   }
 });
