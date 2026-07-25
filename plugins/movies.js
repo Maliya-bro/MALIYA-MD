@@ -259,15 +259,18 @@ async function resolveSonicCloudPage(sonicUrl) {
     // away from the sonic-cloud domain.
     browser.on("targetcreated", async (target) => {
       try {
+        console.log("[cinesubz] new target created:", target.url(), target.type());
         const newPage = await target.page();
         if (!newPage) return;
-        // New tab may still be about:blank right after creation — wait briefly
         await newPage.waitForNavigation({ timeout: 8000 }).catch(() => {});
         const url = newPage.url();
+        console.log("[cinesubz] new tab resolved to:", url);
         if (url && url !== "about:blank" && !url.includes("sonic-cloud")) {
           capturedUrl = url;
         }
-      } catch (_) {}
+      } catch (e) {
+        console.log("[cinesubz] targetcreated handler error:", e.message);
+      }
     });
 
     page.on("framenavigated", (frame) => {
@@ -301,18 +304,33 @@ async function resolveSonicCloudPage(sonicUrl) {
     // can be sent as a WhatsApp document. Telegram is only a fallback,
     // since it requires the user to manually message a bot (not automatable
     // into a WhatsApp document send).
+    const buttonInfo = await page.evaluate(() => {
+      const container = document.getElementById("dl-links");
+      if (!container) return { found: false, html: null };
+      return {
+        found: true,
+        html: container.innerHTML.substring(0, 500),
+        childCount: container.children.length,
+      };
+    });
+    console.log("[cinesubz] dl-links container:", JSON.stringify(buttonInfo));
+
     const clicked = await page.evaluate(() => {
       const btn = document.querySelector(
         "#dl-links button, #dl-links .direct-download, .button.direct-download"
       );
-      if (btn) { btn.click(); return true; }
-      return false;
+      if (btn) { btn.click(); return btn.outerHTML.substring(0, 200); }
+      return null;
     });
+    console.log("[cinesubz] clicked button:", clicked);
 
     if (clicked) {
       // Give the encrypted fetch + decrypt + navigate/open cycle time to finish
       await new Promise(r => setTimeout(r, 6000));
     }
+
+    console.log("[cinesubz] capturedUrl after click+wait:", capturedUrl);
+    console.log("[cinesubz] page.url() after click+wait:", page.url());
 
     if (capturedUrl) {
       await page.close().catch(() => {});
