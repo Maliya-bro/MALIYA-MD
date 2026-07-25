@@ -260,9 +260,12 @@ async function resolveSonicCloudPage(sonicUrl) {
     browser.on("targetcreated", async (target) => {
       try {
         const newPage = await target.page();
-        if (newPage) {
-          const url = newPage.url();
-          if (url && !url.includes("sonic-cloud")) capturedUrl = url;
+        if (!newPage) return;
+        // New tab may still be about:blank right after creation — wait briefly
+        await newPage.waitForNavigation({ timeout: 8000 }).catch(() => {});
+        const url = newPage.url();
+        if (url && url !== "about:blank" && !url.includes("sonic-cloud")) {
+          capturedUrl = url;
         }
       } catch (_) {}
     });
@@ -294,20 +297,10 @@ async function resolveSonicCloudPage(sonicUrl) {
       return m ? m[1] : null;
     });
 
-    // Prefer the Telegram button — it's a direct <a href> we can read
-    // without needing to click/decrypt anything.
-    const telegramHref = await page.evaluate(() => {
-      const a = document.querySelector("a.telegram-download");
-      return a ? a.href : null;
-    });
-
-    if (telegramHref) {
-      await page.close().catch(() => {});
-      return { fileSize, telegramUrl: telegramHref, directUrl: null };
-    }
-
-    // No Telegram link visible — fall back to clicking "Direct Download (New)"
-    // and capturing whatever URL the page's decrypt logic navigates to.
+    // Prefer "Direct Download (New)" — this gives the actual file URL that
+    // can be sent as a WhatsApp document. Telegram is only a fallback,
+    // since it requires the user to manually message a bot (not automatable
+    // into a WhatsApp document send).
     const clicked = await page.evaluate(() => {
       const btn = document.querySelector(
         "#dl-links button, #dl-links .direct-download, .button.direct-download"
@@ -321,9 +314,24 @@ async function resolveSonicCloudPage(sonicUrl) {
       await new Promise(r => setTimeout(r, 6000));
     }
 
+    if (capturedUrl) {
+      await page.close().catch(() => {});
+      return { fileSize, telegramUrl: null, directUrl: capturedUrl };
+    }
+
+    // Direct download didn't resolve to a capturable URL — fall back to Telegram
+    const telegramHref = await page.evaluate(() => {
+      const a = document.querySelector("a.telegram-download");
+      return a ? a.href : null;
+    });
+
     await page.close().catch(() => {});
 
-    return { fileSize, telegramUrl: null, directUrl: capturedUrl };
+    if (telegramHref) {
+      return { fileSize, telegramUrl: telegramHref, directUrl: null };
+    }
+
+    return { fileSize, telegramUrl: null, directUrl: null };
 
   } catch (e) {
     await page.close().catch(() => {});
