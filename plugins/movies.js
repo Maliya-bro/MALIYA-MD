@@ -241,45 +241,93 @@ async function resolveSonicCloudPage(sonicUrl) {
   const page    = await browser.newPage();
 
   try {
+    // Hide the most common headless-detection signal this site checks for
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => false });
+    });
+
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     );
-    await page.goto(sonicUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
 
-    // Wait for the buttons to render (covers the 2-5s loading effect)
-    await new Promise(r => setTimeout(r, 5000));
+    let capturedUrl = null;
 
-    const result = await page.evaluate(() => {
-      const getText = sel => document.querySelector(sel)?.textContent?.trim() || "";
-
-      // File name / size — from the visible "File Name:" / "File Size:" block
-      const allText = document.body.innerText || "";
-      const sizeMatch = allText.match(/File Size:\s*\n?\s*([\d.]+\s*(MB|GB))/i);
-      const fileSize  = sizeMatch ? sizeMatch[1] : null;
-
-      // Find all buttons/links on the page
-      const links = Array.from(document.querySelectorAll("a[href]")).map(a => ({
-        text: a.textContent.trim(),
-        href: a.href,
-      }));
-
-      const telegramBtn = links.find(l =>
-        l.text.toLowerCase().includes("telegram") && l.href.includes("t.me")
-      );
-      const directBtn = links.find(l =>
-        l.text.toLowerCase().includes("direct download")
-      );
-
-      return {
-        fileSize,
-        telegramUrl: telegramBtn ? telegramBtn.href : null,
-        directUrl:   directBtn ? directBtn.href : null,
-      };
+    // The site's JS decrypts a server response and then either:
+    //  - navigates the current tab to the real URL (window.location.href = url), or
+    //  - opens a new tab (window.open(url))
+    // We catch both by watching for new pages/popups and for navigations
+    // away from the sonic-cloud domain.
+    browser.on("targetcreated", async (target) => {
+      try {
+        const newPage = await target.page();
+        if (newPage) {
+          const url = newPage.url();
+          if (url && !url.includes("sonic-cloud")) capturedUrl = url;
+        }
+      } catch (_) {}
     });
 
-    return result;
-  } finally {
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) {
+        const url = frame.url();
+        if (url && !url.includes("sonic-cloud.online") && url.startsWith("http")) {
+          capturedUrl = url;
+        }
+      }
+    });
+
+    await page.goto(sonicUrl, { waitUntil: "networkidle2", timeout: 25000 });
+
+    // Wait for the loading screen + button injection JS to finish
+    await page.waitForFunction(
+      () => {
+        const links = document.getElementById("dl-links");
+        return links && links.children.length > 0;
+      },
+      { timeout: 15000 }
+    ).catch(() => {});
+
+    // Grab file size shown on the card (for confirmation)
+    const fileSize = await page.evaluate(() => {
+      const text = document.body.innerText || "";
+      const m = text.match(/File Size:\s*\n?\s*([\d.]+\s*(MB|GB))/i);
+      return m ? m[1] : null;
+    });
+
+    // Prefer the Telegram button — it's a direct <a href> we can read
+    // without needing to click/decrypt anything.
+    const telegramHref = await page.evaluate(() => {
+      const a = document.querySelector("a.telegram-download");
+      return a ? a.href : null;
+    });
+
+    if (telegramHref) {
+      await page.close().catch(() => {});
+      return { fileSize, telegramUrl: telegramHref, directUrl: null };
+    }
+
+    // No Telegram link visible — fall back to clicking "Direct Download (New)"
+    // and capturing whatever URL the page's decrypt logic navigates to.
+    const clicked = await page.evaluate(() => {
+      const btn = document.querySelector(
+        "#dl-links button, #dl-links .direct-download, .button.direct-download"
+      );
+      if (btn) { btn.click(); return true; }
+      return false;
+    });
+
+    if (clicked) {
+      // Give the encrypted fetch + decrypt + navigate/open cycle time to finish
+      await new Promise(r => setTimeout(r, 6000));
+    }
+
     await page.close().catch(() => {});
+
+    return { fileSize, telegramUrl: null, directUrl: capturedUrl };
+
+  } catch (e) {
+    await page.close().catch(() => {});
+    throw e;
   }
 }
 
