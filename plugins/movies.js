@@ -1,23 +1,44 @@
 /**
  * CineSubz.lk Movie Download Plugin for MALIYA-MD
  * ─────────────────────────────────────────────────
- * npm install axios cheerio cinesubz-scraper
+ * npm install axios cheerio puppeteer
+ *
+ * Flow:
+ *   1. Search + movie page → axios/cheerio (fast, no browser)
+ *   2. zt-link page → axios/cheerio: get raw google.com href,
+ *      apply the site's own string-replace mapping to get the
+ *      bot3.sonic-cloud.online URL
+ *   3. sonic-cloud page → puppeteer (ONLY here): that page needs
+ *      2-5s for its "Direct Download" / "Telegram Download" buttons
+ *      to appear via JS, so we wait for `.file-info-card` and grab
+ *      the real Telegram link + confirmed file size.
  */
 
-const { cmd } = require("../command");
-const axios   = require("axios"); 
-const cheerio = require("cheerio"); 
-const fs = require('fs');
-const path = require('path');
-const { searchCineSubz, scrapeCineSubz, scrapeCineSubzServerLink } = require('cinesubz-scraper');
+const { cmd }   = require("../command");
+const axios     = require("axios");
+const cheerio   = require("cheerio");
+const puppeteer = require("puppeteer");
 
 const pendingSearch  = {};
 const pendingQuality = {};
 
 const BASE    = "https://cinesubz.lk";
 const MAX_MB  = 2048;
+const TIMEOUT = 20_000;
+
+const HEADERS = {
+  "User-Agent"      : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Accept"          : "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language" : "en-US,en;q=0.9",
+  "Accept-Encoding" : "gzip, deflate, br",
+  "Referer"         : BASE,
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function get(url) {
+  return axios.get(url, { headers: HEADERS, timeout: TIMEOUT, maxRedirects: 15 });
+}
 
 function cleanTitle(t = "") {
   return t
@@ -48,45 +69,272 @@ function normalizeQuality(t = "") {
   return t.trim() || "Unknown";
 }
 
-// ─── 1. Search (Using cinesubz-scraper) ───────────────────────────────────────
+// ─── 1. Search ────────────────────────────────────────────────────────────────
 
 async function searchMovies(query) {
-  const results = await searchCineSubz(query);
-  
-  return results.map(r => ({
-    title: r.title,
-    url: r.url,
-    imdb: r.rating || "",
-    year: "", 
-    thumb: ""
-  })).slice(0, 10);
-}
+  const { data } = await get(`${BASE}/?s=${encodeURIComponent(query)}`);
+  const $        = cheerio.load(data);
+  const results  = [], seen = new Set();
 
-// ─── 2. Movie page (Using cinesubz-scraper) ───────────────────────────────────
-
-async function getMovieMeta(movieUrl) {
-  const meta = await scrapeCineSubz(movieUrl);
-
-  const links = (meta.downloadLinks || []).map(l => {
-    const sizeMatch = l.quality.match(/(\d+\.?\d*)\s*(GB|MB)/i);
-    return {
-      label: l.quality,
-      quality: l.quality,
-      size: sizeMatch ? sizeMatch[0] : "1000MB",
-      directUrl: l.directUrl
-    };
+  $(".display-item .item-box, article, .post").each((_, el) => {
+    const a     = $(el).find("a[href*='/movies/'], a[href*='/tvshows/']").first();
+    const href  = a.attr("href") || "";
+    const title = (a.attr("title") || a.text()).trim();
+    if (!href || !title || seen.has(href)) return;
+    seen.add(href);
+    results.push({
+      title,
+      url  : href,
+      imdb : $(el).find("[class*='data-imdb']").first().text().replace(/imdb[:\s]*/i, "").trim(),
+      year : $(el).find("[class*='year']").first().text().trim(),
+      thumb: $(el).find("img").first().attr("src") || "",
+    });
   });
 
-  return { 
-    title: cleanTitle(meta.title), 
-    thumb: meta.poster || "", 
-    imdb: meta.imdb_rate || meta.vote || "", 
-    duration: meta.duration || "", 
-    genres: meta.genre ? meta.genre.split(',').map(g => g.trim()) : [], 
-    directors: [], 
-    subBy: "", 
-    links 
-  };
+  if (!results.length) {
+    $("a[href*='/movies/'], a[href*='/tvshows/']").each((_, el) => {
+      const href  = $(el).attr("href") || "";
+      const title = ($(el).attr("title") || $(el).text()).trim();
+      if (!href || !title || seen.has(href) || href === BASE) return;
+      seen.add(href);
+      results.push({ title, url: href, imdb: "", year: "", thumb: "" });
+    });
+  }
+
+  return results.slice(0, 10);
+}
+
+// ─── 2. Movie page ────────────────────────────────────────────────────────────
+
+async function getMovieMeta(movieUrl) {
+  const { data } = await get(movieUrl);
+  const $        = cheerio.load(data);
+
+  const title = cleanTitle(
+    $(".info-details .details-title h3").first().text().trim() ||
+    $(".sheader .data h1").first().text().trim() ||
+    $("h1.entry-title").first().text().trim() ||
+    $("h1").first().text().trim()
+  );
+
+  const thumb = $(".splash-bg img").first().attr("src") ||
+                $(".poster img").first().attr("src") ||
+                $(".wp-post-image").first().attr("src") || "";
+
+  const imdb     = $(".data-imdb").first().text().replace(/imdb[:\s]*/i, "").trim();
+  const duration = $("[itemprop='duration']").first().text().trim() ||
+                   $(".runtime").first().text().trim();
+
+  const genres = [];
+  $(".details-genre a, .sgeneros a").each((_, el) => {
+    const g = $(el).text().trim();
+    if (g && genres.length < 6) genres.push(g);
+  });
+
+  const directors = [];
+  $(".info-col a[href*='/director/']").each((_, el) => {
+    const d = $(el).text().trim();
+    if (d && !directors.includes(d)) directors.push(d);
+  });
+
+  const subBy = (data.match(/Subtitle By[:\s]*([^\n<]+)/i) || [])[1]?.trim() || "";
+
+  const links = [], linkSeen = new Set();
+  $("a[href*='/zt-links/'], a[href*='/api-']").each((_, el) => {
+    const href = $(el).attr("href") || "";
+    if (!href || linkSeen.has(href)) return;
+    linkSeen.add(href);
+
+    const raw   = $(el).text()
+      .replace(/Direct\s*(&|and)\s*Telegram\s*Download\s*Links?/gi, "")
+      .trim();
+    const qualM = raw.match(/(4K|2160[Pp]|1080[Pp]|FHD|720[Pp]|HD|480[Pp]|SD|360[Pp])/i);
+    const sizeM = raw.match(/(\d+\.?\d*)\s*(GB|MB)/i);
+
+    links.push({
+      label  : raw,
+      quality: qualM?.[1] || "",
+      size   : sizeM?.[0] || "",
+      ztUrl  : href,
+    });
+  });
+
+  return { title, thumb, imdb, duration, genres, directors, subBy, links };
+}
+
+// ─── 3. Resolve zt-link → REAL direct .mp4 URL (pure string replace) ─────────
+//
+//  Confirmed from cinesubz's own page source: the zt-link page contains
+//  <a id="link" href="https://google.com/serverN/.../File.mp4">
+//  and client-side JS just does a plain string replacement:
+//    "https://google.com/serverN/"  →  "https://bot3.sonic-cloud.online/serverN/"
+//  plus ".mp4" → "?ext=mp4" (or .mkv/.zip equivalents).
+//  We replicate that mapping directly — no browser/JS execution needed.
+
+const URL_MAPPINGS = [
+  { search: [
+      "https://google.com/server11/1:/",
+      "https://google.com/server12/1:/",
+      "https://google.com/server13/1:/",
+    ], replace: "https://bot3.sonic-cloud.online/server1/" },
+  { search: [
+      "https://google.com/server21/1:/",
+      "https://google.com/server22/1:/",
+      "https://google.com/server23/1:/",
+    ], replace: "https://bot3.sonic-cloud.online/server2/" },
+  { search: ["https://google.com/server3/1:/"], replace: "https://bot3.sonic-cloud.online/server3/" },
+  { search: ["https://google.com/server4/1:/"], replace: "https://bot3.sonic-cloud.online/server4/" },
+  { search: ["https://google.com/server5/1:/"], replace: "https://bot3.sonic-cloud.online/server5/" },
+  { search: ["https://google.com/server6/"],    replace: "https://bot3.sonic-cloud.online/server6/" },
+];
+
+function applyExtSuffix(url) {
+  if (url.includes(".mp4?bot=cscloud2bot&code="))
+    return url.replace(".mp4?bot=cscloud2bot&code=", "?ext=mp4&bot=cscloud2bot&code=");
+  if (url.includes(".mp4"))
+    return url.replace(".mp4", "?ext=mp4");
+  if (url.includes(".mkv?bot=cscloud2bot&code="))
+    return url.replace(".mkv?bot=cscloud2bot&code=", "?ext=mkv&bot=cscloud2bot&code=");
+  if (url.includes(".mkv"))
+    return url.replace(".mkv", "?ext=mkv");
+  if (url.includes(".zip"))
+    return url.replace(".zip", "?ext=zip");
+  return url;
+}
+
+// ─── Step 3: sonic-cloud page → puppeteer (only place we need a browser) ────
+//
+//  This page shows "784.37 MB" / "909.13 MB" etc. + a 2-5s loading effect
+//  before "Direct Download (New)" / "Telegram Download" buttons appear via
+//  client-side JS. We wait for that content, then read the confirmed size
+//  and the real Telegram deep link (t.me/... — actually downloadable,
+//  unlike a plain HTML page which is what caused "Document send failed").
+//
+//  Selectors below are best-effort guesses based on the page's visible
+//  labels ("File Name:", "File Size:", "Telegram Download"). If cinesubz
+//  changes their markup, only this function needs updating.
+
+let _browser = null;
+async function getBrowser() {
+  try {
+    if (_browser) {
+      await _browser.pages(); // throws if browser died
+      return _browser;
+    }
+  } catch (_) { _browser = null; }
+  _browser = await puppeteer.launch({
+    headless: "new",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--no-zygote",
+      "--single-process",
+    ],
+  });
+  return _browser;
+}
+
+async function resolveSonicCloudPage(sonicUrl) {
+  const browser = await getBrowser();
+  const page    = await browser.newPage();
+
+  try {
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    );
+    await page.goto(sonicUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+
+    // Wait for the buttons to render (covers the 2-5s loading effect)
+    await new Promise(r => setTimeout(r, 5000));
+
+    const result = await page.evaluate(() => {
+      const getText = sel => document.querySelector(sel)?.textContent?.trim() || "";
+
+      // File name / size — from the visible "File Name:" / "File Size:" block
+      const allText = document.body.innerText || "";
+      const sizeMatch = allText.match(/File Size:\s*\n?\s*([\d.]+\s*(MB|GB))/i);
+      const fileSize  = sizeMatch ? sizeMatch[1] : null;
+
+      // Find all buttons/links on the page
+      const links = Array.from(document.querySelectorAll("a[href]")).map(a => ({
+        text: a.textContent.trim(),
+        href: a.href,
+      }));
+
+      const telegramBtn = links.find(l =>
+        l.text.toLowerCase().includes("telegram") && l.href.includes("t.me")
+      );
+      const directBtn = links.find(l =>
+        l.text.toLowerCase().includes("direct download")
+      );
+
+      return {
+        fileSize,
+        telegramUrl: telegramBtn ? telegramBtn.href : null,
+        directUrl:   directBtn ? directBtn.href : null,
+      };
+    });
+
+    return result;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+async function resolveZtLink(ztUrl) {
+  // Step 1: fetch zt-link page, extract the raw href from <a id="link">
+  const { data } = await get(ztUrl);
+  const $ = cheerio.load(data);
+
+  const rawHref = $("#link").attr("href") || "";
+  if (!rawHref) return null;
+
+  // Telegram links (from zt-link page itself) — return as-is
+  if (rawHref.includes("t.me/") && !rawHref.includes("CineSubzAdmin")) {
+    return { url: rawHref, isTelegram: true };
+  }
+
+  // Step 2: apply the same URL mapping the site's own JS uses
+  let sonicUrl = rawHref;
+  let matched  = false;
+
+  for (const mapping of URL_MAPPINGS) {
+    if (matched) break;
+    for (const searchStr of mapping.search) {
+      if (rawHref.includes(searchStr)) {
+        sonicUrl = rawHref.replace(searchStr, mapping.replace);
+        sonicUrl = applyExtSuffix(sonicUrl);
+        matched  = true;
+        break;
+      }
+    }
+  }
+
+  if (!matched) {
+    // Unknown pattern — nothing to visit, return raw href as last resort
+    return { url: rawHref, isTelegram: false };
+  }
+
+  // Step 3: visit the sonic-cloud page and get the REAL telegram link
+  // (the sonic-cloud URL itself is an HTML page, not the file — sending
+  // it directly as a WhatsApp document fails, which is the bug we're fixing)
+  try {
+    const page = await resolveSonicCloudPage(sonicUrl);
+    if (page.telegramUrl) {
+      return { url: page.telegramUrl, isTelegram: true, confirmedSize: page.fileSize };
+    }
+    if (page.directUrl) {
+      return { url: page.directUrl, isTelegram: false, confirmedSize: page.fileSize };
+    }
+  } catch (e) {
+    console.log("[cinesubz] sonic-cloud page error:", e.message);
+  }
+
+  // Fallback: return the sonic-cloud page URL itself (better than nothing,
+  // but likely to fail the same way — surfaced to the user as a manual link)
+  return { url: sonicUrl, isTelegram: false };
 }
 
 // ─── Bot Commands ─────────────────────────────────────────────────────────────
@@ -182,7 +430,7 @@ cmd({
   } catch (_) { await maliya.sendMessage(from, { text: msg }, { quoted: mek }); }
 });
 
-// ── Step 3: NPM Package Download Option ───────────────────────────────────────
+// ── Step 3: quality → resolve → send document ────────────────────────────────
 
 cmd({
   filter: (text, { sender }) =>
@@ -198,79 +446,50 @@ cmd({
   const chosen  = links[+body.trim() - 1];
   const quality = normalizeQuality(chosen.quality || chosen.label);
 
-  reply(`*⏳ Extracting Decrypted Streams..*\nUsing cinesubz-scraper automation...`);
+  reply(`*⏳ ${quality} (${chosen.size}) — Getting direct link..*`);
 
-  let serverData;
-  try { 
-      // Using NPM module to bypass protection and extract backend streams
-      serverData = await scrapeCineSubzServerLink(chosen.directUrl); 
-  } catch (e) { 
-      return reply(`*❌ NPM Scraper Error:* ${e.message}`); 
-  }
+  let resolved;
+  try       { resolved = await resolveZtLink(chosen.ztUrl); }
+  catch (e) { return reply(`*❌ Resolve error:* ${e.message}`); }
 
-  if (!serverData) {
+  if (!resolved || !resolved.url) {
     return maliya.sendMessage(from, {
-      text: `*❌ Can't get direct link from scraper.*\nTry manually:\n${chosen.directUrl}`,
+      text: `*❌ Can't get direct link.*\nTry manually:\n${chosen.ztUrl}`,
     }, { quoted: mek });
   }
 
-  // If the NPM package returned a Telegram stream
-  if (serverData.telegram) {
+  const finalSize = resolved.confirmedSize || chosen.size;
+
+  // Telegram — this is the reliable path (real file, not an HTML page)
+  if (resolved.isTelegram) {
     return maliya.sendMessage(from, {
       text:
-        `*🎬 ${serverData.title || title}*\n*Quality:* ${quality}  |  *Size:* ${serverData.size || chosen.size}\n\n` +
-        `📲 *Telegram Direct Stream:*\n${serverData.telegram}\n\nEnjoy! 🍿`,
+        `*🎬 ${title}*\n*Quality:* ${quality}  |  *Size:* ${finalSize}\n\n` +
+        `📲 *Telegram Download:*\n${resolved.url}\n\nEnjoy! 🍿`,
     }, { quoted: mek });
   }
 
-  // If it's a direct file URL, process it via the RAM-friendly method
-  const finalDirectUrl = serverData.directUrl || chosen.directUrl;
-  reply(`*⬇️ Downloading to server.. (${chosen.size})*\nPlease wait.. 🙏`);
+  reply(`*⬇️ Sending the film.. (${finalSize})*\nPlease wait.. 🙏`);
 
-  const fileName = `${title} [${quality}] [CineSubz].mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
-  const tempFilePath = path.join(__dirname, fileName);
+  const fileName = `${title} [${quality}] [CineSubz].mp4`
+    .replace(/[^\w\s.\-\[\]()]/gi, "").trim();
 
   try {
-    const response = await axios({
-      url: finalDirectUrl,
-      method: 'GET',
-      responseType: 'stream',
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Referer": "https://cinesubz.lk/",
-        "Accept": "*/*"
-      }
-    });
-
-    const writer = fs.createWriteStream(tempFilePath);
-    response.data.pipe(writer);
-
-    await new Promise((resolve, reject) => {
-      writer.on('finish', resolve);
-      writer.on('error', reject);
-    });
-
-    reply(`*📤 Uploading to WhatsApp.. (${chosen.size})*\nAlmost done..`);
-
     await maliya.sendMessage(from, {
-      document: fs.readFileSync(tempFilePath),
+      document: { url: resolved.url },
       mimetype : "video/mp4",
-      fileName: fileName,
+      fileName,
       caption:
         `*🎬 ${title}*\n` +
         `*📊 Quality:* ${quality}\n` +
-        `*💾 Size:* ${chosen.size}\n\n` +
+        `*💾 Size:* ${finalSize}\n\n` +
         `*Enjoy! 🍿*\n_Sinhala subtitles සමඟ_`,
     }, { quoted: mek });
-
-    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-
   } catch (err) {
-    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
     await maliya.sendMessage(from, {
       text:
-        `*🎬 ${title}*  [${quality}]  ${chosen.size}\n\n` +
-        `⚠️ Document send failed.\nError: ${err.message}\n\n📥 Direct link:\n${finalDirectUrl}`,
+        `*🎬 ${title}*  [${quality}]  ${finalSize}\n\n` +
+        `⚠️ Document send failed.\n📥 Direct link:\n${resolved.url}`,
     }, { quoted: mek });
   }
 });
