@@ -13,7 +13,7 @@ async (conn, mek, m, {
     from, reply
 }) => {
     try {
-        const bannerImg = 'https://github.com/DANUWA-MD/DANUWA-BOT/blob/main/images/educational__zone.png?raw=true';
+        const bannerImg = 'https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/eduzon.png?raw=true';
 
         const caption = `
 ╭─────── ⭓ ⭓ ⭓  ─────────╮
