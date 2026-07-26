@@ -61,7 +61,13 @@
     "cinesubz-scraper": "latest",
     "stream": "latest",
     "child_process": "latest",
-    "lk21dl-core": "latest"
+    "lk21dl-core": "latest",
+    "@gradio/client": "latest",
+    "sharp": "latest",
+    "mime-types": "latest",
+    "archiver": "latest",
+    "split-file": "latest",
+    "@gradio/client": "latest"
     
     
     
