@@ -256,6 +256,13 @@ async function setGlobalMode(enabled, includeGroups = false, scopePhone = "defau
     },
     { upsert: true }
   );
+  // Same local-flag sync as setAutoReply() — handleAutoMsg() gates on
+  // readSettings().auto_msg regardless of which toggle path enabled it.
+  if (enabled) {
+    try { setSetting("auto_msg", true); } catch (e) {
+      console.log("⚠️ setGlobalMode: failed to sync local auto_msg setting:", e?.message || e);
+    }
+  }
 }
 async function setGlobalHardOff(scopePhone = "default") {
   const db  = await getDb();
@@ -301,6 +308,15 @@ async function setAutoReply(scopePhone, enabled) {
     },
     { upsert: true }
   );
+  // handleAutoMsg() also gates on the LOCAL botSettings.js "auto_msg" flag
+  // (readSettings().auto_msg) — that flag used to only be flipped by the
+  // separate ".setting on/off automsg" command, so ".msg on" could report
+  // success (MongoDB toggle set) while replies still never fired because
+  // the local flag was still off. Keep both toggles in sync here so
+  // ".msg on"/".msg off" alone is always enough.
+  try { setSetting("auto_msg", !!enabled); } catch (e) {
+    console.log("⚠️ setAutoReply: failed to sync local auto_msg setting:", e?.message || e);
+  }
 }
 async function isAutoReplyEnabled(scopePhone) {
   const db  = await getDb();
@@ -370,42 +386,71 @@ function detectLang(text) {
   return "en";
 }
 
+// ─── Google Translate (unofficial, no API key) ─────────────────
+// Uses the same public endpoint the Google Translate website itself
+// calls (translate.googleapis.com/translate_a/single). No key needed,
+// but it's an undocumented endpoint — Google can rate-limit or change
+// it without notice, so every call is wrapped and falls back safely.
+//
+// detectLang() above only tells us "si" / "ta" / "singlish" / "en" —
+// Google Translate needs real ISO language codes, and "singlish" is
+// Sinhala words spelled in English letters, so Google's own language
+// detector (auto-detect) handles it far better than we could by
+// guessing a fixed source code. We always pass sl=auto and let Google
+// tell us what it detected via the response's 3rd top-level array.
+const GOOGLE_TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single";
+
+async function googleTranslate(text, targetLang, sourceLang = "auto") {
+  const clean = String(text || "").trim();
+  if (!clean) return { text: "", detected: sourceLang };
+  try {
+    const res = await axios.get(GOOGLE_TRANSLATE_URL, {
+      params: {
+        client: "gtx",
+        sl: sourceLang,
+        tl: targetLang,
+        dt: "t",
+        q: clean,
+      },
+      timeout: 10000,
+    });
+    // Response shape: [ [ [translatedChunk, originalChunk, ...], ... ], null, detectedSourceLang, ... ]
+    const chunks = Array.isArray(res.data?.[0]) ? res.data[0] : [];
+    const translated = chunks.map((c) => (Array.isArray(c) ? c[0] : "")).join("");
+    const detected = res.data?.[2] || sourceLang;
+    if (translated && translated.trim()) {
+      return { text: translated.trim(), detected };
+    }
+    return { text: clean, detected };
+  } catch (e) {
+    console.log("⚠️ googleTranslate error:", e?.response?.status || e?.message || e);
+    return { text: clean, detected: sourceLang }; // fail-safe: pass original text through untranslated
+  }
+}
+
+// Map our internal detectLang() buckets to Google Translate target codes
+// for translating the AI's English reply back to the user.
+function langToGoogleCode(lang) {
+  if (lang === "si")       return "si"; // Sinhala unicode
+  if (lang === "singlish") return "si"; // Singlish -> reply in proper Sinhala unicode
+  if (lang === "ta")       return "ta"; // Tamil
+  return "en";
+}
+
 // ─── System Prompt ────────────────────────────────────────────
-function buildSystemPrompt(ownerName, pushName, lang) {
-  const who  = ownerName ? `${ownerName}ge MALIYA-MD WhatsApp Bot` : "MALIYA-MD WhatsApp Bot";
-  const whoSi = ownerName ? `${ownerName}ගේ MALIYA-MD WhatsApp Bot` : "MALIYA-MD WhatsApp Bot";
+// The AI now ALWAYS thinks and replies in English — the incoming message
+// is translated to English before this prompt is used, and the AI's
+// English reply gets translated back to the user's language afterward
+// (see handleAutoMsg). So this prompt no longer needs per-language
+// branches; it just needs to tell the AI who it is and to reply in
+// natural, friendly English.
+function buildSystemPrompt(ownerName, pushName) {
+  const who  = ownerName ? `${ownerName}'s MALIYA-MD WhatsApp Bot` : "MALIYA-MD WhatsApp Bot";
   const user = pushName && pushName.trim() ? pushName.trim() : "user";
 
-  if (lang === "singlish") {
-    return (
-      `Oya ${who}. Oya manage karanney ${ownerName || "Bot Owner"}.` +
-      ` Dan chat karana kenage nam ${user}. Ovunta ${user} kiyala address karanna.` +
-      ` වැදගත්: Reply karanna Sinhala unicode walin — Sinhala words Sinhala Unicode walin (Sinhala Unicode use karaganna).` +
-      ` Example: "kohomada ${user}? 😊 mokak karannada?"` +
-      ` Emojis use karanna replies walata. Short, friendly, natural chat style.` +
-      ` Previous conversation context use karala relevant replies denna.`
-    );
-  }
-  if (lang === "si") {
-    return (
-      `ඔයා ${whoSi}. ඔයාව manage කරන්නේ ${ownerName || "Bot Owner"}.` +
-      ` දැන් chat කරන කෙනාගේ නම ${user}. ඔවුන්ව ${user} කියලා address කරන්න.` +
-      ` වැදගත්: සෑම reply එකක්ම සම්පූර්ණ *සිංහල Unicode* ගෙන් ලියන්න — Singlish use කරන්නෙ නෑ.` +
-      ` Emojis use කරන්න replies වලට. Short, friendly, natural chat style.` +
-      ` කලින් conversation context use කරලා relevant replies දෙන්න.`
-    );
-  }
-  if (lang === "ta") {
-    return (
-      `நீங்கள் ${ownerName ? `${ownerName}இன் MALIYA-MD WhatsApp Bot` : "MALIYA-MD WhatsApp Bot"}.` +
-      ` இப்போது பேசுபவரின் பெயர் ${user}. அவர்களை ${user} என்று அழையுங்கள்.` +
-      ` IMPORTANT: தமிழில் மட்டும் பதில் சொல்லுங்கள். Emojis பயன்படுத்துங்கள். குறுகியதாக, நட்பாக பேசுங்கள்.` +
-      ` முந்தைய உரையாடல் context பயன்படுத்தி பதில் சொல்லுங்கள்.`
-    );
-  }
   return (
     `You are ${who}. The person chatting is named ${user}. Address them as ${user} naturally.` +
-    ` IMPORTANT: Reply ONLY in English. Use emojis to make replies feel warm and expressive.` +
+    ` Reply in English. Use emojis to make replies feel warm and expressive.` +
     ` Be short, friendly, and conversational.` +
     ` Use the previous conversation history for context when replying.`
   );
@@ -776,16 +821,27 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
 
     const lang = detectLang(body);
 
+    // ── Translate incoming message to English before it reaches the AI ──
+    // The AI only ever sees/produces English now; googleTranslate() falls
+    // back to returning the original text untranslated if the request
+    // fails, so a translate outage degrades gracefully instead of
+    // blocking the reply entirely.
+    let englishBody = body;
+    if (lang !== "en") {
+      const toEnglish = await googleTranslate(body, "en", "auto");
+      englishBody = toEnglish.text || body;
+    }
+
     const effectivePushName =
       (pushName && pushName.trim())          ? pushName.trim()     :
       (mek?.pushName && mek.pushName.trim()) ? mek.pushName.trim() : "";
 
     const storedOwner  = await getUserOwnerName(phone);
     const ownerName    = sessionOwnerName || storedOwner || "Bot Owner";
-    const systemPrompt = buildSystemPrompt(ownerName, effectivePushName, lang);
-    const history      = await getHistory(phone);
+    const systemPrompt = buildSystemPrompt(ownerName, effectivePushName);
+    const history       = await getHistory(phone);
 
-    const result = await askAI(phone, systemPrompt, history, body);
+    const result = await askAI(phone, systemPrompt, history, englishBody);
 
     if (!result) {
       await react(conn, mek, "❌");
@@ -793,15 +849,26 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
       return true;
     }
 
+    // ── Translate the AI's English answer back to the sender's language ──
+    // History is stored in the ORIGINAL languages (what the user actually
+    // typed, and what we actually sent back) so future context passed to
+    // the AI stays consistent with what's shown on screen.
+    let finalText = result.text;
+    const targetCode = langToGoogleCode(lang);
+    if (targetCode !== "en") {
+      const toUser = await googleTranslate(result.text, targetCode, "en");
+      finalText = toUser.text || result.text;
+    }
+
     await appendHistory(phone, "user",  body);
-    await appendHistory(phone, "model", result.text);
+    await appendHistory(phone, "model", finalText);
     await react(conn, mek, pick(REPLY_REACTS));
 
     const MAX_LEN = 3500;
-    if (result.text.length <= MAX_LEN) {
-      await conn.sendMessage(m.chat, { text: result.text }, { quoted: mek });
+    if (finalText.length <= MAX_LEN) {
+      await conn.sendMessage(m.chat, { text: finalText }, { quoted: mek });
     } else {
-      let rem = result.text;
+      let rem = finalText;
       while (rem.length > 0) {
         let cut = rem.lastIndexOf("\n", MAX_LEN);
         if (cut < 800) cut = rem.lastIndexOf(". ", MAX_LEN);
