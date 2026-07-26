@@ -4,7 +4,7 @@ cmd({
     pattern: "newsletter",
     alias: ["channelid", "newsid"],
     react: "📢",
-    desc: "Get WhatsApp Newsletter JID",
+    desc: "Get WhatsApp Newsletter Info",
     category: "tools",
     filename: __filename
 },
@@ -12,13 +12,8 @@ async (conn, mek, m, { from, reply, args }) => {
 
     try {
 
-        let url = args[0];
+        let url = args[0] || "https://whatsapp.com/channel/0029VbCyHsvAO7RKAbYw7p1o";
 
-        if (!url) {
-            url = "https://whatsapp.com/channel/0029VbCyHsvAO7RKAbYw7p1o";
-        }
-
-        // Get invite code
         let inviteCode = url.split("/").pop();
 
         let data = await conn.newsletterMetadata(
@@ -30,19 +25,19 @@ async (conn, mek, m, { from, reply, args }) => {
 ╭━━━〔 📢 NEWSLETTER INFO 〕━━━╮
 
 📝 Name:
-${data.name}
+${data.name || data.newsletterName || "N/A"}
 
-🆔 Newsletter JID:
-${data.id}
+🆔 JID:
+${data.id || "N/A"}
 
 🔗 Invite:
-${data.invite}
+${data.invite || inviteCode}
 
 👥 Subscribers:
-${data.subscribers}
+${data.subscribers || data.subscriberCount || "N/A"}
 
-✅ State:
-${data.state}
+📌 State:
+${JSON.stringify(data.state || "N/A")}
 
 ╰━━━━━━━━━━━━━━━━━━╯
 `;
@@ -50,21 +45,16 @@ ${data.state}
         await conn.sendMessage(
             from,
             {
-                text: text
+                text
             },
             {
                 quoted: mek
             }
         );
 
-    } catch (e) {
-
+    } catch(e) {
         console.log(e);
-
-        reply(
-            "❌ Error getting newsletter ID\n\n" +
-            e.message
-        );
-
+        reply("❌ Error: " + e.message);
     }
+
 });
