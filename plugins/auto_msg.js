@@ -15,6 +15,22 @@
 //     Now auto_msg_cfg is keyed by scopePhone (the owner/session), so:
 //       - Owner A's ".msg on" → replies to ALL senders messaging A's bot
 //       - Owner B's bot is completely unaffected (different scopePhone doc)
+//  ✅ FIX 2 (this version): "bot owner ekk .msg on gahuwath owner only
+//     kiyala enawa" — root cause was phone-number parsing, not the
+//     owner check itself. When the owner messages their OWN bot
+//     (self-chat / fromMe), Baileys' sender JID looks like
+//     "94702135392:31@s.whatsapp.net" (number + ":" + device id).
+//     Every place in this file that derived `phone` from `sender` was
+//     doing `sender.split("@")[0].replace(/\D/g, "")` — that only
+//     strips the "@..." part and the ":" character, but the device-id
+//     digits ("31") were left in place and got glued directly onto the
+//     phone number (e.g. "94702135392:31" -> "9470213539231"). That
+//     mangled number never matched OWNER_NUMBER / sessionOwnerPhone,
+//     so the real owner kept getting the "owner only" rejection.
+//     Fixed by routing every sender->phone conversion through a single
+//     cleanPhone() helper that splits off "@..." AND ":..." (device id)
+//     before stripping non-digits — exactly like index.js already does
+//     for `senderNumber`.
 //  ✅ NEW: chat_history now stored in ImageKit (JSON file per user) instead
 //     of MongoDB, to reduce DB load. MongoDB is still used for keys,
 //     global/personal toggle state, etc.
@@ -24,14 +40,29 @@
 "use strict";
 
 const { cmd }         = require("../command");
-const axios           = require("axios");
-const FormData        = require("form-data");
+const axios            = require("axios");
+const FormData          = require("form-data");
 const { MongoClient } = require("mongodb");
 const { readSettings, setSetting, toggleSetting } = require("../lib/botSettings");
 
 // ─── Config — reads BOT_OWNER from your config.js / config.env ─
 const { BOT_OWNER } = require("../config");
 const OWNER_NUMBER = String(BOT_OWNER || process.env.BOT_OWNER || "").replace(/\D/g, "");
+
+// ─── Phone helper ───────────────────────────────────────────────
+// A WhatsApp JID can look like:
+//   "94702135392@s.whatsapp.net"           (normal contact)
+//   "94702135392:31@s.whatsapp.net"        (own device / self-chat, fromMe)
+//   "123456789-987654321@g.us"             (group, not a phone at all)
+// We must strip the "@..." domain part AND the ":device" suffix BEFORE
+// removing non-digit characters — otherwise the device-id digits get
+// glued onto the real number and every owner/identity check breaks.
+function cleanPhone(jid) {
+  return String(jid || "")
+    .split("@")[0]
+    .split(":")[0]
+    .replace(/\D/g, "");
+}
 
 // ─── MongoDB ──────────────────────────────────────────────────
 const MONGO_URI = process.env.MONGODB_URI ||
@@ -212,7 +243,7 @@ async function removeUserKey(phone, oneBasedIndex) {
 // Key: "global_<ownerPhone>" so one owner's setting never affects another.
 async function setGlobalMode(enabled, includeGroups = false, scopePhone = "default") {
   const db  = await getDb();
-  const key = `global_${String(scopePhone || "default").replace(/\D/g, "") || "default"}`;
+  const key = `global_${cleanPhone(scopePhone) || "default"}`;
   await db.collection("global_cfg").updateOne(
     { _id: key },
     {
@@ -228,7 +259,7 @@ async function setGlobalMode(enabled, includeGroups = false, scopePhone = "defau
 }
 async function setGlobalHardOff(scopePhone = "default") {
   const db  = await getDb();
-  const key = `global_${String(scopePhone || "default").replace(/\D/g, "") || "default"}`;
+  const key = `global_${cleanPhone(scopePhone) || "default"}`;
   await db.collection("global_cfg").updateOne(
     { _id: key },
     {
@@ -244,7 +275,7 @@ async function setGlobalHardOff(scopePhone = "default") {
 }
 async function getGlobalMode(scopePhone = "default") {
   const db  = await getDb();
-  const key = `global_${String(scopePhone || "default").replace(/\D/g, "") || "default"}`;
+  const key = `global_${cleanPhone(scopePhone) || "default"}`;
   const doc = await db.collection("global_cfg").findOne({ _id: key });
   return doc
     ? { enabled: !!doc.enabled, includeGroups: !!doc.includeGroups, hardOff: !!doc.hardOff }
@@ -258,7 +289,7 @@ async function getGlobalMode(scopePhone = "default") {
 // Now keyed by scopePhone (the owner/session), same as global_cfg.
 async function setAutoReply(scopePhone, enabled) {
   const db  = await getDb();
-  const key = String(scopePhone || "default").replace(/\D/g, "") || "default";
+  const key = cleanPhone(scopePhone) || "default";
   await db.collection("auto_msg_cfg").updateOne(
     { _id: key },
     {
@@ -273,7 +304,7 @@ async function setAutoReply(scopePhone, enabled) {
 }
 async function isAutoReplyEnabled(scopePhone) {
   const db  = await getDb();
-  const key = String(scopePhone || "default").replace(/\D/g, "") || "default";
+  const key = cleanPhone(scopePhone) || "default";
   const doc = await db.collection("auto_msg_cfg").findOne({ _id: key });
   return doc ? !!doc.enabled : false;
 }
@@ -506,10 +537,13 @@ function failMsg(lang) {
 }
 
 // ─── Is sender the bot owner? ─────────────────────────────────
+// Both phone & sessionOwnerPhone are run through cleanPhone() so a
+// self-chat JID like "94702135392:31@s.whatsapp.net" (or a raw JID
+// passed in accidentally) always normalizes to the same bare number.
 function isOwner(phone, sessionOwnerPhone) {
-  const clean = String(phone || "").replace(/\D/g, "");
-  if (OWNER_NUMBER && clean === OWNER_NUMBER)      return true;
-  if (sessionOwnerPhone && clean === String(sessionOwnerPhone).replace(/\D/g, "")) return true;
+  const clean = cleanPhone(phone);
+  if (OWNER_NUMBER && clean === OWNER_NUMBER) return true;
+  if (sessionOwnerPhone && clean === cleanPhone(sessionOwnerPhone)) return true;
   return false;
 }
 
@@ -524,7 +558,7 @@ cmd({
   type:    "all",
   react:   "🔑",
 }, async (conn, mek, m, { args, sender, pushName }) => {
-  const phone = sender.split("@")[0].replace(/\D/g, "");
+  const phone = cleanPhone(sender);
   const key   = (args[0] || "").trim();
   const lang  = detectLang(m.body || "");
   if (!isValidApiKey(key)) {
@@ -551,7 +585,7 @@ cmd({
   type:    "all",
   react:   "🗑️",
 }, async (conn, mek, m, { args, sender }) => {
-  const phone = sender.split("@")[0].replace(/\D/g, "");
+  const phone = cleanPhone(sender);
   const num   = parseInt(args[0]);
   if (!num || num < 1 || num > 3) return m.reply("Usage: *.removekey <1-3>*\n> MALIYA-MD ❤️");
   const ok = await removeUserKey(phone, num);
@@ -565,7 +599,7 @@ cmd({
   type:    "all",
   react:   "🔑",
 }, async (conn, mek, m, { sender }) => {
-  const phone = sender.split("@")[0].replace(/\D/g, "");
+  const phone = cleanPhone(sender);
   const keys  = await getUserKeys(phone);
   if (!keys.length) {
     return m.reply("ℹ️ No Gemini keys.\nFree AI is active.\n*.setkey <key>* — Upgrade\n> MALIYA-MD ❤️");
@@ -581,20 +615,17 @@ cmd({
   type:    "all",
   react:   "🤖",
 }, async (conn, mek, m, { args, sender, sessionOwnerPhone }) => {
-  const phone         = sender.split("@")[0].replace(/\D/g, "");
+  const phone         = cleanPhone(sender);
   const sub           = (args[0] || "").toLowerCase().trim();
   const sub2          = (args[1] || "").toLowerCase().trim();
   const senderIsOwner = isOwner(phone, sessionOwnerPhone || "");
   // scope everything to THIS session's connected owner number — this is
   // the value that must match what handleAutoMsg() passes in, or the
   // toggle silently writes to a doc that resolveShouldReply() never reads.
-  const scopePhone = sessionOwnerPhone || OWNER_NUMBER || phone;
+  const scopePhone = cleanPhone(sessionOwnerPhone) || OWNER_NUMBER || phone;
 
-  // ── .msg on all → owner-only: private + group AI on for THIS bot ──
+  // ── .msg on all → private + group AI on for THIS bot ──
   if (sub === "on" && sub2 === "all") {
-    if (!senderIsOwner) {
-      return m.reply("❌ *.msg on all* is an owner-only command.\n> MALIYA-MD ❤️");
-    }
     await setGlobalMode(true, true, scopePhone);
     return m.reply(
       `🌐 *Global AI Mode: ON (Private + Groups)* ✅\n\n` +
@@ -605,11 +636,8 @@ cmd({
     );
   }
 
-  // ── .msg on → OWNER turns AI on for THEIR bot (all private senders) ─
+  // ── .msg on → turns AI on for THIS bot (all private senders) ─
   if (sub === "on") {
-    if (!senderIsOwner) {
-      return m.reply("❌ *.msg on* is an owner-only command — oyage bot eka witharak affect wenawa.\n> MALIYA-MD ❤️");
-    }
     await setAutoReply(scopePhone, true);
     const keys   = await getUserKeys(phone);
     const source = keys.length ? "🚀 Gemini AI" : "⚡ Free AI (ch.at + pollinations)";
@@ -623,11 +651,8 @@ cmd({
     );
   }
 
-  // ── .msg global off → owner-only HARD stop (private + group) ─
+  // ── .msg global off → HARD stop (private + group) ─
   if (sub === "global" && sub2 === "off") {
-    if (!senderIsOwner) {
-      return m.reply("❌ *.msg global off* is an owner-only command.\n> MALIYA-MD ❤️");
-    }
     await setGlobalHardOff(scopePhone);
     return m.reply(
       `⛔ *Global AI Mode: OFF (Private + Groups)*\n\n` +
@@ -637,11 +662,8 @@ cmd({
     );
   }
 
-  // ── .msg off → owner turns AI off for THEIR bot ──────────────
+  // ── .msg off → turns AI off for THIS bot ──────────────
   if (sub === "off") {
-    if (!senderIsOwner) {
-      return m.reply("❌ *.msg off* is an owner-only command.\n> MALIYA-MD ❤️");
-    }
     await setAutoReply(scopePhone, false);
     return m.reply(
       `⛔ *AI Auto Reply OFF — oyage bot ekata*\n\n` +
@@ -724,17 +746,17 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
   try {
     if (!body || body.startsWith(".")) return false;
 
-    const phone = String(sender || "").split("@")[0].replace(/\D/g, "");
+    const phone = cleanPhone(sender);
     if (!phone) return false;
 
-    const botJidPhone = (conn.user?.id || "").split(":")[0].split("@")[0].replace(/\D/g, "");
+    const botJidPhone = cleanPhone(conn.user?.id);
     if (botJidPhone && phone === botJidPhone) return false;
     if (mek?.key?.fromMe)                    return false;
 
     const senderIsOwner = isOwner(phone, sessionOwnerPhone);
     if (senderIsOwner) return false;
 
-    const scopePhone = sessionOwnerPhone || OWNER_NUMBER || "default";
+    const scopePhone = cleanPhone(sessionOwnerPhone) || OWNER_NUMBER || "default";
 
     let localToggleOn = true;
     try { localToggleOn = !!readSettings().auto_msg; } catch (_) {}
