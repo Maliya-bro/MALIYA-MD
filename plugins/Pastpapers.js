@@ -14,6 +14,8 @@ async (conn, mek, m, {
 }) => {
     try {
         const bannerImg = 'https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/eduzon.png?raw=true';
+        const channelJid = " 120363427174988449@newsletter";
+        const channelName = "MALIYA-MD";
 
         const caption = `
 ╭─────── ⭓ ⭓ ⭓  ─────────╮
