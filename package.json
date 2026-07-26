@@ -58,7 +58,11 @@
     "qrcode": "latest",
     "cors": "latest",
     "mime-types": "latest",
-    "cinesubz-scraper": "latest"
+    "cinesubz-scraper": "latest",
+    "stream": "latest",
+    "child_process": "latest",
+    "lk21dl-core": "latest"
+    
     
     
   }
