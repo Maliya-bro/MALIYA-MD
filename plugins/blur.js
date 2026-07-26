@@ -32,7 +32,7 @@ cmd({
 │ ✅ Blur effect applied!
 ╰───────────────⬣
 ⚙️ Made with ❤️ by
-╰🔥 𝘿𝘼𝙉𝙐𝙆𝘼 𝘿𝙄𝙎𝘼𝙉𝘼𝙔𝘼𝙆𝘼 🔥`,
+╰🔥 𝙈𝘼𝙇𝙄𝙉𝘿𝙐 𝙉𝘼𝘿𝙄𝙏𝙃 🔥`,
     }, { quoted: mek });
 
     // 🧹 Clear temp files after 1s
