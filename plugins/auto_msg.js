@@ -1,15 +1,23 @@
 // ═══════════════════════════════════════════════════════════════
 //  auto_msg.js — MALIYA-MD Upgraded AI Chat Plugin
 //  ---------------------------------------------------------------
-//  ✅ Bot owner .msg on  → ALL private chats get AI replies
-//  ✅ Bot owner .msg on all → Groups + private both get AI replies
-//  ✅ Bot owner .msg off → Global mode off
-//  ✅ Bot owner .msg global off → Global mode + private opt-in OFF (hard stop, group+private)
+//  ✅ Bot owner .msg on  → ALL private chats *to that owner's bot* get AI replies
+//  ✅ Bot owner .msg on all → Groups + private both get AI replies (owner-scoped)
+//  ✅ Bot owner .msg off → turns it off for that owner's bot only
+//  ✅ Bot owner .msg global off → Global mode + owner opt-in OFF (hard stop, group+private)
 //  ✅ No API key needed — free AI (ch.at + pollinations) built-in
 //  ✅ Add Gemini key (.setkey) → auto upgrades to Gemini
 //  ✅ Fallback chain: Gemini → ch.at → pollinations.ai
-//  ✅ FIX: global mode + per-user opt-in now actually resolved together
-//  ✅ FIX: groups now respected when global includeGroups is on
+//  ✅ FIX (this version): ".msg on" is now scoped to the OWNER/session,
+//     not the sender. Previously auto_msg_cfg was keyed by the sender's
+//     phone, which meant turning "on" only affected AI replies TO that
+//     one sender's own messages — not "reply to anyone messaging my bot".
+//     Now auto_msg_cfg is keyed by scopePhone (the owner/session), so:
+//       - Owner A's ".msg on" → replies to ALL senders messaging A's bot
+//       - Owner B's bot is completely unaffected (different scopePhone doc)
+//  ✅ NEW: chat_history now stored in ImageKit (JSON file per user) instead
+//     of MongoDB, to reduce DB load. MongoDB is still used for keys,
+//     global/personal toggle state, etc.
 //  ✅ NEW: Seen All Msg — read-receipt everything, independent of AI toggle
 // ═══════════════════════════════════════════════════════════════
 
@@ -17,6 +25,7 @@
 
 const { cmd }         = require("../command");
 const axios           = require("axios");
+const FormData        = require("form-data");
 const { MongoClient } = require("mongodb");
 const { readSettings, setSetting, toggleSetting } = require("../lib/botSettings");
 
@@ -41,7 +50,116 @@ async function getDb() {
   return _db;
 }
 
-// ─── Key Management ───────────────────────────────────────────
+// ─── ImageKit config (chat_history storage) ───────────────────
+// NOTE: private key must be an env var in production, not hardcoded.
+// Kept here only because it was provided directly for this task —
+// move it to process.env.IMAGEKIT_PRIVATE_KEY before deploying.
+const IMAGEKIT_URL_ENDPOINT  = process.env.IMAGEKIT_URL_ENDPOINT  || "https://ik.imagekit.io/edusmart";
+const IMAGEKIT_PUBLIC_KEY    = process.env.IMAGEKIT_PUBLIC_KEY    || "public_hLpLsH3zTT0HOnp41TeukNXnlIc=";
+const IMAGEKIT_PRIVATE_KEY   = process.env.IMAGEKIT_PRIVATE_KEY   || "private_7wSnh+9Lp59oWo46JvQdS8fNtaI=";
+const IMAGEKIT_UPLOAD_URL    = "https://upload.imagekit.io/api/v1/files/upload";
+const IMAGEKIT_LIST_URL      = "https://api.imagekit.io/v1/files";
+const IMAGEKIT_FOLDER        = "/chat_history";
+
+function imagekitAuthHeader() {
+  // ImageKit private-key auth = HTTP Basic with private key as username, no password
+  const token = Buffer.from(`${IMAGEKIT_PRIVATE_KEY}:`).toString("base64");
+  return `Basic ${token}`;
+}
+
+function historyFileName(phone) {
+  return `history_${phone}.json`;
+}
+
+// Find existing file's fileId by name (needed to overwrite/delete cleanly;
+// ImageKit upload with same fileName otherwise just versions it, so we
+// delete the old one first to keep exactly one file per user).
+async function findHistoryFileId(phone) {
+  try {
+    const res = await axios.get(IMAGEKIT_LIST_URL, {
+      headers: { Authorization: imagekitAuthHeader() },
+      params: {
+        path: IMAGEKIT_FOLDER,
+        name: historyFileName(phone),
+        limit: 1,
+      },
+      timeout: 10000,
+    });
+    const list = Array.isArray(res.data) ? res.data : [];
+    return list.length ? list[0].fileId : null;
+  } catch (e) {
+    console.log("⚠️ ImageKit list error:", e?.response?.data || e?.message || e);
+    return null;
+  }
+}
+
+async function deleteHistoryFile(fileId) {
+  if (!fileId) return;
+  try {
+    await axios.delete(`https://api.imagekit.io/v1/files/${fileId}`, {
+      headers: { Authorization: imagekitAuthHeader() },
+      timeout: 10000,
+    });
+  } catch (e) {
+    console.log("⚠️ ImageKit delete error:", e?.response?.data || e?.message || e);
+  }
+}
+
+async function getHistory(phone) {
+  try {
+    // ImageKit doesn't let us fetch raw JSON by fileId directly without
+    // the public URL, so we build the public URL from the known path.
+    const url = `${IMAGEKIT_URL_ENDPOINT}${IMAGEKIT_FOLDER}/${historyFileName(phone)}`;
+    const res = await axios.get(url, { timeout: 10000, validateStatus: () => true });
+    if (res.status === 200 && Array.isArray(res.data?.messages)) {
+      return res.data.messages;
+    }
+    if (res.status === 200 && Array.isArray(res.data)) {
+      return res.data; // tolerate a bare-array format
+    }
+    return [];
+  } catch (_) {
+    return [];
+  }
+}
+
+async function saveHistory(phone, messages) {
+  try {
+    const payload = JSON.stringify({ phone, messages, updatedAt: new Date().toISOString() });
+
+    const form = new FormData();
+    form.append("file", Buffer.from(payload, "utf8"), historyFileName(phone));
+    form.append("fileName", historyFileName(phone));
+    form.append("folder", IMAGEKIT_FOLDER);
+    form.append("useUniqueFileName", "false");
+    form.append("isPrivateFile", "false");
+
+    // Remove any existing file with same name first, so we don't
+    // accumulate versioned duplicates for every save.
+    const existingId = await findHistoryFileId(phone);
+    if (existingId) await deleteHistoryFile(existingId);
+
+    await axios.post(IMAGEKIT_UPLOAD_URL, form, {
+      headers: { ...form.getHeaders(), Authorization: imagekitAuthHeader() },
+      timeout: 15000,
+    });
+  } catch (e) {
+    console.log("⚠️ ImageKit save error:", e?.response?.data || e?.message || e);
+  }
+}
+
+const HISTORY_MAX = 20;
+async function appendHistory(phone, role, text) {
+  const turn = { role, text: String(text).slice(0, 2000), ts: Date.now() };
+  const existing = await getHistory(phone);
+  const updated  = [...existing, turn].slice(-HISTORY_MAX);
+  await saveHistory(phone, updated);
+}
+async function clearHistory(phone) {
+  await saveHistory(phone, []);
+}
+
+// ─── Key Management (still MongoDB) ───────────────────────────
 async function getUserDoc(phone) {
   const db = await getDb();
   return db.collection("user_api_keys").findOne({ phone });
@@ -91,13 +209,7 @@ async function removeUserKey(phone, oneBasedIndex) {
 }
 
 // ─── Global Mode — scoped per bot-owner session ───────────────
-// Each bot owner gets their own isolated global_cfg document.
 // Key: "global_<ownerPhone>" so one owner's setting never affects another.
-//
-// enabled       → global AI auto-reply is ON for everyone (private, unless opted out)
-// includeGroups → when enabled, also applies inside groups
-// hardOff       → ".msg global off" was used: forces AI OFF everywhere
-//                 (private + group) regardless of any personal ".msg on"
 async function setGlobalMode(enabled, includeGroups = false, scopePhone = "default") {
   const db  = await getDb();
   const key = `global_${String(scopePhone || "default").replace(/\D/g, "") || "default"}`;
@@ -107,7 +219,6 @@ async function setGlobalMode(enabled, includeGroups = false, scopePhone = "defau
       $set: {
         enabled: !!enabled,
         includeGroups: !!includeGroups,
-        // turning global mode on again always clears a previous hard-off
         ...(enabled ? { hardOff: false } : {}),
         updatedAt: new Date(),
       },
@@ -140,17 +251,19 @@ async function getGlobalMode(scopePhone = "default") {
     : { enabled: false, includeGroups: false, hardOff: false };
 }
 
-// ─── Per-user Auto-reply toggle + Opt-out ────────────────────
-// optedOut = true  → user explicitly turned off (even in global mode)
-// optedOut = false → user is active (receives global + personal replies)
-async function setAutoReply(phone, enabled) {
-  const db = await getDb();
+// ─── Per-OWNER auto-reply toggle (".msg on" / ".msg off") ─────
+// FIX: this used to be keyed by the *sender's* phone, which broke the
+// intended behavior — ".msg on" is a per-bot setting the owner flips,
+// and it should apply to every sender messaging that owner's bot.
+// Now keyed by scopePhone (the owner/session), same as global_cfg.
+async function setAutoReply(scopePhone, enabled) {
+  const db  = await getDb();
+  const key = String(scopePhone || "default").replace(/\D/g, "") || "default";
   await db.collection("auto_msg_cfg").updateOne(
-    { phone },
+    { _id: key },
     {
       $set: {
-        enabled:  !!enabled,
-        optedOut: !enabled,   // off = opted out, on = not opted out
+        enabled: !!enabled,
         updatedAt: new Date(),
       },
       $setOnInsert: { createdAt: new Date() },
@@ -158,73 +271,55 @@ async function setAutoReply(phone, enabled) {
     { upsert: true }
   );
 }
-async function isAutoReplyEnabled(phone) {
+async function isAutoReplyEnabled(scopePhone) {
   const db  = await getDb();
-  const doc = await db.collection("auto_msg_cfg").findOne({ phone });
+  const key = String(scopePhone || "default").replace(/\D/g, "") || "default";
+  const doc = await db.collection("auto_msg_cfg").findOne({ _id: key });
   return doc ? !!doc.enabled : false;
 }
-async function isOptedOut(phone) {
+
+// Per-SENDER opt-out still exists so an individual person chatting with
+// an owner's bot can mute AI replies just for themselves, without the
+// owner having to turn the whole thing off.
+async function setSenderOptOut(phone, optedOut) {
+  const db = await getDb();
+  await db.collection("auto_msg_optout").updateOne(
+    { phone },
+    { $set: { optedOut: !!optedOut, updatedAt: new Date() } },
+    { upsert: true }
+  );
+}
+async function isSenderOptedOut(phone) {
   const db  = await getDb();
-  const doc = await db.collection("auto_msg_cfg").findOne({ phone });
+  const doc = await db.collection("auto_msg_optout").findOne({ phone });
   return doc ? (doc.optedOut === true) : false;
 }
 
 // ─── Resolve: should THIS message get an AI auto-reply? ────────
-// Combines global mode + per-user opt-in/opt-out + group rules.
-async function resolveShouldReply(phone, isGroup, scopePhone) {
+// Combines global mode + owner-level personal toggle + sender opt-out
+// + group rules — all scoped to THIS owner's bot (scopePhone).
+async function resolveShouldReply(senderPhone, isGroup, scopePhone) {
   const global = await getGlobalMode(scopePhone);
 
-  // Hard-off always wins — group + private both blocked.
+  // Hard-off always wins — group + private both blocked, for this owner's bot.
   if (global.hardOff) return false;
 
-  const optedOut = await isOptedOut(phone);
+  const senderOptedOut = await isSenderOptedOut(senderPhone);
+  if (senderOptedOut) return false;
 
   if (global.enabled) {
-    // Global mode ON.
-    if (isGroup) {
-      if (!global.includeGroups) return false;   // ".msg on" only (not "on all")
-      return !optedOut;
-    }
-    // private chat
-    return !optedOut;
+    if (isGroup) return !!global.includeGroups;
+    return true;
   }
 
-  // Global mode OFF → fall back to purely personal opt-in.
-  if (isGroup) return false; // groups never get AI without global "on all"
-  return await isAutoReplyEnabled(phone);
-}
-
-// ─── Chat History ─────────────────────────────────────────────
-const HISTORY_MAX = 20;
-async function getHistory(phone) {
-  const db  = await getDb();
-  const doc = await db.collection("chat_history").findOne({ phone });
-  return doc ? (doc.messages || []) : [];
-}
-async function appendHistory(phone, role, text) {
-  const db   = await getDb();
-  const turn = { role, text: String(text).slice(0, 2000), ts: Date.now() };
-  await db.collection("chat_history").updateOne(
-    { phone },
-    {
-      $push: { messages: { $each: [turn], $slice: -HISTORY_MAX } },
-      $set:  { updatedAt: new Date() },
-      $setOnInsert: { createdAt: new Date() },
-    },
-    { upsert: true }
-  );
-}
-async function clearHistory(phone) {
-  const db = await getDb();
-  await db.collection("chat_history").updateOne(
-    { phone },
-    { $set: { messages: [], updatedAt: new Date() } },
-    { upsert: true }
-  );
+  // Global mode OFF → fall back to this owner's personal ".msg on" toggle.
+  // This now applies to ALL senders messaging this owner's bot, private only
+  // (groups require the owner-only ".msg on all").
+  if (isGroup) return false;
+  return await isAutoReplyEnabled(scopePhone);
 }
 
 // ─── Language Detection ───────────────────────────────────────
-// Returns: "si" (Sinhala Unicode) | "singlish" | "ta" (Tamil) | "en"
 const SI_UNICODE  = /[\u0D80-\u0DFF]/;
 const TA_UNICODE  = /[\u0B80-\u0BFF]/;
 const SINGLISH_KW = [
@@ -237,10 +332,10 @@ const SINGLISH_KW = [
   "akka","ayye","malli","duwa","putha","ammae","thaathae","apita","apige",
 ];
 function detectLang(text) {
-  if (SI_UNICODE.test(text))  return "si";        // Sinhala Unicode chars
-  if (TA_UNICODE.test(text))  return "ta";        // Tamil Unicode chars
+  if (SI_UNICODE.test(text))  return "si";
+  if (TA_UNICODE.test(text))  return "ta";
   const lower = text.toLowerCase();
-  if (SINGLISH_KW.some((w) => lower.includes(w))) return "singlish"; // Sinhala in Roman
+  if (SINGLISH_KW.some((w) => lower.includes(w))) return "singlish";
   return "en";
 }
 
@@ -250,7 +345,6 @@ function buildSystemPrompt(ownerName, pushName, lang) {
   const whoSi = ownerName ? `${ownerName}ගේ MALIYA-MD WhatsApp Bot` : "MALIYA-MD WhatsApp Bot";
   const user = pushName && pushName.trim() ? pushName.trim() : "user";
 
-  // Singlish: reply in Singlish (Sinhala words written in Roman/English letters)
   if (lang === "singlish") {
     return (
       `Oya ${who}. Oya manage karanney ${ownerName || "Bot Owner"}.` +
@@ -261,8 +355,6 @@ function buildSystemPrompt(ownerName, pushName, lang) {
       ` Previous conversation context use karala relevant replies denna.`
     );
   }
-
-  // Sinhala Unicode: reply fully in Sinhala Unicode
   if (lang === "si") {
     return (
       `ඔයා ${whoSi}. ඔයාව manage කරන්නේ ${ownerName || "Bot Owner"}.` +
@@ -272,8 +364,6 @@ function buildSystemPrompt(ownerName, pushName, lang) {
       ` කලින් conversation context use කරලා relevant replies දෙන්න.`
     );
   }
-
-  // Tamil
   if (lang === "ta") {
     return (
       `நீங்கள் ${ownerName ? `${ownerName}இன் MALIYA-MD WhatsApp Bot` : "MALIYA-MD WhatsApp Bot"}.` +
@@ -282,8 +372,6 @@ function buildSystemPrompt(ownerName, pushName, lang) {
       ` முந்தைய உரையாடல் context பயன்படுத்தி பதில் சொல்லுங்கள்.`
     );
   }
-
-  // English (default)
   return (
     `You are ${who}. The person chatting is named ${user}. Address them as ${user} naturally.` +
     ` IMPORTANT: Reply ONLY in English. Use emojis to make replies feel warm and expressive.` +
@@ -354,14 +442,10 @@ async function callGemini(apiKey, systemPrompt, history, userText) {
   return null;
 }
 
-// Build a text-based conversation prompt for free AI providers
-// Includes up to last 8 history turns so the AI has full context
 function buildFreePrompt(systemPrompt, history, userText) {
   const lines = [];
   if (systemPrompt) lines.push(`[System]: ${systemPrompt}`);
   lines.push("");
-
-  // Include last 8 turns of history (older → newer)
   const recent = history.slice(-8);
   if (recent.length > 0) {
     lines.push("[Conversation so far]:");
@@ -371,13 +455,11 @@ function buildFreePrompt(systemPrompt, history, userText) {
     }
     lines.push("");
   }
-
   lines.push(`User: ${userText}`);
   lines.push("Bot:");
   return lines.join("\n");
 }
 
-// Smart caller: Gemini → ch.at → pollinations
 async function askAI(phone, systemPrompt, history, userText) {
   const keys = await getUserKeys(phone);
   if (keys.length) {
@@ -386,7 +468,6 @@ async function askAI(phone, systemPrompt, history, userText) {
       if (result) return result;
     }
   }
-  // Free providers — include history in the text prompt
   const freePrompt = buildFreePrompt(systemPrompt, history, userText);
   const chAtResult = await Promise.race([
     callChAt(freePrompt),
@@ -447,9 +528,9 @@ cmd({
   const key   = (args[0] || "").trim();
   const lang  = detectLang(m.body || "");
   if (!isValidApiKey(key)) {
-    return m.reply(lang === "si"
-      ? "❌ Invalid key.\n*.setkey <your_key>*\nFree: https://aistudio.google.com/apikey\n> MALIYA-MD ❤️"
-      : "❌ Invalid key.\n*.setkey <your_key>*\nFree: https://aistudio.google.com/apikey\n> MALIYA-MD ❤️");
+    return m.reply(
+      "❌ Invalid key.\n*.setkey <your_key>*\nFree: https://aistudio.google.com/apikey\n> MALIYA-MD ❤️"
+    );
   }
   const result = await addUserKey(phone, key, pushName || phone);
   if (!result.ok) {
@@ -493,23 +574,23 @@ cmd({
   m.reply(`🔑 *Gemini Keys (${keys.length}/3)*\n\n${list}\n\n> MALIYA-MD ❤️`);
 });
 
-// .msg on | on all | off | global off | status | clear
+// .msg on | on all | off | global off | status | clear | mute | unmute
 cmd({
   pattern: "msg",
   desc:    "AI auto-reply — oma eka on/off karanna",
   type:    "all",
   react:   "🤖",
 }, async (conn, mek, m, { args, sender, sessionOwnerPhone }) => {
-  const phone       = sender.split("@")[0].replace(/\D/g, "");
-  const sub         = (args[0] || "").toLowerCase().trim();
-  const sub2        = (args[1] || "").toLowerCase().trim();
+  const phone         = sender.split("@")[0].replace(/\D/g, "");
+  const sub           = (args[0] || "").toLowerCase().trim();
+  const sub2          = (args[1] || "").toLowerCase().trim();
   const senderIsOwner = isOwner(phone, sessionOwnerPhone || "");
-  // scope global mode per-owner using THIS session's actual connected number
-  // (must match the scopePhone that handleAutoMsg() uses, or "on all" silently
-  // writes to a global_cfg doc that resolveShouldReply() never reads back)
+  // scope everything to THIS session's connected owner number — this is
+  // the value that must match what handleAutoMsg() passes in, or the
+  // toggle silently writes to a doc that resolveShouldReply() never reads.
   const scopePhone = sessionOwnerPhone || OWNER_NUMBER || phone;
 
-  // ── .msg on all → GLOBAL: private + group AI on (owner only) ─
+  // ── .msg on all → owner-only: private + group AI on for THIS bot ──
   if (sub === "on" && sub2 === "all") {
     if (!senderIsOwner) {
       return m.reply("❌ *.msg on all* is an owner-only command.\n> MALIYA-MD ❤️");
@@ -517,22 +598,26 @@ cmd({
     await setGlobalMode(true, true, scopePhone);
     return m.reply(
       `🌐 *Global AI Mode: ON (Private + Groups)* ✅\n\n` +
-      `> Dan hama private chat ekakatama, hama group ekakatama AI reply yanawa\n` +
-      `> (users kawru hari .msg off kara nam eyata witarai yanne na)\n` +
+      `> Dan me bot ekata private ekakatawath, group ekakatawath ena hama msg ekakatama AI reply yanawa\n` +
+      `> (kenek witharak mute karanna one nam eyata *.msg mute* danna)\n` +
       `> Off karanna: *.msg global off*\n` +
       `> MALIYA-MD ❤️`
     );
   }
 
-  // ── .msg on → this user opts in (personal, private only) ────
+  // ── .msg on → OWNER turns AI on for THEIR bot (all private senders) ─
   if (sub === "on") {
-    await setAutoReply(phone, true);
+    if (!senderIsOwner) {
+      return m.reply("❌ *.msg on* is an owner-only command — oyage bot eka witharak affect wenawa.\n> MALIYA-MD ❤️");
+    }
+    await setAutoReply(scopePhone, true);
     const keys   = await getUserKeys(phone);
     const source = keys.length ? "🚀 Gemini AI" : "⚡ Free AI (ch.at + pollinations)";
     return m.reply(
-      `✅ *AI Auto Reply ON* 🤖\n` +
+      `✅ *AI Auto Reply ON — oyage bot ekata* 🤖\n` +
       `🧠 ${source}\n\n` +
-      `> Dan oya kiyana ekka AI reply karanawa!\n` +
+      `> Dan oyage bot number ekata ena hama private msg ekakatama AI reply yanawa\n` +
+      `> (wena bot owners ta me affect wenne na)\n` +
       `> Off karanna: *.msg off*\n` +
       `> MALIYA-MD ❤️`
     );
@@ -546,20 +631,34 @@ cmd({
     await setGlobalHardOff(scopePhone);
     return m.reply(
       `⛔ *Global AI Mode: OFF (Private + Groups)*\n\n` +
-      `> Okkoma AI auto-reply hard-stop karala thiyenne — users ge personal ".msg on" tikath wada karanne na dan.\n` +
+      `> Me bot eke AI auto-reply okkoma hard-stop karala thiyenne.\n` +
       `> Wapas on karanna: *.msg on* / *.msg on all*\n` +
       `> MALIYA-MD ❤️`
     );
   }
 
-  // ── .msg off → this user opts out (personal) ────────────────
+  // ── .msg off → owner turns AI off for THEIR bot ──────────────
   if (sub === "off") {
-    await setAutoReply(phone, false);
+    if (!senderIsOwner) {
+      return m.reply("❌ *.msg off* is an owner-only command.\n> MALIYA-MD ❤️");
+    }
+    await setAutoReply(scopePhone, false);
     return m.reply(
-      `⛔ *AI Auto Reply OFF*\n\n` +
+      `⛔ *AI Auto Reply OFF — oyage bot ekata*\n\n` +
       `> Wapas on karanna: *.msg on*\n` +
       `> MALIYA-MD ❤️`
     );
+  }
+
+  // ── .msg mute / unmute → an individual sender opts out of AI ──
+  // replies just for themselves, without the owner disabling it globally.
+  if (sub === "mute") {
+    await setSenderOptOut(phone, true);
+    return m.reply("🔕 AI won't auto-reply to you anymore on this bot.\n*.msg unmute* to undo.\n> MALIYA-MD ❤️");
+  }
+  if (sub === "unmute") {
+    await setSenderOptOut(phone, false);
+    return m.reply("🔔 AI auto-replies re-enabled for you.\n> MALIYA-MD ❤️");
   }
 
   // ── .msg clear ────────────────────────────────────────────
@@ -570,26 +669,26 @@ cmd({
 
   // ── .msg status ───────────────────────────────────────────
   if (sub === "status") {
-    const global   = await getGlobalMode(scopePhone);
-    const keys     = await getUserKeys(phone);
-    const userOn   = await isAutoReplyEnabled(phone);
-    const optedOut = await isOptedOut(phone);
-    const history  = await getHistory(phone);
-    const source   = keys.length ? `🚀 Gemini (${keys.length} key/s)` : "⚡ Free AI (ch.at + pollinations)";
+    const global    = await getGlobalMode(scopePhone);
+    const keys      = await getUserKeys(phone);
+    const ownerOn   = await isAutoReplyEnabled(scopePhone);
+    const optedOut  = await isSenderOptedOut(phone);
+    const history   = await getHistory(phone);
+    const source    = keys.length ? `🚀 Gemini (${keys.length} key/s)` : "⚡ Free AI (ch.at + pollinations)";
 
-    // What actually happens to THIS user
     let myStatus;
-    if (global.hardOff)               myStatus = "OFF ⛔ (global hard-off)";
-    else if (global.enabled && optedOut) myStatus = "OFF ⛔ (personally opted out)";
-    else if (global.enabled)          myStatus = "ON ✅ (via global mode)";
-    else if (userOn)                  myStatus = "ON ✅ (personal)";
-    else                               myStatus = "OFF ⛔";
+    if (global.hardOff)                   myStatus = "OFF ⛔ (global hard-off)";
+    else if (optedOut)                    myStatus = "OFF ⛔ (you muted yourself)";
+    else if (global.enabled)              myStatus = "ON ✅ (via global mode)";
+    else if (ownerOn)                     myStatus = "ON ✅ (bot owner enabled it)";
+    else                                  myStatus = "OFF ⛔";
 
     return m.reply(
-      `📊 *AI Status*\n\n` +
+      `📊 *AI Status (this bot)*\n\n` +
       `🌐 Global Mode : ${global.hardOff ? "HARD OFF ⛔" : (global.enabled ? "ON ✅" : "OFF ⛔")}\n` +
       `👥 Groups      : ${global.includeGroups ? "ON ✅" : "OFF ⛔"}\n` +
-      `🤖 My AI       : ${myStatus}\n` +
+      `🤖 Bot AI      : ${ownerOn ? "ON ✅" : "OFF ⛔"} (owner toggle)\n` +
+      `🙋 Your status : ${myStatus}\n` +
       `🧠 AI Source   : ${source}\n` +
       `💬 History     : ${history.length} turns\n` +
       `> MALIYA-MD ❤️`
@@ -599,11 +698,13 @@ cmd({
   // ── Help ──────────────────────────────────────────────────
   m.reply(
     `🤖 *AI Chat Commands*\n\n` +
-    `*.msg on*          — Oma eka private AI on\n` +
-    `*.msg on all*      — *Okkotama* (private + groups) AI on 🌐 (owner)\n` +
-    `*.msg off*         — Oma eka AI off\n` +
-    `*.msg global off*  — Okkoma (private+group) AI hard off 🌐 (owner)\n` +
-    `*.msg clear*       — History clear\n` +
+    `*.msg on*          — (owner) Turn AI on for THIS bot — all private senders 🤖\n` +
+    `*.msg on all*      — (owner) Turn AI on for private + groups 🌐\n` +
+    `*.msg off*         — (owner) Turn AI off for THIS bot\n` +
+    `*.msg global off*  — (owner) Hard off (private+group) 🌐\n` +
+    `*.msg mute*        — Mute AI replies just for yourself\n` +
+    `*.msg unmute*      — Undo *.msg mute*\n` +
+    `*.msg clear*       — Clear your chat history\n` +
     `*.msg status*      — Status check\n\n` +
     `*.setkey <key>*    — Gemini key add (optional upgrade)\n` +
     `*.mykeys*          — Keys list\n` +
@@ -626,28 +727,23 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
     const phone = String(sender || "").split("@")[0].replace(/\D/g, "");
     if (!phone) return false;
 
-    // Don't reply to bot's own messages
     const botJidPhone = (conn.user?.id || "").split(":")[0].split("@")[0].replace(/\D/g, "");
     if (botJidPhone && phone === botJidPhone) return false;
     if (mek?.key?.fromMe)                    return false;
 
-    // Owner's own messages — never auto-reply to owner
     const senderIsOwner = isOwner(phone, sessionOwnerPhone);
     if (senderIsOwner) return false;
 
     const scopePhone = sessionOwnerPhone || OWNER_NUMBER || "default";
 
-    // Also respect the local per-installation "auto_msg" bot setting toggle
-    // (exposed via the interactive .setting menu) as a master kill-switch.
     let localToggleOn = true;
     try { localToggleOn = !!readSettings().auto_msg; } catch (_) {}
     if (!localToggleOn) return false;
 
-    // Resolve global + personal + group rules together
+    // Resolve using THIS bot's owner scope — never leaks across owners.
     const shouldReply = await resolveShouldReply(phone, isGroup, scopePhone);
     if (!shouldReply) return false;
 
-    // ── Cooldown ─────────────────────────────────────────────
     const cooldownKey = isGroup ? (mek.key?.remoteJid + phone) : phone;
     const now  = Date.now();
     const last = _cooldowns.get(cooldownKey) || 0;
@@ -667,7 +763,6 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
     const systemPrompt = buildSystemPrompt(ownerName, effectivePushName, lang);
     const history      = await getHistory(phone);
 
-    // AI call — Gemini (user key) → ch.at → pollinations
     const result = await askAI(phone, systemPrompt, history, body);
 
     if (!result) {
@@ -680,7 +775,6 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
     await appendHistory(phone, "model", result.text);
     await react(conn, mek, pick(REPLY_REACTS));
 
-    // Send (split if long)
     const MAX_LEN = 3500;
     if (result.text.length <= MAX_LEN) {
       await conn.sendMessage(m.chat, { text: result.text }, { quoted: mek });
@@ -705,8 +799,6 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
 
 // ══════════════════════════════════════════════════════════════
 //  SEEN ALL MSG — independent of AI toggle
-//  When bot_settings.seen_all_msg is true, auto-mark-read every
-//  incoming message (private AND group), regardless of AI state.
 // ══════════════════════════════════════════════════════════════
 async function handleSeenAllMsg(conn, mek) {
   try {
@@ -733,14 +825,21 @@ module.exports = { handleAutoMsg, handleSeenAllMsg };
 //  1. Set owner number in your bot config/env:
 //       process.env.OWNER_NUMBER = "94711234567"  // digits only
 //
-//  2. Import at top of index.js:
+//  2. Set ImageKit env vars (recommended over hardcoding):
+//       process.env.IMAGEKIT_URL_ENDPOINT = "https://ik.imagekit.io/edusmart"
+//       process.env.IMAGEKIT_PUBLIC_KEY   = "public_xxx"
+//       process.env.IMAGEKIT_PRIVATE_KEY  = "private_xxx"
+//
+//  3. `npm install form-data` (needed for the ImageKit multipart upload)
+//
+//  4. Import at top of index.js:
 //       const { handleAutoMsg, handleSeenAllMsg } = require("./plugins/auto_msg");
 //
-//  3. Inside messages.upsert handler, right after mek.message is
+//  5. Inside messages.upsert handler, right after mek.message is
 //     normalized (before command parsing), call:
 //       await handleSeenAllMsg(sock, mek);
 //
-//  4. After command processing (non-command branch):
+//  6. After command processing (non-command branch):
 //       const handled = await handleAutoMsg({
 //         conn, mek, m, sender, pushName, body,
 //         isGroup, sessionOwnerPhone, sessionOwnerName,
