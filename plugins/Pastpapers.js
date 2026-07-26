@@ -3,6 +3,7 @@ const config = require('../config');
 
 cmd({
     pattern: "edu",
+    alias: ["pp", "pastpaper"],
     react: "📚",
     desc: "Educational Zone | Download term tests and past papers.",
     category: "education",
@@ -13,10 +14,6 @@ async (conn, mek, m, {
 }) => {
     try {
         const bannerImg = 'https://github.com/DANUWA-MD/DANUWA-BOT/blob/main/images/educational__zone.png?raw=true';
-
-        const channelJid = '120363418166326365@newsletter'; 
-        const channelName = '🍁 ＤＡＮＵＷＡ－ 〽️Ｄ 🍁';
-        const channelInvite = '0029Vb65OhH7oQhap1fG1y3o';
 
         const caption = `
 ╭─────── ⭓ ⭓ ⭓  ─────────╮
