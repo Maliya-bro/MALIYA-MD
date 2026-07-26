@@ -22,8 +22,8 @@ const formatUptime = (seconds) => {
 cmd(
 {
     pattern: "alive",
-    react: "👀",
-    desc: "Check bot status",
+    react: "🔥",
+    desc: "Check if bot is online",
     category: "main",
     filename: __filename,
 },
@@ -37,6 +37,10 @@ try {
     const userName = m.pushName || "User";
 
 
+    const aliveImg =
+    "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/WhatsApp%20Image%202026-01-18%20at%2012.37.23.jpeg?raw=true";
+
+
     const videoPath = path.join(__dirname, "../media/0908.mp4");
 
 
@@ -45,21 +49,21 @@ try {
 
 
     const aliveCaption = `
-╭─────── ⭓ ⭓ ⭓ ─────────╮
-│        🧿 SYSTEM ONLINE 🧿
-╰──────────────⟡───────╯
+╭━━━〔 🧿 SYSTEM ONLINE 🧿 〕━━━╮
+┃
+┃ 👋 Hey ${userName}
+┃
+┃ 🍁 *PREFIX:* .
+┃ ⚡ *BOT NAME:* ${config.BOT_NAME || "🌀 MALIYA-MD 🌀"}
+┃ 🧭 *UPTIME:* ${uptime}
+┃ 🔋 *PLATFORM:* ${platform}
+┃ 🧩 *VERSION:* ${config.VERSION || "1.0.0"}
+┃
+╰━━━━━━━━━━━━━━━━━━╯
 
-👋 Hey ${userName}
-
-🍁 *PREFIX:* .
-⚡ *BOT NAME:* ${config.BOT_NAME || "🌀 MALIYA-MD 🌀"}
-
-🧭 *UPTIME:* ${uptime}
-🔋 *PLATFORM:* ${platform}
-🧩 *VERSION:* ${config.VERSION || "1.0.0"}
+⚙️ Made with ❤️ by
 
 ╭───────────────⬣
-⚙️ Made with ❤️ by
 🔥 𝙈𝘼𝙇𝙄𝙉𝘿𝙐 𝙉𝘼𝘿𝙄𝙏𝙃 🔥
 ╰───────────────⬣
 `;
@@ -78,7 +82,7 @@ try {
 
 
 
-    // Send Alive Video (if exists)
+    // Send video if available
     if (fs.existsSync(videoPath)) {
 
         await MALIYA.sendMessage(
@@ -97,16 +101,20 @@ try {
 
 
 
-    // Send Alive Message
-
+    // Send Alive Image + Buttons
     await sendButtons(
         MALIYA,
         from,
         {
 
+            image: {
+                url: aliveImg
+            },
+
             text: aliveCaption,
 
             buttons: buttons,
+
 
             contextInfo: {
 
@@ -134,10 +142,10 @@ try {
 
 } catch (err) {
 
-    console.log("ALIVE PLUGIN ERROR:", err);
+    console.log("ALIVE ERROR:", err);
 
     reply(
-        "❌ Alive plugin error\n\n" + err.message
+        "❌ Alive Error : " + err.message
     );
 
 }
