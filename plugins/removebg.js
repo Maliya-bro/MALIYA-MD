@@ -1,113 +1,65 @@
 const { cmd } = require("../command");
-const axios = require("axios");
-const FormData = require("form-data");
+const { Client } = require("@gradio/client");
+const fetch = require("node-fetch");
 
-cmd(
-  {
-    pattern: "rbg",
-    alias: ["removebg", "nobg"],
-    desc: "Remove image background without API keys",
-    category: "tools",
-    react: "✂️",
-    filename: __filename,
-  },
-  async (bot, mek, m, { from, quoted, reply }) => {
-    try {
-      const q = quoted || m.quoted || null;
+// Hugging Face Space URL
+const HF_SPACE = "https://briaai-bria-rmbg-1-4.hf.space/--replicas/bkhbq/";
 
-      if (!q) {
-        return reply("Reply to an image message.");
-      }
+cmd({
+  pattern: "removebg",
+  react: "🪄",
+  desc: "Remove image background",
+  category: "image",
+  filename: __filename,
+}, async (danuwa, mek, m, { from, reply }) => {
+  try {
+    if (!mek._mediaBuffer || mek._mediaType !== "imageMessage")
+      return reply("📸 *Send an image with caption `.removebg`*");
 
-      const mime =
-        q.mimetype ||
-        q.msg?.mimetype ||
-        q.message?.imageMessage?.mimetype ||
-        "";
+    await reply("🪄 Removing background, please wait...");
 
-      if (!mime || !mime.startsWith("image/")) {
-        return reply("Reply to an image message.");
-      }
+    // Convert the media buffer to a Blob (as required by @gradio/client)
+    const imageBlob = new Blob([mek._mediaBuffer], { type: "image/png" });
 
-      await reply("Removing background... ⏳");
+    // Connect to Hugging Face Space
+    const app = await Client.connect(HF_SPACE);
 
-      let buffer;
+    // Predict / remove background
+    const result = await app.predict("/predict", [imageBlob]);
 
-      if (typeof q.download === "function") {
-        buffer = await q.download();
-      } else if (typeof bot.downloadMediaMessage === "function") {
-        buffer = await bot.downloadMediaMessage(q);
-      } else {
-        return reply("Media download method not supported in this bot version.");
-      }
+    const processedUrl = result?.data?.[0];
+    if (!processedUrl || typeof processedUrl !== "string")
+      return reply("❌ *Failed to get processed image URL.*");
 
-      if (!buffer || !Buffer.isBuffer(buffer)) {
-        return reply("Failed to download the image.");
-      }
+    // Make sure it's an absolute URL
+    const absoluteUrl = processedUrl.startsWith("http")
+      ? processedUrl
+      : `https://briaai-bria-rmbg-1-4.hf.space${processedUrl}`;
 
-      const formData = new FormData();
-      formData.append("image", buffer, {
-        filename: "maliya.png",
-        contentType: "image/png",
-      });
+    // Download processed image
+    const res = await fetch(absoluteUrl);
+    if (!res.ok) return reply("❌ *Failed to download processed image.*");
 
-      const response = await axios.post(
-        "https://api.creartai.com/v1/remove-bg",
-        formData,
-        {
-          headers: {
-            ...formData.getHeaders(),
-            Accept: "image/png, image/*, application/octet-stream",
-            "User-Agent": "Mozilla/5.0",
-          },
-          responseType: "arraybuffer",
-          timeout: 30000,
-          maxBodyLength: Infinity,
-          maxContentLength: Infinity,
-          validateStatus: () => true,
-        }
-      );
+    const buffer = Buffer.from(await res.arrayBuffer());
 
-      if (response.status !== 200) {
-        console.log("RBG API STATUS:", response.status);
-        console.log(
-          "RBG API RESPONSE:",
-          Buffer.isBuffer(response.data)
-            ? response.data.toString("utf8").slice(0, 500)
-            : response.data
-        );
-        return reply(`Background removal failed. Server returned ${response.status}.`);
-      }
+    // Send processed image to user
+    await danuwa.sendMessage(
+      from,
+      {
+        image: buffer,
+        caption: `╭─────── ⭓ ⭓ ⭓  ─────────╮
+│    🪄 𝗕𝗔𝗖𝗞𝗚𝗥𝗢𝗨𝗡𝗗 𝗥𝗘𝗠𝗢𝗩𝗘𝗗 🪄    │
+╰──────────────⟡───────╯
+│ ✨ Background removed successfully!
+╰───────────────⬣
+⚙️ Made with ❤️ by
+╰🔥 𝙈𝘼𝙇𝙄𝙉𝘿𝙐 𝙉𝘼𝘿𝙄𝙏𝙃 🔥`,
+      },
+      { quoted: mek }
+    );
 
-      const finalBuffer = Buffer.from(response.data);
-
-      if (!finalBuffer || !finalBuffer.length) {
-        return reply("Empty response received from background remover.");
-      }
-
-      await bot.sendMessage(
-        from,
-        {
-          image: finalBuffer,
-          mimetype: "image/png",
-          caption:
-            "✅ *MALIYA-MD BG REMOVER*\n\nBackground removed successfully.\n\n> Powered by MALIYA-MD",
-        },
-        { quoted: mek }
-      );
-    } catch (e) {
-      console.log("RBG ERROR:", e?.response?.status || e?.message || e);
-      if (e?.response?.data) {
-        try {
-          console.log(
-            "RBG ERROR BODY:",
-            Buffer.isBuffer(e.response.data)
-              ? e.response.data.toString("utf8").slice(0, 500)
-              : e.response.data
-          );
-        } catch {}
-      }
-      return reply("An error occurred while removing the background. Please try again.");
-    }
+  } catch (err) {
+    console.error("RemoveBG error:", err);
+    reply("❌ *Error while removing background.*");
   }
-);
+});
