@@ -390,14 +390,14 @@ function detectLang(text) {
 // Uses the same public endpoint the Google Translate website itself
 // calls (translate.googleapis.com/translate_a/single). No key needed,
 // but it's an undocumented endpoint — Google can rate-limit or change
-// it without notice, so every call is wrapped and falls back safely.
+// it without notice, so every call is wrapped and falls back safely
+// (returns the original text untranslated on any failure).
 //
-// detectLang() above only tells us "si" / "ta" / "singlish" / "en" —
-// Google Translate needs real ISO language codes, and "singlish" is
-// Sinhala words spelled in English letters, so Google's own language
-// detector (auto-detect) handles it far better than we could by
-// guessing a fixed source code. We always pass sl=auto and let Google
-// tell us what it detected via the response's 3rd top-level array.
+// Only used ONE way in this bot: translating the AI's English answer
+// to Sinhala before sending it back to the user. The user's incoming
+// message (Singlish or Sinhala unicode) is never translated — it goes
+// to the AI as-is, since the AI understands both directly and answers
+// better that way than routing broken Singlish through Translate first.
 const GOOGLE_TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single";
 
 async function googleTranslate(text, targetLang, sourceLang = "auto") {
@@ -428,30 +428,22 @@ async function googleTranslate(text, targetLang, sourceLang = "auto") {
   }
 }
 
-// Map our internal detectLang() buckets to Google Translate target codes
-// for translating the AI's English reply back to the user.
-function langToGoogleCode(lang) {
-  if (lang === "si")       return "si"; // Sinhala unicode
-  if (lang === "singlish") return "si"; // Singlish -> reply in proper Sinhala unicode
-  if (lang === "ta")       return "ta"; // Tamil
-  return "en";
-}
-
 // ─── System Prompt ────────────────────────────────────────────
-// The AI now ALWAYS thinks and replies in English — the incoming message
-// is translated to English before this prompt is used, and the AI's
-// English reply gets translated back to the user's language afterward
-// (see handleAutoMsg). So this prompt no longer needs per-language
-// branches; it just needs to tell the AI who it is and to reply in
-// natural, friendly English.
+// The AI reads the user's ORIGINAL message (Singlish or Sinhala unicode,
+// untouched) but must always ANSWER in English — its English answer is
+// then translated to Sinhala afterward (see handleAutoMsg). So this
+// prompt no longer needs per-language branches; it just needs to tell
+// the AI who it is and to answer in natural, friendly English.
 function buildSystemPrompt(ownerName, pushName) {
   const who  = ownerName ? `${ownerName}'s MALIYA-MD WhatsApp Bot` : "MALIYA-MD WhatsApp Bot";
   const user = pushName && pushName.trim() ? pushName.trim() : "user";
 
   return (
     `You are ${who}. The person chatting is named ${user}. Address them as ${user} naturally.` +
-    ` Reply in English. Use emojis to make replies feel warm and expressive.` +
-    ` Be short, friendly, and conversational.` +
+    ` The user may write in Sinhala, Singlish (Sinhala typed in English letters), Tamil, or English —` +
+    ` understand whatever language they used, but IMPORTANT: you must ALWAYS reply ONLY in English,` +
+    ` regardless of what language the user wrote in. Never reply in Sinhala script or Singlish.` +
+    ` Use emojis to make replies feel warm and expressive. Be short, friendly, and conversational.` +
     ` Use the previous conversation history for context when replying.`
   );
 }
@@ -821,16 +813,12 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
 
     const lang = detectLang(body);
 
-    // ── Translate incoming message to English before it reaches the AI ──
-    // The AI only ever sees/produces English now; googleTranslate() falls
-    // back to returning the original text untranslated if the request
-    // fails, so a translate outage degrades gracefully instead of
-    // blocking the reply entirely.
-    let englishBody = body;
-    if (lang !== "en") {
-      const toEnglish = await googleTranslate(body, "en", "auto");
-      englishBody = toEnglish.text || body;
-    }
+    // ── AI reads the user's ORIGINAL text (Singlish or Sinhala unicode) ──
+    // directly — no pre-translation. The AI is fluent enough to understand
+    // both, and asking it to answer in English (see buildSystemPrompt)
+    // gives noticeably better answers than routing broken Singlish through
+    // Google Translate first. Only the AI's English OUTPUT gets translated
+    // below, back into Sinhala for the user.
 
     const effectivePushName =
       (pushName && pushName.trim())          ? pushName.trim()     :
@@ -841,7 +829,7 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
     const systemPrompt = buildSystemPrompt(ownerName, effectivePushName);
     const history       = await getHistory(phone);
 
-    const result = await askAI(phone, systemPrompt, history, englishBody);
+    const result = await askAI(phone, systemPrompt, history, body);
 
     if (!result) {
       await react(conn, mek, "❌");
@@ -849,15 +837,31 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
       return true;
     }
 
-    // ── Translate the AI's English answer back to the sender's language ──
-    // History is stored in the ORIGINAL languages (what the user actually
-    // typed, and what we actually sent back) so future context passed to
-    // the AI stays consistent with what's shown on screen.
+    // ── Translate the AI's English answer to Sinhala before sending ──
+    // Username protection: the AI's answer usually contains the user's
+    // own name (e.g. "Hi Kasun, ..."). Google Translate can mangle names
+    // when they're embedded in running text, so we swap the name out for
+    // a placeholder token, translate, then swap the ORIGINAL name back in
+    // — the name itself is never sent through translation.
     let finalText = result.text;
-    const targetCode = langToGoogleCode(lang);
-    if (targetCode !== "en") {
-      const toUser = await googleTranslate(result.text, targetCode, "en");
-      finalText = toUser.text || result.text;
+    const nameToken = "XNAMEX";
+    let textForTranslation = result.text;
+    let nameWasPresent = false;
+    if (effectivePushName) {
+      const escaped = effectivePushName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const nameRegex = new RegExp(escaped, "gi");
+      if (nameRegex.test(result.text)) {
+        nameWasPresent = true;
+        textForTranslation = result.text.replace(nameRegex, nameToken);
+      }
+    }
+
+    const toUser = await googleTranslate(textForTranslation, "si", "en");
+    finalText = toUser.text || textForTranslation;
+
+    if (nameWasPresent) {
+      const tokenRegex = new RegExp(nameToken, "gi");
+      finalText = finalText.replace(tokenRegex, effectivePushName);
     }
 
     await appendHistory(phone, "user",  body);
