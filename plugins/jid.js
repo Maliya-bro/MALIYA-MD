@@ -1,45 +1,70 @@
 const { cmd } = require("../command");
 
-cmd(
-  {
-    pattern: "getjid",
-    desc: "Get WhatsApp Channel JID",
-    category: "owner",
-    filename: __filename,
-  },
-  async (sock, mek, m, { q, reply }) => {
+cmd({
+    pattern: "newsletter",
+    alias: ["channelid", "newsid"],
+    react: "📢",
+    desc: "Get WhatsApp Newsletter JID",
+    category: "tools",
+    filename: __filename
+},
+async (conn, mek, m, { from, reply, args }) => {
+
     try {
-      if (!q) {
-        return reply(
-          "Example:\n.getjid https://whatsapp.com/channel/0029VbCyHsvAO7RKAbYw7p1o"
+
+        let url = args[0];
+
+        if (!url) {
+            url = "https://whatsapp.com/channel/0029VbCyHsvAO7RKAbYw7p1o";
+        }
+
+        // Get invite code
+        let inviteCode = url.split("/").pop();
+
+        let data = await conn.newsletterMetadata(
+            "invite",
+            inviteCode
         );
-      }
 
-      // Extract invite code
-      const match = q.match(/channel\/([A-Za-z0-9]+)/);
+        let text = `
+╭━━━〔 📢 NEWSLETTER INFO 〕━━━╮
 
-      if (!match) {
-        return reply("❌ Invalid WhatsApp Channel Link!");
-      }
+📝 Name:
+${data.name}
 
-      const inviteCode = match[1];
+🆔 Newsletter JID:
+${data.id}
 
-      // Get metadata
-      const data = await sock.newsletterMetadata(
-        "invite",
-        inviteCode
-      );
+🔗 Invite:
+${data.invite}
 
-      return reply(
-        `📢 *Channel Information*\n\n` +
-        `• Name: ${data.name}\n` +
-        `• JID: ${data.id}\n` +
-        `• Subscribers: ${data.subscribers || "Unknown"}`
-      );
+👥 Subscribers:
+${data.subscribers}
+
+✅ State:
+${data.state}
+
+╰━━━━━━━━━━━━━━━━━━╯
+`;
+
+        await conn.sendMessage(
+            from,
+            {
+                text: text
+            },
+            {
+                quoted: mek
+            }
+        );
 
     } catch (e) {
-      console.log(e);
-      reply("❌ Failed to fetch Channel JID!\n\n" + e.message);
+
+        console.log(e);
+
+        reply(
+            "❌ Error getting newsletter ID\n\n" +
+            e.message
+        );
+
     }
-  }
-);
+});
