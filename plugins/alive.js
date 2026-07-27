@@ -1,5 +1,4 @@
 const { cmd } = require("../command");
-const { sendButtons } = require("gifted-btns");
 const config = require("../config");
 const os = require("os");
 const fs = require("fs");
@@ -7,14 +6,14 @@ const path = require("path");
 
 // ------------------ Helper: Uptime ------------------
 const formatUptime = (seconds) => {
-  const pad = (s) => (s < 10 ? "0" + s : s);
+    const pad = (s) => (s < 10 ? "0" + s : s);
 
-  const days = Math.floor(seconds / (24 * 3600));
-  const hrs = Math.floor((seconds % (24 * 3600)) / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
+    const days = Math.floor(seconds / (24 * 3600));
+    const hrs = Math.floor((seconds % (24 * 3600)) / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
 
-  return `${days > 0 ? `${days}d ` : ""}${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
+    return `${days > 0 ? `${days}d ` : ""}${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
 };
 
 
@@ -25,7 +24,7 @@ cmd(
     react: "🔥",
     desc: "Check if bot is online",
     category: "main",
-    filename: __filename,
+    filename: __filename
 },
 
 async (MALIYA, mek, m, { from, reply }) => {
@@ -45,7 +44,7 @@ try {
 
 
     const channelJid = "120363427174988449@newsletter";
-    const channelName = "MALIYA-MD";
+    const channelName = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
 
 
     const aliveCaption = `
@@ -57,32 +56,19 @@ try {
 ┃ ⚡ *BOT NAME:* ${config.BOT_NAME || "🌀 MALIYA-MD 🌀"}
 ┃ 🧭 *UPTIME:* ${uptime}
 ┃ 🔋 *PLATFORM:* ${platform}
-┃ 🧩 *VERSION:* ${config.VERSION || "1.0.0"}
+┃ 🧩 *VERSION:* ${config.VERSION || "2.3.1"}
 ┃
 ╰━━━━━━━━━━━━━━━╯
 
 ⚙️ Made with ❤️ by
-
 ╭───────────────⬣
 🔥 𝙈𝘼𝙇𝙄𝙉𝘿𝙐 𝙉𝘼𝘿𝙄𝙏𝙃 🔥
 ╰───────────────⬣
 `;
 
 
-    const buttons = [
-        {
-            id: ".menu",
-            text: "📜 Menu"
-        },
-        {
-            id: ".owner",
-            text: "👤 Owner"
-        }
-    ];
 
-
-
-    // Send Video
+    // Send video if exists
     if (fs.existsSync(videoPath)) {
 
         await MALIYA.sendMessage(
@@ -101,15 +87,38 @@ try {
 
 
 
-    // Send Image + Newsletter Preview
+    // Single Message Image + Buttons + Newsletter
     await MALIYA.sendMessage(
         from,
         {
+
             image: {
                 url: aliveImg
             },
 
             caption: aliveCaption,
+
+
+            buttons: [
+                {
+                    buttonId: ".menu",
+                    buttonText: {
+                        displayText: "📜 Menu"
+                    },
+                    type: 1
+                },
+                {
+                    buttonId: ".owner",
+                    buttonText: {
+                        displayText: "👤 Owner"
+                    },
+                    type: 1
+                }
+            ],
+
+
+            headerType: 4,
+
 
             contextInfo: {
 
@@ -126,22 +135,6 @@ try {
 
             }
 
-        },
-        {
-            quoted: mek
-        }
-    );
-
-
-
-    // Send Buttons
-    await sendButtons(
-        MALIYA,
-        from,
-        {
-            text: "🧿 MALIYA-MD ONLINE",
-
-            buttons: buttons
         },
         {
             quoted: mek
