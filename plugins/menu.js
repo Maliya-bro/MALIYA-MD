@@ -9,7 +9,7 @@ const BOT_NAME = "MALIYA-MD";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
-// Channel Configuration (Synced from Alive)
+// Channel Configuration
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
 
@@ -409,7 +409,7 @@ cmd(
       await sendMainMenu(sock, from, mek, pendingMenu[k], userName);
     } catch (e) {
       console.log("MENU ERROR:", e?.message || e);
-      reply("❌ Can't send menu.");
+      reply("❌ Menu eka send karanna බැරි වුණා.");
     }
   }
 );
