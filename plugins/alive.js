@@ -37,7 +37,7 @@ try {
 
 
     const aliveImg =
-    "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/WhatsApp%20Image%202026-01-18%20at%2012.37.23.jpeg?raw=true";
+    "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_j34rhwj34rhwj34r.png?raw=true";
 
 
     const videoPath = path.join(__dirname, "../media/0908.mp4");
