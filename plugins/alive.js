@@ -45,11 +45,11 @@ try {
 
 
     const channelJid = "120363427174988449@newsletter";
-    const channelName = "🍁 ＭＡＬＩＹＡ－ 〽️ＭＤ 🍁";
+    const channelName = "MALIYA-MD";
 
 
     const aliveCaption = `
-╭━━━〔 🧿 SYSTEM ONLINE 🧿 〕━━━╮
+╭━〔 🧿 SYSTEM ONLINE 🧿 〕━╮
 ┃
 ┃ 👋 Hey ${userName}
 ┃
@@ -59,7 +59,7 @@ try {
 ┃ 🔋 *PLATFORM:* ${platform}
 ┃ 🧩 *VERSION:* ${config.VERSION || "1.0.0"}
 ┃
-╰━━━━━━━━━━━━━━━━━━╯
+╰━━━━━━━━━━━━━━━╯
 
 ⚙️ Made with ❤️ by
 
@@ -82,7 +82,7 @@ try {
 
 
 
-    // Send video if available
+    // Send Video
     if (fs.existsSync(videoPath)) {
 
         await MALIYA.sendMessage(
@@ -101,20 +101,15 @@ try {
 
 
 
-    // Send Alive Image + Buttons
-    await sendButtons(
-        MALIYA,
+    // Send Image + Newsletter Preview
+    await MALIYA.sendMessage(
         from,
         {
-
             image: {
                 url: aliveImg
             },
 
-            text: aliveCaption,
-
-            buttons: buttons,
-
+            caption: aliveCaption,
 
             contextInfo: {
 
@@ -132,11 +127,25 @@ try {
             }
 
         },
-
         {
             quoted: mek
         }
+    );
 
+
+
+    // Send Buttons
+    await sendButtons(
+        MALIYA,
+        from,
+        {
+            text: "🧿 MALIYA-MD ONLINE",
+
+            buttons: buttons
+        },
+        {
+            quoted: mek
+        }
     );
 
 
@@ -145,7 +154,7 @@ try {
     console.log("ALIVE ERROR:", err);
 
     reply(
-        "❌ Alive Error : " + err.message
+        `❌ Alive Error : ${err.message}`
     );
 
 }
