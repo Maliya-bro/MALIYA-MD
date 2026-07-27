@@ -9,6 +9,10 @@ const BOT_NAME = "MALIYA-MD";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
+// Channel Configuration (Synced from Alive)
+const CHANNEL_JID = "120363427174988449@newsletter";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
+
 const OWNER_NUMBER_RAW = String(config.BOT_OWNER || "").trim();
 const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
   ? OWNER_NUMBER_RAW
@@ -329,7 +333,7 @@ async function sendMainMenu(sock, from, mek, state, userName) {
           name: "cta_url",
           buttonParamsJson: JSON.stringify({
             display_text: "🌐 Official Website",
-            url: "https://maliya-md.replit.app",
+            url: "https://maliya-md.vercel.app",
           }),
         },
         {
@@ -340,6 +344,15 @@ async function sendMainMenu(sock, from, mek, state, userName) {
           }),
         },
       ],
+      contextInfo: {
+        forwardingScore: 999,
+        isForwarded: true,
+        forwardedNewsletterMessageInfo: {
+          newsletterJid: CHANNEL_JID,
+          newsletterName: CHANNEL_NAME,
+          serverMessageId: -1,
+        },
+      },
     },
     { quoted: mek }
   );
@@ -351,6 +364,15 @@ async function sendCommandsList(sock, from, mek, cat, list, userName) {
     {
       image: { url: headerImage },
       caption: commandListCaption(cat, list, userName),
+      contextInfo: {
+        forwardingScore: 999,
+        isForwarded: true,
+        forwardedNewsletterMessageInfo: {
+          newsletterJid: CHANNEL_JID,
+          newsletterName: CHANNEL_NAME,
+          serverMessageId: -1,
+        },
+      },
     },
     { quoted: mek }
   );
@@ -387,7 +409,7 @@ cmd(
       await sendMainMenu(sock, from, mek, pendingMenu[k], userName);
     } catch (e) {
       console.log("MENU ERROR:", e?.message || e);
-      reply("❌ Menu eka send karanna බැරි වුණා.");
+      reply("❌ Can't send menu.");
     }
   }
 );
