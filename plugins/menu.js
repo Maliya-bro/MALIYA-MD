@@ -1,5 +1,5 @@
 const { cmd, commands } = require("../command");
-const { sendButtons } = require("gifted-btns");
+const { sendInteractiveMessage } = require("gifted-btns");
 const config = require("../config");
 
 const pendingMenu = Object.create(null);
@@ -9,9 +9,9 @@ const BOT_NAME = "MALIYA-MD";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
-// Channel Configuration
+// Channel Configuration (Synced from Alive)
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️ＭＤ 🍁";
 
 const OWNER_NUMBER_RAW = String(config.BOT_OWNER || "").trim();
 const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
@@ -192,6 +192,17 @@ function commandListCaption(cat, list, userName = "User") {
   return txt;
 }
 
+function makeCategoryRows(map, categories) {
+  return categories.map((cat) => {
+    const emo = getCategoryEmoji(cat);
+    return {
+      title: `${emo} ${cat} MENU`,
+      description: `${map[cat].length} commands available`,
+      id: `menu_view:${cat}`,
+    };
+  });
+}
+
 function tryParseJsonString(s) {
   try {
     return JSON.parse(s);
@@ -298,27 +309,41 @@ function isDuplicateAction(state, action) {
 }
 
 async function sendMainMenu(sock, from, mek, state, userName) {
-  const buttons = state.categories.map((cat) => {
-    const emo = getCategoryEmoji(cat);
-    return {
-      id: `menu_view:${cat}`,
-      text: `${emo} ${cat}`
-    };
-  });
-
-  // Adding website and owner number copy buttons as well
-  buttons.push(
-    { id: "https://maliya-md.vercel.app", text: "🌐 Official Website" },
-    { id: OWNER_NUMBER, text: "📋 Copy Owner" }
-  );
-
-  return sendButtons(
+  return sendInteractiveMessage(
     sock,
     from,
     {
       image: { url: headerImage },
       text: menuHeader(userName),
-      buttons: buttons,
+      footer: `${BOT_NAME} | Interactive Menu`,
+      interactiveButtons: [
+        {
+          name: "single_select",
+          buttonParamsJson: JSON.stringify({
+            title: "Click Here ↯",
+            sections: [
+              {
+                title: "Command Categories",
+                rows: makeCategoryRows(state.map, state.categories),
+              },
+            ],
+          }),
+        },
+        {
+          name: "cta_url",
+          buttonParamsJson: JSON.stringify({
+            display_text: "🌐 Official Website",
+            url: "https://maliya-md.vercel.app",
+          }),
+        },
+        {
+          name: "cta_copy",
+          buttonParamsJson: JSON.stringify({
+            display_text: "📋 Copy Owner Number",
+            copy_code: OWNER_NUMBER,
+          }),
+        },
+      ],
       contextInfo: {
         forwardingScore: 999,
         isForwarded: true,
