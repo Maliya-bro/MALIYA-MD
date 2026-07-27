@@ -1,5 +1,4 @@
 const { cmd, commands } = require("../command");
-const { sendInteractiveMessage } = require("gifted-btns");
 const config = require("../config");
 
 const pendingMenu = Object.create(null);
@@ -192,17 +191,6 @@ function commandListCaption(cat, list, userName = "User") {
   return txt;
 }
 
-function makeCategoryRows(map, categories) {
-  return categories.map((cat) => {
-    const emo = getCategoryEmoji(cat);
-    return {
-      title: `${emo} ${cat} MENU`,
-      description: `${map[cat].length} commands available`,
-      id: `menu_view:${cat}`,
-    };
-  });
-}
-
 function tryParseJsonString(s) {
   try {
     return JSON.parse(s);
@@ -309,39 +297,51 @@ function isDuplicateAction(state, action) {
 }
 
 async function sendMainMenu(sock, from, mek, state, userName) {
-  return sendInteractiveMessage(
-    sock,
+  const rows = state.categories.map((cat) => {
+    const emo = getCategoryEmoji(cat);
+    return {
+      title: `${emo} ${cat} MENU`,
+      rowId: `menu_view:${cat}`,
+      description: `${state.map[cat].length} commands available`,
+    };
+  });
+
+  return sock.sendMessage(
     from,
     {
       image: { url: headerImage },
-      text: menuHeader(userName),
+      caption: menuHeader(userName),
       footer: `${BOT_NAME} | Interactive Menu`,
-      interactiveButtons: [
+      headerType: 4,
+      buttons: [
         {
-          name: "single_select",
-          buttonParamsJson: JSON.stringify({
-            title: "Click Here ↯",
-            sections: [
-              {
-                title: "Command Categories",
-                rows: makeCategoryRows(state.map, state.categories),
-              },
-            ],
-          }),
+          buttonId: "action_menu",
+          buttonText: { displayText: "📜 Click Here ↯" },
+          type: 4,
+          nativeFlowInfo: {
+            name: "single_select",
+            paramsJson: JSON.stringify({
+              title: "Command Categories",
+              sections: [
+                {
+                  title: "Categories",
+                  rows: rows,
+                },
+              ],
+            }),
+          },
         },
         {
-          name: "cta_url",
-          buttonParamsJson: JSON.stringify({
-            display_text: "🌐 Official Website",
-            url: "https://maliya-md.vercel.app",
-          }),
+          buttonId: "official_web",
+          buttonText: { displayText: "🌐 Official Website" },
+          type: 1,
+          url: "https://maliya-md.vercel.app",
         },
         {
-          name: "cta_copy",
-          buttonParamsJson: JSON.stringify({
-            display_text: "📋 Copy Owner Number",
-            copy_code: OWNER_NUMBER,
-          }),
+          buttonId: "copy_owner",
+          buttonText: { displayText: "📋 Copy Owner Number" },
+          type: 1,
+          copyCode: OWNER_NUMBER,
         },
       ],
       contextInfo: {
