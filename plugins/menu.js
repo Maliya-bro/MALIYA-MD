@@ -1,4 +1,5 @@
 const { cmd, commands } = require("../command");
+const { sendButtons } = require("gifted-btns");
 const config = require("../config");
 
 const pendingMenu = Object.create(null);
@@ -297,53 +298,27 @@ function isDuplicateAction(state, action) {
 }
 
 async function sendMainMenu(sock, from, mek, state, userName) {
-  const rows = state.categories.map((cat) => {
+  const buttons = state.categories.map((cat) => {
     const emo = getCategoryEmoji(cat);
     return {
-      title: `${emo} ${cat} MENU`,
-      rowId: `menu_view:${cat}`,
-      description: `${state.map[cat].length} commands available`,
+      id: `menu_view:${cat}`,
+      text: `${emo} ${cat}`
     };
   });
 
-  return sock.sendMessage(
+  // Adding website and owner number copy buttons as well
+  buttons.push(
+    { id: "https://maliya-md.vercel.app", text: "🌐 Official Website" },
+    { id: OWNER_NUMBER, text: "📋 Copy Owner" }
+  );
+
+  return sendButtons(
+    sock,
     from,
     {
       image: { url: headerImage },
-      caption: menuHeader(userName),
-      footer: `${BOT_NAME} | Interactive Menu`,
-      headerType: 4,
-      buttons: [
-        {
-          buttonId: "action_menu",
-          buttonText: { displayText: "📜 Click Here ↯" },
-          type: 4,
-          nativeFlowInfo: {
-            name: "single_select",
-            paramsJson: JSON.stringify({
-              title: "Command Categories",
-              sections: [
-                {
-                  title: "Categories",
-                  rows: rows,
-                },
-              ],
-            }),
-          },
-        },
-        {
-          buttonId: "official_web",
-          buttonText: { displayText: "🌐 Official Website" },
-          type: 1,
-          url: "https://maliya-md.vercel.app",
-        },
-        {
-          buttonId: "copy_owner",
-          buttonText: { displayText: "📋 Copy Owner Number" },
-          type: 1,
-          copyCode: OWNER_NUMBER,
-        },
-      ],
+      text: menuHeader(userName),
+      buttons: buttons,
       contextInfo: {
         forwardingScore: 999,
         isForwarded: true,
