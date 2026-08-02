@@ -2,7 +2,7 @@
  * CineSubz.lk Movie Download Plugin for MALIYA-MD
  * ─────────────────────────────────────────────────
  * Developers: Malindu Nadith Kumarathunga
- * Features: Puppeteer Stealth Bypass, Dynamic Loading Overlay Wait, Native Cookie Injection, Live Console Tracking
+ * Features: Puppeteer Stealth Advanced, Human Mouse Emulation, Loading Bypass, Live Tracking
  * 
  * Required Packages: npm install axios cheerio puppeteer-extra puppeteer-extra-plugin-stealth
  */
@@ -14,7 +14,6 @@ const fs        = require("fs");
 const path      = require("path");
 const { execSync } = require("child_process");
 
-// Anti-bot detection bypass කරන්න puppeteer stealth පාවිච්චි කරයි
 const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 puppeteer.use(StealthPlugin());
@@ -28,7 +27,7 @@ const TIMEOUT = 20_000;
 
 const HEADERS = {
   "User-Agent"      : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-  "Accept"          : "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept"          : "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
   "Accept-Language" : "en-US,en;q=0.9",
   "Accept-Encoding" : "gzip, deflate, br",
   "Referer"         : BASE,
@@ -182,7 +181,7 @@ function applyExtSuffix(url) {
   return url;
 }
 
-// ─── 🌐 4. Core Puppeteer Bypass Engine ───────────────────────────────────────
+// ─── 🌐 4. Core Advanced Puppeteer Bypass Engine ───────────────────────────────────────
 
 let _browser = null;
 async function getBrowser() {
@@ -195,11 +194,10 @@ async function getBrowser() {
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--no-zygote",
-      "--single-process",
-      "--disable-blink-features=AutomationControlled",
-      "--window-size=1920,1080"
+      "--disable-web-security",
+      "--disable-features=IsolateOrigins,site-per-process",
+      "--blink-features=AutomationControlled",
+      "--window-size=1440,900"
     ],
   });
   return _browser;
@@ -210,16 +208,18 @@ async function resolveSonicCloudPage(sonicUrl) {
   const page    = await browser.newPage();
 
   try {
-    console.log(`\n[MALIYA-MD] 🌐 Opening sonic-cloud page: ${sonicUrl}`);
-    await page.setViewport({ width: 1920, height: 1080 });
+    console.log(`\n[MALIYA-MD] 🌐 Opening sonic-cloud target: ${sonicUrl}`);
+    await page.setViewport({ width: 1440, height: 900 });
     
+    // Real desktop browser headers
     const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
     await page.setUserAgent(userAgent);
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Sec-Ch-Ua': '"Not A(Brand";v="8", "Chromium";v="132", "Google Chrome";v="132"',
-      'Sec-Ch-Ua-Mobile': '?0',
-      'Sec-Ch-Ua-Platform': '"Windows"'
+    
+    // Anti-Bot Fingerprint Tricking
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      window.chrome = { runtime: {} };
     });
 
     let capturedUrl = null;
@@ -227,51 +227,57 @@ async function resolveSonicCloudPage(sonicUrl) {
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame()) {
         const url = frame.url();
-        if (url && !url.includes("sonic-cloud.online") && url.startsWith("http")) {
+        if (url && !url.includes("sonic-cloud.online") && !url.includes("fordev.jpg") && url.startsWith("http")) {
           capturedUrl = url;
-          console.log(`[MALIYA-MD] 🎯 Frame Redirect Captured: ${capturedUrl}`);
+          console.log(`[MALIYA-MD] 🎯 Real Video Redirect Captured: ${capturedUrl}`);
         }
       }
     });
 
-    console.log("[MALIYA-MD] ⏳ Waiting for network to become idle...");
-    await page.goto(sonicUrl, { waitUntil: "networkidle2", timeout: 40000 });
+    console.log("[MALIYA-MD] ⏳ Initializing connection architecture...");
+    await page.goto(sonicUrl, { waitUntil: "domcontentloaded", timeout: 40000 });
 
-    // ── FIX: LOADING OVERLAY WAIT ──
-    console.log("[MALIYA-MD] ⏳ CineSubz Loading screen detected. Waiting 4.5 seconds for overlay cleanup...");
-    await new Promise(r => setTimeout(r, 4500)); 
+    // ── FIX: EXTENDED LOADING SYNC ──
+    console.log("[MALIYA-MD] ⏳ CineSubz Loading screen detected. Waiting 8 seconds for full token handshake...");
+    await new Promise(r => setTimeout(r, 8000)); 
 
-    console.log("[MALIYA-MD] 🔍 Searching for 'Direct Download' buttons in DOM...");
-    await page.waitForSelector("#dl-links button, .direct-download, a[href*='ext=mp4']", { timeout: 15000 })
-      .catch(() => console.log("[MALIYA-MD] ⚠️ Button selector wait timed out, attempting forced click logic."));
+    console.log("[MALIYA-MD] 🔍 Checking target buttons inside document context...");
+    const btnSelector = "#dl-links button, .direct-download, button.direct-download, a[href*='ext=']";
+    await page.waitForSelector(btnSelector, { timeout: 10000 })
+      .catch(() => console.log("[MALIYA-MD] ⚠️ Timeout, attempting structural click override."));
 
     const fileSize = await page.evaluate(() => {
       const text = document.body.innerText || "";
       const m = text.match(/File Size:\s*\n?\s*([\d.]+\s*(MB|GB))/i);
       return m ? m[1] : null;
     });
-    console.log(`[MALIYA-MD] 📊 File size extracted from page: ${fileSize}`);
+    console.log(`[MALIYA-MD] 📊 Web UI reported file size: ${fileSize}`);
 
-    console.log("[MALIYA-MD] 🖱️ Force clicking the download button trigger...");
-    const clicked = await page.evaluate(() => {
-      const btn = document.querySelector("#dl-links button") || 
-                  document.querySelector(".direct-download") || 
-                  document.querySelector("button.direct-download");
-      if (btn) { btn.click(); return true; }
-      return false;
-    });
-
-    if (clicked) {
-      console.log("[MALIYA-MD] ✅ Button clicked successfully! Waiting for dynamic token generation...");
-      await new Promise(r => setTimeout(r, 6000)); 
+    // ── FIX: HUMAN EMULATED MOUSE CLICK ──
+    console.log("[MALIYA-MD] 🖱️ Finding coordinates for safe human mouse click simulation...");
+    const element = await page.$(btnSelector);
+    if (element) {
+      const box = await element.boundingBox();
+      if (box) {
+        // Move mouse to button center and click like a human
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.up();
+        console.log("[MALIYA-MD] 🤝 Human emulated click triggered successfully.");
+      } else {
+        await page.evaluate((sel) => { document.querySelector(sel)?.click(); }, btnSelector);
+      }
     } else {
-      console.log("[MALIYA-MD] ❌ Dynamic click could not execute.");
+      await page.evaluate((sel) => { document.querySelector(sel)?.click(); }, btnSelector);
     }
 
-    // ── COOKIE EXTRACOR ──
+    console.log("[MALIYA-MD] ⏳ Processing redirection pipeline...");
+    await new Promise(r => setTimeout(r, 7000)); 
+
+    // Extracting session tokens
     const cookies = await page.cookies();
     const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-    console.log(`[MALIYA-MD] 🍪 Successfully grabbed session cookies: [${cookies.length} cookies found]`);
+    console.log(`[MALIYA-MD] 🍪 Cookies extracted: [${cookies.length} active sessions found]`);
 
     const telegramHref = await page.evaluate(() => {
       const a = document.querySelector("a.telegram-download");
@@ -279,11 +285,11 @@ async function resolveSonicCloudPage(sonicUrl) {
     }).catch(() => null);
 
     const finalPageUrl = page.url();
-    if (!capturedUrl && finalPageUrl && !finalPageUrl.includes("sonic-cloud")) {
+    if (!capturedUrl && finalPageUrl && !finalPageUrl.includes("sonic-cloud") && !finalPageUrl.includes("fordev.jpg")) {
       capturedUrl = finalPageUrl;
     }
 
-    console.log(`[MALIYA-MD] 🚀 Final Direct URL resolved: ${capturedUrl || finalPageUrl}`);
+    console.log(`[MALIYA-MD] 🚀 Result link: ${capturedUrl || finalPageUrl}`);
     
     await page.close().catch(() => {});
     return { 
@@ -295,7 +301,7 @@ async function resolveSonicCloudPage(sonicUrl) {
     };
 
   } catch (e) {
-    console.log(`[MALIYA-MD] ❌ Puppeteer Core Error: ${e.message}`);
+    console.log(`[MALIYA-MD] ❌ Puppeteer Core Failure: ${e.message}`);
     await page.close().catch(() => {});
     throw e;
   }
@@ -344,7 +350,7 @@ async function resolveZtLink(ztUrl) {
       };
     }
   } catch (e) {
-    console.log("[cinesubz] Sonic-Cloud page processing failure:", e.message);
+    console.log("[cinesubz] Warning mapping sonic page:", e.message);
   }
 
   return { url: sonicUrl, isTelegram: false };
@@ -352,7 +358,6 @@ async function resolveZtLink(ztUrl) {
 
 // ─── 💬 5. Bot Commands Flow ─────────────────────────────────────────────────
 
-// Step 1: Search Trigger
 cmd({
   pattern : "film",
   alias   : ["movie", "cinema", "cine", "sub", "films"],
@@ -389,7 +394,6 @@ cmd({
   reply(text);
 });
 
-// Step 2: Quality Presenter
 cmd({
   filter: (text, { sender }) =>
     pendingSearch[sender] &&
@@ -442,7 +446,6 @@ cmd({
   } catch (_) { await maliya.sendMessage(from, { text: msg }, { quoted: mek }); }
 });
 
-// Step 3: Wget Downloader & Custom Document Sender
 cmd({
   filter: (text, { sender }) =>
     pendingQuality[sender] &&
@@ -468,15 +471,16 @@ cmd({
     return reply(`*❌ Resolve error:* ${e.message}`); 
   }
 
-  if (!resolved || !resolved.url) {
-    console.log("[BOT COMMAND] ❌ Resolved URL target is null.");
-    return reply(`*❌ Can't get direct link.*\nTry another link.`);
+  // ── FIX: TRAP URL PROTECTION BLOCK ──
+  if (!resolved || !resolved.url || resolved.url.includes("fordev.jpg")) {
+    console.log("[BOT COMMAND] ❌ Redirected to Trap URL (fordev.jpg). System blocked.");
+    return reply(`*❌ Bot Detection Firewall Active!*\nServer blocked our request. Please try again in a few moments.`);
   }
 
   const finalSize = resolved.confirmedSize || chosen.size;
 
   if (resolved.isTelegram) {
-    console.log("[BOT COMMAND] 📲 Telegram link matched. Redirecting client.");
+    console.log("[BOT COMMAND] 📲 Telegram link matched.");
     return maliya.sendMessage(from, {
       text: `*🎬 ${title}*\n*Size:* ${finalSize}\n\n📲 *Telegram Link:*\n${resolved.url}`,
     }, { quoted: mek });
@@ -486,22 +490,19 @@ cmd({
   const tempFilePath = path.join(__dirname, fileName);
 
   reply(`*⬇️ Downloading film via Cookie Bypass... (${finalSize})*\nThis will take a moment, please wait... ⏳`);
-  console.log(`[DOWNLOAD PROCESS] 📂 Local Destination path: ${tempFilePath}`);
+  console.log(`[DOWNLOAD PROCESS] 📂 Destination path: ${tempFilePath}`);
 
   try {
-    // Injecting Headers and Cookie Array to Native Wget
     let wgetCommand = `wget -U "${resolved.userAgent || HEADERS['User-Agent']}" --header="Referer: https://bot3.sonic-cloud.online/" `;
     if (resolved.cookieStr) {
       wgetCommand += `--header="Cookie: ${resolved.cookieStr}" `;
     }
     wgetCommand += `"${resolved.url}" -O "${tempFilePath}"`;
     
-    console.log(`[WGET RUNNING] ⚙️ Executing system down: ${wgetCommand}`);
-    
-    // Live execution logs tracking
+    console.log(`[WGET RUNNING] ⚙️ Executing download task...`);
     execSync(wgetCommand, { stdio: 'inherit', timeout: 600000 });
 
-    console.log("[DOWNLOAD PROCESS] 📂 Verification metrics testing...");
+    console.log("[DOWNLOAD PROCESS] 📂 Checking file metrics on disk...");
     if (!fs.existsSync(tempFilePath)) {
       throw new Error("Wget task finished but object missing on storage filesystem.");
     }
@@ -509,13 +510,13 @@ cmd({
     const stats = fs.statSync(tempFilePath);
     console.log(`[DOWNLOAD PROCESS] 📦 Size on Storage: ${(stats.size / (1024*1024)).toFixed(2)} MB`);
 
+    // Trap Check: 5MB වලට වඩා අඩු නම් ඒක අනිවාර්යයෙන්ම error file එකක්
     if (stats.size < 5000000) { 
-      throw new Error(`Corrupted file payload size (${stats.size} bytes). Security walls still active.`);
+      throw new Error(`Corrupted payload detected (${stats.size} bytes). Cloudflare/Bot wall triggered.`);
     }
 
     reply(`*⬆️ Film successfully grabbed! Uploading to WhatsApp...* 🚀\n_Free WhatsApp Data package will be consumed now._`);
-    console.log("[UPLOAD PROCESS] 📤 Handing stream context over to Baileys engine...");
-
+    
     await maliya.sendMessage(from, {
       document: { url: tempFilePath },
       mimetype : "video/mp4",
@@ -527,16 +528,13 @@ cmd({
         `*Enjoy! 🍿*\n_Bypassed & Delivered by MALIYA-MD_`,
     }, { quoted: mek });
 
-    console.log("[UPLOAD PROCESS] ✅ File sent successfully. Cleaning up cache storage...");
-    if (fs.existsSync(tempFilePath)) {
-      fs.unlinkSync(tempFilePath);
-    }
-
-  } catch (err) {
-    console.error(`\n[CRITICAL ERROR] ❌ MALIYA-MD Core Downloader Stacktrace: ${err.message}`);
+    console.log("[UPLOAD PROCESS] ✅ File sent. Cleaning storage...");
     if (fs.existsSync(tempFilePath)) { fs.unlinkSync(tempFilePath); }
 
-    console.log("[BOT PROCESS] 🔄 Fallback trigger: giving direct url instead.");
+  } catch (err) {
+    console.error(`\n[CRITICAL ERROR] ❌ MALIYA-MD Downloader Exception: ${err.message}`);
+    if (fs.existsSync(tempFilePath)) { fs.unlinkSync(tempFilePath); }
+
     await maliya.sendMessage(from, {
       text:
         `*🎬 ${title}*  [${quality}]  ${finalSize}\n\n` +
@@ -546,7 +544,6 @@ cmd({
   }
 });
 
-// Cache Cleaning System
 setInterval(() => {
   const now = Date.now(), ttl = 10 * 60 * 1000;
   for (const s in pendingSearch)  if (now - pendingSearch[s].timestamp  > ttl) delete pendingSearch[s];
