@@ -4,16 +4,19 @@
  * Developer: Malindu Nadith Kumarathunga
  * Upgraded Features: 
  *   - Fingerprint Evasion Engine v2.1.87 (Using newInjectedPage)
- *   - Network Request Deep Interception (Grabs token before fordev.jpg redirect)
- *   - Full Adblocker Engine (Blocks malicious trackers/forced redirects on the fly)
- *   - Axios Stream Downloader (Replaces wget to fix 403 Forbidden)
+ *   - Advanced CDN & Token Interceptor (Captures cache01.avatarzone.online with tokens)
+ *   - Dynamic Popup Target Interceptor (Bypasses 1-Sec Auto-Close Token Redirects)
+ *   - Native Wget Process Engine (Prevents connection drops on big files)
  */
 
 const { cmd } = require("../command");
 const axios = require("axios");
+const axiosRetry = require("axios-retry").default;
+const https = require("https");
 const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
+const { exec } = require("child_process");
 
 // Advanced Puppeteer Setup
 const puppeteer = require("puppeteer-extra");
@@ -25,6 +28,15 @@ const { newInjectedPage } = require('fingerprint-injector');
 
 puppeteer.use(StealthPlugin());
 puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
+
+// ⚡ Axios Auto-Retry Configuration
+axiosRetry(axios, { 
+    retries: 3, 
+    retryDelay: axiosRetry.exponentialDelay,
+    retryCondition: (error) => {
+        return axiosRetry.isNetworkOrIdempotentRequestError(error) || error.code === 'ECONNABORTED';
+    }
+});
 
 const pendingSearch = {};
 const pendingQuality = {};
@@ -219,7 +231,6 @@ async function resolveSonicCloudPage(sonicUrl) {
   try {
     console.log(`\n[MALIYA-MD] 🌐 Initializing Fingerprint Evasion Engine on target...`);
     
-    // 🎭 New v2.1.87 Integration: Direct Pre-Injected Page generation
     page = await newInjectedPage(browser, {
       fingerprintOptions: {
         devices: ['desktop'],
@@ -229,37 +240,27 @@ async function resolveSonicCloudPage(sonicUrl) {
 
     await page.setViewport({ width: 1920, height: 1080 });
 
-    // Deep Network Request Interception
     await page.setRequestInterception(true);
     let interceptedUrl = null;
 
+    // Main Page Interceptor (Added token & avatarzone support)
     page.on('request', request => {
       const url = request.url();
-      if (url.includes('bot=cscloud') || url.includes('ext=') || url.includes('/download/') || (url.includes('server') && url.includes('?code='))) {
+      if (url.includes('bot=cscloud') || url.includes('ext=') || url.includes('/download/') || url.includes('?token=') || url.includes('avatarzone') || (url.includes('server') && url.includes('?code='))) {
         if (!url.includes("fordev.jpg")) {
           interceptedUrl = url;
-          console.log(`[MALIYA-MD] 🎯 Deep Network Request Intercepted: ${interceptedUrl}`);
+          console.log(`[MALIYA-MD] 🎯 Main Interceptor Captured: ${interceptedUrl}`);
         }
       }
       if (request.resourceType() === 'image' && url.includes('fordev.jpg')) {
-        return request.abort(); // Block Trap Redirection Images
+        return request.abort(); 
       }
       request.continue();
     });
 
-    page.on("framenavigated", (frame) => {
-      if (frame === page.mainFrame()) {
-        const url = frame.url();
-        if (url && !url.includes("sonic-cloud.online") && !url.includes("fordev.jpg") && url.startsWith("http")) {
-          interceptedUrl = url;
-          console.log(`[MALIYA-MD] 🎯 Navigation Redirect Captured: ${interceptedUrl}`);
-        }
-      }
-    });
-
     console.log("[MALIYA-MD] ⏳ Connecting to pipeline architecture...");
     await page.goto(sonicUrl, { waitUntil: "networkidle2", timeout: 45000 });
-    await new Promise(r => setTimeout(r, 8000)); 
+    await new Promise(r => setTimeout(r, 4000)); 
 
     const btnSelector = "#dl-links button, .direct-download, button.direct-download, a[href*='ext=']";
     
@@ -271,7 +272,9 @@ async function resolveSonicCloudPage(sonicUrl) {
 
     await page.waitForSelector(btnSelector, { timeout: 6000 }).catch(() => {});
 
-    // 🖱️ Mouse Click Simulation (Human Emulated)
+    // [POPUP INTERCEPTOR TARGET]
+    const newTargetPromise = new Promise(resolve => browser.once('targetcreated', target => resolve(target.page())));
+
     console.log("[MALIYA-MD] 🖱️ Executing Human Emulated Vector Click...");
     const element = await page.$(btnSelector);
     if (element) {
@@ -290,7 +293,30 @@ async function resolveSonicCloudPage(sonicUrl) {
       }).catch(() => {});
     }
 
-    await new Promise(r => setTimeout(r, 7000)); 
+    console.log("[MALIYA-MD] ⏳ Waiting for 1-Sec Token Validation Page to spawn...");
+    const popupPage = await newTargetPromise.catch(() => null);
+    
+    if (popupPage) {
+      console.log("[MALIYA-MD] 🛑 Validation Page Captured! Waiting for Token generation...");
+      
+      // Popup Page Request Interceptor (Grabs avatarzone CDN link + ?token= instantly)
+      popupPage.on('request', req => {
+        const u = req.url();
+        if (u.includes('bot=cscloud') || u.includes('ext=') || u.includes('?code=') || u.includes('?token=') || u.includes('avatarzone')) {
+          interceptedUrl = u;
+          console.log(`[MALIYA-MD] 🎯 Popup Redirect Token Intercepted: ${interceptedUrl}`);
+        }
+      });
+
+      let checks = 0;
+      while (!popupPage.isClosed() && checks < 20) {
+        await new Promise(r => setTimeout(r, 500));
+        checks++;
+      }
+      console.log("[MALIYA-MD] ✅ Validation Page handled. Pipeline Ready.");
+    } else {
+      await new Promise(r => setTimeout(r, 5000));
+    }
 
     const cookies = await page.cookies();
     const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
@@ -499,33 +525,36 @@ cmd({
   const fileName = `${title} [${quality}] [CineSubz].mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
   const tempFilePath = path.join(__dirname, fileName);
 
-  reply(`*⬇️ Downloading film via Fingerprinted Stream Session... (${finalSize})*\nකරුණාකර රැඳී සිටින්න... ⏳`);
+  reply(`*⬇️ Downloading film via Native Cloud Injector Engine... (${finalSize})*\nකරුණාකර රැඳී සිටින්න... ⏳`);
 
   try {
-    // ⚡ Axios Stream Downloader mapped strictly to resolved.directUrl
-    const response = await axios({
-      method: 'get',
-      url: resolved.directUrl || resolved.url,
-      responseType: 'stream',
-      headers: {
-        'User-Agent': resolved.userAgent || HEADERS['User-Agent'],
-        'Cookie': resolved.cookieStr || '',
-        'Referer': 'https://bot3.sonic-cloud.online/',
-        'Accept': '*/*'
-      }
-    });
+    const downloadUrl = resolved.directUrl || resolved.url;
+    const userAgent = resolved.userAgent || HEADERS['User-Agent'];
+    const cookieStr = resolved.cookieStr || '';
 
-    const writer = fs.createWriteStream(tempFilePath);
-    response.data.pipe(writer);
+    // 🚀 Linux Native Wget Engine Setup
+    const wgetCommand = `wget --tries=3 --timeout=60 --no-check-certificate \
+      --user-agent="${userAgent}" \
+      --header="Cookie: ${cookieStr}" \
+      --header="Referer: https://bot3.sonic-cloud.online/" \
+      --header="Accept: */*" \
+      -O "${tempFilePath}" "${downloadUrl}"`;
 
+    console.log(`[MALIYA-MD] ⚡ Spawning Native Process Engine...`);
+    
     await new Promise((resolve, reject) => {
-      writer.on('finish', resolve);
-      writer.on('error', reject);
+      exec(wgetCommand, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`[MALIYA-MD] Wget Error: ${stderr}`);
+          return reject(new Error("Native pipeline download failed."));
+        }
+        resolve();
+      });
     });
 
     const stats = fs.statSync(tempFilePath);
     if (stats.size < 5000000) { 
-      throw new Error("Corrupted payload or block page downloaded.");
+      throw new Error("Corrupted payload or unauthorized session drop.");
     }
 
     reply(`*⬆️ Film successfully grabbed! Uploading to WhatsApp...* 🚀`);
@@ -538,18 +567,19 @@ cmd({
         `*🎬 ${title}*\n` +
         `*📊 Quality:* ${quality}\n` +
         `*💾 Size:* ${finalSize}\n\n` +
-        `*Enjoy! 🍿*\n_Bypassed & Delivered by MALIYA-MD_`,
+        `*Enjoy! 🍿*\n_Secured & Delivered by MALIYA-MD_`,
     }, { quoted: mek });
 
     if (fs.existsSync(tempFilePath)) { fs.unlinkSync(tempFilePath); }
 
   } catch (err) {
     if (fs.existsSync(tempFilePath)) { fs.unlinkSync(tempFilePath); }
+    console.log(`[MALIYA-MD] Native Engine Fallback Triggered: ${err.message}`);
 
     await maliya.sendMessage(from, {
       text:
         `*🎬 ${title}*  [${quality}]  ${finalSize}\n\n` +
-        `⚠️ *සර්වර් එකේ Strict Encryption නිසා වට්සැප් එකට direct එවීම අසාර්ථක විය.*\n\n` +
+        `⚠️ *සර්වර් එකේ Strict API Security එක නිසා වට්සැප් එකට direct එවීම අසාර්ථක විය.*\n\n` +
         `👇 පහල Direct Link එක ක්ලික් කරලා ඔයාගේ බ්‍රවුසර් එකෙන්ම බාගන්න:\n${resolved.directUrl || resolved.url}`,
     }, { quoted: mek });
   }
