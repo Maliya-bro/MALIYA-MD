@@ -3,7 +3,7 @@
  * ─────────────────────────────────────────────────────────────
  * Developer: Malindu Nadith Kumarathunga
  * Upgraded Features: 
- *   - Fingerprint Injection Evasion (Bypasses TLS/Cloudflare V2 blocks)
+ *   - Fingerprint Evasion Engine v2.1.87 (Using newInjectedPage)
  *   - Network Request Deep Interception (Grabs token before fordev.jpg redirect)
  *   - Full Adblocker Engine (Blocks malicious trackers/forced redirects on the fly)
  *   - Axios Stream Downloader (Replaces wget to fix 403 Forbidden)
@@ -20,18 +20,11 @@ const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const AdblockerPlugin = require("puppeteer-extra-plugin-adblocker");
 
-// Fingerprint Simulation Setup
-const { FingerprintGenerator } = require('fingerprint-generator');
-const { attachFingerprintToPuppeteer } = require('fingerprint-injector'); // Fixed Functional Import
+// 🎭 Fingerprint Injector (Latest v2.1.87 API)
+const { newInjectedPage } = require('fingerprint-injector'); 
 
 puppeteer.use(StealthPlugin());
 puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
-
-const fingerprintGenerator = new FingerprintGenerator({
-    browsers: [{ name: 'chrome', minVersion: 120 }],
-    devices: ['desktop'],
-    operatingSystems: ['windows'],
-});
 
 const pendingSearch = {};
 const pendingQuality = {};
@@ -221,15 +214,20 @@ async function getBrowser() {
 
 async function resolveSonicCloudPage(sonicUrl) {
   const browser = await getBrowser();
-  const page = await browser.newPage();
+  let page;
 
   try {
     console.log(`\n[MALIYA-MD] 🌐 Initializing Fingerprint Evasion Engine on target...`);
-    await page.setViewport({ width: 1920, height: 1080 });
     
-    // 🎭 Real Browser Fingerprint Injection (Fixed Functional Call)
-    const fingerprint = fingerprintGenerator.getFingerprint();
-    await attachFingerprintToPuppeteer(page, fingerprint);
+    // 🎭 New v2.1.87 Integration: Direct Pre-Injected Page generation
+    page = await newInjectedPage(browser, {
+      fingerprintOptions: {
+        devices: ['desktop'],
+        operatingSystems: ['windows'],
+      },
+    });
+
+    await page.setViewport({ width: 1920, height: 1080 });
 
     // Deep Network Request Interception
     await page.setRequestInterception(true);
@@ -320,7 +318,7 @@ async function resolveSonicCloudPage(sonicUrl) {
 
   } catch (e) {
     console.log(`[MALIYA-MD] ❌ Engine Exception: ${e.message}`);
-    await page.close().catch(() => {});
+    if (page) await page.close().catch(() => {});
     throw e;
   }
 }
