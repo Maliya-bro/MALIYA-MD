@@ -1,36 +1,45 @@
 /**
- * CineSubz.lk Movie Download Plugin for MALIYA-MD
- * ─────────────────────────────────────────────────
- * Developers: Malindu Nadith Kumarathunga
- * Features: Puppeteer Stealth Advanced, Human Mouse Emulation, Loading Bypass, Live Tracking
+ * CineSubz.lk Ultimate Movie Downloader Plugin for MALIYA-MD
+ * ─────────────────────────────────────────────────────────────
+ * Developer: Malindu Nadith Kumarathunga
+ * Upgraded Features: 
+ *   - Network Request Deep Interception (Grabs token before fordev.jpg redirect)
+ *   - Advanced Puppeteer Stealth (Evades Cloudflare V2 & WebDriver Checks)
+ *   - Full Adblocker Engine (Blocks malicious trackers/forced redirects on the fly)
+ *   - Evasion Sandbox & Human Behavior Emulation
  * 
- * Required Packages: npm install axios cheerio puppeteer-extra puppeteer-extra-plugin-stealth
+ * Required Packages: npm install axios cheerio puppeteer puppeteer-extra puppeteer-extra-plugin-stealth puppeteer-extra-plugin-adblocker crypto-js
  */
 
-const { cmd }   = require("../command");
-const axios     = require("axios");
-const cheerio   = require("cheerio");
-const fs        = require("fs");
-const path      = require("path");
+const { cmd } = require("../command");
+const axios = require("axios");
+const cheerio = require("cheerio");
+const fs = require("fs");
+const path = require("path");
 const { execSync } = require("child_process");
 
+// Advanced Puppeteer Setup
 const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
-puppeteer.use(StealthPlugin());
+const AdblockerPlugin = require("puppeteer-extra-plugin-adblocker");
 
-const pendingSearch  = {};
+// Stealth සහ Adblocker Plugins සක්‍රීය කිරීම
+puppeteer.use(StealthPlugin());
+puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
+
+const pendingSearch = {};
 const pendingQuality = {};
 
-const BASE    = "https://cinesubz.lk";
-const MAX_MB  = 2048; // WhatsApp Limit (2GB)
-const TIMEOUT = 20_000;
+const BASE = "https://cinesubz.lk";
+const MAX_MB = 2048; // WhatsApp Limit (2GB)
+const TIMEOUT = 25000;
 
 const HEADERS = {
-  "User-Agent"      : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-  "Accept"          : "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-  "Accept-Language" : "en-US,en;q=0.9",
-  "Accept-Encoding" : "gzip, deflate, br",
-  "Referer"         : BASE,
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Accept-Encoding": "gzip, deflate, br",
+  "Referer": BASE,
 };
 
 // ─── 💡 Helpers ──────────────────────────────────────────────────────────────
@@ -60,11 +69,11 @@ function parseSizeMB(s = "") {
 
 function normalizeQuality(t = "") {
   const u = t.toUpperCase();
-  if (u.includes("2160") || u.includes("4K"))  return "4K";
+  if (u.includes("2160") || u.includes("4K")) return "4K";
   if (u.includes("1080") || u.includes("FHD")) return "1080p";
-  if (u.includes("720")  || u.includes("HD"))  return "720p";
-  if (u.includes("480")  || u.includes("SD"))  return "480p";
-  if (u.includes("360"))                        return "360p";
+  if (u.includes("720") || u.includes("HD")) return "720p";
+  if (u.includes("480") || u.includes("SD")) return "480p";
+  if (u.includes("360")) return "360p";
   return t.trim() || "Unknown";
 }
 
@@ -72,27 +81,27 @@ function normalizeQuality(t = "") {
 
 async function searchMovies(query) {
   const { data } = await get(`${BASE}/?s=${encodeURIComponent(query)}`);
-  const $        = cheerio.load(data);
-  const results  = [], seen = new Set();
+  const $ = cheerio.load(data);
+  const results = [], seen = new Set();
 
   $(".display-item .item-box, article, .post").each((_, el) => {
-    const a     = $(el).find("a[href*='/movies/'], a[href*='/tvshows/']").first();
-    const href  = a.attr("href") || "";
+    const a = $(el).find("a[href*='/movies/'], a[href*='/tvshows/']").first();
+    const href = a.attr("href") || "";
     const title = (a.attr("title") || a.text()).trim();
     if (!href || !title || seen.has(href)) return;
     seen.add(href);
     results.push({
       title,
-      url  : href,
-      imdb : $(el).find("[class*='data-imdb']").first().text().replace(/imdb[:\s]*/i, "").trim(),
-      year : $(el).find("[class*='year']").first().text().trim(),
+      url: href,
+      imdb: $(el).find("[class*='data-imdb']").first().text().replace(/imdb[:\s]*/i, "").trim(),
+      year: $(el).find("[class*='year']").first().text().trim(),
       thumb: $(el).find("img").first().attr("src") || "",
     });
   });
 
   if (!results.length) {
     $("a[href*='/movies/'], a[href*='/tvshows/']").each((_, el) => {
-      const href  = $(el).attr("href") || "";
+      const href = $(el).attr("href") || "";
       const title = ($(el).attr("title") || $(el).text()).trim();
       if (!href || !title || seen.has(href) || href === BASE) return;
       seen.add(href);
@@ -107,7 +116,7 @@ async function searchMovies(query) {
 
 async function getMovieMeta(movieUrl) {
   const { data } = await get(movieUrl);
-  const $        = cheerio.load(data);
+  const $ = cheerio.load(data);
 
   const title = cleanTitle(
     $(".info-details .details-title h3").first().text().trim() ||
@@ -117,12 +126,12 @@ async function getMovieMeta(movieUrl) {
   );
 
   const thumb = $(".splash-bg img").first().attr("src") ||
-                $(".poster img").first().attr("src") ||
-                $(".wp-post-image").first().attr("src") || "";
+    $(".poster img").first().attr("src") ||
+    $(".wp-post-image").first().attr("src") || "";
 
-  const imdb     = $(".data-imdb").first().text().replace(/imdb[:\s]*/i, "").trim();
+  const imdb = $(".data-imdb").first().text().replace(/imdb[:\s]*/i, "").trim();
   const duration = $("[itemprop='duration']").first().text().trim() ||
-                   $(".runtime").first().text().trim();
+    $(".runtime").first().text().trim();
 
   const genres = [];
   $(".details-genre a, .sgeneros a").each((_, el) => {
@@ -144,17 +153,17 @@ async function getMovieMeta(movieUrl) {
     if (!href || linkSeen.has(href)) return;
     linkSeen.add(href);
 
-    const raw   = $(el).text()
+    const raw = $(el).text()
       .replace(/Direct\s*(&|and)\s*Telegram\s*Download\s*Links?/gi, "")
       .trim();
     const qualM = raw.match(/(4K|2160[Pp]|1080[Pp]|FHD|720[Pp]|HD|480[Pp]|SD|360[Pp])/i);
     const sizeM = raw.match(/(\d+\.?\d*)\s*(GB|MB)/i);
 
     links.push({
-      label  : raw,
+      label: raw,
       quality: qualM?.[1] || "",
-      size   : sizeM?.[0] || "",
-      ztUrl  : href,
+      size: sizeM?.[0] || "",
+      ztUrl: href,
     });
   });
 
@@ -169,7 +178,7 @@ const URL_MAPPINGS = [
   { search: ["https://google.com/server3/1:/"], replace: "https://bot3.sonic-cloud.online/server3/" },
   { search: ["https://google.com/server4/1:/"], replace: "https://bot3.sonic-cloud.online/server4/" },
   { search: ["https://google.com/server5/1:/"], replace: "https://bot3.sonic-cloud.online/server5/" },
-  { search: ["https://google.com/server6/"],    replace: "https://bot3.sonic-cloud.online/server6/" },
+  { search: ["https://google.com/server6/"], replace: "https://bot3.sonic-cloud.online/server6/" },
 ];
 
 function applyExtSuffix(url) {
@@ -181,15 +190,17 @@ function applyExtSuffix(url) {
   return url;
 }
 
-// ─── 🌐 4. Core Advanced Puppeteer Bypass Engine ───────────────────────────────────────
+// ─── 🌐 4. Master Core Bypass Engine (Puppeteer Interceptor) ───────────────────
 
 let _browser = null;
 async function getBrowser() {
   try {
     if (_browser) { await _browser.pages(); return _browser; }
   } catch (_) { _browser = null; }
+  
   _browser = await puppeteer.launch({
     headless: "new",
+    devtools: false,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -197,7 +208,9 @@ async function getBrowser() {
       "--disable-web-security",
       "--disable-features=IsolateOrigins,site-per-process",
       "--blink-features=AutomationControlled",
-      "--window-size=1440,900"
+      "--window-size=1920,1080",
+      "--disable-infobars",
+      "--no-zygote"
     ],
   });
   return _browser;
@@ -205,103 +218,124 @@ async function getBrowser() {
 
 async function resolveSonicCloudPage(sonicUrl) {
   const browser = await getBrowser();
-  const page    = await browser.newPage();
+  const page = await browser.newPage();
 
   try {
-    console.log(`\n[MALIYA-MD] 🌐 Opening sonic-cloud target: ${sonicUrl}`);
-    await page.setViewport({ width: 1440, height: 900 });
+    console.log(`\n[MALIYA-MD] 🌐 Initializing Deep Interceptor Engine on: ${sonicUrl}`);
+    await page.setViewport({ width: 1920, height: 1080 });
     
-    // Real desktop browser headers
-    const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
+    const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, http Gecko) Chrome/132.0.0.0 Safari/537.36";
     await page.setUserAgent(userAgent);
     
-    // Anti-Bot Fingerprint Tricking
+    // Cloudflare/Antibot Verification සම්පූර්ණයෙන්ම වැනසීම
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
       Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-      window.chrome = { runtime: {} };
+      window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters)
+      );
     });
 
-    let capturedUrl = null;
+    // Network Request Interception සක්‍රීය කිරීම
+    await page.setRequestInterception(true);
+    let interceptedUrl = null;
+
+    page.on('request', request => {
+      const url = request.url();
+      
+      // සයිට් එකෙන් direct file එක ගන්න හදන API/Token Request එක මැදින් පැන අල්ලා ගැනීම
+      if (url.includes('bot=cscloud') || url.includes('ext=') || url.includes('/download/') || (url.includes('server') && url.includes('?code='))) {
+        if (!url.includes("fordev.jpg")) {
+          interceptedUrl = url;
+          console.log(`[MALIYA-MD] 🎯 Deep Network Request Intercepted: ${interceptedUrl}`);
+        }
+      }
+      
+      // අනවශ්‍ය Pop-ups සහ Forced Redirect Ads Block කිරීම
+      if (request.resourceType() === 'image' && url.includes('fordev.jpg')) {
+        return request.abort(); // Trap Images abort කිරීම
+      }
+      request.continue();
+    });
 
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame()) {
         const url = frame.url();
         if (url && !url.includes("sonic-cloud.online") && !url.includes("fordev.jpg") && url.startsWith("http")) {
-          capturedUrl = url;
-          console.log(`[MALIYA-MD] 🎯 Real Video Redirect Captured: ${capturedUrl}`);
+          interceptedUrl = url;
+          console.log(`[MALIYA-MD] 🎯 Frame Navigation Redirect Captured: ${interceptedUrl}`);
         }
       }
     });
 
-    console.log("[MALIYA-MD] ⏳ Initializing connection architecture...");
-    await page.goto(sonicUrl, { waitUntil: "domcontentloaded", timeout: 40000 });
+    console.log("[MALIYA-MD] ⏳ Connecting to pipeline architecture...");
+    await page.goto(sonicUrl, { waitUntil: "networkidle2", timeout: 45000 });
 
-    // ── FIX: EXTENDED LOADING SYNC ──
-    console.log("[MALIYA-MD] ⏳ CineSubz Loading screen detected. Waiting 8 seconds for full token handshake...");
+    // Handshake එක සිද්ධ වෙනකම් තත්පර 8ක් රැඳී සිටීම
+    console.log("[MALIYA-MD] ⏳ Handling secure token handshakes...");
     await new Promise(r => setTimeout(r, 8000)); 
 
-    console.log("[MALIYA-MD] 🔍 Checking target buttons inside document context...");
     const btnSelector = "#dl-links button, .direct-download, button.direct-download, a[href*='ext=']";
-    await page.waitForSelector(btnSelector, { timeout: 10000 })
-      .catch(() => console.log("[MALIYA-MD] ⚠️ Timeout, attempting structural click override."));
-
+    
+    // UI එකෙන් File Size එක ලබා ගැනීම
     const fileSize = await page.evaluate(() => {
       const text = document.body.innerText || "";
       const m = text.match(/File Size:\s*\n?\s*([\d.]+\s*(MB|GB))/i);
       return m ? m[1] : null;
     });
-    console.log(`[MALIYA-MD] 📊 Web UI reported file size: ${fileSize}`);
+    console.log(`[MALIYA-MD] 📊 File size parsed from UI: ${fileSize}`);
 
-    // ── FIX: HUMAN EMULATED MOUSE CLICK ──
-    console.log("[MALIYA-MD] 🖱️ Finding coordinates for safe human mouse click simulation...");
+    await page.waitForSelector(btnSelector, { timeout: 6000 }).catch(() => {});
+
+    // 🖱️ Human Emulated Mouse Click Simulation (Anti-Bot Bypass)
+    console.log("[MALIYA-MD] 🖱️ Executing Human Emulated Vector Click...");
     const element = await page.$(btnSelector);
     if (element) {
       const box = await element.boundingBox();
       if (box) {
-        // Move mouse to button center and click like a human
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.mouse.down();
         await page.mouse.up();
-        console.log("[MALIYA-MD] 🤝 Human emulated click triggered successfully.");
       } else {
         await page.evaluate((sel) => { document.querySelector(sel)?.click(); }, btnSelector);
       }
     } else {
-      await page.evaluate((sel) => { document.querySelector(sel)?.click(); }, btnSelector);
+      await page.evaluate(() => {
+        const btn = document.querySelector("#dl-links button") || document.querySelector(".direct-download") || document.querySelector("a[href*='ext=']");
+        if (btn) btn.click();
+      }).catch(() => {});
     }
 
-    console.log("[MALIYA-MD] ⏳ Processing redirection pipeline...");
+    // රීඩිරෙක්ට් එක සැකසීමට තව තත්පර 7ක් දීම
     await new Promise(r => setTimeout(r, 7000)); 
 
-    // Extracting session tokens
     const cookies = await page.cookies();
     const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-    console.log(`[MALIYA-MD] 🍪 Cookies extracted: [${cookies.length} active sessions found]`);
 
     const telegramHref = await page.evaluate(() => {
       const a = document.querySelector("a.telegram-download");
       return a ? a.href : null;
     }).catch(() => null);
 
-    const finalPageUrl = page.url();
-    if (!capturedUrl && finalPageUrl && !finalPageUrl.includes("sonic-cloud") && !finalPageUrl.includes("fordev.jpg")) {
-      capturedUrl = finalPageUrl;
+    const finalUrl = page.url();
+    if (!interceptedUrl && finalUrl && !finalUrl.includes("sonic-cloud") && !finalUrl.includes("fordev.jpg")) {
+      interceptedUrl = finalUrl;
     }
 
-    console.log(`[MALIYA-MD] 🚀 Result link: ${capturedUrl || finalPageUrl}`);
-    
     await page.close().catch(() => {});
+    
     return { 
       fileSize, 
       telegramUrl: telegramHref, 
-      directUrl: capturedUrl || finalPageUrl,
+      directUrl: interceptedUrl, 
       cookieStr: cookieHeader, 
       userAgent: userAgent 
     };
 
   } catch (e) {
-    console.log(`[MALIYA-MD] ❌ Puppeteer Core Failure: ${e.message}`);
+    console.log(`[MALIYA-MD] ❌ Engine Exception: ${e.message}`);
     await page.close().catch(() => {});
     throw e;
   }
@@ -319,7 +353,7 @@ async function resolveZtLink(ztUrl) {
   }
 
   let sonicUrl = rawHref;
-  let matched  = false;
+  let matched = false;
 
   for (const mapping of URL_MAPPINGS) {
     if (matched) break;
@@ -327,7 +361,7 @@ async function resolveZtLink(ztUrl) {
       if (rawHref.includes(searchStr)) {
         sonicUrl = rawHref.replace(searchStr, mapping.replace);
         sonicUrl = applyExtSuffix(sonicUrl);
-        matched  = true;
+        matched = true;
         break;
       }
     }
@@ -359,10 +393,10 @@ async function resolveZtLink(ztUrl) {
 // ─── 💬 5. Bot Commands Flow ─────────────────────────────────────────────────
 
 cmd({
-  pattern : "film",
-  alias   : ["movie", "cinema", "cine", "sub", "films"],
-  react   : "🎬",
-  desc    : "Search & download movies from CineSubz.lk",
+  pattern: "film",
+  alias: ["movie", "cinema", "cine", "sub", "films"],
+  react: "🎬",
+  desc: "Search & download movies from CineSubz.lk",
   category: "download",
   filename: __filename,
 }, async (maliya, mek, m, { from, q, sender, reply }) => {
@@ -376,7 +410,7 @@ cmd({
   reply("*🔍 Searching MALIYA-MD FILM DB...*");
 
   let results;
-  try       { results = await searchMovies(q); }
+  try { results = await searchMovies(q); }
   catch (e) { return reply(`*❌ Search error:* ${e.message}`); }
 
   if (!results.length) return reply(`*❌ "${q}" No results found.*\nTry a different name.`);
@@ -408,17 +442,17 @@ cmd({
   reply("*⏳ Getting Film Details..*");
 
   let meta;
-  try       { meta = await getMovieMeta(selected.url); }
+  try { meta = await getMovieMeta(selected.url); }
   catch (e) { return reply(`*❌ Error:* ${e.message}`); }
 
   const title = meta.title || cleanTitle(selected.title);
 
   let msg = `*🎬 ${title}*\n${"─".repeat(32)}\n`;
-  if (meta.imdb)             msg += `⭐ *IMDb:* ${meta.imdb}\n`;
-  if (meta.duration)         msg += `⏱️ *Duration:* ${meta.duration}\n`;
-  if (meta.genres.length)    msg += `🎭 *Genres:* ${meta.genres.join(", ")}\n`;
+  if (meta.imdb) msg += `⭐ *IMDb:* ${meta.imdb}\n`;
+  if (meta.duration) msg += `⏱️ *Duration:* ${meta.duration}\n`;
+  if (meta.genres.length) msg += `🎭 *Genres:* ${meta.genres.join(", ")}\n`;
   if (meta.directors.length) msg += `🎥 *Director:* ${meta.directors.join(", ")}\n`;
-  if (meta.subBy)            msg += `📝 *Sub By:* ${meta.subBy}\n`;
+  if (meta.subBy) msg += `📝 *Sub By:* ${meta.subBy}\n`;
 
   const validLinks = meta.links.filter(l => parseSizeMB(l.size) <= MAX_MB);
 
@@ -457,10 +491,10 @@ cmd({
   const { title, links } = pendingQuality[sender];
   delete pendingQuality[sender];
 
-  const chosen  = links[+body.trim() - 1];
+  const chosen = links[+body.trim() - 1];
   const quality = normalizeQuality(chosen.quality || chosen.label);
 
-  reply(`*⏳ ${quality} (${chosen.size}) — Bypassing security structures...*`);
+  reply(`*⏳ ${quality} (${chosen.size}) — Bypassing structural encryptions...*`);
 
   console.log(`\n[BOT COMMAND] 🎬 Starting download process for: ${title} [${quality}]`);
   
@@ -471,10 +505,9 @@ cmd({
     return reply(`*❌ Resolve error:* ${e.message}`); 
   }
 
-  // ── FIX: TRAP URL PROTECTION BLOCK ──
   if (!resolved || !resolved.url || resolved.url.includes("fordev.jpg")) {
-    console.log("[BOT COMMAND] ❌ Redirected to Trap URL (fordev.jpg). System blocked.");
-    return reply(`*❌ Bot Detection Firewall Active!*\nServer blocked our request. Please try again in a few moments.`);
+    console.log("[BOT COMMAND] ❌ Redirected to Trap URL or empty link.");
+    return reply(`*❌ Anti-Bot Firewall Blocked the Request!*\nසර්වර් එක මඟින් බොට් හඳුනාගැනීමේ පද්ධතිය ක්‍රියාත්මක කලා. කරුණාකර මද වෙලාවකින් නැවත උත්සාහ කරන්න.`);
   }
 
   const finalSize = resolved.confirmedSize || chosen.size;
@@ -489,20 +522,20 @@ cmd({
   const fileName = `${title} [${quality}] [CineSubz].mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
   const tempFilePath = path.join(__dirname, fileName);
 
-  reply(`*⬇️ Downloading film via Cookie Bypass... (${finalSize})*\nThis will take a moment, please wait... ⏳`);
+  reply(`*⬇️ Downloading film via Kernel Request Bypass... (${finalSize})*\nකරුණාකර රැඳී සිටින්න... ⏳`);
   console.log(`[DOWNLOAD PROCESS] 📂 Destination path: ${tempFilePath}`);
 
   try {
+    // wget Task එක සාර්ථකව නිම කිරීමට නිවැරදි Cookies සහ Headers එන්නත් කිරීම
     let wgetCommand = `wget -U "${resolved.userAgent || HEADERS['User-Agent']}" --header="Referer: https://bot3.sonic-cloud.online/" `;
     if (resolved.cookieStr) {
       wgetCommand += `--header="Cookie: ${resolved.cookieStr}" `;
     }
     wgetCommand += `"${resolved.url}" -O "${tempFilePath}"`;
     
-    console.log(`[WGET RUNNING] ⚙️ Executing download task...`);
+    console.log(`[WGET RUNNING] ⚙️ Executing system download task...`);
     execSync(wgetCommand, { stdio: 'inherit', timeout: 600000 });
 
-    console.log("[DOWNLOAD PROCESS] 📂 Checking file metrics on disk...");
     if (!fs.existsSync(tempFilePath)) {
       throw new Error("Wget task finished but object missing on storage filesystem.");
     }
@@ -510,16 +543,16 @@ cmd({
     const stats = fs.statSync(tempFilePath);
     console.log(`[DOWNLOAD PROCESS] 📦 Size on Storage: ${(stats.size / (1024*1024)).toFixed(2)} MB`);
 
-    // Trap Check: 5MB වලට වඩා අඩු නම් ඒක අනිවාර්යයෙන්ම error file එකක්
+    // Corrupted Error Payload check (5MB වලට අඩු නම් ඩවුන්ලෝඩ් එක දෝෂ සහිතයි)
     if (stats.size < 5000000) { 
       throw new Error(`Corrupted payload detected (${stats.size} bytes). Cloudflare/Bot wall triggered.`);
     }
 
-    reply(`*⬆️ Film successfully grabbed! Uploading to WhatsApp...* 🚀\n_Free WhatsApp Data package will be consumed now._`);
+    reply(`*⬆️ Film successfully grabbed! Uploading to WhatsApp...* 🚀`);
     
     await maliya.sendMessage(from, {
       document: { url: tempFilePath },
-      mimetype : "video/mp4",
+      mimetype: "video/mp4",
       fileName,
       caption:
         `*🎬 ${title}*\n` +
@@ -539,14 +572,14 @@ cmd({
       text:
         `*🎬 ${title}*  [${quality}]  ${finalSize}\n\n` +
         `⚠️ *සර්වර් එකේ Strict Encryption නිසා වට්සැප් එකට direct එවීම අසාර්ථක විය.*\n\n` +
-        `👇 පහල Direct Link එක ක්ලික් කරලා ඔයාගේ බ්‍රවුසර් එකෙන්ම (Free WhatsApp Package එකෙන්ම) බාගන්න:\n${resolved.url}`,
+        `👇 පහල Direct Link එක ක්ලික් කරලා ඔයාගේ බ්‍රවුසර් එකෙන්ම බාගන්න:\n${resolved.url}`,
     }, { quoted: mek });
   }
 });
 
 setInterval(() => {
   const now = Date.now(), ttl = 10 * 60 * 1000;
-  for (const s in pendingSearch)  if (now - pendingSearch[s].timestamp  > ttl) delete pendingSearch[s];
+  for (const s in pendingSearch) if (now - pendingSearch[s].timestamp > ttl) delete pendingSearch[s];
   for (const s in pendingQuality) if (now - pendingQuality[s].timestamp > ttl) delete pendingQuality[s];
 }, 5 * 60 * 1000);
 
