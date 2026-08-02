@@ -22,7 +22,7 @@ const AdblockerPlugin = require("puppeteer-extra-plugin-adblocker");
 
 // Fingerprint Simulation Setup
 const { FingerprintGenerator } = require('fingerprint-generator');
-const { FingerprintInjector } = require('fingerprint-injector');
+const { attachFingerprintToPuppeteer } = require('fingerprint-injector'); // Fixed Functional Import
 
 puppeteer.use(StealthPlugin());
 puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
@@ -227,10 +227,9 @@ async function resolveSonicCloudPage(sonicUrl) {
     console.log(`\n[MALIYA-MD] 🌐 Initializing Fingerprint Evasion Engine on target...`);
     await page.setViewport({ width: 1920, height: 1080 });
     
-    // 🎭 Real Browser Fingerprint Injection
+    // 🎭 Real Browser Fingerprint Injection (Fixed Functional Call)
     const fingerprint = fingerprintGenerator.getFingerprint();
-    const fingerprintInjector = new FingerprintInjector();
-    await fingerprintInjector.attachFingerprintToPuppeteerPage(page, fingerprint);
+    await attachFingerprintToPuppeteer(page, fingerprint);
 
     // Deep Network Request Interception
     await page.setRequestInterception(true);
@@ -274,7 +273,7 @@ async function resolveSonicCloudPage(sonicUrl) {
 
     await page.waitForSelector(btnSelector, { timeout: 6000 }).catch(() => {});
 
-    // 鼠标 Click Simulation (Human Emulated)
+    // 🖱️ Mouse Click Simulation (Human Emulated)
     console.log("[MALIYA-MD] 🖱️ Executing Human Emulated Vector Click...");
     const element = await page.$(btnSelector);
     if (element) {
@@ -487,7 +486,7 @@ cmd({
     return reply(`*❌ Resolve error:* ${e.message}`); 
   }
 
-  if (!resolved || !resolved.url || resolved.url.includes("fordev.jpg")) {
+  if (!resolved || (!resolved.url && !resolved.directUrl) || (resolved.url && resolved.url.includes("fordev.jpg")) || (resolved.directUrl && resolved.directUrl.includes("fordev.jpg"))) {
     return reply(`*❌ Anti-Bot Firewall Blocked the Request!*\nසර්වර් එක මඟින් බොට් හඳුනාගැනීමේ පද්ධතිය ක්‍රියාත්මක කලා. කරුණාකර මද වෙලාවකින් නැවත උත්සාහ කරන්න.`);
   }
 
@@ -502,13 +501,13 @@ cmd({
   const fileName = `${title} [${quality}] [CineSubz].mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
   const tempFilePath = path.join(__dirname, fileName);
 
-  reply(`*⬇️ Downloading film via Fingerprinted Stream Session... (${finalSize})*\nਕරුਣਾਕਰ රැඳී සිටින්න... ⏳`);
+  reply(`*⬇️ Downloading film via Fingerprinted Stream Session... (${finalSize})*\nකරුණාකර රැඳී සිටින්න... ⏳`);
 
   try {
-    // ⚡ wget වෙනුවට 403 Forbidden මඟහරින Axios Stream Architecture එක
+    // ⚡ Axios Stream Downloader mapped strictly to resolved.directUrl
     const response = await axios({
       method: 'get',
-      url: resolved.url,
+      url: resolved.directUrl || resolved.url,
       responseType: 'stream',
       headers: {
         'User-Agent': resolved.userAgent || HEADERS['User-Agent'],
@@ -553,7 +552,7 @@ cmd({
       text:
         `*🎬 ${title}*  [${quality}]  ${finalSize}\n\n` +
         `⚠️ *සර්වර් එකේ Strict Encryption නිසා වට්සැප් එකට direct එවීම අසාර්ථක විය.*\n\n` +
-        `👇 පහල Direct Link එක ක්ලික් කරලා ඔයාගේ බ්‍රවුසර් එකෙන්ම බාගන්න:\n${resolved.url}`,
+        `👇 පහල Direct Link එක ක්ලික් කරලා ඔයාගේ බ්‍රවුසර් එකෙන්ම බාගන්න:\n${resolved.directUrl || resolved.url}`,
     }, { quoted: mek });
   }
 });
