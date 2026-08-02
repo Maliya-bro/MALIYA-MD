@@ -11,7 +11,7 @@ const fs        = require("fs");
 const path      = require("path");
 const { execSync } = require("child_process");
 
-// Anti-bot detection bypass කරන්න සාමාන්‍ය puppeteer වෙනුවට stealth plugin එක පාවිච්චි කරයි
+// Anti-bot detection bypass කරන්න puppeteer stealth පාවිච්චි කරයි
 const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 puppeteer.use(StealthPlugin());
@@ -231,9 +231,8 @@ async function resolveSonicCloudPage(sonicUrl) {
       'Sec-Ch-Ua-Platform': '"Windows"'
     });
 
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
-    );
+    const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
+    await page.setUserAgent(userAgent);
 
     let capturedUrl = null;
 
@@ -246,9 +245,7 @@ async function resolveSonicCloudPage(sonicUrl) {
         if (url && url !== "about:blank" && !url.includes("sonic-cloud")) {
           capturedUrl = url;
         }
-      } catch (e) {
-        console.log("[cinesubz] targetcreated handler error:", e.message);
-      }
+      } catch (e) {}
     });
 
     page.on("framenavigated", (frame) => {
@@ -261,7 +258,7 @@ async function resolveSonicCloudPage(sonicUrl) {
     });
 
     await page.goto(sonicUrl, { waitUntil: "networkidle2", timeout: 30000 });
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 4000));
 
     await page.waitForFunction(
       () => {
@@ -289,6 +286,11 @@ async function resolveSonicCloudPage(sonicUrl) {
       await new Promise(r => setTimeout(r, 6000));
     }
 
+    // ── NATIVE COOKIE EXTRACTION TRICK ──
+    // සයිට් එකෙන් authenticate වෙන්න බ්‍රවුසර් එකට දුන්න cookies ටික අපි wget එකට දෙන්න අල්ලගන්නවා
+    const cookies = await page.cookies();
+    const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
     const telegramHref = await page.evaluate(() => {
       const a = document.querySelector("a.telegram-download");
       return a ? a.href : null;
@@ -296,13 +298,13 @@ async function resolveSonicCloudPage(sonicUrl) {
 
     await page.close().catch(() => {});
 
-    if (capturedUrl) {
-      return { fileSize, telegramUrl: null, directUrl: capturedUrl };
-    }
-    if (telegramHref) {
-      return { fileSize, telegramUrl: telegramHref, directUrl: null };
-    }
-    return { fileSize, telegramUrl: null, directUrl: null };
+    return { 
+      fileSize, 
+      telegramUrl: telegramHref, 
+      directUrl: capturedUrl,
+      cookieStr: cookieHeader, 
+      userAgent: userAgent 
+    };
 
   } catch (e) {
     await page.close().catch(() => {});
@@ -346,7 +348,13 @@ async function resolveZtLink(ztUrl) {
       return { url: page.telegramUrl, isTelegram: true, confirmedSize: page.fileSize };
     }
     if (page.directUrl) {
-      return { url: page.directUrl, isTelegram: false, confirmedSize: page.fileSize };
+      return { 
+        url: page.directUrl, 
+        isTelegram: false, 
+        confirmedSize: page.fileSize,
+        cookieStr: page.cookieStr,
+        userAgent: page.userAgent
+      };
     }
   } catch (e) {
     console.log("[cinesubz] sonic-cloud page error:", e.message);
@@ -448,7 +456,7 @@ cmd({
   } catch (_) { await maliya.sendMessage(from, { text: msg }, { quoted: mek }); }
 });
 
-// ── Step 3: quality → resolve → send document (UPDATED TO WGET NATIVE BYPASS) ──
+// ── Step 3: quality → resolve → send document (UPDATED WITH SECURE COOKIE BYPASS) ──
 
 cmd({
   filter: (text, { sender }) =>
@@ -464,25 +472,21 @@ cmd({
   const chosen  = links[+body.trim() - 1];
   const quality = normalizeQuality(chosen.quality || chosen.label);
 
-  reply(`*⏳ ${quality} (${chosen.size}) — Getting direct link..*`);
+  reply(`*⏳ ${quality} (${chosen.size}) — Bypassing security structures...*`);
 
   let resolved;
   try       { resolved = await resolveZtLink(chosen.ztUrl); }
   catch (e) { return reply(`*❌ Resolve error:* ${e.message}`); }
 
   if (!resolved || !resolved.url) {
-    return maliya.sendMessage(from, {
-      text: `*❌ Can't get direct link.*\nTry manually:\n${chosen.ztUrl}`,
-    }, { quoted: mek });
+    return reply(`*❌ Can't get direct link.*\nTry another link.`);
   }
 
   const finalSize = resolved.confirmedSize || chosen.size;
 
   if (resolved.isTelegram) {
     return maliya.sendMessage(from, {
-      text:
-        `*🎬 ${title}*\n*Quality:* ${quality}  |  *Size:* ${finalSize}\n\n` +
-        `📲 *Telegram Download:*\n${resolved.url}\n\nEnjoy! 🍿`,
+      text: `*🎬 ${title}*\n*Size:* ${finalSize}\n\n📲 *Telegram Link:*\n${resolved.url}`,
     }, { quoted: mek });
   }
 
@@ -491,25 +495,32 @@ cmd({
   
   const tempFilePath = path.join(__dirname, fileName);
 
-  reply(`*⬇️ Downloading film via OS Native Bypass... (${finalSize})*\nAxios blocker surpassed. Please wait... ⏳`);
+  reply(`*⬇️ Downloading film via Cookie Bypass... (${finalSize})*\nThis will take a moment, please wait... ⏳`);
 
   try {
-    // Axios වෙනුවට සර්වර් එකේ `wget` කමාන්ඩ් එකෙන් කෙලින්ම සර්වර් එක රවට්ටලා බානවා.
-    const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
-    const wgetCommand = `wget -U "${userAgent}" --header="Referer: https://bot3.sonic-cloud.online/" "${resolved.url}" -O "${tempFilePath}"`;
+    // ── NATIVE WGET COOKIE INJECTION ──
+    // සර්වර් එකෙන් බ්ලොක් නොකරන්න, බ්‍රවුසර් එකෙන් ගත්තු cookies සහ headers සේරම wget එකට ඉන්ජෙක්ට් කරනවා
+    let wgetCommand = `wget -U "${resolved.userAgent || HEADERS['User-Agent']}" --header="Referer: https://bot3.sonic-cloud.online/" `;
     
-    // Command එක background එකේ රන් කරලා ෆයිල් එක බානවා
-    execSync(wgetCommand, { stdio: 'inherit', timeout: 600000 });
+    if (resolved.cookieStr) {
+      wgetCommand += `--header="Cookie: ${resolved.cookieStr}" `;
+    }
+    
+    wgetCommand += `"${resolved.url}" -O "${tempFilePath}"`;
+    
+    // Download එක OS level එකෙන් background එකේ රන් කිරීම
+    execSync(wgetCommand, { stdio: 'ignore', timeout: 600000 });
 
-    if (!fs.existsSync(tempFilePath) || fs.statSync(tempFilePath).size === 0) {
-      throw new Error("Downloaded file is empty or does not exist.");
+    // ෆයිල් එක හැදුනද සහ ඒක ඇත්තම වීඩියෝ එකක්ද (ලොකු සයිස් එකක්ද) කියලා චෙක් කරනවා
+    if (!fs.existsSync(tempFilePath) || fs.statSync(tempFilePath).size < 1000000) {
+      throw new Error("Security verification failed. Downloaded file is corrupted.");
     }
 
-    reply(`*⬆️ Film downloaded to server! Uploading to WhatsApp now...* 🚀`);
+    reply(`*⬆️ Film successfully grabbed! Uploading to WhatsApp...* 🚀\n_Free WhatsApp Data package will be consumed now._`);
 
-    // Local එකට ආපු ෆයිල් එක stream එකක් විදිහට බ්ලොක් නොවී යවනවා
+    // Baileys එකට local file path එක දීමෙන් RAM එක crash නොවී ලස්සනට upload වෙනවා
     await maliya.sendMessage(from, {
-      document: fs.createReadStream(tempFilePath),
+      document: { url: tempFilePath },
       mimetype : "video/mp4",
       fileName,
       caption:
@@ -519,24 +530,24 @@ cmd({
         `*Enjoy! 🍿*\n_Bypassed & Delivered by MALIYA-MD_`,
     }, { quoted: mek });
 
-    // ඉඩ ඉතුරු කරගන්න ෆයිල් එක ඩිලීට් කිරීම
+    // Storage එක ක්ලීන් කිරීම
     if (fs.existsSync(tempFilePath)) {
       fs.unlinkSync(tempFilePath);
     }
 
   } catch (err) {
-    console.error("[MALIYA-MD Wget Bypass Error]:", err.message);
+    console.error("[MALIYA-MD Core Download Error]:", err.message);
 
     if (fs.existsSync(tempFilePath)) {
       fs.unlinkSync(tempFilePath);
     }
 
-    // සර්වර් එක ඇතුළටම බාන්න බැරි වුනොත් direct link එක බටන් එකක් වගේ යවනවා
+    // සේරම දේ ෆේල් වුනොත් බොට් crash නොවී යූසර්ට ලින්ක් එක දෙනවා
     await maliya.sendMessage(from, {
       text:
         `*🎬 ${title}*  [${quality}]  ${finalSize}\n\n` +
-        `⚠️ *WhatsApp එකට කෙලින්ම එවන්න සර්වර් එකෙන් ඉඩ දෙන්නේ නැත.*\n\n` +
-        `👇 පහල Direct Link එක ක්ලික් කරලා ඔයාගේ බ්‍රවුසර් එකෙන්ම බාගන්න:\n${resolved.url}`,
+        `⚠️ *සර්වර් එකේ Strict Encryption නිසා වට්සැප් එකට direct එවීම අසාර්ථක විය.*\n\n` +
+        `👇 පහල Direct Link එක ක්ලික් කරලා ඔයාගේ බ්‍රවුසර් එකෙන්ම (Free WhatsApp Package එකෙන්ම) බාගන්න:\n${resolved.url}`,
     }, { quoted: mek });
   }
 });
