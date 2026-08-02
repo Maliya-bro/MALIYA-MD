@@ -72,7 +72,8 @@
     "puppeteer-extra": "latest",
     "puppeteer-extra-plugin-adblocker": "latest",
     "fingerprint-generator": "latest",
-    "fingerprint-injector": "latest"
+    "fingerprint-injector": "latest",
+    "axios-retry": "latest"
     
     
     
