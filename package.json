@@ -70,7 +70,9 @@
     "@gradio/client": "latest",
     "puppeteer-extra-plugin-stealth": "latest",
     "puppeteer-extra": "latest",
-    "puppeteer-extra-plugin-adblocker": "latest"
+    "puppeteer-extra-plugin-adblocker": "latest",
+    "fingerprint-generator": "latest",
+    "fingerprint-injector": "latest"
     
     
     
