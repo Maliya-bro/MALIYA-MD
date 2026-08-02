@@ -3,12 +3,10 @@
  * ─────────────────────────────────────────────────────────────
  * Developer: Malindu Nadith Kumarathunga
  * Upgraded Features: 
+ *   - Fingerprint Injection Evasion (Bypasses TLS/Cloudflare V2 blocks)
  *   - Network Request Deep Interception (Grabs token before fordev.jpg redirect)
- *   - Advanced Puppeteer Stealth (Evades Cloudflare V2 & WebDriver Checks)
  *   - Full Adblocker Engine (Blocks malicious trackers/forced redirects on the fly)
- *   - Evasion Sandbox & Human Behavior Emulation
- * 
- * Required Packages: npm install axios cheerio puppeteer puppeteer-extra puppeteer-extra-plugin-stealth puppeteer-extra-plugin-adblocker crypto-js
+ *   - Axios Stream Downloader (Replaces wget to fix 403 Forbidden)
  */
 
 const { cmd } = require("../command");
@@ -16,16 +14,24 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
-const { execSync } = require("child_process");
 
 // Advanced Puppeteer Setup
 const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const AdblockerPlugin = require("puppeteer-extra-plugin-adblocker");
 
-// Stealth සහ Adblocker Plugins සක්‍රීය කිරීම
+// Fingerprint Simulation Setup
+const { FingerprintGenerator } = require('fingerprint-generator');
+const { FingerprintInjector } = require('fingerprint-injector');
+
 puppeteer.use(StealthPlugin());
 puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
+
+const fingerprintGenerator = new FingerprintGenerator({
+    browsers: [{ name: 'chrome', minVersion: 120 }],
+    devices: ['desktop'],
+    operatingSystems: ['windows'],
+});
 
 const pendingSearch = {};
 const pendingQuality = {};
@@ -176,7 +182,7 @@ const URL_MAPPINGS = [
   { search: ["https://google.com/server11/1:/", "https://google.com/server12/1:/", "https://google.com/server13/1:/"], replace: "https://bot3.sonic-cloud.online/server1/" },
   { search: ["https://google.com/server21/1:/", "https://google.com/server22/1:/", "https://google.com/server23/1:/"], replace: "https://bot3.sonic-cloud.online/server2/" },
   { search: ["https://google.com/server3/1:/"], replace: "https://bot3.sonic-cloud.online/server3/" },
-  { search: ["https://google.com/server4/1:/"], replace: "https://bot3.sonic-cloud.online/server4/" },
+  { search: ["https://google.com/server4/1:/"], replace: "https://bot3.sonic-cloud.online/server5/" },
   { search: ["https://google.com/server5/1:/"], replace: "https://bot3.sonic-cloud.online/server5/" },
   { search: ["https://google.com/server6/"], replace: "https://bot3.sonic-cloud.online/server6/" },
 ];
@@ -190,7 +196,7 @@ function applyExtSuffix(url) {
   return url;
 }
 
-// ─── 🌐 4. Master Core Bypass Engine (Puppeteer Interceptor) ───────────────────
+// ─── 🌐 4. Core Fingerprinted Interceptor Engine ───────────────────────────────
 
 let _browser = null;
 async function getBrowser() {
@@ -200,7 +206,6 @@ async function getBrowser() {
   
   _browser = await puppeteer.launch({
     headless: "new",
-    devtools: false,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -209,8 +214,6 @@ async function getBrowser() {
       "--disable-features=IsolateOrigins,site-per-process",
       "--blink-features=AutomationControlled",
       "--window-size=1920,1080",
-      "--disable-infobars",
-      "--no-zygote"
     ],
   });
   return _browser;
@@ -221,41 +224,28 @@ async function resolveSonicCloudPage(sonicUrl) {
   const page = await browser.newPage();
 
   try {
-    console.log(`\n[MALIYA-MD] 🌐 Initializing Deep Interceptor Engine on: ${sonicUrl}`);
+    console.log(`\n[MALIYA-MD] 🌐 Initializing Fingerprint Evasion Engine on target...`);
     await page.setViewport({ width: 1920, height: 1080 });
     
-    const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, http Gecko) Chrome/132.0.0.0 Safari/537.36";
-    await page.setUserAgent(userAgent);
-    
-    // Cloudflare/Antibot Verification සම්පූර්ණයෙන්ම වැනසීම
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-      window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
-      const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters) => (
-        parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters)
-      );
-    });
+    // 🎭 Real Browser Fingerprint Injection
+    const fingerprint = fingerprintGenerator.getFingerprint();
+    const fingerprintInjector = new FingerprintInjector();
+    await fingerprintInjector.attachFingerprintToPuppeteerPage(page, fingerprint);
 
-    // Network Request Interception සක්‍රීය කිරීම
+    // Deep Network Request Interception
     await page.setRequestInterception(true);
     let interceptedUrl = null;
 
     page.on('request', request => {
       const url = request.url();
-      
-      // සයිට් එකෙන් direct file එක ගන්න හදන API/Token Request එක මැදින් පැන අල්ලා ගැනීම
       if (url.includes('bot=cscloud') || url.includes('ext=') || url.includes('/download/') || (url.includes('server') && url.includes('?code='))) {
         if (!url.includes("fordev.jpg")) {
           interceptedUrl = url;
           console.log(`[MALIYA-MD] 🎯 Deep Network Request Intercepted: ${interceptedUrl}`);
         }
       }
-      
-      // අනවශ්‍ය Pop-ups සහ Forced Redirect Ads Block කිරීම
       if (request.resourceType() === 'image' && url.includes('fordev.jpg')) {
-        return request.abort(); // Trap Images abort කිරීම
+        return request.abort(); // Block Trap Redirection Images
       }
       request.continue();
     });
@@ -265,31 +255,26 @@ async function resolveSonicCloudPage(sonicUrl) {
         const url = frame.url();
         if (url && !url.includes("sonic-cloud.online") && !url.includes("fordev.jpg") && url.startsWith("http")) {
           interceptedUrl = url;
-          console.log(`[MALIYA-MD] 🎯 Frame Navigation Redirect Captured: ${interceptedUrl}`);
+          console.log(`[MALIYA-MD] 🎯 Navigation Redirect Captured: ${interceptedUrl}`);
         }
       }
     });
 
     console.log("[MALIYA-MD] ⏳ Connecting to pipeline architecture...");
     await page.goto(sonicUrl, { waitUntil: "networkidle2", timeout: 45000 });
-
-    // Handshake එක සිද්ධ වෙනකම් තත්පර 8ක් රැඳී සිටීම
-    console.log("[MALIYA-MD] ⏳ Handling secure token handshakes...");
     await new Promise(r => setTimeout(r, 8000)); 
 
     const btnSelector = "#dl-links button, .direct-download, button.direct-download, a[href*='ext=']";
     
-    // UI එකෙන් File Size එක ලබා ගැනීම
     const fileSize = await page.evaluate(() => {
       const text = document.body.innerText || "";
       const m = text.match(/File Size:\s*\n?\s*([\d.]+\s*(MB|GB))/i);
       return m ? m[1] : null;
     });
-    console.log(`[MALIYA-MD] 📊 File size parsed from UI: ${fileSize}`);
 
     await page.waitForSelector(btnSelector, { timeout: 6000 }).catch(() => {});
 
-    // 🖱️ Human Emulated Mouse Click Simulation (Anti-Bot Bypass)
+    // 鼠标 Click Simulation (Human Emulated)
     console.log("[MALIYA-MD] 🖱️ Executing Human Emulated Vector Click...");
     const element = await page.$(btnSelector);
     if (element) {
@@ -303,16 +288,16 @@ async function resolveSonicCloudPage(sonicUrl) {
       }
     } else {
       await page.evaluate(() => {
-        const btn = document.querySelector("#dl-links button") || document.querySelector(".direct-download") || document.querySelector("a[href*='ext=']");
+        const btn = document.querySelector("#dl-links button") || document.querySelector(".direct-download");
         if (btn) btn.click();
       }).catch(() => {});
     }
 
-    // රීඩිරෙක්ට් එක සැකසීමට තව තත්පර 7ක් දීම
     await new Promise(r => setTimeout(r, 7000)); 
 
     const cookies = await page.cookies();
     const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    const userAgent = await page.evaluate(() => navigator.userAgent);
 
     const telegramHref = await page.evaluate(() => {
       const a = document.querySelector("a.telegram-download");
@@ -496,24 +481,19 @@ cmd({
 
   reply(`*⏳ ${quality} (${chosen.size}) — Bypassing structural encryptions...*`);
 
-  console.log(`\n[BOT COMMAND] 🎬 Starting download process for: ${title} [${quality}]`);
-  
   let resolved;
   try { resolved = await resolveZtLink(chosen.ztUrl); } 
   catch (e) { 
-    console.log(`[BOT COMMAND] ❌ Link resolving failed: ${e.message}`);
     return reply(`*❌ Resolve error:* ${e.message}`); 
   }
 
   if (!resolved || !resolved.url || resolved.url.includes("fordev.jpg")) {
-    console.log("[BOT COMMAND] ❌ Redirected to Trap URL or empty link.");
     return reply(`*❌ Anti-Bot Firewall Blocked the Request!*\nසර්වර් එක මඟින් බොට් හඳුනාගැනීමේ පද්ධතිය ක්‍රියාත්මක කලා. කරුණාකර මද වෙලාවකින් නැවත උත්සාහ කරන්න.`);
   }
 
   const finalSize = resolved.confirmedSize || chosen.size;
 
   if (resolved.isTelegram) {
-    console.log("[BOT COMMAND] 📲 Telegram link matched.");
     return maliya.sendMessage(from, {
       text: `*🎬 ${title}*\n*Size:* ${finalSize}\n\n📲 *Telegram Link:*\n${resolved.url}`,
     }, { quoted: mek });
@@ -522,30 +502,33 @@ cmd({
   const fileName = `${title} [${quality}] [CineSubz].mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
   const tempFilePath = path.join(__dirname, fileName);
 
-  reply(`*⬇️ Downloading film via Kernel Request Bypass... (${finalSize})*\nකරුණාකර රැඳී සිටින්න... ⏳`);
-  console.log(`[DOWNLOAD PROCESS] 📂 Destination path: ${tempFilePath}`);
+  reply(`*⬇️ Downloading film via Fingerprinted Stream Session... (${finalSize})*\nਕරුਣਾਕਰ රැඳී සිටින්න... ⏳`);
 
   try {
-    // wget Task එක සාර්ථකව නිම කිරීමට නිවැරදි Cookies සහ Headers එන්නත් කිරීම
-    let wgetCommand = `wget -U "${resolved.userAgent || HEADERS['User-Agent']}" --header="Referer: https://bot3.sonic-cloud.online/" `;
-    if (resolved.cookieStr) {
-      wgetCommand += `--header="Cookie: ${resolved.cookieStr}" `;
-    }
-    wgetCommand += `"${resolved.url}" -O "${tempFilePath}"`;
-    
-    console.log(`[WGET RUNNING] ⚙️ Executing system download task...`);
-    execSync(wgetCommand, { stdio: 'inherit', timeout: 600000 });
+    // ⚡ wget වෙනුවට 403 Forbidden මඟහරින Axios Stream Architecture එක
+    const response = await axios({
+      method: 'get',
+      url: resolved.url,
+      responseType: 'stream',
+      headers: {
+        'User-Agent': resolved.userAgent || HEADERS['User-Agent'],
+        'Cookie': resolved.cookieStr || '',
+        'Referer': 'https://bot3.sonic-cloud.online/',
+        'Accept': '*/*'
+      }
+    });
 
-    if (!fs.existsSync(tempFilePath)) {
-      throw new Error("Wget task finished but object missing on storage filesystem.");
-    }
-    
+    const writer = fs.createWriteStream(tempFilePath);
+    response.data.pipe(writer);
+
+    await new Promise((resolve, reject) => {
+      writer.on('finish', resolve);
+      writer.on('error', reject);
+    });
+
     const stats = fs.statSync(tempFilePath);
-    console.log(`[DOWNLOAD PROCESS] 📦 Size on Storage: ${(stats.size / (1024*1024)).toFixed(2)} MB`);
-
-    // Corrupted Error Payload check (5MB වලට අඩු නම් ඩවුන්ලෝඩ් එක දෝෂ සහිතයි)
     if (stats.size < 5000000) { 
-      throw new Error(`Corrupted payload detected (${stats.size} bytes). Cloudflare/Bot wall triggered.`);
+      throw new Error("Corrupted payload or block page downloaded.");
     }
 
     reply(`*⬆️ Film successfully grabbed! Uploading to WhatsApp...* 🚀`);
@@ -561,11 +544,9 @@ cmd({
         `*Enjoy! 🍿*\n_Bypassed & Delivered by MALIYA-MD_`,
     }, { quoted: mek });
 
-    console.log("[UPLOAD PROCESS] ✅ File sent. Cleaning storage...");
     if (fs.existsSync(tempFilePath)) { fs.unlinkSync(tempFilePath); }
 
   } catch (err) {
-    console.error(`\n[CRITICAL ERROR] ❌ MALIYA-MD Downloader Exception: ${err.message}`);
     if (fs.existsSync(tempFilePath)) { fs.unlinkSync(tempFilePath); }
 
     await maliya.sendMessage(from, {
