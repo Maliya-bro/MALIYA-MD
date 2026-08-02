@@ -9,6 +9,7 @@ const axios     = require("axios");
 const cheerio   = require("cheerio");
 const fs        = require("fs");
 const path      = require("path");
+const { execSync } = require("child_process");
 
 // Anti-bot detection bypass කරන්න සාමාන්‍ය puppeteer වෙනුවට stealth plugin එක පාවිච්චි කරයි
 const puppeteer = require("puppeteer-extra");
@@ -191,7 +192,7 @@ function applyExtSuffix(url) {
   return url;
 }
 
-// ─── Step 3: sonic-cloud page → puppeteer (UPDATED TO BYPASS DETECTION) ────
+// ─── Step 3: sonic-cloud page → puppeteer ───────────────────────────────────
 
 let _browser = null;
 async function getBrowser() {
@@ -210,7 +211,7 @@ async function getBrowser() {
       "--disable-gpu",
       "--no-zygote",
       "--single-process",
-      "--disable-blink-features=AutomationControlled", // Automation control hidden
+      "--disable-blink-features=AutomationControlled",
       "--window-size=1920,1080"
     ],
   });
@@ -222,7 +223,6 @@ async function resolveSonicCloudPage(sonicUrl) {
   const page    = await browser.newPage();
 
   try {
-    // සැබෑ බ්‍රවුසර් එකක හැසිරීම emulate කිරීම
     await page.setViewport({ width: 1920, height: 1080 });
     await page.setExtraHTTPHeaders({
       'Accept-Language': 'en-US,en;q=0.9',
@@ -261,11 +261,8 @@ async function resolveSonicCloudPage(sonicUrl) {
     });
 
     await page.goto(sonicUrl, { waitUntil: "networkidle2", timeout: 30000 });
-
-    // Anti-bot scripts bypass වෙන්න තත්පර 3ක පොඩි delay එකක් දෙනවා
     await new Promise(r => setTimeout(r, 3000));
 
-    // Wait for the loading screen + button injection JS to finish
     await page.waitForFunction(
       () => {
         const links = document.getElementById("dl-links");
@@ -274,7 +271,6 @@ async function resolveSonicCloudPage(sonicUrl) {
       { timeout: 15000 }
     ).catch(() => {});
 
-    // Grab file size shown on the card
     const fileSize = await page.evaluate(() => {
       const text = document.body.innerText || "";
       const m = text.match(/File Size:\s*\n?\s*([\d.]+\s*(MB|GB))/i);
@@ -290,11 +286,9 @@ async function resolveSonicCloudPage(sonicUrl) {
     });
 
     if (clicked) {
-      // Direct Link එකට redirect වෙනකම් සෙකන්ඩ් 6ක් රැදී සිටීම
       await new Promise(r => setTimeout(r, 6000));
     }
 
-    // Grab potential direct link BEFORE closing the page
     const telegramHref = await page.evaluate(() => {
       const a = document.querySelector("a.telegram-download");
       return a ? a.href : null;
@@ -305,11 +299,9 @@ async function resolveSonicCloudPage(sonicUrl) {
     if (capturedUrl) {
       return { fileSize, telegramUrl: null, directUrl: capturedUrl };
     }
-
     if (telegramHref) {
       return { fileSize, telegramUrl: telegramHref, directUrl: null };
     }
-
     return { fileSize, telegramUrl: null, directUrl: null };
 
   } catch (e) {
@@ -456,7 +448,7 @@ cmd({
   } catch (_) { await maliya.sendMessage(from, { text: msg }, { quoted: mek }); }
 });
 
-// ── Step 3: quality → resolve → send document (UPDATED TO LOCAL DOWNLOAD BYPASS) ──
+// ── Step 3: quality → resolve → send document (UPDATED TO WGET NATIVE BYPASS) ──
 
 cmd({
   filter: (text, { sender }) =>
@@ -497,41 +489,25 @@ cmd({
   const fileName = `${title} [${quality}] [CineSubz].mp4`
     .replace(/[^\w\s.\-\[\]()]/gi, "").trim();
   
-  // බෝටා ඉන්න server එක ඇතුලේ file එක save වෙන්න ඕන තැන
   const tempFilePath = path.join(__dirname, fileName);
 
-  reply(`*⬇️ Downloading film to server to bypass blocking... (${finalSize})*\nPlease wait, this takes a moment... ⏳`);
+  reply(`*⬇️ Downloading film via OS Native Bypass... (${finalSize})*\nAxios blocker surpassed. Please wait... ⏳`);
 
   try {
-    const customHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
-      'Accept': '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Connection': 'keep-alive',
-      'Referer': 'https://bot3.sonic-cloud.online/'
-    };
+    // Axios වෙනුවට සර්වර් එකේ `wget` කමාන්ඩ් එකෙන් කෙලින්ම සර්වර් එක රවට්ටලා බානවා.
+    const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
+    const wgetCommand = `wget -U "${userAgent}" --header="Referer: https://bot3.sonic-cloud.online/" "${resolved.url}" -O "${tempFilePath}"`;
+    
+    // Command එක background එකේ රන් කරලා ෆයිල් එක බානවා
+    execSync(wgetCommand, { stdio: 'inherit', timeout: 600000 });
 
-    // 1. මුලින්ම Axios වලින් සර්වර් එක රවට්ටලා file එක local එකට බාගන්නවා
-    const writer = fs.createWriteStream(tempFilePath);
-    const response = await axios({
-      method: 'get',
-      url: resolved.url,
-      headers: customHeaders,
-      responseType: 'stream',
-      timeout: 600000 // විනාඩි 10 ක timeout එකක් (ලොකු file නිසා)
-    });
+    if (!fs.existsSync(tempFilePath) || fs.statSync(tempFilePath).size === 0) {
+      throw new Error("Downloaded file is empty or does not exist.");
+    }
 
-    response.data.pipe(writer);
+    reply(`*⬆️ Film downloaded to server! Uploading to WhatsApp now...* 🚀`);
 
-    // Download එක ඉවර වෙනකම් පොඩ්ඩක් ඉන්නවා
-    await new Promise((resolve, reject) => {
-      writer.on('finish', resolve);
-      writer.on('error', reject);
-    });
-
-    reply(`*⬆️ Film downloaded successfully! Uploading to WhatsApp now...* 🚀`);
-
-    // 2. දැන් Local එකේ තියෙන file එක raw buffer/stream එකක් විදිහට බ්ලොක් වීමක් නැතුව whatsapp එකට යවනවා
+    // Local එකට ආපු ෆයිල් එක stream එකක් විදිහට බ්ලොක් නොවී යවනවා
     await maliya.sendMessage(from, {
       document: fs.createReadStream(tempFilePath),
       mimetype : "video/mp4",
@@ -543,24 +519,24 @@ cmd({
         `*Enjoy! 🍿*\n_Bypassed & Delivered by MALIYA-MD_`,
     }, { quoted: mek });
 
-    // 3. යවලා ඉවර වුන ගමන් storage එක පිරෙන්න නොදී file එක delete කරනවා
+    // ඉඩ ඉතුරු කරගන්න ෆයිල් එක ඩිලීට් කිරීම
     if (fs.existsSync(tempFilePath)) {
       fs.unlinkSync(tempFilePath);
     }
 
   } catch (err) {
-    console.error("[MALIYA-MD Local Bypass Error]:", err.message);
+    console.error("[MALIYA-MD Wget Bypass Error]:", err.message);
 
-    // Error එකක් ආවොත් temp file එක අයින් කරනවා
     if (fs.existsSync(tempFilePath)) {
       fs.unlinkSync(tempFilePath);
     }
 
+    // සර්වර් එක ඇතුළටම බාන්න බැරි වුනොත් direct link එක බටන් එකක් වගේ යවනවා
     await maliya.sendMessage(from, {
       text:
         `*🎬 ${title}*  [${quality}]  ${finalSize}\n\n` +
-        `❌ Server Blocked even Local Download Bypass!\n` +
-        `📥 Direct Link එකෙන් බාගන්න:\n${resolved.url}`,
+        `⚠️ *WhatsApp එකට කෙලින්ම එවන්න සර්වර් එකෙන් ඉඩ දෙන්නේ නැත.*\n\n` +
+        `👇 පහල Direct Link එක ක්ලික් කරලා ඔයාගේ බ්‍රවුසර් එකෙන්ම බාගන්න:\n${resolved.url}`,
     }, { quoted: mek });
   }
 });
