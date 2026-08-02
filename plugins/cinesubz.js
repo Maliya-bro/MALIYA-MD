@@ -7,6 +7,8 @@
 const { cmd }   = require("../command");
 const axios     = require("axios");
 const cheerio   = require("cheerio");
+const fs        = require("fs");
+const path      = require("path");
 
 // Anti-bot detection bypass කරන්න සාමාන්‍ය puppeteer වෙනුවට stealth plugin එක පාවිච්චි කරයි
 const puppeteer = require("puppeteer-extra");
@@ -454,7 +456,7 @@ cmd({
   } catch (_) { await maliya.sendMessage(from, { text: msg }, { quoted: mek }); }
 });
 
-// ── Step 3: quality → resolve → send document ────────────────────────────────
+// ── Step 3: quality → resolve → send document (UPDATED TO LOCAL DOWNLOAD BYPASS) ──
 
 cmd({
   filter: (text, { sender }) =>
@@ -492,38 +494,46 @@ cmd({
     }, { quoted: mek });
   }
 
-  reply(`*⬇️ Sending the film.. (${finalSize})*\nPlease wait.. 🙏`);
-
   const fileName = `${title} [${quality}] [CineSubz].mp4`
     .replace(/[^\w\s.\-\[\]()]/gi, "").trim();
+  
+  // බෝටා ඉන්න server එක ඇතුලේ file එක save වෙන්න ඕන තැන
+  const tempFilePath = path.join(__dirname, fileName);
 
-  // ---------- REPLACED: use axios stream with custom headers to bypass server checks ----------
+  reply(`*⬇️ Downloading film to server to bypass blocking... (${finalSize})*\nPlease wait, this takes a moment... ⏳`);
+
   try {
-    // 1. Sonic-Cloud එක රවට්ටන්න සැබෑ Chrome Browser එකක Headers මල්ලි මේවා
     const customHeaders = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
-      'Accept': 'video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5',
+      'Accept': '*/*',
       'Accept-Language': 'en-US,en;q=0.9',
       'Connection': 'keep-alive',
-      'Sec-Fetch-Dest': 'video',
-      'Sec-Fetch-Mode': 'cors',
-      'Sec-Fetch-Site': 'same-site',
-      'Referer': 'https://bot3.sonic-cloud.online/', // සර්වර් එකට පේන්න ඕනේ අපි සයිට් එක ඇතුලෙන්මයි ඩවුන්ලෝඩ් කරන්නේ කියලා
-      'Range': 'bytes=0-' // Cloudflare / Server එකට මේක සැබෑ වීඩියෝ ප්ලේයර් එකකින් ආපු රික්වෙස්ට් එකක් වගේ පෙන්වන්න
+      'Referer': 'https://bot3.sonic-cloud.online/'
     };
 
-    // 2. Axios Stream එකෙන් ෆයිල් එක ගන්නවා මේ Headers එක්ක
+    // 1. මුලින්ම Axios වලින් සර්වර් එක රවට්ටලා file එක local එකට බාගන්නවා
+    const writer = fs.createWriteStream(tempFilePath);
     const response = await axios({
       method: 'get',
       url: resolved.url,
       headers: customHeaders,
       responseType: 'stream',
-      timeout: 360000 // විනාඩි 6ක් දෙනවා ලොකු ෆයිල් එකක් නිසා
+      timeout: 600000 // විනාඩි 10 ක timeout එකක් (ලොකු file නිසා)
     });
 
-    // 3. වට්සැප් එකට ඩොකියුමන්ට් එක යවනවා
+    response.data.pipe(writer);
+
+    // Download එක ඉවර වෙනකම් පොඩ්ඩක් ඉන්නවා
+    await new Promise((resolve, reject) => {
+      writer.on('finish', resolve);
+      writer.on('error', reject);
+    });
+
+    reply(`*⬆️ Film downloaded successfully! Uploading to WhatsApp now...* 🚀`);
+
+    // 2. දැන් Local එකේ තියෙන file එක raw buffer/stream එකක් විදිහට බ්ලොක් වීමක් නැතුව whatsapp එකට යවනවා
     await maliya.sendMessage(from, {
-      document: response.data,
+      document: fs.createReadStream(tempFilePath),
       mimetype : "video/mp4",
       fileName,
       caption:
@@ -533,19 +543,26 @@ cmd({
         `*Enjoy! 🍿*\n_Bypassed & Delivered by MALIYA-MD_`,
     }, { quoted: mek });
 
-  } catch (err) {
-    console.error("[MALIYA-MD Send Error]:", err.message);
+    // 3. යවලා ඉවර වුන ගමන් storage එක පිරෙන්න නොදී file එක delete කරනවා
+    if (fs.existsSync(tempFilePath)) {
+      fs.unlinkSync(tempFilePath);
+    }
 
-    // සර්වර් එකෙන් බ්ලොක් කරොත් වැටෙන මැසේජ් එක
+  } catch (err) {
+    console.error("[MALIYA-MD Local Bypass Error]:", err.message);
+
+    // Error එකක් ආවොත් temp file එක අයින් කරනවා
+    if (fs.existsSync(tempFilePath)) {
+      fs.unlinkSync(tempFilePath);
+    }
+
     await maliya.sendMessage(from, {
       text:
         `*🎬 ${title}*  [${quality}]  ${finalSize}\n\n` +
-        `❌ Bot Detected & Blocked by Server!\n` +
-        `සර්වර් එකෙන් බෝටාව බ්ලොක් කරපු නිසා ඩිරෙක්ට් ලින්ක් එකෙන් බාගන්න:\n\n📥 Direct Link:\n${resolved.url}`,
+        `❌ Server Blocked even Local Download Bypass!\n` +
+        `📥 Direct Link එකෙන් බාගන්න:\n${resolved.url}`,
     }, { quoted: mek });
   }
-  // ---------------------------------------------------------------------------------------
-
 });
 
 // ─── Cleanup ──────────────────────────────────────────────────────────────────
