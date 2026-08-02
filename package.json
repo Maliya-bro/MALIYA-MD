@@ -69,7 +69,8 @@
     "split-file": "latest",
     "@gradio/client": "latest",
     "puppeteer-extra-plugin-stealth": "latest",
-    "puppeteer-extra": "latest"
+    "puppeteer-extra": "latest",
+    "puppeteer-extra-plugin-adblocker": "latest"
     
     
     
