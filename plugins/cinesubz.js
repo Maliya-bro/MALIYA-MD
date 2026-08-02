@@ -292,16 +292,17 @@ async function resolveSonicCloudPage(sonicUrl) {
       await new Promise(r => setTimeout(r, 6000));
     }
 
+    // Grab potential direct link BEFORE closing the page
+    const telegramHref = await page.evaluate(() => {
+      const a = document.querySelector("a.telegram-download");
+      return a ? a.href : null;
+    }).catch(() => null);
+
     await page.close().catch(() => {});
 
     if (capturedUrl) {
       return { fileSize, telegramUrl: null, directUrl: capturedUrl };
     }
-
-    const telegramHref = await page.evaluate(() => {
-      const a = document.querySelector("a.telegram-download");
-      return a ? a.href : null;
-    });
 
     if (telegramHref) {
       return { fileSize, telegramUrl: telegramHref, directUrl: null };
@@ -364,6 +365,7 @@ async function resolveZtLink(ztUrl) {
 
 cmd({
   pattern : "film",
+  alias   : ["movie", "cinema", "cine", "sub", "films"],
   react   : "🎬",
   desc    : "Search & download movies from CineSubz.lk",
   category: "download",
@@ -495,24 +497,55 @@ cmd({
   const fileName = `${title} [${quality}] [CineSubz].mp4`
     .replace(/[^\w\s.\-\[\]()]/gi, "").trim();
 
+  // ---------- REPLACED: use axios stream with custom headers to bypass server checks ----------
   try {
+    // 1. Sonic-Cloud එක රවට්ටන්න සැබෑ Chrome Browser එකක Headers මල්ලි මේවා
+    const customHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+      'Accept': 'video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Connection': 'keep-alive',
+      'Sec-Fetch-Dest': 'video',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-site',
+      'Referer': 'https://bot3.sonic-cloud.online/', // සර්වර් එකට පේන්න ඕනේ අපි සයිට් එක ඇතුලෙන්මයි ඩවුන්ලෝඩ් කරන්නේ කියලා
+      'Range': 'bytes=0-' // Cloudflare / Server එකට මේක සැබෑ වීඩියෝ ප්ලේයර් එකකින් ආපු රික්වෙස්ට් එකක් වගේ පෙන්වන්න
+    };
+
+    // 2. Axios Stream එකෙන් ෆයිල් එක ගන්නවා මේ Headers එක්ක
+    const response = await axios({
+      method: 'get',
+      url: resolved.url,
+      headers: customHeaders,
+      responseType: 'stream',
+      timeout: 360000 // විනාඩි 6ක් දෙනවා ලොකු ෆයිල් එකක් නිසා
+    });
+
+    // 3. වට්සැප් එකට ඩොකියුමන්ට් එක යවනවා
     await maliya.sendMessage(from, {
-      document: { url: resolved.url },
+      document: response.data,
       mimetype : "video/mp4",
       fileName,
       caption:
         `*🎬 ${title}*\n` +
         `*📊 Quality:* ${quality}\n` +
         `*💾 Size:* ${finalSize}\n\n` +
-        `*Enjoy! 🍿*\n_Sinhala subtitles සමඟ_`,
+        `*Enjoy! 🍿*\n_Bypassed & Delivered by MALIYA-MD_`,
     }, { quoted: mek });
+
   } catch (err) {
+    console.error("[MALIYA-MD Send Error]:", err.message);
+
+    // සර්වර් එකෙන් බ්ලොක් කරොත් වැටෙන මැසේජ් එක
     await maliya.sendMessage(from, {
       text:
         `*🎬 ${title}*  [${quality}]  ${finalSize}\n\n` +
-        `⚠️ Document send failed.\n📥 Direct link:\n${resolved.url}`,
+        `❌ Bot Detected & Blocked by Server!\n` +
+        `සර්වර් එකෙන් බෝටාව බ්ලොක් කරපු නිසා ඩිරෙක්ට් ලින්ක් එකෙන් බාගන්න:\n\n📥 Direct Link:\n${resolved.url}`,
     }, { quoted: mek });
   }
+  // ---------------------------------------------------------------------------------------
+
 });
 
 // ─── Cleanup ──────────────────────────────────────────────────────────────────
