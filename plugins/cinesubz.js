@@ -5,7 +5,7 @@
  * Upgraded Features: 
  *   - Fingerprint Evasion Engine v2.1.87 (Using newInjectedPage)
  *   - Advanced CDN & Token Interceptor (Captures cache01.avatarzone.online with tokens)
- *   - Dynamic Popup Target Interceptor (Bypasses 1-Sec Auto-Close Token Redirects)
+ *   - Full Pipeline Console Logging (Verbose Debugging Enabled)
  *   - Native Wget Process Engine (Prevents connection drops on big files)
  */
 
@@ -91,6 +91,7 @@ function normalizeQuality(t = "") {
 // ─── 🔍 1. Search Engine ─────────────────────────────────────────────────────
 
 async function searchMovies(query) {
+  console.log(`[MALIYA-MD] 🔍 Searching database for query: "${query}"`);
   const { data } = await get(`${BASE}/?s=${encodeURIComponent(query)}`);
   const $ = cheerio.load(data);
   const results = [], seen = new Set();
@@ -120,12 +121,14 @@ async function searchMovies(query) {
     });
   }
 
+  console.log(`[MALIYA-MD] 📦 Found ${results.length} movie results.`);
   return results.slice(0, 10);
 }
 
 // ─── 📑 2. Movie Details Scraper ──────────────────────────────────────────────
 
 async function getMovieMeta(movieUrl) {
+  console.log(`[MALIYA-MD] 📑 Fetching movie metadata from: ${movieUrl}`);
   const { data } = await get(movieUrl);
   const $ = cheerio.load(data);
 
@@ -178,6 +181,7 @@ async function getMovieMeta(movieUrl) {
     });
   });
 
+  console.log(`[MALIYA-MD] 🔗 Scraped Movie: "${title}" | Links found: ${links.length}`);
   return { title, thumb, imdb, duration, genres, directors, subBy, links };
 }
 
@@ -209,6 +213,7 @@ async function getBrowser() {
     if (_browser) { await _browser.pages(); return _browser; }
   } catch (_) { _browser = null; }
   
+  console.log("[MALIYA-MD] 🚀 Spawning Headless Chromium Instance...");
   _browser = await puppeteer.launch({
     headless: "new",
     args: [
@@ -229,7 +234,7 @@ async function resolveSonicCloudPage(sonicUrl) {
   let page;
 
   try {
-    console.log(`\n[MALIYA-MD] 🌐 Initializing Fingerprint Evasion Engine on target...`);
+    console.log(`\n[MALIYA-MD] 🌐 Initializing Fingerprint Evasion Engine v2.1.87...`);
     
     page = await newInjectedPage(browser, {
       fingerprintOptions: {
@@ -239,27 +244,29 @@ async function resolveSonicCloudPage(sonicUrl) {
     });
 
     await page.setViewport({ width: 1920, height: 1080 });
-
     await page.setRequestInterception(true);
     let interceptedUrl = null;
 
-    // Main Page Interceptor (Added token & avatarzone support)
+    // 🎯 Main Page Network Interceptor
     page.on('request', request => {
       const url = request.url();
       if (url.includes('bot=cscloud') || url.includes('ext=') || url.includes('/download/') || url.includes('?token=') || url.includes('avatarzone') || (url.includes('server') && url.includes('?code='))) {
         if (!url.includes("fordev.jpg")) {
           interceptedUrl = url;
-          console.log(`[MALIYA-MD] 🎯 Main Interceptor Captured: ${interceptedUrl}`);
+          console.log(`[MALIYA-MD] 🎯 [Main Interceptor] Hooked URL: ${interceptedUrl}`);
         }
       }
       if (request.resourceType() === 'image' && url.includes('fordev.jpg')) {
+        console.log(`[MALIYA-MD] 🛑 [Main Interceptor] Aborted Trap Image: ${url}`);
         return request.abort(); 
       }
       request.continue();
     });
 
-    console.log("[MALIYA-MD] ⏳ Connecting to pipeline architecture...");
+    console.log(`[MALIYA-MD] ⏳ Navigating to target portal: ${sonicUrl}`);
     await page.goto(sonicUrl, { waitUntil: "networkidle2", timeout: 45000 });
+    
+    console.log("[MALIYA-MD] ⏳ Holding pipeline open for 4000ms to allow script parsing...");
     await new Promise(r => setTimeout(r, 4000)); 
 
     const btnSelector = "#dl-links button, .direct-download, button.direct-download, a[href*='ext=']";
@@ -269,58 +276,70 @@ async function resolveSonicCloudPage(sonicUrl) {
       const m = text.match(/File Size:\s*\n?\s*([\d.]+\s*(MB|GB))/i);
       return m ? m[1] : null;
     });
+    console.log(`[MALIYA-MD] 📊 File size parsed from UI: ${fileSize}`);
 
-    await page.waitForSelector(btnSelector, { timeout: 6000 }).catch(() => {});
+    console.log(`[MALIYA-MD] 🔍 Scanning UI for Action Button...`);
+    await page.waitForSelector(btnSelector, { timeout: 6000 }).catch(() => {
+      console.log("[MALIYA-MD] ⚠️ Warning: Action button selector not matched via explicit wait.");
+    });
 
-    // [POPUP INTERCEPTOR TARGET]
+    // ⚡ [POPUP INTERCEPTOR TARGET]
+    console.log("[MALIYA-MD] 📡 Binding Global 'targetcreated' Event Listener for Popup Capture...");
     const newTargetPromise = new Promise(resolve => browser.once('targetcreated', target => resolve(target.page())));
 
-    console.log("[MALIYA-MD] 🖱️ Executing Human Emulated Vector Click...");
+    console.log("[MALIYA-MD] 🖱️ Executing Emulated Human Vector Click on Target Node...");
     const element = await page.$(btnSelector);
     if (element) {
       const box = await element.boundingBox();
       if (box) {
+        console.log(`[MALIYA-MD] 📍 Target Element Vector Found at X:${box.x} Y:${box.y}. Moving mouse...`);
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.mouse.down();
         await page.mouse.up();
       } else {
+        console.log("[MALIYA-MD] ⚠️ Bounding Box null, fallback to DOM query click execution.");
         await page.evaluate((sel) => { document.querySelector(sel)?.click(); }, btnSelector);
       }
     } else {
+      console.log("[MALIYA-MD] ⚠️ Element handle null, firing broad evaluation fallback click.");
       await page.evaluate(() => {
         const btn = document.querySelector("#dl-links button") || document.querySelector(".direct-download");
         if (btn) btn.click();
       }).catch(() => {});
     }
 
-    console.log("[MALIYA-MD] ⏳ Waiting for 1-Sec Token Validation Page to spawn...");
+    console.log("[MALIYA-MD] ⏳ Awaiting 1-Sec Token Redirect Popup Window to spawn...");
     const popupPage = await newTargetPromise.catch(() => null);
     
     if (popupPage) {
-      console.log("[MALIYA-MD] 🛑 Validation Page Captured! Waiting for Token generation...");
+      console.log("[MALIYA-MD] 🛑 [POPUP DETECTED] Token Validation Page successfully locked inside sandbox!");
       
-      // Popup Page Request Interceptor (Grabs avatarzone CDN link + ?token= instantly)
+      // 🎯 Popup Page Network Interceptor
       popupPage.on('request', req => {
         const u = req.url();
         if (u.includes('bot=cscloud') || u.includes('ext=') || u.includes('?code=') || u.includes('?token=') || u.includes('avatarzone')) {
           interceptedUrl = u;
-          console.log(`[MALIYA-MD] 🎯 Popup Redirect Token Intercepted: ${interceptedUrl}`);
+          console.log(`[MALIYA-MD] 🎯 [Popup Interceptor] Captured CDN Token URL: ${interceptedUrl}`);
         }
       });
 
+      console.log("[MALIYA-MD] ⏳ Monitoring Popup status. Waiting for internal redirect scripts to execute...");
       let checks = 0;
       while (!popupPage.isClosed() && checks < 20) {
         await new Promise(r => setTimeout(r, 500));
         checks++;
       }
-      console.log("[MALIYA-MD] ✅ Validation Page handled. Pipeline Ready.");
+      console.log(`[MALIYA-MD] ✅ Popup cycle resolved after ${checks * 500}ms. Sub-window closed.`);
     } else {
+      console.log("[MALIYA-MD] ⚠️ No detached popup detected. Sleeping 5000ms for standard viewport redirect...");
       await new Promise(r => setTimeout(r, 5000));
     }
 
+    console.log("[MALIYA-MD] 🍪 Extracting freshly injected TLS Validation Cookies...");
     const cookies = await page.cookies();
     const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
     const userAgent = await page.evaluate(() => navigator.userAgent);
+    console.log(`[MALIYA-MD] 🔑 Cookie string built. Total Cookies: ${cookies.length}`);
 
     const telegramHref = await page.evaluate(() => {
       const a = document.querySelector("a.telegram-download");
@@ -330,8 +349,10 @@ async function resolveSonicCloudPage(sonicUrl) {
     const finalUrl = page.url();
     if (!interceptedUrl && finalUrl && !finalUrl.includes("sonic-cloud") && !finalUrl.includes("fordev.jpg")) {
       interceptedUrl = finalUrl;
+      console.log(`[MALIYA-MD] 🌐 Fallback: Using raw window viewport final URL: ${interceptedUrl}`);
     }
 
+    console.log("[MALIYA-MD] 🔒 Closing primary headless view tab.");
     await page.close().catch(() => {});
     
     return { 
@@ -343,20 +364,26 @@ async function resolveSonicCloudPage(sonicUrl) {
     };
 
   } catch (e) {
-    console.log(`[MALIYA-MD] ❌ Engine Exception: ${e.message}`);
+    console.log(`[MALIYA-MD] ❌ Engine Critical Exception: ${e.message}`);
     if (page) await page.close().catch(() => {});
     throw e;
   }
 }
 
 async function resolveZtLink(ztUrl) {
+  console.log(`[MALIYA-MD] 🔗 Processing Zone-T Tunnel Link: ${ztUrl}`);
   const { data } = await get(ztUrl);
   const $ = cheerio.load(data);
 
   const rawHref = $("#link").attr("href") || "";
-  if (!rawHref) return null;
+  if (!rawHref) {
+    console.log("[MALIYA-MD] ❌ Critical: Form download link not found in Cheerio DOM structure.");
+    return null;
+  }
+  console.log(`[MALIYA-MD] 🔗 Resolved intermediate raw URL: ${rawHref}`);
 
   if (rawHref.includes("t.me/") && !rawHref.includes("CineSubzAdmin")) {
+    console.log("[MALIYA-MD] ✈️ Telegram distribution endpoint matched.");
     return { url: rawHref, isTelegram: true };
   }
 
@@ -370,12 +397,16 @@ async function resolveZtLink(ztUrl) {
         sonicUrl = rawHref.replace(searchStr, mapping.replace);
         sonicUrl = applyExtSuffix(sonicUrl);
         matched = true;
+        console.log(`[MALIYA-MD] 🗺️ Mapping Match! Remapped Cloud Portal URL: ${sonicUrl}`);
         break;
       }
     }
   }
 
-  if (!matched) return { url: rawHref, isTelegram: false };
+  if (!matched) {
+    console.log("[MALIYA-MD] ⚠️ No specific cloud mappings matched. Proceeding with raw intermediate url.");
+    return { url: rawHref, isTelegram: false };
+  }
 
   try {
     const page = await resolveSonicCloudPage(sonicUrl);
@@ -392,7 +423,7 @@ async function resolveZtLink(ztUrl) {
       };
     }
   } catch (e) {
-    console.log("[cinesubz] Warning mapping sonic page:", e.message);
+    console.log("[MALIYA-MD] ⚠️ Exception caught mapping sonic architecture page:", e.message);
   }
 
   return { url: sonicUrl, isTelegram: false };
@@ -511,12 +542,14 @@ cmd({
   }
 
   if (!resolved || (!resolved.url && !resolved.directUrl) || (resolved.url && resolved.url.includes("fordev.jpg")) || (resolved.directUrl && resolved.directUrl.includes("fordev.jpg"))) {
+    console.log("[MALIYA-MD] ❌ Anti-Bot Firewall Blocked the Request. Fordev payload detected.");
     return reply(`*❌ Anti-Bot Firewall Blocked the Request!*\nසර්වර් එක මඟින් බොට් හඳුනාගැනීමේ පද්ධතිය ක්‍රියාත්මක කලා. කරුණාකර මද වෙලාවකින් නැවත උත්සාහ කරන්න.`);
   }
 
   const finalSize = resolved.confirmedSize || chosen.size;
 
   if (resolved.isTelegram) {
+    console.log("[MALIYA-MD] 📲 Switching delivery model to Telegram Direct Href.");
     return maliya.sendMessage(from, {
       text: `*🎬 ${title}*\n*Size:* ${finalSize}\n\n📲 *Telegram Link:*\n${resolved.url}`,
     }, { quoted: mek });
@@ -532,6 +565,11 @@ cmd({
     const userAgent = resolved.userAgent || HEADERS['User-Agent'];
     const cookieStr = resolved.cookieStr || '';
 
+    console.log(`\n[MALIYA-MD] 🚀 NATIVE GRAB PIPELINE ACTIVATED`);
+    console.log(`[MALIYA-MD] 🎯 Target End-Point CDN: ${downloadUrl}`);
+    console.log(`[MALIYA-MD] 🎭 Spofing User-Agent: ${userAgent}`);
+    console.log(`[MALIYA-MD] 🍪 Injecting Dynamic Cookie Header: ${cookieStr ? "YES (Valid Content)" : "NO (Empty Header)"}`);
+
     // 🚀 Linux Native Wget Engine Setup
     const wgetCommand = `wget --tries=3 --timeout=60 --no-check-certificate \
       --user-agent="${userAgent}" \
@@ -540,12 +578,14 @@ cmd({
       --header="Accept: */*" \
       -O "${tempFilePath}" "${downloadUrl}"`;
 
-    console.log(`[MALIYA-MD] ⚡ Spawning Native Process Engine...`);
+    console.log(`[MALIYA-MD] ⚡ Spawning Native Process Engine via ChildExec...`);
     
     await new Promise((resolve, reject) => {
       exec(wgetCommand, (error, stdout, stderr) => {
+        // Wget stderr එක හැමවෙලේම log කරනවා download progress එක බලන්න
+        console.log(`[MALIYA-MD] 📈 Wget Session Feed:\n${stderr || stdout}`);
         if (error) {
-          console.error(`[MALIYA-MD] Wget Error: ${stderr}`);
+          console.error(`[MALIYA-MD] Wget Native Pipeline Crash Error: ${error.message}`);
           return reject(new Error("Native pipeline download failed."));
         }
         resolve();
@@ -553,11 +593,14 @@ cmd({
     });
 
     const stats = fs.statSync(tempFilePath);
+    console.log(`[MALIYA-MD] 📁 Download complete. Local file size verified: ${(stats.size / (1024*1024)).toFixed(2)} MB`);
+    
     if (stats.size < 5000000) { 
       throw new Error("Corrupted payload or unauthorized session drop.");
     }
 
     reply(`*⬆️ Film successfully grabbed! Uploading to WhatsApp...* 🚀`);
+    console.log(`[MALIYA-MD] 📤 Uploading payload buffer to WhatsApp Network...`);
     
     await maliya.sendMessage(from, {
       document: { url: tempFilePath },
@@ -570,11 +613,12 @@ cmd({
         `*Enjoy! 🍿*\n_Secured & Delivered by MALIYA-MD_`,
     }, { quoted: mek });
 
+    console.log(`[MALIYA-MD] ✅ Transaction success. Flushing file from buffer: ${tempFilePath}`);
     if (fs.existsSync(tempFilePath)) { fs.unlinkSync(tempFilePath); }
 
   } catch (err) {
+    console.log(`[MALIYA-MD] 🚨 Native Pipeline Failure Intercepted: ${err.message}`);
     if (fs.existsSync(tempFilePath)) { fs.unlinkSync(tempFilePath); }
-    console.log(`[MALIYA-MD] Native Engine Fallback Triggered: ${err.message}`);
 
     await maliya.sendMessage(from, {
       text:
