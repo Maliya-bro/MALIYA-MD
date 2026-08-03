@@ -1,60 +1,84 @@
 /**
- * CineSubz.lk Ultimate Scraper Plugin for MALIYA-MD
+ * FILMS365.org Plugin for MALIYA-MD
  * ─────────────────────────────────────────────────────────────
- * Engine: cinesubz-scraper NPM Package by VajiraOfficial
- * Fix: filter-based session matching (same reliable pattern as sinhalasub.js)
- *      instead of strict stanzaId-only matching, which was silently failing
- *      when contextInfo.stanzaId didn't match sent.key.id exactly.
- * Flow: .film -> reply with number (Select) -> reply with number (Download)
+ * Search: puppeteer (films365.org is a JS-rendered React/Next.js site,
+ *         so results can't be scraped with plain axios/cheerio)
+ * Metadata + downloadUrl: films365-scraper package (scrapeMovieData)
+ * Flow: .f365 <name> -> reply with number (Select) -> reply "y" to confirm download
+ *
+ * NOTE: films365-scraper only exposes scrapeMovieData(url) — there is no
+ * built-in search function in the package, so search is implemented here
+ * separately using puppeteer against films365.org's search/explore pages.
  */
 
 const { cmd } = require("../command");
+const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 
-const { searchCineSubz, scrapeCineSubz, scrapeCineSubzServerLink } = require('cinesubz-scraper');
+const { scrapeMovieData } = require("films365-scraper");
 
-// Session tracking සඳහා Objects
 const pendingSearch = {};
-const pendingQuality = {};
+const pendingDownload = {};
 
-// Helper: මාතෘකා පිරිසිදු කිරීමට
-function cleanTitle(t = "") {
-  return t.replace(/Direct\s*(&|and)\s*Telegram\s*Download\s*Links?/gi, "").replace(/sinhala subtitles?.*/i, "").replace(/සිංහල.*/i, "").replace(/\|.*/i, "").replace(/[-–]\s*$/, "").trim();
+// ─── Puppeteer-based search (films365.org renders results client-side) ─────
+async function searchFilms365(query) {
+  const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+    const searchUrl = `https://www.films365.org/search?q=${encodeURIComponent(query)}`;
+    await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 30000 });
+
+    // Give client-side rendering a moment to populate results
+    await new Promise(r => setTimeout(r, 3000));
+
+    // NOTE: these selectors are best-guess for a typical Next.js movie-card
+    // grid. If films365.org changes markup, inspect the page and adjust
+    // the selectors below (right-click a movie card -> Inspect).
+    const results = await page.$$eval("a[href*='/movie/']", (anchors) =>
+      anchors.slice(0, 10).map((a, i) => {
+        const img = a.querySelector("img");
+        const titleEl = a.querySelector("[class*='title']") || a;
+        return {
+          id: i + 1,
+          title: (titleEl.textContent || img?.alt || "").trim(),
+          url: a.href,
+          thumb: img?.src || "",
+        };
+      }).filter(r => r.title && r.url)
+    );
+
+    return results;
+  } finally {
+    await browser.close();
+  }
 }
 
-// ─── 💬 1. MAIN FILM SEARCH COMMAND ──────────────────────────────────────────
+// ─── 💬 1. SEARCH COMMAND ────────────────────────────────────────────────────
 cmd({
-  pattern: "film",
-  alias: ["movie", "cinema", "cine"],
+  pattern: "f365",
+  alias: ["films365"],
   react: "🎬",
-  desc: "Search movies from CineSubz using Package Engine",
+  desc: "Search movies from FILMS365.org",
   category: "download",
   filename: __filename,
 }, async (maliya, mek, m, { from, q, sender, reply }) => {
-  if (!q) return reply("*🎬 Usage: .film <movie name>*");
+  if (!q) return reply("*🎬 Usage: .f365 <movie name>*");
 
   await maliya.sendMessage(from, { react: { text: "🔍", key: mek.key } });
 
   try {
-    const results = await searchCineSubz(q);
-    if (!results || !results.length) return reply(`*❌ No results found for "${q}"*`);
+    const results = await searchFilms365(q);
+    if (!results.length) return reply(`*❌ No results found for "${q}"*`);
 
-    let text = `*🎬 MALIYA-MD Results: "${q}"*\n${"─".repeat(28)}\n`;
-    results.forEach((r, i) => {
-      text += `*${i + 1}.* ${cleanTitle(r.title)} ${r.rating ? `[⭐ ${r.rating}]` : ''}\n`;
-    });
-    text += `\n*📌 Note:* Reply with the number to select (quoting this message works too).`;
+    let text = `*🎬 FILMS365 Results: "${q}"*\n${"─".repeat(28)}\n`;
+    results.forEach(r => { text += `*${r.id}.* ${r.title}\n`; });
+    text += `\n*📌 Reply with the number to select.*`;
 
-    const sent = await maliya.sendMessage(from, { text: text }, { quoted: mek });
-
-    // Session එක Store කිරීම — messageId used only as a soft hint now, not a hard gate
-    pendingSearch[sender] = {
-      results,
-      messageId: sent?.key?.id || null,
-      timestamp: Date.now()
-    };
+    pendingSearch[sender] = { results, timestamp: Date.now() };
+    await maliya.sendMessage(from, { text }, { quoted: mek });
 
   } catch (e) {
     await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
@@ -62,7 +86,7 @@ cmd({
   }
 });
 
-// ─── 💬 2. FILTER-BASED SELECTION HANDLER (Movie Selection) ─────────────────
+// ─── 💬 2. SELECTION HANDLER (filter-based, same reliable pattern as cinesubz.js) ──
 cmd({
   filter: (text, { sender }) => {
     if (!pendingSearch[sender]) return false;
@@ -75,104 +99,89 @@ cmd({
   if (!session) return;
 
   const index = parseInt(body.trim()) - 1;
-  const selectedMovie = session.results[index];
-  delete pendingSearch[sender]; // Search session එක ක්ලියර් කිරීම
+  const selected = session.results[index];
+  delete pendingSearch[sender];
 
   await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
   try {
-    const metadata = await scrapeCineSubz(selectedMovie.url);
-    if (!metadata.downloadLinks || !metadata.downloadLinks.length) {
-      return reply("*❌ Download links no longer available.*");
+    const metadata = await scrapeMovieData(selected.url);
+    if (!metadata || !metadata.downloadUrl) {
+      return reply("*❌ No download link found for this title.*");
     }
 
-    let msg = `*🎬 ${metadata.title || selectedMovie.title}*\n${"─".repeat(32)}\n`;
-    if (metadata.imdb_rate) msg += `⭐ *IMDb:* ${metadata.imdb_rate}\n`;
+    let msg = `*🎬 ${metadata.title || selected.title}*\n${"─".repeat(32)}\n`;
+    if (metadata.rate) msg += `⭐ *Rating:* ${metadata.rate}\n`;
     if (metadata.duration) msg += `⏱️ *Duration:* ${metadata.duration}\n`;
-    if (metadata.genre) msg += `🎭 *Genre:* ${metadata.genre}\n\n`;
+    if (metadata.date) msg += `📅 *Release:* ${metadata.date}\n`;
+    if (metadata.desc) msg += `\n📝 ${metadata.desc.slice(0, 300)}${metadata.desc.length > 300 ? "..." : ""}\n`;
+    msg += `\n*📌 Reply "y" to download this movie.*`;
 
-    msg += `*📥 Quality Select:*\n`;
-    metadata.downloadLinks.forEach((l, i) => {
-      msg += `*${i + 1}.* ${l.quality}\n`;
-    });
-    msg += `\n*📌 Note:* Reply with the quality number to download (quoting this message works too).`;
-
-    const sentQualityMsg = await maliya.sendMessage(from, { text: msg }, { quoted: mek });
-
-    pendingQuality[sender] = {
-      title: metadata.title || selectedMovie.title,
-      links: metadata.downloadLinks,
-      messageId: sentQualityMsg?.key?.id || null,
+    pendingDownload[sender] = {
+      title: metadata.title || selected.title,
+      downloadUrl: metadata.downloadUrl,
       timestamp: Date.now()
     };
+
+    await maliya.sendMessage(from, { text: msg }, { quoted: mek });
 
   } catch (e) {
     return reply(`*❌ Metadata Error:* ${e.message}`);
   }
 });
 
-// ─── 💬 3. FILTER-BASED QUALITY HANDLER (Download) ──────────────────────────
+// ─── 💬 3. DOWNLOAD CONFIRMATION HANDLER ────────────────────────────────────
 cmd({
   filter: (text, { sender }) => {
-    if (!pendingQuality[sender]) return false;
-    const n = parseInt((text || "").trim());
-    return !isNaN(n) && n > 0 && n <= pendingQuality[sender].links.length;
+    if (!pendingDownload[sender]) return false;
+    return /^y(es)?$/i.test((text || "").trim());
   },
   filename: __filename
-}, async (maliya, mek, m, { body, sender, from, reply }) => {
-  const session = pendingQuality[sender];
+}, async (maliya, mek, m, { sender, from, reply }) => {
+  const session = pendingDownload[sender];
   if (!session) return;
-
-  const index = parseInt(body.trim()) - 1;
-  const chosenLink = session.links[index];
-  delete pendingQuality[sender]; // Quality session එක ක්ලියර් කිරීම
+  delete pendingDownload[sender];
 
   await maliya.sendMessage(from, { react: { text: "✅", key: mek.key } });
-  reply(`*⏳ Bypassing Firewalls & Fetching Direct Link...*`);
+  reply(`*⏳ Fetching download link...*`);
 
-  const cleanFileName = `${session.title} [${chosenLink.quality}].mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
+  const cleanFileName = `${session.title}.mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
   const tempFilePath = path.join(__dirname, cleanFileName);
 
   try {
-    // දැනටමත් Direct File Link එකක්ද බැලීම (.mp4/.mkv වලින් අවසන් වේ නම් scraping step එක skip කරන්න)
-    const isAlreadyDirectFile = /\.(mp4|mkv|avi|mov)(\?.*)?$/i.test(chosenLink.directUrl);
-
-    let finalDownloadUrl;
-    let sizeInfo = null;
-
-    if (isAlreadyDirectFile) {
-      finalDownloadUrl = chosenLink.directUrl;
-      sizeInfo = chosenLink.size || null;
-    } else {
-      const decryptedData = await scrapeCineSubzServerLink(chosenLink.directUrl);
-
-      if (!decryptedData || (!decryptedData.telegram && !decryptedData.directUrl)) {
-        return reply(`*❌ Stream Link Decryption Failed.*`);
-      }
-
-      // ටෙලිග්‍රෑම් ලින්ක් එකක් පමණක් ඇත්නම්
-      if (decryptedData.telegram && !decryptedData.directUrl) {
-        return reply(`*📲 Telegram Stream Link:* ${decryptedData.telegram}\n*(Size: ${decryptedData.size || 'Unknown'})*`);
-      }
-
-      finalDownloadUrl = decryptedData.directUrl || chosenLink.directUrl;
-      sizeInfo = decryptedData.size;
-    }
-
-    // File Download Stream
     const response = await axios({
       method: 'get',
-      url: finalDownloadUrl,
+      url: session.downloadUrl,
       responseType: 'stream',
       timeout: 120000,
       maxRedirects: 5,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Referer': 'https://www.films365.org/',
+        'Accept': '*/*'
+      }
     });
+
+    // Guard against error pages disguised as 200 OK responses
+    const contentType = (response.headers['content-type'] || '').toLowerCase();
+    const contentLength = parseInt(response.headers['content-length'] || '0');
+
+    if (contentType.includes('text/html') || contentType.includes('application/json')) {
+      return reply(`*❌ Server rejected direct download (blocked/expired link).*\n\n🔗 Try manually:\n${session.downloadUrl}`);
+    }
+    if (contentLength > 0 && contentLength < 100 * 1024) {
+      return reply(`*❌ File too small (${(contentLength / 1024).toFixed(1)}KB) — likely an error page.*\n\n🔗 Try manually:\n${session.downloadUrl}`);
+    }
 
     const writer = fs.createWriteStream(tempFilePath);
     response.data.pipe(writer);
-
     await new Promise((res, rej) => { writer.on('finish', res); writer.on('error', rej); });
+
+    const stats = fs.statSync(tempFilePath);
+    if (stats.size < 100 * 1024) {
+      if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+      return reply(`*❌ Downloaded file too small (${(stats.size / 1024).toFixed(1)}KB) — likely an error page.*\n\n🔗 Try manually:\n${session.downloadUrl}`);
+    }
 
     reply(`*⬆️ Uploading movie file to WhatsApp...*`);
 
@@ -180,27 +189,23 @@ cmd({
       document: { url: tempFilePath },
       mimetype: "video/mp4",
       fileName: cleanFileName,
-      caption: `*🎬 ${session.title}*\n*📊 Quality:* ${chosenLink.quality}\n*💾 Size:* ${sizeInfo || 'N/A'}\n\n_Delivered by MALIYA-MD_`
+      caption: `*🎬 ${session.title}*\n\n_Delivered by MALIYA-MD_`
     }, { quoted: mek });
 
     if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
 
   } catch (err) {
     if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-    console.log("❌ CineSubz Upload Error:", err.message);
-    console.log("❌ Full Stack:", err.stack);
-    if (err.response) {
-      console.log("❌ HTTP Status:", err.response.status);
-    }
-    reply(`*⚠️ Direct Upload Failed.*\n*Reason:* ${err.message}\n\n🔗 Download Link:\n${chosenLink.directUrl}`);
+    console.log("❌ FILMS365 Download Error:", err.message);
+    reply(`*⚠️ Direct Upload Failed.*\n*Reason:* ${err.message}\n\n🔗 Download Link:\n${session.downloadUrl}`);
   }
 });
 
-// විනාඩි 5න් සෙෂන් ඉබේම එක්ස්පයර් වීමේ ආරක්ෂිත ලොජික් එක
+// Session expiry — 5 minutes
 setInterval(() => {
   const now = Date.now(), ttl = 5 * 60 * 1000;
   for (const s in pendingSearch) if (now - pendingSearch[s].timestamp > ttl) delete pendingSearch[s];
-  for (const s in pendingQuality) if (now - pendingQuality[s].timestamp > ttl) delete pendingQuality[s];
+  for (const s in pendingDownload) if (now - pendingDownload[s].timestamp > ttl) delete pendingDownload[s];
 }, 60000);
 
-module.exports = { pendingSearch, pendingQuality };
+module.exports = { pendingSearch, pendingDownload };
