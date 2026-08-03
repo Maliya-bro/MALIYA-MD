@@ -1,6 +1,6 @@
-FROM node:18-slim
+FROM node:22-slim
 
-# Linux වලට අවශ්‍ය වන GUI Emulation (xvfb) සහ Chromium Dependencies ඉන්ස්ටෝල් කිරීම
+
 RUN apt-get update && apt-get install -y \
     xvfb \
     x11vnc \
@@ -22,5 +22,4 @@ RUN npm install
 
 COPY . .
 
-# Railway එකේ Xvfb (Virtual Screen) එකක් ඇතුලේ බොට්ව headless: false විදිහටම රන් කරවන්න මේ Command එක දෙන්න
 CMD ["xvfb-run", "--server-args=-screen 0 1024x768x24", "node", "index.js"]
