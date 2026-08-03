@@ -1,7 +1,7 @@
 /**
  * CineSubz.lk Ultimate Movie Downloader Plugin for MALIYA-MD
  * ─────────────────────────────────────────────────────────────
- * Engine: Puppeteer Real Browser v1.4.4 (Anti-Detection Mode)
+ * Engine: Puppeteer Real Browser v1.4.4 (New Tab Interceptor Mode)
  * Platform: Optimized for Railway (Docker + Xvfb Environment)
  */
 
@@ -195,111 +195,141 @@ async function finalizeRealSession(browser, page, targetUrl) {
   const cookies = await page.cookies();
   const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
   const userAgent = await page.evaluate(() => navigator.userAgent);
-  const finalUrl = page.url();
-
-  if (!targetUrl && finalUrl && !finalUrl.includes("fordev.jpg")) {
-    targetUrl = finalUrl;
-  }
-
+  
   console.log(`[MALIYA-MD] 🔒 Closing session. Final Direct Target: ${targetUrl}`);
   await browser.close().catch(() => {});
   
   return { 
-    fileSize: null, 
     directUrl: targetUrl, 
     cookieStr: cookieHeader, 
     userAgent: userAgent 
   };
 }
 
-// ─── 🌐 5. Puppeteer Real Browser (Anti-Expiration Interceptor) ──────────────
+// ─── 🌐 5. Puppeteer Real Browser (Tab/Redirect Target Hook Mode) ──────
 
 async function resolveSonicCloudPage(sonicUrl) {
   let browser, page;
 
   try {
-    console.log(`\n[MALIYA-MD] 🌐 Launching Puppeteer Real Browser (Anti-Detection Mode)...`);
+    console.log(`\n[MALIYA-MD] 🌐 Launching Puppeteer Real Browser (New Tab Interceptor Mode)...`);
     
     const setup = await connect({
       headless: false, 
       turnstile: true, 
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      connectOption: {
-        defaultViewport: null
-      }
+      connectOption: { defaultViewport: null }
     });
 
     browser = setup.browser;
     page = setup.page;
 
-    await page.setRequestInterception(true);
-    let interceptedUrl = null;
-    let apiDownloadUrl = null;
+    let realDownloadLink = null;
 
-    page.on('request', request => {
-      const url = request.url();
-      
-      // 🎯 API Download Link එකක් ආවොත් ඒක තමයි සෙෂන් එක එක්ස්පයර් නොවී වදින ලින්ක් එක!
-      if (url.includes('/api/download-data/')) {
-        apiDownloadUrl = url;
-        console.log(`[MALIYA-MD] 🎯 [API Interceptor] Hooked Endpoint: ${apiDownloadUrl}`);
-      } else if (url.includes('bot=cscloud') || url.includes('ext=') || url.includes('?code=')) {
-        if (!url.includes("fordev.jpg")) {
-          interceptedUrl = url;
-          console.log(`[MALIYA-MD] 🎯 [Main Interceptor] Hooked URL: ${interceptedUrl}`);
+    // 🎯 1. අලුතෙන් ඕපන් වෙන ටැබ්/වින්ඩෝස් (New Targets) ට්‍රැක් කිරීම
+    browser.on('targetcreated', async (target) => {
+      if (target.type() === 'page') {
+        const newPage = await target.page();
+        if (newPage) {
+          try {
+            // අලුත් ටැබ් එකේ URL එක වෙනස් වෙනකොටම (Redirect වෙනකොටම) ඒක හොක් කරගන්නවා
+            newPage.on('framenavigated', frame => {
+              const url = frame.url();
+              if (url && (url.includes('avatarzone') || url.includes('sonic-cloud') || url.includes('.mp4') || url.includes('.mkv'))) {
+                realDownloadLink = url;
+                console.log(`[MALIYA-MD] 🎯 [New Tab Redirect Hooked]: ${realDownloadLink}`);
+              }
+            });
+            
+            // රික්වෙස්ට් මට්ටමින්ද චෙක් කරනවා ෂුවර් එකටම
+            await newPage.setRequestInterception(true);
+            newPage.on('request', request => {
+              const url = request.url();
+              if (url.includes('avatarzone') || url.includes('.mp4') || url.includes('.mkv') || url.includes('token=')) {
+                realDownloadLink = url;
+                console.log(`[MALIYA-MD] 🎯 [New Tab Stream Hooked]: ${realDownloadLink}`);
+              }
+              request.continue();
+            });
+          } catch (err) {
+            // සයිලන්ට් ඉග්නෝර් - ටැබ් එක ඉක්මනට වැහුනොත් එන එරර්ස් වැලැක්වීමට
+          }
         }
       }
+    });
 
-      if (request.resourceType() === 'image' && url.includes('fordev.jpg')) {
-        return request.abort(); 
+    // 🎯 2. දැනට තියෙන මේන් පේජ් එකේ රික්වෙස්ට් ට්‍රැක් කිරීම
+    await page.setRequestInterception(true);
+    page.on('request', request => {
+      const url = request.url();
+      if (url.includes('avatarzone') || ((url.includes('server1') || url.includes('server2')) && (url.includes('ext=') || url.includes('token=')))) {
+        if (url !== sonicUrl && !url.includes("fordev.jpg")) {
+          realDownloadLink = url;
+          console.log(`[MALIYA-MD] 🎯 [Main Page Stream Hooked]: ${realDownloadLink}`);
+        }
       }
       request.continue();
     });
 
-    console.log(`[MALIYA-MD] ⏳ Navigating to target portal: ${sonicUrl}`);
-    await page.goto(sonicUrl, { waitUntil: "domcontentloaded", timeout: 40000 });
+    console.log(`[MALIYA-MD] ⏳ Navigating to Portal Page: ${sonicUrl}`);
+    await page.goto(sonicUrl, { waitUntil: "networkidle2", timeout: 50000 });
     
-    console.log("[MALIYA-MD] ⏳ Holding pipeline open for 4000ms to allow DOM execution...");
-    await new Promise(r => setTimeout(r, 4000)); 
-
-    // API ලින්ක් එකක් හරි Direct ලින්ක් එකක් හරි මුලින්ම ආවොත් බ්‍රවුසර් එකෙන් බෑම ස්ටාර්ට් වෙන්න කලින් සෙෂන් එක ගන්නවා
-    const finalTargetUrl = apiDownloadUrl || interceptedUrl;
-    if (finalTargetUrl) {
-      console.log("[MALIYA-MD] ⚡ Target URL captured early via network stream. Skipping UI clicks.");
-      return await finalizeRealSession(browser, page, finalTargetUrl);
-    }
-
-    console.log("[MALIYA-MD] 🕵️‍♂️ Scanning DOM for hidden direct download anchors...");
-    const extractedHref = await page.evaluate(() => {
-      const allLinks = Array.from(document.querySelectorAll("a"));
-      const found = allLinks.find(a => a.href.includes("ext=") || a.href.includes("download") || a.href.includes("code=") || a.href.includes("/api/"));
-      return found ? found.href : null;
-    });
-
-    if (extractedHref) {
-      console.log(`[MALIYA-MD] 🔗 Found raw link in DOM: ${extractedHref}`);
-      return await finalizeRealSession(browser, page, extractedHref);
-    }
-
-    console.log("[MALIYA-MD] 🖱️ Executing Humanized Real Click Engine...");
-    const targetSelectors = ["#dl-links button", ".direct-download", "button", "a.btn", "[onclick]"];
+    console.log("[MALIYA-MD] 🖱️ Scanning DOM for 'Direct Download' button...");
     
+    const buttonSelectors = [
+      "a.btn-danger", 
+      "button.btn-danger",
+      "a[href*='api/download-data']",
+      "//a[contains(text(), 'Direct Download')]",
+      "//button[contains(text(), 'Direct Download')]",
+      "#dl-links button",
+      ".direct-download"
+    ];
+
     let clicked = false;
-    for (const sel of targetSelectors) {
-      const el = await page.$(sel);
-      if (el) {
-        await page.realClick(sel); 
-        console.log(`[MALIYA-MD] 💥 RealClick executed on selector: ${sel}`);
-        clicked = true;
-        break;
+    for (const sel of buttonSelectors) {
+      if (sel.startsWith("//")) {
+        const [el] = await page.$x(sel);
+        if (el) {
+          await el.click();
+          console.log(`[MALIYA-MD] 💥 Clicked 'Direct Download' Button via XPath: ${sel}`);
+          clicked = true;
+          break;
+        }
+      } else {
+        const el = await page.$(sel);
+        if (el) {
+          await page.realClick(sel); 
+          console.log(`[MALIYA-MD] 💥 Clicked 'Direct Download' Button via CSS: ${sel}`);
+          clicked = true;
+          break;
+        }
       }
     }
 
-    await new Promise(r => setTimeout(r, 3000));
-    return await finalizeRealSession(browser, page, apiDownloadUrl || interceptedUrl);
+    if (!clicked) {
+      const fallbackEl = await page.$("a, button");
+      if (fallbackEl) {
+        await fallbackEl.click();
+        console.log("[MALIYA-MD] ⚠️ Target button fallback clicked.");
+      }
+    }
+
+    // ⏳ ටැබ් එක ඕපන් වෙලා රීඩිරෙක්ට් එක වදිනකන් තත්පර 7ක් බලාගෙන ඉන්නවා
+    console.log("[MALIYA-MD] ⏳ Waiting 7000ms for Tab Redirect Handshake...");
+    for (let i = 0; i < 7; i++) {
+      if (realDownloadLink) break; 
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    if (realDownloadLink) {
+      return await finalizeRealSession(browser, page, realDownloadLink);
+    }
+
+    return await finalizeRealSession(browser, page, page.url());
 
   } catch (e) {
-    console.log(`[MALIYA-MD] ❌ Real Browser Exception: ${e.message}`);
+    console.log(`[MALIYA-MD] ❌ Browser Core Exception: ${e.message}`);
     if (browser) await browser.close().catch(() => {});
     throw e;
   }
@@ -341,8 +371,7 @@ async function resolveZtLink(ztUrl) {
     if (page.directUrl) {
       return { 
         url: page.directUrl, 
-        isTelegram: false, 
-        confirmedSize: page.fileSize,
+        isTelegram: false,
         cookieStr: page.cookieStr,
         userAgent: page.userAgent
       };
@@ -470,8 +499,7 @@ cmd({
     return reply(`*❌ Anti-Bot Firewall Blocked the Request!*\nසර්වර් එක මඟින් බොට් හඳුනාගැනීමේ පද්ධතිය ක්‍රියාත්මක කලා. කරුණාකර මද වෙලාවකින් නැවත උත්සාහ කරන්න.`);
   }
 
-  const finalSize = resolved.confirmedSize || chosen.size;
-
+  const finalSize = chosen.size;
   if (resolved.isTelegram) {
     return maliya.sendMessage(from, {
       text: `*🎬 ${title}*\n*Size:* ${finalSize}\n\n📲 *Telegram Link:*\n${resolved.url}`,
@@ -491,24 +519,23 @@ cmd({
     console.log(`\n[MALIYA-MD] 🚀 NATIVE AXIOS STREAM PIPELINE ACTIVATED`);
     console.log(`[MALIYA-MD] 🎯 Target End-Point CDN: ${downloadUrl}`);
 
-    // Axios Stream Downloader Engine with Auto-Redirect Follower
     const writer = fs.createWriteStream(tempFilePath);
     
     const downloadResponse = await axios({
       method: 'get',
       url: downloadUrl,
       responseType: 'stream',
-      maxRedirects: 20, // ⚡ සර්වර් එකෙන් දෙන හැම රීඩිරෙක්ට් එකක්ම ෆලෝ කරන්න දෙනවා
+      maxRedirects: 20,
       headers: {
         'User-Agent': userAgent,
         'Cookie': cookieStr,
         'Referer': 'https://bot3.sonic-cloud.online/',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept': '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
         'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
+        'Range': 'bytes=0-'
       },
-      timeout: 600000 // විනාඩි 10ක උපරිම කාලයක් ලොකු ෆයිල් වලට
+      timeout: 1200000 
     });
 
     downloadResponse.data.pipe(writer);
@@ -524,7 +551,6 @@ cmd({
     const stats = fs.statSync(tempFilePath);
     console.log(`[MALIYA-MD] 📁 Local file size verified: ${(stats.size / (1024*1024)).toFixed(2)} MB`);
     
-    // වැලිඩේෂන් එක: 5MB වලට වඩා අඩු නම් ඒක අනිවාර්යයෙන්ම එරර් එකක්
     if (stats.size < 5000000) { 
       throw new Error("Corrupted payload or unauthorized session drop.");
     }
