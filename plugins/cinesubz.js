@@ -2,6 +2,7 @@
  * CineSubz.lk Ultimate Movie Downloader Plugin for MALIYA-MD
  * ─────────────────────────────────────────────────────────────
  * Engine: Puppeteer Real Browser v1.4.4 (New Tab Interceptor Mode)
+ * Bugfix: Resolved page.$x Deprecation Crash
  * Platform: Optimized for Railway (Docker + Xvfb Environment)
  */
 
@@ -206,7 +207,7 @@ async function finalizeRealSession(browser, page, targetUrl) {
   };
 }
 
-// ─── 🌐 5. Puppeteer Real Browser (Tab/Redirect Target Hook Mode) ──────
+// ─── 🌐 5. Puppeteer Real Browser (Fixed Click Interceptor) ──────────────────
 
 async function resolveSonicCloudPage(sonicUrl) {
   let browser, page;
@@ -226,13 +227,12 @@ async function resolveSonicCloudPage(sonicUrl) {
 
     let realDownloadLink = null;
 
-    // 🎯 1. අලුතෙන් ඕපන් වෙන ටැබ්/වින්ඩෝස් (New Targets) ට්‍රැක් කිරීම
+    // 🎯 1. Intercepting New Tabs/Redirect Targets
     browser.on('targetcreated', async (target) => {
       if (target.type() === 'page') {
         const newPage = await target.page();
         if (newPage) {
           try {
-            // අලුත් ටැබ් එකේ URL එක වෙනස් වෙනකොටම (Redirect වෙනකොටම) ඒක හොක් කරගන්නවා
             newPage.on('framenavigated', frame => {
               const url = frame.url();
               if (url && (url.includes('avatarzone') || url.includes('sonic-cloud') || url.includes('.mp4') || url.includes('.mkv'))) {
@@ -241,7 +241,6 @@ async function resolveSonicCloudPage(sonicUrl) {
               }
             });
             
-            // රික්වෙස්ට් මට්ටමින්ද චෙක් කරනවා ෂුවර් එකටම
             await newPage.setRequestInterception(true);
             newPage.on('request', request => {
               const url = request.url();
@@ -251,18 +250,16 @@ async function resolveSonicCloudPage(sonicUrl) {
               }
               request.continue();
             });
-          } catch (err) {
-            // සයිලන්ට් ඉග්නෝර් - ටැබ් එක ඉක්මනට වැහුනොත් එන එරර්ස් වැලැක්වීමට
-          }
+          } catch (err) {}
         }
       }
     });
 
-    // 🎯 2. දැනට තියෙන මේන් පේජ් එකේ රික්වෙස්ට් ට්‍රැක් කිරීම
+    // 🎯 2. Intercepting Main Page Requests
     await page.setRequestInterception(true);
     page.on('request', request => {
       const url = request.url();
-      if (url.includes('avatarzone') || ((url.includes('server1') || url.includes('server2')) && (url.includes('ext=') || url.includes('token=')))) {
+      if (url.includes('avatarzone') || ((url.includes('server1') || url.includes('server2')) && (url.includes('ext=') || url.includes('token='))) || url.includes('/api/download-data/')) {
         if (url !== sonicUrl && !url.includes("fordev.jpg")) {
           realDownloadLink = url;
           console.log(`[MALIYA-MD] 🎯 [Main Page Stream Hooked]: ${realDownloadLink}`);
@@ -276,35 +273,41 @@ async function resolveSonicCloudPage(sonicUrl) {
     
     console.log("[MALIYA-MD] 🖱️ Scanning DOM for 'Direct Download' button...");
     
+    // CSS සහ නවීන XPath Locator ක්‍රමයට Fix කරන ලදSelectors ලූප් එක
     const buttonSelectors = [
       "a.btn-danger", 
       "button.btn-danger",
       "a[href*='api/download-data']",
-      "//a[contains(text(), 'Direct Download')]",
-      "//button[contains(text(), 'Direct Download')]",
-      "#dl-links button",
+      "aria/Direct Download (New)", // modern puppeteer selector
+      "a.btn",
       ".direct-download"
     ];
 
     let clicked = false;
     for (const sel of buttonSelectors) {
-      if (sel.startsWith("//")) {
-        const [el] = await page.$x(sel);
-        if (el) {
-          await el.click();
-          console.log(`[MALIYA-MD] 💥 Clicked 'Direct Download' Button via XPath: ${sel}`);
-          clicked = true;
-          break;
-        }
-      } else {
+      try {
         const el = await page.$(sel);
         if (el) {
           await page.realClick(sel); 
-          console.log(`[MALIYA-MD] 💥 Clicked 'Direct Download' Button via CSS: ${sel}`);
+          console.log(`[MALIYA-MD] 💥 Clicked 'Direct Download' Button via Selector: ${sel}`);
           clicked = true;
           break;
         }
+      } catch (err) {
+        // සෙලෙක්ටර් එකක් මැච් වුණේ නැත්නම් ක්‍රෑෂ් නොවී ඊළඟ එකට යන්න
       }
+    }
+
+    // XPath සඳහා නවීන ක්‍රමය (page.$x වෙනුවට page.$('xpath/...'))
+    if (!clicked) {
+      try {
+        const el = await page.$("xpath///a[contains(text(), 'Direct Download')]");
+        if (el) {
+          await el.click();
+          console.log(`[MALIYA-MD] 💥 Clicked 'Direct Download' Button via Modern XPath Selector`);
+          clicked = true;
+        }
+      } catch (e) {}
     }
 
     if (!clicked) {
