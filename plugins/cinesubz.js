@@ -134,24 +134,38 @@ cmd({
   const tempFilePath = path.join(__dirname, cleanFileName);
 
   try {
-    const decryptedData = await scrapeCineSubzServerLink(chosenLink.directUrl);
+    // දැනටමත් Direct File Link එකක්ද බැලීම (.mp4/.mkv වලින් අවසන් වේ නම් scraping step එක skip කරන්න)
+    const isAlreadyDirectFile = /\.(mp4|mkv|avi|mov)(\?.*)?$/i.test(chosenLink.directUrl);
 
-    if (!decryptedData || (!decryptedData.telegram && !decryptedData.directUrl)) {
-      return reply(`*❌ Stream Link Decryption Failed.*`);
+    let finalDownloadUrl;
+    let sizeInfo = null;
+
+    if (isAlreadyDirectFile) {
+      finalDownloadUrl = chosenLink.directUrl;
+      sizeInfo = chosenLink.size || null;
+    } else {
+      const decryptedData = await scrapeCineSubzServerLink(chosenLink.directUrl);
+
+      if (!decryptedData || (!decryptedData.telegram && !decryptedData.directUrl)) {
+        return reply(`*❌ Stream Link Decryption Failed.*`);
+      }
+
+      // ටෙලිග්‍රෑම් ලින්ක් එකක් පමණක් ඇත්නම්
+      if (decryptedData.telegram && !decryptedData.directUrl) {
+        return reply(`*📲 Telegram Stream Link:* ${decryptedData.telegram}\n*(Size: ${decryptedData.size || 'Unknown'})*`);
+      }
+
+      finalDownloadUrl = decryptedData.directUrl || chosenLink.directUrl;
+      sizeInfo = decryptedData.size;
     }
-
-    // ටෙලිග්‍රෑම් ලින්ක් එකක් පමණක් ඇත්නම්
-    if (decryptedData.telegram && !decryptedData.directUrl) {
-      return reply(`*📲 Telegram Stream Link:* ${decryptedData.telegram}\n*(Size: ${decryptedData.size || 'Unknown'})*`);
-    }
-
-    const finalDownloadUrl = decryptedData.directUrl || chosenLink.directUrl;
 
     // File Download Stream
     const response = await axios({
       method: 'get',
       url: finalDownloadUrl,
       responseType: 'stream',
+      timeout: 120000,
+      maxRedirects: 5,
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
     });
 
@@ -166,7 +180,7 @@ cmd({
       document: { url: tempFilePath },
       mimetype: "video/mp4",
       fileName: cleanFileName,
-      caption: `*🎬 ${session.title}*\n*📊 Quality:* ${chosenLink.quality}\n*💾 Size:* ${decryptedData.size || 'N/A'}\n\n_Delivered by MALIYA-MD_`
+      caption: `*🎬 ${session.title}*\n*📊 Quality:* ${chosenLink.quality}\n*💾 Size:* ${sizeInfo || 'N/A'}\n\n_Delivered by MALIYA-MD_`
     }, { quoted: mek });
 
     if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
