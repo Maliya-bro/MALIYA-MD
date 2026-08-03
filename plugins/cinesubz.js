@@ -11,7 +11,6 @@ const axiosRetry = require("axios-retry").default;
 const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
-const { exec } = require("child_process");
 const { connect } = require("puppeteer-real-browser");
 
 // ⚡ Axios Auto-Retry Configuration
@@ -198,10 +197,9 @@ async function resolveSonicCloudPage(sonicUrl) {
   try {
     console.log(`\n[MALIYA-MD] 🌐 Launching Puppeteer Real Browser (Anti-Detection Mode)...`);
     
-    // ⚡ Railway Docker + Xvfb පරිසරය සඳහා Real Browser එක සම්බන්ධ කිරීම
     const setup = await connect({
-      headless: false, // Xvfb Virtual Screen එක තියෙන නිසා false දීම තමා උපරිම ස්ටේබල් වැඩ කරන්නේ!
-      turnstile: true, // Cloudflare Turnstile Captchas ඔටෝ බයිපාස් කිරීමට
+      headless: false, 
+      turnstile: true, 
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
       connectOption: {
         defaultViewport: null
@@ -214,7 +212,6 @@ async function resolveSonicCloudPage(sonicUrl) {
     await page.setRequestInterception(true);
     let interceptedUrl = null;
 
-    // 🎯 [Network Interceptor] API එක සහ ඩවුන්ලෝඩ් ස්ට්‍රීම් එක Hook කිරීම
     page.on('request', request => {
       const url = request.url();
       if (url.includes('/api/download-data/') || url.includes('bot=cscloud') || url.includes('ext=') || url.includes('?code=')) {
@@ -232,17 +229,14 @@ async function resolveSonicCloudPage(sonicUrl) {
     console.log(`[MALIYA-MD] ⏳ Navigating to target portal: ${sonicUrl}`);
     await page.goto(sonicUrl, { waitUntil: "domcontentloaded", timeout: 40000 });
     
-    // ටෝකන්ස් සහ ස්ක්‍රිප්ට්ස් රන් වීමට තත්පර 4ක් රැඳී සිටීම
     console.log("[MALIYA-MD] ⏳ Holding pipeline open for 4000ms to allow DOM execution...");
     await new Promise(r => setTimeout(r, 4000)); 
 
-    // API එක මුලින්ම අහුවුනා නම් UI Click Engine එක ස්කිප් කර කෙලින්ම සෙශන් එක පියවයි
     if (interceptedUrl) {
       console.log("[MALIYA-MD] ⚡ Target URL captured early via network stream. Skipping UI clicks.");
       return await finalizeRealSession(browser, page, interceptedUrl);
     }
 
-    // 🕵️‍♂️ [DOM Scraper Fallback] බටන් එකක් නැතත් DOM එක ඇතුලේ සැඟවුනු ඩිරෙක්ට් ලින්ක් සෙවීම
     console.log("[MALIYA-MD] 🕵️‍♂️ Scanning DOM for hidden direct download anchors...");
     const extractedHref = await page.evaluate(() => {
       const allLinks = Array.from(document.querySelectorAll("a"));
@@ -256,7 +250,6 @@ async function resolveSonicCloudPage(sonicUrl) {
       return await finalizeRealSession(browser, page, interceptedUrl);
     }
 
-    // 🖱️ [Smart RealClick Engine] මනුස්සයෙක් වගේ මවුස් එක ගෙනිහින් ක්ලික් කිරීම සිමියුලේට් කිරීම
     console.log("[MALIYA-MD] 🖱️ Executing Humanized Real Click Engine...");
     const targetSelectors = ["#dl-links button", ".direct-download", "button", "a.btn", "[onclick]"];
     
@@ -489,27 +482,32 @@ cmd({
     const userAgent = resolved.userAgent || HEADERS['User-Agent'];
     const cookieStr = resolved.cookieStr || '';
 
-    console.log(`\n[MALIYA-MD] 🚀 NATIVE GRAB PIPELINE ACTIVATED`);
+    console.log(`\n[MALIYA-MD] 🚀 NATIVE AXIOS STREAM PIPELINE ACTIVATED`);
     console.log(`[MALIYA-MD] 🎯 Target End-Point CDN: ${downloadUrl}`);
 
-    // 🚀 Linux Native Wget Engine Setup
-    const wgetCommand = `wget --tries=3 --timeout=60 --no-check-certificate \
-      --user-agent="${userAgent}" \
-      --header="Cookie: ${cookieStr}" \
-      --header="Referer: https://bot3.sonic-cloud.online/" \
-      --header="Accept: */*" \
-      -O "${tempFilePath}" "${downloadUrl}"`;
-
-    console.log(`[MALIYA-MD] ⚡ Spawning Native Process Engine via ChildExec...`);
+    // Axios Stream Downloader Engine
+    const writer = fs.createWriteStream(tempFilePath);
     
+    const downloadResponse = await axios({
+      method: 'get',
+      url: downloadUrl,
+      responseType: 'stream',
+      headers: {
+        'User-Agent': userAgent,
+        'Cookie': cookieStr,
+        'Referer': 'https://bot3.sonic-cloud.online/',
+        'Accept': '*/*'
+      },
+      timeout: 300000 // විනාඩි 5ක උපරිම කාලයක් (ලොකු ෆයිල් ඩවුන්ලෝඩ් වීමට)
+    });
+
+    downloadResponse.data.pipe(writer);
+
     await new Promise((resolve, reject) => {
-      exec(wgetCommand, (error, stdout, stderr) => {
-        console.log(`[MALIYA-MD] 📈 Wget Session Feed:\n${stderr || stdout}`);
-        if (error) {
-          console.error(`[MALIYA-MD] Wget Native Pipeline Crash Error: ${error.message}`);
-          return reject(new Error("Native pipeline download failed."));
-        }
-        resolve();
+      writer.on('finish', resolve);
+      writer.on('error', (err) => {
+        console.error(`[MALIYA-MD] Stream Writer Error: ${err.message}`);
+        reject(err);
       });
     });
 
