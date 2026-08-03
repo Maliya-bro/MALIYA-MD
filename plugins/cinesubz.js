@@ -2,8 +2,7 @@
  * CineSubz.lk Ultimate Scraper Plugin for MALIYA-MD
  * ─────────────────────────────────────────────────────────────
  * Engine: cinesubz-scraper NPM Package by VajiraOfficial
- * Bugfix: Advanced Context + Reply Number Tracking (No Freezes)
- * Platform: Optimized for MALIYA-MD Framework
+ * Bugfix: Strict StanzaId Context Matching to prevent Global Plugin Freezes.
  */
 
 const { cmd } = require("../command");
@@ -18,12 +17,17 @@ const { searchCineSubz, scrapeCineSubz, scrapeCineSubzServerLink } = require('ci
 const pendingSearch = {};
 const pendingQuality = {};
 
+// Helper: මාතෘකා පිරිසිදු කිරීමට
+function cleanTitle(t = "") {
+  return t.replace(/Direct\s*(&|and)\s*Telegram\s*Download\s*Links?/gi, "").replace(/sinhala subtitles?.*/i, "").replace(/සිංහල.*/i, "").replace(/\|.*/i, "").replace(/[-–]\s*$/, "").trim();
+}
+
 // ─── 💬 1. MAIN FILM SEARCH COMMAND ──────────────────────────────────────────
 cmd({
   pattern: "film",
   alias: ["movie", "cinema", "cine"],
   react: "🎬",
-  desc: "Search & download movies from CineSubz using Package Engine",
+  desc: "Search movies from CineSubz using Package Engine",
   category: "download",
   filename: __filename,
 }, async (maliya, mek, m, { from, q, sender, reply }) => {
@@ -32,57 +36,61 @@ cmd({
   await maliya.sendMessage(from, { react: { text: "🔍", key: mek.key } });
   
   try {
-    // 🔍 NPM Package එකෙන් සර්ච් කිරීම
     const results = await searchCineSubz(q);
     if (!results || !results.length) return reply(`*❌ No results found for "${q}"*`);
 
-    // Dynamic Session එකක් Store කිරීම
+    let text = `*🎬 MALIYA-MD Results: "${q}"*\n${"─".repeat(28)}\n`;
+    results.forEach((r, i) => {
+      text += `*${i + 1}.* ${cleanTitle(r.title)} ${r.rating ? `[⭐ ${r.rating}]` : ''}\n`;
+    });
+    text += `\n*📌 Note:* You MUST reply (Quote) to this message with the number to select.`;
+    
+    // මැසේජ් එක Send කර එහි ID එක ලබා ගැනීම
+    const sent = await maliya.sendMessage(from, { text: text }, { quoted: mek });
+
+    // Session එක Store කිරීම (Sent Message ID එකත් සමඟ)
     pendingSearch[sender] = { 
       results, 
+      messageId: sent.key.id,
       timestamp: Date.now() 
     };
 
-    let text = `*🎬 Results: "${q}"*\n${"─".repeat(28)}\n`;
-    results.forEach((r, i) => {
-      text += `*${i + 1}.* ${r.title.trim()} ${r.rating ? `[⭐ ${r.rating}]` : ''}\n`;
-    });
-    text += `\n*📌 Note:* Reply to this message with the number (e.g. 1) to select your movie.`;
-    
-    return reply(text);
   } catch (e) {
     await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
     return reply(`*❌ Search Error:* ${e.message}`);
   }
 });
 
-// ─── 💬 2. ADVANCED TEXT LISTENER (Number Processing Engine) ─────────────────
+// ─── 💬 2. STANCE-ID LOCKED TEXT LISTENER (Zero Interference) ────────────────
 cmd({
   on: "text",
   filename: __filename
 }, async (maliya, mek, m, { body, sender, from, reply }) => {
   const input = body?.trim();
   
-  // ආපු මැසේජ් එක අංකයක් නොවේ නම් වෙනත් ප්ලගින්ස් වලට ඉඩ දී ඉවත් වන්න
-  if (!input || isNaN(input)) return; 
+  // 1. ආපු මැසේජ් එක ධන අංකයක්දැයි බැලීම
+  if (!input || isNaN(input) || parseInt(input) <= 0) return; 
   const index = parseInt(input) - 1;
 
-  // 1️⃣ FLOW A: චිත්‍රපට අංකය තෝරාගැනීම (Movie Number Reply Handling)
-  if (pendingSearch[sender]) {
+  // 2. පරිශීලකයා වෙනත් මැසේජ් එකකට Reply (Quote) කර ඇත්දැයි බැලීම
+  const repliedId = mek.message?.extendedTextMessage?.contextInfo?.stanzaId;
+  if (!repliedId) return; // Reply එකක් නොවේ නම් කිසිදු බාධාවකින් තොරව ඉවත් වන්න
+
+  // ─── FLOW A: Movie Selection Handling ───
+  if (pendingSearch[sender] && repliedId === pendingSearch[sender].messageId) {
     const session = pendingSearch[sender];
     
-    // වැරදි අංකයක් එවා ඇත්නම් බ්ලොක් නොකර සිටීම
-    if (index < 0 || index >= session.results.length) return;
+    if (index < 0 || index >= session.results.length) return reply("*⚠️ Invalid selection number.*");
     
     const selectedMovie = session.results[index];
-    delete pendingSearch[sender]; // Lock එක ඉවත් කිරීම
+    delete pendingSearch[sender]; // Search session එක ක්ලියර් කිරීම
 
     await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
     
     try {
-      // චිත්‍රපටයේ සම්පූර්ණ විස්තර සහ ලින්ක්ස් Scrape කිරීම
       const metadata = await scrapeCineSubz(selectedMovie.url);
       if (!metadata.downloadLinks || !metadata.downloadLinks.length) {
-        return reply("*❌ Download links නොමැත! වෙනත් එකක් උත්සාහ කරන්න.*");
+        return reply("*❌ Download links no longer available.*");
       }
 
       let msg = `*🎬 ${metadata.title || selectedMovie.title}*\n${"─".repeat(32)}\n`;
@@ -94,50 +102,53 @@ cmd({
       metadata.downloadLinks.forEach((l, i) => { 
         msg += `*${i + 1}.* ${l.quality}\n`; 
       });
-      msg += `\n*📌 Note:* Reply with the quality number to extract the final file.`;
+      msg += `\n*📌 Note:* Reply (Quote) to this message with the quality number to download.`;
 
-      // ඊලඟ පියවර (Quality Selection) සඳහා දත්ත සේව් කිරීම
+      // Quality මැසේජ් එක යවා එහි ID එක ලබා ගැනීම
+      const sentQualityMsg = await maliya.sendMessage(from, { text: msg }, { quoted: mek });
+
+      // Next step එක සඳහා දත්ත සේව් කිරීම
       pendingQuality[sender] = { 
         title: metadata.title || selectedMovie.title, 
         links: metadata.downloadLinks, 
+        messageId: sentQualityMsg.key.id,
         timestamp: Date.now() 
       };
       
-      return reply(msg);
     } catch (e) {
       return reply(`*❌ Metadata Error:* ${e.message}`);
     }
+    return; // Flow එක නතර කිරීම
   }
 
-  // 2️⃣ FLOW B: Quality අංකය තෝරාගැනීම (Quality Number Reply Handling)
-  if (pendingQuality[sender]) {
+  // ─── FLOW B: Quality Download Handling ───
+  if (pendingQuality[sender] && repliedId === pendingQuality[sender].messageId) {
     const session = pendingQuality[sender];
     
-    if (index < 0 || index >= session.links.length) return;
+    if (index < 0 || index >= session.links.length) return reply("*⚠️ Invalid quality number.*");
     
     const chosenLink = session.links[index];
-    delete pendingQuality[sender]; // Lock එක ඉවත් කිරීම
+    delete pendingQuality[sender]; // Quality session එක ක්ලියර් කිරීම
 
-    reply(`*⏳ Grabbing Direct Stream for ${chosenLink.quality}...*\nPlease wait... ⏳`);
+    reply(`*⏳ Bypassing Firewalls & Fetching Direct Link...*`);
 
     try {
-      // Backend එකෙන් final direct stream එක decrypt කර ගැනීම
       const decryptedData = await scrapeCineSubzServerLink(chosenLink.directUrl);
       
       if (!decryptedData || (!decryptedData.telegram && !decryptedData.directUrl)) {
-        return reply(`*❌ Direct Stream එක ලබාගැනීමට අපොහොසත් විය. පසුව උත්සාහ කරන්න.*`);
+        return reply(`*❌ Stream Link Decryption Failed.*`);
       }
 
-      // ටෙලිග්‍රෑම් චැනල් ලින්ක් එකක් පමණක් ලැබුනහොත්
+      // ටෙලිග්‍රෑම් ලින්ක් එකක් පමණක් ඇත්නම්
       if (decryptedData.telegram && !decryptedData.directUrl) {
-        return reply(`*📲 Private Telegram Link:* ${decryptedData.telegram}\n*(Size: ${decryptedData.size || 'Unknown'})*`);
+        return reply(`*📲 Telegram Stream Link:* ${decryptedData.telegram}\n*(Size: ${decryptedData.size || 'Unknown'})*`);
       }
 
       const finalDownloadUrl = decryptedData.directUrl || chosenLink.directUrl;
       const cleanFileName = `${session.title} [${chosenLink.quality}].mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
       const tempFilePath = path.join(__dirname, cleanFileName);
 
-      // Axios මඟින් File Stream එකක් ලෙස Local එකට Download කිරීම
+      // File Download Stream
       const response = await axios({
         method: 'get',
         url: finalDownloadUrl,
@@ -152,7 +163,6 @@ cmd({
 
       reply(`*⬆️ Uploading movie file to WhatsApp...*`);
       
-      // MALIYA-MD මඟින් Document එකක් ලෙස WhatsApp එකට යැවීම
       await maliya.sendMessage(from, {
         document: { url: tempFilePath },
         mimetype: "video/mp4",
@@ -160,17 +170,16 @@ cmd({
         caption: `*🎬 ${session.title}*\n*📊 Quality:* ${chosenLink.quality}\n*💾 Size:* ${decryptedData.size || 'N/A'}\n\n_Delivered by MALIYA-MD_`
       }, { quoted: mek });
 
-      // වැඩේ ඉවර වුණාම Local File එක මකා දැමීම
       if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
       
     } catch (err) {
       if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-      reply(`*⚠️ Direct WhatsApp sending failed.*\n\n🔗 Manual Download Link:\n${chosenLink.directUrl}`);
+      reply(`*⚠️ Direct Upload Failed.*\n\n🔗 Download Link:\n${chosenLink.directUrl}`);
     }
   }
 });
 
-// Cache Cleaner (විනාඩි 5කින් පසු Sessions Expire කිරීමට)
+// විනාඩි 5න් සෙෂන් ඉබේම එක්ස්පයර් වීමේ ආරක්ෂිත ලොජික් එක
 setInterval(() => {
   const now = Date.now(), ttl = 5 * 60 * 1000;
   for (const s in pendingSearch) if (now - pendingSearch[s].timestamp > ttl) delete pendingSearch[s];
