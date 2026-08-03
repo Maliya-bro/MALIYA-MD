@@ -3,6 +3,7 @@
  * ─────────────────────────────────────────────────────────────
  * Engine: cinesubz-scraper NPM Package by VajiraOfficial
  * Bugfix: Strict StanzaId Context Matching to prevent Global Plugin Freezes.
+ * Flow: .film -> 1st Quote Reply (Select) -> 2nd Quote Reply (Download)
  */
 
 const { cmd } = require("../command");
@@ -132,6 +133,9 @@ cmd({
 
     reply(`*⏳ Bypassing Firewalls & Fetching Direct Link...*`);
 
+    const cleanFileName = `${session.title} [${chosenLink.quality}].mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
+    const tempFilePath = path.join(__dirname, cleanFileName);
+
     try {
       const decryptedData = await scrapeCineSubzServerLink(chosenLink.directUrl);
       
@@ -145,8 +149,6 @@ cmd({
       }
 
       const finalDownloadUrl = decryptedData.directUrl || chosenLink.directUrl;
-      const cleanFileName = `${session.title} [${chosenLink.quality}].mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
-      const tempFilePath = path.join(__dirname, cleanFileName);
 
       // File Download Stream
       const response = await axios({
