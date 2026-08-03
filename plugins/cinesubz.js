@@ -2,7 +2,7 @@
  * CineSubz.lk Ultimate Scraper Plugin for MALIYA-MD
  * ─────────────────────────────────────────────────────────────
  * Engine: cinesubz-scraper NPM Package by VajiraOfficial
- * Fix: Filter-based session matching + .mkv to .mp4 Link Patch for "Invalid Server" bug.
+ * Fix: Filter-based session matching + Dynamic Referer Bypass + .mkv Patch
  * Flow: .film -> reply with number (Select) -> reply with number (Download)
  */
 
@@ -109,7 +109,7 @@ cmd({
   }
 });
 
-// ─── 💬 3. FILTER-BASED QUALITY HANDLER (Download & Invalid Server Patched) ──
+// ─── 💬 3. FILTER-BASED QUALITY HANDLER (Download & Firewall Bypass) ────────
 cmd({
   filter: (text, { sender }) => {
     if (!pendingQuality[sender]) return false;
@@ -148,7 +148,6 @@ cmd({
         return reply(`*❌ Stream Link Decryption Failed.*`);
       }
 
-      // ටෙලිග්‍රෑම් ලින්ක් එකක් පමණක් ඇත්නම්
       if (decryptedData.telegram && !decryptedData.directUrl) {
         return reply(`*📲 Telegram Stream Link:* ${decryptedData.telegram}\n*(Size: ${decryptedData.size || 'Unknown'})*`);
       }
@@ -157,11 +156,20 @@ cmd({
       sizeInfo = decryptedData.size;
     }
 
-    // 🔥 CRITICAL FIX: "Invalid Server" HTML බග් එක වළක්වා ගැනීමට .mkv ඒවා .mp4 වලට කෝඩ් එකෙන්ම හැරවීම
+    // 🔥 Invalid Server HTML බග් එක වළක්වා ගැනීමට .mkv ඒවා .mp4 වලට හැරවීම
     if (finalDownloadUrl.includes('ext=mkv')) {
       finalDownloadUrl = finalDownloadUrl.replace('ext=mkv', 'ext=mp4');
     } else if (finalDownloadUrl.endsWith('.mkv')) {
       finalDownloadUrl = finalDownloadUrl.replace(/\.mkv$/, '.mp4');
+    }
+
+    // 🔥 ලැබෙන හොස්ට් සර්වර් එක අනුව ඔටෝමැටිකලි නිවැරදි Referer එක ගැලපීම (Bypass Block)
+    let dynamicReferer = 'https://cinesubz.lk/';
+    try {
+      const parsedUrl = new URL(finalDownloadUrl);
+      dynamicReferer = `${parsedUrl.protocol}//${parsedUrl.host}/`;
+    } catch (e) {
+      console.log("URL parsing error, using default referer");
     }
 
     // File Download Stream
@@ -169,19 +177,20 @@ cmd({
       method: 'get',
       url: finalDownloadUrl,
       responseType: 'stream',
-      timeout: 180000, // විනාඩි 3ක Time Out එකක්
+      timeout: 0, // 🔥 ලොකු ෆයිල් මැදදී කට් නොවෙන්න Timeout එක නැති කරා
       maxRedirects: 5,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://cinesubz.lk/',
-        'Accept': '*/*'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Referer': dynamicReferer, // 🔥 Sonic-Cloud Cloudflare Bypass
+        'Accept': '*/*',
+        'Connection': 'keep-alive'
       }
     });
 
     const contentType = (response.headers['content-type'] || '').toLowerCase();
     const contentLength = parseInt(response.headers['content-length'] || '0');
 
-    // සර්වර් එකෙන් වැරදිලා හෝ බ්ලොක් වෙලා HTML එකක් ආවොත් හෝ 10MB ට අඩු නම් බ්ලොක් කිරීම
+    // සර්වර් එකෙන් ආයෙත් HTML Error එකක් ආවොත් බ්ලොක් කිරීම
     if (contentType.includes('text/html') || contentType.includes('application/json') || (contentLength > 0 && contentLength < 10 * 1024 * 1024)) {
       return reply(`*❌ Server rejected direct download (Cloudflare Challenge or Invalid Server).*\n\n🎬 *Movie:* ${session.title}\n\n🔗 *මෙන්න ඩිරෙක්ට් බ්‍රවුසර් ලින්ක් එක:* \n${finalDownloadUrl}`);
     }
@@ -191,11 +200,11 @@ cmd({
 
     await new Promise((res, rej) => { writer.on('finish', res); writer.on('error', rej); });
 
-    // ඩවුන්ලෝඩ් වුනාට පස්සේ ඇත්තටම ෆයිල් එකේ සයිස් එක චෙක් කිරීම (8KB බිඳවැටීම් වැළැක්වීම)
+    // හාඩ් ඩිස්ක් එකට ආපු ෆයිල් එකේ සයිස් එක චෙක් කිරීම
     const stats = fs.statSync(tempFilePath);
     if (stats.size < 10 * 1024 * 1024) { 
       if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-      return reply(`*❌ Download Failed (Server returned an invalid file).* \n\n🔗 *ඔයාම මේ ලින්ක් එකෙන් බ්‍රවුසර් එක හරහා ට්‍රයි කරන්න:* \n${finalDownloadUrl}`);
+      return reply(`*❌ Download Failed (Server returned an invalid file).* \n\n🔗 *ඔයාම මේ ලින්ක් එකෙන් ට්‍රයි කරන්න:* \n${finalDownloadUrl}`);
     }
 
     reply(`*⬆️ Uploading movie file to WhatsApp...*`);
@@ -212,7 +221,11 @@ cmd({
   } catch (err) {
     if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
     console.log("❌ CineSubz Upload Error:", err.message);
-    reply(`*⚠️ Direct Upload Failed.*\n*Reason:* ${err.message}\n\n🔗 Download Link:\n${chosenLink.directUrl}`);
+    
+    let errMsg = err.message;
+    if (err.response) errMsg += ` (Status: ${err.response.status})`;
+    
+    reply(`*⚠️ Direct Upload Failed.*\n*Reason:* ${errMsg}\n\n🔗 Download Link:\n${chosenLink.directUrl}`);
   }
 });
 
