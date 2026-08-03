@@ -1,9 +1,9 @@
 /**
  * CineSubz.lk Ultimate Movie Downloader Plugin for MALIYA-MD
  * ─────────────────────────────────────────────────────────────
- * Engine: Puppeteer Real Browser v1.4.4 (New Tab Interceptor Mode)
- * Bugfix: Resolved page.$x Deprecation Crash
- * Platform: Optimized for Railway (Docker + Xvfb Environment)
+ * Engine: Puppeteer Real Browser v1.4.4 + wreq-js v2.3.1 (Rust TLS Bypass)
+ * Bugfix: Corrected wreq-js API Architecture & Stream Piping Mechanics
+ * Platform: Optimized for Railway / Ubuntu Servers
  */
 
 const { cmd } = require("../command");
@@ -12,7 +12,9 @@ const axiosRetry = require("axios-retry").default;
 const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
+const { Readable } = require("stream"); // ⚡ Web-to-Node Stream converting සඳහා
 const { connect } = require("puppeteer-real-browser");
+const { fetch: wreqFetch } = require("wreq-js"); // 🚀 Correct wreq-js API Import
 
 // ⚡ Axios Auto-Retry Configuration
 axiosRetry(axios, { 
@@ -227,7 +229,6 @@ async function resolveSonicCloudPage(sonicUrl) {
 
     let realDownloadLink = null;
 
-    // 🎯 1. Intercepting New Tabs/Redirect Targets
     browser.on('targetcreated', async (target) => {
       if (target.type() === 'page') {
         const newPage = await target.page();
@@ -255,7 +256,6 @@ async function resolveSonicCloudPage(sonicUrl) {
       }
     });
 
-    // 🎯 2. Intercepting Main Page Requests
     await page.setRequestInterception(true);
     page.on('request', request => {
       const url = request.url();
@@ -273,12 +273,11 @@ async function resolveSonicCloudPage(sonicUrl) {
     
     console.log("[MALIYA-MD] 🖱️ Scanning DOM for 'Direct Download' button...");
     
-    // CSS සහ නවීන XPath Locator ක්‍රමයට Fix කරන ලදSelectors ලූප් එක
     const buttonSelectors = [
       "a.btn-danger", 
       "button.btn-danger",
       "a[href*='api/download-data']",
-      "aria/Direct Download (New)", // modern puppeteer selector
+      "aria/Direct Download (New)", 
       "a.btn",
       ".direct-download"
     ];
@@ -293,12 +292,9 @@ async function resolveSonicCloudPage(sonicUrl) {
           clicked = true;
           break;
         }
-      } catch (err) {
-        // සෙලෙක්ටර් එකක් මැච් වුණේ නැත්නම් ක්‍රෑෂ් නොවී ඊළඟ එකට යන්න
-      }
+      } catch (err) {}
     }
 
-    // XPath සඳහා නවීන ක්‍රමය (page.$x වෙනුවට page.$('xpath/...'))
     if (!clicked) {
       try {
         const el = await page.$("xpath///a[contains(text(), 'Direct Download')]");
@@ -318,7 +314,6 @@ async function resolveSonicCloudPage(sonicUrl) {
       }
     }
 
-    // ⏳ ටැබ් එක ඕපන් වෙලා රීඩිරෙක්ට් එක වදිනකන් තත්පර 7ක් බලාගෙන ඉන්නවා
     console.log("[MALIYA-MD] ⏳ Waiting 7000ms for Tab Redirect Handshake...");
     for (let i = 0; i < 7; i++) {
       if (realDownloadLink) break; 
@@ -512,36 +507,38 @@ cmd({
   const fileName = `${title} [${quality}] [CineSubz].mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
   const tempFilePath = path.join(__dirname, fileName);
 
-  reply(`*⬇️ Downloading film via Native Cloud Injector Engine... (${finalSize})*\nකරුණාකර රැඳී සිටින්න... ⏳`);
+  reply(`*⬇️ Downloading film via Native Rust TLS Injector Engine... (${finalSize})*\nකරුණාකර රැඳී සිටින්න... ⏳`);
 
   try {
     const downloadUrl = resolved.directUrl || resolved.url;
     const userAgent = resolved.userAgent || HEADERS['User-Agent'];
     const cookieStr = resolved.cookieStr || '';
 
-    console.log(`\n[MALIYA-MD] 🚀 NATIVE AXIOS STREAM PIPELINE ACTIVATED`);
+    console.log(`\n[MALIYA-MD] 🚀 NATIVE WREQ FETCH PIPELINE ACTIVATED`);
     console.log(`[MALIYA-MD] 🎯 Target End-Point CDN: ${downloadUrl}`);
 
-    const writer = fs.createWriteStream(tempFilePath);
-    
-    const downloadResponse = await axios({
-      method: 'get',
-      url: downloadUrl,
-      responseType: 'stream',
-      maxRedirects: 20,
-      headers: {
-        'User-Agent': userAgent,
-        'Cookie': cookieStr,
-        'Referer': 'https://bot3.sonic-cloud.online/',
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Connection': 'keep-alive',
-        'Range': 'bytes=0-'
-      },
-      timeout: 1200000 
+    // 📥 wreq-js නිල Fetch syntax එකට අනුව Request එක යැවීම
+    const downloadResponse = await wreqFetch(downloadUrl, {
+        browser: 'chrome_142', // Impersonates accurate Chrome versions
+        os: 'windows',
+        headers: {
+            'User-Agent': userAgent,
+            'Cookie': cookieStr,
+            'Referer': 'https://bot3.sonic-cloud.online/',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Connection': 'keep-alive'
+        }
     });
 
-    downloadResponse.data.pipe(writer);
+    if (!downloadResponse.ok) {
+        throw new Error(`wreq-js Server rejected with status code: ${downloadResponse.status}`);
+    }
+
+    // 🔄 wreq-js response.body (Web Stream) එක Node Readable Stream එකක් බවට පරිවර්තනය කර ෆයිල් එක ලියන්න
+    const nodeStream = Readable.fromWeb(downloadResponse.body);
+    const writer = fs.createWriteStream(tempFilePath);
+    nodeStream.pipe(writer);
 
     await new Promise((resolve, reject) => {
       writer.on('finish', resolve);
@@ -580,7 +577,7 @@ cmd({
     await maliya.sendMessage(from, {
       text:
         `*🎬 ${title}*  [${quality}]  ${finalSize}\n\n` +
-        `⚠️ *සර්වර් එකේ Strict API Security එක නිසා වට්සැප් එකට direct එවීම අසාර්ථක විය.*\n\n` +
+        `⚠️ *සර්වර් එකේ Strict TLS Security එක නිසා වට්සැප් එකට direct එවීම අසාර්ථක විය.*\n\n` +
         `👇 පහල Direct Link එක ක්ලික් කරලා ඔයාගේ බ්‍රවුසර් එකෙන්ම බාගන්න:\n${resolved.directUrl || resolved.url}`,
     }, { quoted: mek });
   }
