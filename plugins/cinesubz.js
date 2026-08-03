@@ -173,7 +173,12 @@ cmd({
 
   } catch (err) {
     if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-    reply(`*⚠️ Direct Upload Failed.*\n\n🔗 Download Link:\n${chosenLink.directUrl}`);
+    console.log("❌ CineSubz Upload Error:", err.message);
+    console.log("❌ Full Stack:", err.stack);
+    if (err.response) {
+      console.log("❌ HTTP Status:", err.response.status);
+    }
+    reply(`*⚠️ Direct Upload Failed.*\n*Reason:* ${err.message}\n\n🔗 Download Link:\n${chosenLink.directUrl}`);
   }
 });
 
