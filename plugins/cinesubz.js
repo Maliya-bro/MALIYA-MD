@@ -1,624 +1,206 @@
+const axios = require('axios');
+const cheerio = require('cheerio');
+const { connect } = require('puppeteer-real-browser');
+
 /**
- * CineSubz.lk Ultimate Movie Downloader Plugin for MALIYA-MD
- * ─────────────────────────────────────────────────────────────
- * Developer: Malindu Nadith Kumarathunga
- * Upgraded Features: 
- *   - Smart Click Evasion (Bypasses UI freezing and missing selectors)
- *   - Force Redirection Engine (Handles hidden or dynamically blocked buttons)
- *   - Full Pipeline Console Logging (Verbose Debugging Enabled)
- *   - Native Wget Process Engine (Prevents connection drops on big files)
+ * CineSubz සයිට් එකෙන් මැච් වෙන මූවීස් සර්ච් කරන ෆන්ක්ෂන් එක
  */
-
-const { cmd } = require("../command");
-const axios = require("axios");
-const axiosRetry = require("axios-retry").default;
-const https = require("https");
-const cheerio = require("cheerio");
-const fs = require("fs");
-const path = require("path");
-const { exec } = require("child_process");
-
-// Advanced Puppeteer Setup
-const puppeteer = require("puppeteer-extra");
-const StealthPlugin = require("puppeteer-extra-plugin-stealth");
-const AdblockerPlugin = require("puppeteer-extra-plugin-adblocker");
-
-// 🎭 Fingerprint Injector (Latest v2.1.87 API)
-const { newInjectedPage } = require('fingerprint-injector'); 
-
-puppeteer.use(StealthPlugin());
-puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
-
-// ⚡ Axios Auto-Retry Configuration
-axiosRetry(axios, { 
-    retries: 3, 
-    retryDelay: axiosRetry.exponentialDelay,
-    retryCondition: (error) => {
-        return axiosRetry.isNetworkOrIdempotentRequestError(error) || error.code === 'ECONNABORTED';
-    }
-});
-
-const pendingSearch = {};
-const pendingQuality = {};
-
-const BASE = "https://cinesubz.lk";
-const MAX_MB = 2048; // WhatsApp Limit (2GB)
-const TIMEOUT = 25000;
-
-const HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-  "Accept-Language": "en-US,en;q=0.9",
-  "Accept-Encoding": "gzip, deflate, br",
-  "Referer": BASE,
-};
-
-// ─── 💡 Helpers ──────────────────────────────────────────────────────────────
-
-function get(url) {
-  return axios.get(url, { headers: HEADERS, timeout: TIMEOUT, maxRedirects: 15 });
-}
-
-function cleanTitle(t = "") {
-  return t
-    .replace(/Direct\s*(&|and)\s*Telegram\s*Download\s*Links?/gi, "")
-    .replace(/sinhala subtitles?.*/i, "")
-    .replace(/සිංහල.*/i, "")
-    .replace(/\|.*/i, "")
-    .replace(/[-–]\s*$/, "")
-    .trim();
-}
-
-function parseSizeMB(s = "") {
-  const u = s.toUpperCase().trim();
-  const n = parseFloat(u);
-  if (isNaN(n)) return 9999;
-  if (u.includes("GB")) return n * 1024;
-  if (u.includes("MB")) return n;
-  return 9999;
-}
-
-function normalizeQuality(t = "") {
-  const u = t.toUpperCase();
-  if (u.includes("2160") || u.includes("4K")) return "4K";
-  if (u.includes("1080") || u.includes("FHD")) return "1080p";
-  if (u.includes("720") || u.includes("HD")) return "720p";
-  if (u.includes("480") || u.includes("SD")) return "480p";
-  if (u.includes("360")) return "360p";
-  return t.trim() || "Unknown";
-}
-
-// ─── 🔍 1. Search Engine ─────────────────────────────────────────────────────
-
 async function searchMovies(query) {
-  console.log(`[MALIYA-MD] 🔍 Searching database for query: "${query}"`);
-  const { data } = await get(`${BASE}/?s=${encodeURIComponent(query)}`);
-  const $ = cheerio.load(data);
-  const results = [], seen = new Set();
+    try {
+        const searchUrl = `https://cinesubz.net/?s=${encodeURIComponent(query)}`;
+        const response = await axios.get(searchUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
 
-  $(".display-item .item-box, article, .post").each((_, el) => {
-    const a = $(el).find("a[href*='/movies/'], a[href*='/tvshows/']").first();
-    const href = a.attr("href") || "";
-    const title = (a.attr("title") || a.text()).trim();
-    if (!href || !title || seen.has(href)) return;
-    seen.add(href);
-    results.push({
-      title,
-      url: href,
-      imdb: $(el).find("[class*='data-imdb']").first().text().replace(/imdb[:\s]*/i, "").trim(),
-      year: $(el).find("[class*='year']").first().text().trim(),
-      thumb: $(el).find("img").first().attr("src") || "",
-    });
-  });
+        const $ = cheerio.load(response.data);
+        const results = [];
 
-  if (!results.length) {
-    $("a[href*='/movies/'], a[href*='/tvshows/']").each((_, el) => {
-      const href = $(el).attr("href") || "";
-      const title = ($(el).attr("title") || $(el).text()).trim();
-      if (!href || !title || seen.has(href) || href === BASE) return;
-      seen.add(href);
-      results.push({ title, url: href, imdb: "", year: "", thumb: "" });
-    });
-  }
+        $('.result-item').each((index, element) => {
+            const title = $(element).find('.title a').text().trim();
+            const link = $(element).find('.title a').attr('href');
+            const image = $(element).find('.thumbnail img').attr('src');
+            const year = $(element).find('.meta .year').text().trim();
 
-  console.log(`[MALIYA-MD] 📦 Found ${results.length} movie results.`);
-  return results.slice(0, 10);
+            if (title && link) {
+                results.push({ title, link, image, year });
+            }
+        });
+
+        console.log(`[MALIYA-MD] 📦 Found ${results.length} movie results.`);
+        return results;
+    } catch (error) {
+        console.error(`[MALIYA-MD] ❌ Error searching movies: ${error.message}`);
+        return [];
+    }
 }
 
-// ─── 📑 2. Movie Details Scraper ──────────────────────────────────────────────
+/**
+ * මූවී පේජ් එක ඇතුලෙන් ඩවුන්ලෝඩ් ලින්ක්ස් (Zone-T හෝ Sonic-Cloud) උදලා ගන්නා ෆන්ක්ෂන් එක
+ */
+async function fetchMovieMetadata(movieUrl) {
+    try {
+        console.log(`\n[MALIYA-MD] 📑 Fetching movie metadata from: ${movieUrl}`);
+        const response = await axios.get(movieUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
 
-async function getMovieMeta(movieUrl) {
-  console.log(`[MALIYA-MD] 📑 Fetching movie metadata from: ${movieUrl}`);
-  const { data } = await get(movieUrl);
-  const $ = cheerio.load(data);
+        const $ = cheerio.load(response.data);
+        const downloadLinks = [];
 
-  const title = cleanTitle(
-    $(".info-details .details-title h3").first().text().trim() ||
-    $(".sheader .data h1").first().text().trim() ||
-    $("h1.entry-title").first().text().trim() ||
-    $("h1").first().text().trim()
-  );
+        // CineSubz එකේ සාමාන්‍යයෙන් ඩවුන්ලෝඩ් බටන් හෝ ඇන්කර් ටැග් තියෙන තැන් ස්කෑන් කිරීම
+        $('a').each((i, el) => {
+            const href = $(el).attr('href');
+            const text = $(el).text().trim();
 
-  const thumb = $(".splash-bg img").first().attr("src") ||
-    $(".poster img").first().attr("src") ||
-    $(".wp-post-image").first().attr("src") || "";
+            if (href && (href.includes('cinesubz.net/api-') || href.includes('sonic-cloud') || href.includes('zone-t'))) {
+                downloadLinks.push({
+                    name: text || `Download Link ${i + 1}`,
+                    link: href
+                });
+            }
+        });
 
-  const imdb = $(".data-imdb").first().text().replace(/imdb[:\s]*/i, "").trim();
-  const duration = $("[itemprop='duration']").first().text().trim() ||
-    $(".runtime").first().text().trim();
-
-  const genres = [];
-  $(".details-genre a, .sgeneros a").each((_, el) => {
-    const g = $(el).text().trim();
-    if (g && genres.length < 6) genres.push(g);
-  });
-
-  const directors = [];
-  $(".info-col a[href*='/director/']").each((_, el) => {
-    const d = $(el).text().trim();
-    if (d && !directors.includes(d)) directors.push(d);
-  });
-
-  const subBy = (data.match(/Subtitle By[:\s]*([^\n<]+)/i) || [])[1]?.trim() || "";
-
-  const links = [], linkSeen = new Set();
-  $("a[href*='/zt-links/'], a[href*='/api-']").each((_, el) => {
-    const href = $(el).attr("href") || "";
-    if (!href || linkSeen.has(href)) return;
-    linkSeen.add(href);
-
-    const raw = $(el).text()
-      .replace(/Direct\s*(&|and)\s*Telegram\s*Download\s*Links?/gi, "")
-      .trim();
-    const qualM = raw.match(/(4K|2160[Pp]|1080[Pp]|FHD|720[Pp]|HD|480[Pp]|SD|360[Pp])/i);
-    const sizeM = raw.match(/(\d+\.?\d*)\s*(GB|MB)/i);
-
-    links.push({
-      label: raw,
-      quality: qualM?.[1] || "",
-      size: sizeM?.[0] || "",
-      ztUrl: href,
-    });
-  });
-
-  console.log(`[MALIYA-MD] 🔗 Scraped Movie: "${title}" | Links found: ${links.length}`);
-  return { title, thumb, imdb, duration, genres, directors, subBy, links };
+        console.log(`[MALIYA-MD] 🔗 Scraped Movie Movie Links found: ${downloadLinks.length}`);
+        return downloadLinks;
+    } catch (error) {
+        console.error(`[MALIYA-MD] ❌ Error fetching movie metadata: ${error.message}`);
+        return [];
+    }
 }
 
-// ─── 🔗 3. Sonic-Cloud URL Mapping ───────────────────────────────────────────
-
-const URL_MAPPINGS = [
-  { search: ["https://google.com/server11/1:/", "https://google.com/server12/1:/", "https://google.com/server13/1:/"], replace: "https://bot3.sonic-cloud.online/server1/" },
-  { search: ["https://google.com/server21/1:/", "https://google.com/server22/1:/", "https://google.com/server23/1:/"], replace: "https://bot3.sonic-cloud.online/server2/" },
-  { search: ["https://google.com/server3/1:/"], replace: "https://bot3.sonic-cloud.online/server3/" },
-  { search: ["https://google.com/server4/1:/"], replace: "https://bot3.sonic-cloud.online/server5/" },
-  { search: ["https://google.com/server5/1:/"], replace: "https://bot3.sonic-cloud.online/server5/" },
-  { search: ["https://google.com/server6/"], replace: "https://bot3.sonic-cloud.online/server6/" },
-];
-
-function applyExtSuffix(url) {
-  if (url.includes(".mp4?bot=cscloud2bot&code=")) return url.replace(".mp4?bot=cscloud2bot&code=", "?ext=mp4&bot=cscloud2bot&code=");
-  if (url.includes(".mp4")) return url.replace(".mp4", "?ext=mp4");
-  if (url.includes(".mkv?bot=cscloud2bot&code=")) return url.replace(".mkv?bot=cscloud2bot&code=", "?ext=mkv&bot=cscloud2bot&code=");
-  if (url.includes(".mkv")) return url.replace(".mkv", "?ext=mkv");
-  if (url.includes(".zip")) return url.replace(".zip", "?ext=zip");
-  return url;
-}
-
-// ─── 🌐 4. Core Fingerprinted Interceptor Engine ───────────────────────────────
-
-let _browser = null;
-async function getBrowser() {
-  try {
-    if (_browser) { await _browser.pages(); return _browser; }
-  } catch (_) { _browser = null; }
-  
-  console.log("[MALIYA-MD] 🚀 Spawning Headless Chromium Instance...");
-  _browser = await puppeteer.launch({
-    headless: "new",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-web-security",
-      "--disable-features=IsolateOrigins,site-per-process",
-      "--blink-features=AutomationControlled",
-      "--window-size=1920,1080",
-    ],
-  });
-  return _browser;
-}
-
+/**
+ * Cloudflare සහ Anti-Bot Firewall බයිපාස් කරමින් Sonic Cloud ලින්ක් එක රිසෝල්ව් කරන ප්‍රධාන එන්ජිම
+ */
 async function resolveSonicCloudPage(sonicUrl) {
-  const browser = await getBrowser();
-  let page;
+    let browser, page;
 
-  try {
-    console.log(`\n[MALIYA-MD] 🌐 Initializing Fingerprint Evasion Engine v2.1.87...`);
-    
-    page = await newInjectedPage(browser, {
-      fingerprintOptions: {
-        devices: ['desktop'],
-        operatingSystems: ['windows'],
-      },
-    });
+    try {
+        console.log(`\n[MALIYA-MD] 🌐 Launching Puppeteer Real Browser (Anti-Detection Mode)...`);
+        
+        // ⚡ Railway Docker පරිසරය සඳහා Real Browser එක සම්බන්ධ කිරීම
+        const setup = await connect({
+            headless: false, // Docker Xvfb එක පාවිච්චි කරන නිසා false දීම වඩාත් ස්ටේබල් වේ
+            turnstile: true, // Cloudflare Turnstile Captchas ඔටෝ ක්ලික් කිරීමට
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+            connectOption: {
+                defaultViewport: null
+            }
+        });
 
-    await page.setViewport({ width: 1920, height: 1080 });
-    await page.setRequestInterception(true);
-    let interceptedUrl = null;
+        browser = setup.browser;
+        page = setup.page;
 
-    // 🎯 Main Page Network Interceptor
-    page.on('request', request => {
-      const url = request.url();
-      if (url.includes('bot=cscloud') || url.includes('ext=') || url.includes('/download/') || url.includes('?token=') || url.includes('avatarzone') || (url.includes('server') && url.includes('?code='))) {
-        if (!url.includes("fordev.jpg")) {
-          interceptedUrl = url;
-          console.log(`[MALIYA-MD] 🎯 [Main Interceptor] Hooked URL: ${interceptedUrl}`);
+        await page.setRequestInterception(true);
+        let interceptedUrl = null;
+
+        // 🎯 [Main Interceptor] නෙට්වර්ක් එක හරහා යන API බ්ලොක් එක කැප්චර් කිරීම
+        page.on('request', request => {
+            const url = request.url();
+            
+            // ඩවුන්ලෝඩ් ඩේටා API හෝ ටෝකන් සහිත ලින්ක්ස් ෆිල්ටර් කිරීම
+            if (url.includes('/api/download-data/') || url.includes('bot=cscloud') || url.includes('ext=') || url.includes('?code=') || url.includes('?token=')) {
+                if (!url.includes("fordev.jpg")) {
+                    interceptedUrl = url;
+                    console.log(`[MALIYA-MD] 🎯 [Main Interceptor] Hooked URL: ${interceptedUrl}`);
+                }
+            }
+            
+            // අනවශ්‍ය දැන්වීම් ඉමේජ් බ්ලොක් කර ස්පීඩ් එක වැඩි කිරීම
+            if (request.resourceType() === 'image' && url.includes('fordev.jpg')) {
+                return request.abort(); 
+            }
+            request.continue();
+        });
+
+        console.log(`[MALIYA-MD] ⏳ Navigating to target portal: ${sonicUrl}`);
+        await page.goto(sonicUrl, { waitUntil: "domcontentloaded", timeout: 40000 });
+        
+        // DOM එක සහ ටෝකන්ස් රන් වීමට තත්පර 4ක් පයිප්ලයින් එක විවෘතව තැබීම
+        console.log("[MALIYA-MD] ⏳ Holding pipeline open for 4000ms to allow DOM execution...");
+        await new Promise(r => setTimeout(r, 4000)); 
+
+        // ⚡ නෙට්වර්ක් එකෙන් මුලින්ම ලින්ක් එක අහුවුනා නම් UI Click Engine එක ස්කිප් කර කෙලින්ම රිටර්න් වීම
+        if (interceptedUrl) {
+            console.log("[MALIYA-MD] ⚡ Target URL captured early via network stream. Skipping UI clicks.");
+            return await finalizeRealSession(browser, page, interceptedUrl);
         }
-      }
-      if (request.resourceType() === 'image' && url.includes('fordev.jpg')) {
-        return request.abort(); 
-      }
-      request.continue();
-    });
 
-    console.log(`[MALIYA-MD] ⏳ Navigating to target portal: ${sonicUrl}`);
-    await page.goto(sonicUrl, { waitUntil: "networkidle2", timeout: 45000 });
-    
-    console.log("[MALIYA-MD] ⏳ Holding pipeline open for 4000ms to allow DOM execution...");
-    await new Promise(r => setTimeout(r, 4000)); 
+        // 🕵️‍♂️ [UI Scraper Fallback] බටන් එකක් නැතත් DOM එක ඇතුලේ සැඟවුනු ඩිරෙක්ට් ලින්ක් සෙවීම
+        console.log("[MALIYA-MD] 🕵️‍♂️ Scanning DOM for hidden direct download anchors...");
+        const extractedHref = await page.evaluate(() => {
+            const allLinks = Array.from(document.querySelectorAll("a"));
+            const found = allLinks.find(a => a.href.includes("ext=") || a.href.includes("download") || a.href.includes("code=") || a.href.includes("/api/"));
+            return found ? found.href : null;
+        });
 
-    // 📊 UI එකෙන් size එක ගමු (නැතත් කමක් නැහැ, මේක ස්ටක් වෙන්න හේතුවක් නෙවෙයි)
-    const fileSize = await page.evaluate(() => {
-      const text = document.body.innerText || "";
-      const m = text.match(/File Size:\s*\n?\s*([\d.]+\s*(MB|GB))/i);
-      return m ? m[1] : null;
-    });
-    console.log(`[MALIYA-MD] 📊 File size parsed: ${fileSize}`);
-
-    // 📡 Bind Global 'targetcreated' for Detached Popups
-    console.log("[MALIYA-MD] 📡 Binding Global Target Listener for Popups...");
-    const newTargetPromise = new Promise(resolve => browser.once('targetcreated', target => resolve(target.page())));
-
-    // ⚡ [SMART CLICK ENGINE] - බටන් එකක් අහුවෙනකම් බලන් ඉන්නේ නැතුව හැම විදිහටම ක්ලික් කරන්න ට්‍රයි කරනවා
-    console.log("[MALIYA-MD] 🖱️ Executing Multi-Vector Smart Click Engine...");
-    
-    const clicked = await page.evaluate(() => {
-      // 1. ඇතුලේ තියෙන direct download බටන් හෝ සාමාන්‍ය බටන් සෙවීම
-      const targetSelectors = ["#dl-links button", ".direct-download", "button.direct-download", "button", "a.btn"];
-      for (const sel of targetSelectors) {
-        const el = document.querySelector(sel);
-        if (el) {
-          el.click();
-          return `Clicked via selector: ${sel}`;
+        if (extractedHref) {
+            console.log(`[MALIYA-MD] 🔗 Found raw link in DOM: ${extractedHref}`);
+            interceptedUrl = extractedHref;
+            return await finalizeRealSession(browser, page, interceptedUrl);
         }
-      }
-      
-      // 2. කිසිම බටන් එකක් නැත්නම් පේජ් එකේ තියෙන ලින්ක් එකක් ක්ලික් කිරීම
-      const allLinks = Array.from(document.querySelectorAll("a"));
-      const dlLink = allLinks.find(a => a.href.includes("ext=") || a.href.includes("download") || a.href.includes("code="));
-      if (dlLink) {
-        dlLink.click();
-        return `Clicked via Anchor Href: ${dlLink.href}`;
-      }
-      
-      return null;
-    });
 
-    console.log(`[MALIYA-MD] 📡 Click Response: ${clicked || "No element found to click in DOM"}`);
-
-    // ⚡ [FORCE REDIRECTION FALLBACK] - බටන් එකක් වැඩ කලේ නැත්නම් ඩිරෙක්ට් පේජ් එක ඇතුලෙන්ම රීඩිරෙක්ට් එක රන් කරනවා
-    if (!interceptedUrl) {
-      console.log("[MALIYA-MD] ⚠️ Interception clear, forcing dynamic window navigation script...");
-      await page.evaluate(() => {
-        // පේජ් එක ඇතුලේ තියෙන download link එක අරන් කෙලින්ම window එක ඒකට රීඩිරෙක්ට් කරනවා
-        const allLinks = Array.from(document.querySelectorAll("a"));
-        const dlLink = allLinks.find(a => a.href.includes("ext=") || a.href.includes("download") || a.href.includes("code="));
-        if (dlLink) {
-          window.location.href = dlLink.href;
-        } else if (typeof goDownload === 'function') {
-          goDownload(); // සර්වර් එකේ තියෙන ඉන්ටර්නල් ෆන්ක්ෂන් එකක් නම් ඒක රන් කරනවා
+        // 🖱️ [Multi-Vector Smart Click Engine] රියල් මවුස් එකකින් ක්ලික් කිරීම සිමියුලේට් කිරීම
+        console.log("[MALIYA-MD] 🖱️ Executing Multi-Vector Smart Click Engine...");
+        const targetSelectors = ["#dl-links button", ".direct-download", "button", "a.btn", "[onclick]"];
+        
+        let clicked = false;
+        for (const sel of targetSelectors) {
+            const el = await page.$(sel);
+            if (el) {
+                // page.click වෙනුවට ලයිබ්‍රරියේ එන හියුමනයිස්ඩ් page.realClick පාවිච්චි කිරීම
+                await page.realClick(sel); 
+                console.log(`[MALIYA-MD] 💥 RealClick executed on selector: ${sel}`);
+                clicked = true;
+                break;
+            }
         }
-      }).catch(() => {});
+
+        if (!clicked) {
+            console.log("[MALIYA-MD] 📡 Click Response: No element found to click in DOM");
+        }
+
+        // ක්ලික් එකෙන් පසු රීඩිරෙක්ට් වීමට තත්පර 3ක් රැඳී සිටීම
+        await new Promise(r => setTimeout(r, 3000));
+        return await finalizeRealSession(browser, page, interceptedUrl);
+
+    } catch (error) {
+        console.log(`[MALIYA-MD] ❌ Engine Critical Exception: ${error.message}`);
+        if (browser) await browser.close().catch(() => {});
+        throw error;
     }
+}
 
-    console.log("[MALIYA-MD] ⏳ Awaiting 1-Sec Detached Redirect Popup or Window updates...");
-    const popupPage = await newTargetPromise.catch(() => null);
-    
-    if (popupPage) {
-      console.log("[MALIYA-MD] 🛑 [POPUP DETECTED] Token Validation Page locked inside sandbox!");
-      
-      popupPage.on('request', req => {
-        const u = req.url();
-        if (u.includes('bot=cscloud') || u.includes('ext=') || u.includes('?code=') || u.includes('?token=') || u.includes('avatarzone')) {
-          interceptedUrl = u;
-          console.log(`[MALIYA-MD] 🎯 [Popup Interceptor] Captured CDN Token URL: ${interceptedUrl}`);
-        }
-      });
-
-      let checks = 0;
-      while (!popupPage.isClosed() && checks < 15) {
-        await new Promise(r => setTimeout(r, 500));
-        checks++;
-      }
-    } else {
-      console.log("[MALIYA-MD] ⏳ Sleeping 4000ms for viewport script evaluation...");
-      await new Promise(r => setTimeout(r, 4000));
-    }
-
-    console.log("[MALIYA-MD] 🍪 Extracting TLS Validation Session Parameters...");
+/**
+ * සෙශන් එක අවසන් කර කුකීස් සහ අවසන් ඩිරෙක්ට් ලින්ක් එක රිටර්න් කරන හෙල්පර් එක
+ */
+async function finalizeRealSession(browser, page, interceptedUrl) {
     const cookies = await page.cookies();
     const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
     const userAgent = await page.evaluate(() => navigator.userAgent);
-
     const finalUrl = page.url();
-    if (!interceptedUrl && finalUrl && !finalUrl.includes("sonic-cloud") && !finalUrl.includes("fordev.jpg")) {
-      interceptedUrl = finalUrl;
+
+    // නෙට්වර්ක් එකෙන් මිස් වුනා නම් බ්‍රවුසර් එක දැනට නතර වී ඇති අවසන් URL එක ගැනීම
+    if (!interceptedUrl && finalUrl && !finalUrl.includes("fordev.jpg")) {
+        interceptedUrl = finalUrl;
     }
 
-    console.log(`[MALIYA-MD] 🔒 Closing primary session. Hooked Result: ${interceptedUrl ? "SUCCESS" : "FAILED"}`);
-    await page.close().catch(() => {});
+    console.log(`[MALIYA-MD] 🔒 Closing primary session. Final URL: ${interceptedUrl}`);
+    await browser.close().catch(() => {});
     
     return { 
-      fileSize, 
-      directUrl: interceptedUrl, 
-      cookieStr: cookieHeader, 
-      userAgent: userAgent 
+        fileSize: null, // ෆයිල් සයිස් එක පසුව පින්ට් කරගැනීමට
+        directUrl: interceptedUrl, 
+        cookieStr: cookieHeader, 
+        userAgent: userAgent 
     };
-
-  } catch (e) {
-    console.log(`[MALIYA-MD] ❌ Engine Critical Exception: ${e.message}`);
-    if (page) await page.close().catch(() => {});
-    throw e;
-  }
 }
 
-async function resolveZtLink(ztUrl) {
-  console.log(`[MALIYA-MD] 🔗 Processing Zone-T Tunnel Link: ${ztUrl}`);
-  const { data } = await get(ztUrl);
-  const $ = cheerio.load(data);
-
-  const rawHref = $("#link").attr("href") || "";
-  if (!rawHref) {
-    console.log("[MALIYA-MD] ❌ Critical: Form download link not found in DOM.");
-    return null;
-  }
-
-  if (rawHref.includes("t.me/") && !rawHref.includes("CineSubzAdmin")) {
-    return { url: rawHref, isTelegram: true };
-  }
-
-  let sonicUrl = rawHref;
-  let matched = false;
-
-  for (const mapping of URL_MAPPINGS) {
-    if (matched) break;
-    for (const searchStr of mapping.search) {
-      if (rawHref.includes(searchStr)) {
-        sonicUrl = rawHref.replace(searchStr, mapping.replace);
-        sonicUrl = applyExtSuffix(sonicUrl);
-        matched = true;
-        console.log(`[MALIYA-MD] 🗺️ Mapping Match! Remapped Cloud Portal URL: ${sonicUrl}`);
-        break;
-      }
-    }
-  }
-
-  try {
-    const page = await resolveSonicCloudPage(sonicUrl);
-    if (page.directUrl) {
-      return { 
-        url: page.directUrl, 
-        isTelegram: false, 
-        confirmedSize: page.fileSize,
-        cookieStr: page.cookieStr,
-        userAgent: page.userAgent
-      };
-    }
-  } catch (e) {
-    console.log("[MALIYA-MD] ⚠️ Exception caught mapping sonic architecture page:", e.message);
-  }
-
-  return { url: sonicUrl, isTelegram: false };
-}
-
-// ─── 💬 5. Bot Commands Flow ─────────────────────────────────────────────────
-
-cmd({
-  pattern: "film",
-  alias: ["movie", "cinema", "cine", "sub", "films"],
-  react: "🎬",
-  desc: "Search & download movies from CineSubz.lk",
-  category: "download",
-  filename: __filename,
-}, async (maliya, mek, m, { from, q, sender, reply }) => {
-  if (!q) return reply(
-    "*🎬 CineSubz Movie Search*\n\n" +
-    "Usage: *film <name>*\nExample: *film spider man*\n\n" +
-    "Sinhala subtitles සමඟ film/series! 🍿"
-  );
-
-  await maliya.sendMessage(from, { react: { text: "🔍", key: mek.key } });
-  reply("*🔍 Searching MALIYA-MD FILM DB...*");
-
-  let results;
-  try { results = await searchMovies(q); }
-  catch (e) { return reply(`*❌ Search error:* ${e.message}`); }
-
-  if (!results.length) return reply(`*❌ "${q}" No results found.*\nTry a different name.`);
-
-  pendingSearch[sender] = { results, timestamp: Date.now() };
-
-  let text = `*🎬 Results: "${q}"*\n${"─".repeat(28)}\n`;
-  results.forEach((r, i) => {
-    text += `*${i + 1}.* ${cleanTitle(r.title)}`;
-    if (r.year) text += ` (${r.year})`;
-    if (r.imdb) text += `  ⭐${r.imdb}`;
-    text += "\n";
-  });
-  text += `\n*Reply a number (1-${results.length})*`;
-  reply(text);
-});
-
-cmd({
-  filter: (text, { sender }) =>
-    pendingSearch[sender] &&
-    /^\d+$/.test(text.trim()) &&
-    +text >= 1 && +text <= pendingSearch[sender].results.length,
-}, async (maliya, mek, m, { body, sender, reply, from }) => {
-  await maliya.sendMessage(from, { react: { text: "✅", key: mek.key } });
-
-  const selected = pendingSearch[sender].results[+body.trim() - 1];
-  delete pendingSearch[sender];
-
-  reply("*⏳ Getting Film Details..*");
-
-  let meta;
-  try { meta = await getMovieMeta(selected.url); }
-  catch (e) { return reply(`*❌ Error:* ${e.message}`); }
-
-  const title = meta.title || cleanTitle(selected.title);
-
-  let msg = `*🎬 ${title}*\n${"─".repeat(32)}\n`;
-  if (meta.imdb) msg += `⭐ *IMDb:* ${meta.imdb}\n`;
-  if (meta.duration) msg += `⏱️ *Duration:* ${meta.duration}\n`;
-  if (meta.genres.length) msg += `🎭 *Genres:* ${meta.genres.join(", ")}\n`;
-  if (meta.directors.length) msg += `🎥 *Director:* ${meta.directors.join(", ")}\n`;
-  if (meta.subBy) msg += `📝 *Sub By:* ${meta.subBy}\n`;
-
-  const validLinks = meta.links.filter(l => parseSizeMB(l.size) <= MAX_MB);
-
-  if (!validLinks.length) {
-    msg += `\n⚠️ *All qualities over 2GB — Can't send via WhatsApp.*\n\nAvailable:\n`;
-    meta.links.forEach(l => { msg += `• ${normalizeQuality(l.quality || l.label)}  ${l.size}\n`; });
-    try {
-      if (meta.thumb) await maliya.sendMessage(from, { image: { url: meta.thumb }, caption: msg }, { quoted: mek });
-      else await maliya.sendMessage(from, { text: msg }, { quoted: mek });
-    } catch (_) { await maliya.sendMessage(from, { text: msg }, { quoted: mek }); }
-    return;
-  }
-
-  msg += `\n*📥 Quality Select (under 2GB):*\n`;
-  validLinks.forEach((l, i) => {
-    msg += `*${i + 1}.* ${normalizeQuality(l.quality || l.label)}  —  ${l.size}\n`;
-  });
-  msg += `\n*Reply a number*`;
-
-  pendingQuality[sender] = { title, thumb: meta.thumb, links: validLinks, timestamp: Date.now() };
-
-  try {
-    if (meta.thumb) await maliya.sendMessage(from, { image: { url: meta.thumb }, caption: msg }, { quoted: mek });
-    else await maliya.sendMessage(from, { text: msg }, { quoted: mek });
-  } catch (_) { await maliya.sendMessage(from, { text: msg }, { quoted: mek }); }
-});
-
-cmd({
-  filter: (text, { sender }) =>
-    pendingQuality[sender] &&
-    /^\d+$/.test(text.trim()) &&
-    +text >= 1 && +text <= pendingQuality[sender].links.length,
-}, async (maliya, mek, m, { body, sender, reply, from }) => {
-  await maliya.sendMessage(from, { react: { text: "✅", key: mek.key } });
-
-  const { title, links } = pendingQuality[sender];
-  delete pendingQuality[sender];
-
-  const chosen = links[+body.trim() - 1];
-  const quality = normalizeQuality(chosen.quality || chosen.label);
-
-  reply(`*⏳ ${quality} (${chosen.size}) — Bypassing structural encryptions...*`);
-
-  let resolved;
-  try { resolved = await resolveZtLink(chosen.ztUrl); } 
-  catch (e) { 
-    return reply(`*❌ Resolve error:* ${e.message}`); 
-  }
-
-  if (!resolved || (!resolved.url && !resolved.directUrl) || (resolved.url && resolved.url.includes("fordev.jpg")) || (resolved.directUrl && resolved.directUrl.includes("fordev.jpg"))) {
-    return reply(`*❌ Anti-Bot Firewall Blocked the Request!*\nසර්වර් එක මඟින් බොට් හඳුනාගැනීමේ පද්ධතිය ක්‍රියාත්මක කලා. කරුණාකර මද වෙලාවකින් නැවත උත්සාහ කරන්න.`);
-  }
-
-  const finalSize = resolved.confirmedSize || chosen.size;
-
-  if (resolved.isTelegram) {
-    return maliya.sendMessage(from, {
-      text: `*🎬 ${title}*\n*Size:* ${finalSize}\n\n📲 *Telegram Link:*\n${resolved.url}`,
-    }, { quoted: mek });
-  }
-
-  const fileName = `${title} [${quality}] [CineSubz].mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
-  const tempFilePath = path.join(__dirname, fileName);
-
-  reply(`*⬇️ Downloading film via Native Cloud Injector Engine... (${finalSize})*\nකරුණාකර රැඳී සිටින්න... ⏳`);
-
-  try {
-    const downloadUrl = resolved.directUrl || resolved.url;
-    const userAgent = resolved.userAgent || HEADERS['User-Agent'];
-    const cookieStr = resolved.cookieStr || '';
-
-    console.log(`\n[MALIYA-MD] 🚀 NATIVE GRAB PIPELINE ACTIVATED`);
-    console.log(`[MALIYA-MD] 🎯 Target End-Point CDN: ${downloadUrl}`);
-
-    // 🚀 Linux Native Wget Engine Setup
-    const wgetCommand = `wget --tries=3 --timeout=60 --no-check-certificate \
-      --user-agent="${userAgent}" \
-      --header="Cookie: ${cookieStr}" \
-      --header="Referer: https://bot3.sonic-cloud.online/" \
-      --header="Accept: */*" \
-      -O "${tempFilePath}" "${downloadUrl}"`;
-
-    console.log(`[MALIYA-MD] ⚡ Spawning Native Process Engine via ChildExec...`);
-    
-    await new Promise((resolve, reject) => {
-      exec(wgetCommand, (error, stdout, stderr) => {
-        console.log(`[MALIYA-MD] 📈 Wget Session Feed:\n${stderr || stdout}`);
-        if (error) {
-          console.error(`[MALIYA-MD] Wget Native Pipeline Crash Error: ${error.message}`);
-          return reject(new Error("Native pipeline download failed."));
-        }
-        resolve();
-      });
-    });
-
-    const stats = fs.statSync(tempFilePath);
-    console.log(`[MALIYA-MD] 📁 Local file size verified: ${(stats.size / (1024*1024)).toFixed(2)} MB`);
-    
-    if (stats.size < 5000000) { 
-      throw new Error("Corrupted payload or unauthorized session drop.");
-    }
-
-    reply(`*⬆️ Film successfully grabbed! Uploading to WhatsApp...* 🚀`);
-    
-    await maliya.sendMessage(from, {
-      document: { url: tempFilePath },
-      mimetype: "video/mp4",
-      fileName,
-      caption:
-        `*🎬 ${title}*\n` +
-        `*📊 Quality:* ${quality}\n` +
-        `*💾 Size:* ${finalSize}\n\n` +
-        `*Enjoy! 🍿*\n_Secured & Delivered by MALIYA-MD_`,
-    }, { quoted: mek });
-
-    if (fs.existsSync(tempFilePath)) { fs.unlinkSync(tempFilePath); }
-
-  } catch (err) {
-    console.log(`[MALIYA-MD] 🚨 Native Pipeline Failure Intercepted: ${err.message}`);
-    if (fs.existsSync(tempFilePath)) { fs.unlinkSync(tempFilePath); }
-
-    await maliya.sendMessage(from, {
-      text:
-        `*🎬 ${title}*  [${quality}]  ${finalSize}\n\n` +
-        `⚠️ *සර්වර් එකේ Strict API Security එක නිසා වට්සැප් එකට direct එවීම අසාර්ථක විය.*\n\n` +
-        `👇 පහල Direct Link එක ක්ලික් කරලා ඔයාගේ බ්‍රවුසර් එකෙන්ම බාගන්න:\n${resolved.directUrl || resolved.url}`,
-    }, { quoted: mek });
-  }
-});
-
-setInterval(() => {
-  const now = Date.now(), ttl = 10 * 60 * 1000;
-  for (const s in pendingSearch) if (now - pendingSearch[s].timestamp > ttl) delete pendingSearch[s];
-  for (const s in pendingQuality) if (now - pendingQuality[s].timestamp > ttl) delete pendingQuality[s];
-}, 5 * 60 * 1000);
-
-module.exports = { pendingSearch, pendingQuality };
+module.exports = {
+    searchMovies,
+    fetchMovieMetadata,
+    resolveSonicCloudPage
+};
