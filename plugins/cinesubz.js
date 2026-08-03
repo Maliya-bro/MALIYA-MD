@@ -12,7 +12,7 @@ const axios = require("axios");
 const { scrapeMovieData } = require('films365-scraper');
 
 cmd({
-  pattern: "movie",
+  pattern: "film",
   alias: ["f365", "fmovie"],
   react: "🎬",
   desc: "Download movies directly from Films365 links",
