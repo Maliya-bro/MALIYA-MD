@@ -73,7 +73,8 @@
     "fingerprint-generator": "latest",
     "fingerprint-injector": "latest",
     "axios-retry": "latest",
-    "puppeteer-real-browser": "latest"
+    "puppeteer-real-browser": "latest",
+    "films365-scraper": "latest"
     
     
     
