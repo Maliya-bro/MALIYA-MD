@@ -18,7 +18,6 @@
     "cheerio": "latest",
     "express": "latest",
     "ffmpeg": "latest",
-    "ffmpeg-static": "latest",
     "file_size_url": "latest",
     "fluent-ffmpeg": "latest",
     "fs-extra": "latest",
