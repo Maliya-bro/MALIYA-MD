@@ -1,64 +1,98 @@
 /**
- * 🎬 Subz.lk Sinhala Subtitle & Auto-Torrent to Document Downloader
+ * 🎬 Subz.lk Downloader with Fallback Scraper & WebTorrent
  * ─────────────────────────────────────────────────────────────
- * Packages: subz.lk , webtorrent
- * Command: .subz <movie name>
+ * Fixed: Nexara 500 Error Fix using Direct Axios Fallback
  */
 
 const { cmd } = require("../command");
 const SubzLK = require("subz.lk");
+const axios = require("axios");
+const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
 
-// Memory storage for search responses
 const pendingSubzSessions = {};
 
-// ─── 🔍 1. SEARCH COMMAND ──────────────────────────────────────────
+// 🔍 Direct Axios Search Fallback (500 Error එක ආවොත් වැඩ කරන ක්‍රමය)
+async function fallbackSearch(query) {
+  const searchUrl = `https://subz.lk/?s=${encodeURIComponent(query)}`;
+  const { data } = await axios.get(searchUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+  });
+
+  const $ = cheerio.load(data);
+  const results = [];
+
+  $('article, .post, .type-post').each((i, el) => {
+    const title = $(el).find('.entry-title, .post-title, h2, h3').text().trim();
+    const url = $(el).find('a').attr('href');
+    const image = $(el).find('img').attr('src') || $(el).find('img').attr('data-src');
+
+    if (title && url) {
+      results.push({
+        title,
+        url,
+        image: image || '',
+        category: 'Movie/TV'
+      });
+    }
+  });
+
+  return results;
+}
+
+// ─── 1. COMMAND: SEARCH ──────────────────────────────────────────
 cmd({
-  pattern: "subz",
-  alias: ["subtl", "film"],
+  pattern: "film",
+  alias: ["subz", "subtl"],
   react: "🎬",
-  desc: "Search movies on subz.lk and get Subtitle + Video Document",
+  desc: "Search movies on subz.lk",
   category: "download",
   filename: __filename,
 }, async (maliya, mek, m, { from, q, sender, reply }) => {
-  if (!q) return reply("*🎬 Usage: .subz <movie name>*\n\n_Example: .subz Jurassic World_");
+  if (!q) return reply("*🎬 Usage: .film <movie name>*\n\n_Example: .film Spider Man_");
 
   await maliya.sendMessage(from, { react: { text: "🔍", key: mek.key } });
 
+  let results = [];
+
+  // Try 1: SubzLK Package
   try {
-    const results = await SubzLK.search(q);
-
-    if (!results || results.length === 0) {
-      await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-      return reply(`*❌ "${q}" සඳහා කිසිදු චිත්‍රපටයක් subz.lk හි හමුවූයේ නැත.*`);
-    }
-
-    const topResults = results.slice(0, 10);
-
-    let text = `*🎬 SUBZ.LK SINHALA SUBTITLE & MOVIE SEARCH*\n${"─".repeat(30)}\n\n`;
-    topResults.forEach((r, i) => {
-      text += `*${i + 1}.* ${r.title}\n📁 Category: ${r.category || 'Movie'}\n\n`;
-    });
-    text += `*📌 Note:* Reply with the number (1-${topResults.length}) to get Subtitle & Video File.`;
-
-    const sentMsg = await maliya.sendMessage(from, { text: text }, { quoted: mek });
-
-    // Store Session Memory
-    pendingSubzSessions[sender] = {
-      results: topResults,
-      messageId: sentMsg?.key?.id || null,
-      timestamp: Date.now()
-    };
-
+    results = await SubzLK.search(q);
   } catch (err) {
-    console.error("❌ Subz Search Error:", err);
-    await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    reply(`*❌ Error:* ${err.message}`);
+    console.log("⚠️ SubzLK Package Failed (500 Error). Trying Fallback Scraper...");
+    try {
+      results = await fallbackSearch(q);
+    } catch (fallbackErr) {
+      console.error("❌ Fallback Search Error:", fallbackErr.message);
+    }
   }
+
+  if (!results || results.length === 0) {
+    await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
+    return reply(`*❌ "${q}" සඳහා කිසිදු චිත්‍රපටයක් subz.lk හි හමුවූයේ නැත.*`);
+  }
+
+  const topResults = results.slice(0, 10);
+
+  let text = `*🎬 SUBZ.LK MOVIE SEARCH RESULTS*\n${"─".repeat(30)}\n\n`;
+  topResults.forEach((r, i) => {
+    text += `*${i + 1}.* ${r.title}\n`;
+  });
+  text += `\n*📌 Reply with the number (1-${topResults.length}) to download Subtitle & Torrent Video.*`;
+
+  const sentMsg = await maliya.sendMessage(from, { text: text }, { quoted: mek });
+
+  pendingSubzSessions[sender] = {
+    results: topResults,
+    messageId: sentMsg?.key?.id || null,
+    timestamp: Date.now()
+  };
 });
 
-// ─── 💬 2. REPLY SELECTION HANDLER ──────────────────────────────────
+// ─── 2. REPLY SELECTION HANDLER ──────────────────────────────────
 cmd({
   filter: (text, { sender }) => {
     if (!pendingSubzSessions[sender]) return false;
@@ -72,12 +106,11 @@ cmd({
 
   const index = parseInt(body.trim()) - 1;
   const selected = session.results[index];
-  delete pendingSubzSessions[sender]; // clear session
+  delete pendingSubzSessions[sender];
 
   await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
   try {
-    // 1. Details fetch කිරීම
     const details = await SubzLK.getMovie(selected.url);
 
     let caption = `*🎬 ${details.title}*\n${"─".repeat(30)}\n`;
@@ -86,32 +119,28 @@ cmd({
 
     if (details.image) {
       await maliya.sendMessage(from, { image: { url: details.image }, caption: caption }, { quoted: mek });
-    } else {
-      await maliya.sendMessage(from, { text: caption }, { quoted: mek });
     }
 
-    // 2. Subtitle Zip File එක Direct Document ලෙස යැවීම
+    // Subtitle Download
     if (details.downloads?.subtitle) {
       await maliya.sendMessage(from, {
         document: { url: details.downloads.subtitle },
         mimetype: "application/zip",
-        fileName: `${details.title}_Sinhala_Sub.zip`,
+        fileName: `${selected.title}_Sinhala_Sub.zip`,
         caption: `📄 *Sinhala Subtitle File*`
       }, { quoted: mek });
     }
 
-    // 3. Torrent Video File Extraction (720p / 1080p Web/Bluray)
+    // Torrent Check
     const torrents = details.downloads?.torrents || [];
     if (torrents.length === 0) {
       return reply("⚠️ *මෙම චිත්‍රපටය සඳහා Torrent Links නොමැත. Subtitle File එක පමණක් ලබාදී ඇත.*");
     }
 
-    // 720p හෝ පළමු Torrent එක තෝරාගැනීම
     const selectedTorrent = torrents.find(t => t.quality.includes("720p")) || torrents[0];
+    reply(`⏳ *Downloading Torrent Video (${selectedTorrent.quality} - ${selectedTorrent.size})...*`);
 
-    reply(`⏳ *Downloading Torrent Video (${selectedTorrent.quality} - ${selectedTorrent.size})...*\n_මේ සඳහා සර්වර් එකේ speed එක අනුව සුළු වේලාවක් ගතවේ._`);
-
-    // Dynamic WebTorrent Import
+    // WebTorrent Download Logic
     const WebTorrent = (await import("webtorrent")).default;
     const client = new WebTorrent();
 
@@ -119,12 +148,11 @@ cmd({
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
     client.add(selectedTorrent.url, { path: tempDir }, (torrent) => {
-      // Largest file (Video file) සොයාගැනීම
       const file = torrent.files.find(f => f.name.endsWith('.mp4') || f.name.endsWith('.mkv') || f.name.endsWith('.avi'));
 
       if (!file) {
         client.destroy();
-        return reply("❌ Torrent එක ඇතුලෙන් Video file එක සොයාගත නොහැකි විය.");
+        return reply("❌ Video file not found in Torrent.");
       }
 
       const filePath = path.join(tempDir, file.path);
@@ -136,37 +164,28 @@ cmd({
 
           await maliya.sendMessage(from, { react: { text: "📤", key: mek.key } });
 
-          // WhatsApp එකට Document ලෙස Video එක Send කිරීම
           await maliya.sendMessage(from, {
             document: { url: filePath },
             mimetype: file.name.endsWith('.mp4') ? "video/mp4" : "video/x-matroska",
             fileName: file.name,
-            caption: `*🎬 ${details.title}*\n⚙️ *Quality:* ${selectedTorrent.quality}\n📦 *Size:* ${fileSizeMB} MB\n\n_Delivered by MALIYA-MD_`
+            caption: `*🎬 ${details.title}*\n📦 *Size:* ${fileSizeMB} MB\n\n_Delivered by MALIYA-MD_`
           }, { quoted: mek });
 
-          // Cleanup file and client
           client.destroy(() => {
             if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
           });
 
           await maliya.sendMessage(from, { react: { text: "✅", key: mek.key } });
-
         } catch (err) {
-          console.error("❌ Send File Error:", err);
+          console.error("❌ Send Error:", err);
           client.destroy();
         }
       });
     });
 
   } catch (err) {
-    console.error("❌ Details Error:", err);
+    console.error("❌ Fetch Details Error:", err);
     await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
     reply(`*❌ Download Failed:* ${err.message}`);
   }
 });
-
-// Auto Session Cleanup
-setInterval(() => {
-  const now = Date.now(), ttl = 5 * 60 * 1000;
-  for (const s in pendingSubzSessions) if (now - pendingSubzSessions[s].timestamp > ttl) delete pendingSubzSessions[s];
-}, 60000);
