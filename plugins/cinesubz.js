@@ -1,48 +1,53 @@
 /**
  * LK21 Movie Download Plugin for MALIYA-MD
  * ─────────────────────────────────────────────────────────────
- * Download engine : @rindev/lk21dl-core  (npm install @rindev/lk21dl-core)
- *                    lk21dl(url, outputPath) -> downloads the movie to disk
- *                    and resolves with the saved file's path. Handles
- *                    Cloudflare bypass + HLS/M3U8 + ffmpeg internally.
+ * Download engine : lk21dl-core  (npm install lk21dl-core)
+ *                    Requires FFmpeg installed on the SYSTEM (not just npm)
+ *                    for HLS/M3U8 titles — see FAQ in the package README.
+ *
+ *                    API shape (per README): lk21dl(url, outputPath?)
+ *                    returns Promise<Readable> — a stream of the video
+ *                    data, NOT a saved file path. We pipe it to disk
+ *                    ourselves and wait for the write to finish before
+ *                    treating the download as complete.
+ *
  * Search           : puppeteer (the package only takes a movie page URL —
- *                    there's no search function in the README, so search
- *                    is implemented here separately against LK21's search
- *                    page, same pattern used for the Sinhalasub/Films365
- *                    plugins).
+ *                    no search function in its README — so search is
+ *                    implemented here separately, same pattern used for
+ *                    the Sinhalasub/Films365 plugins).
  *
- * Flow: .lk21 <name> -> reply number (select) -> bot downloads + sends
- *       the file as a WhatsApp document.
+ * Flow: .lk21 <name> -> reply number (select) -> reply "y" -> bot downloads
+ *       + sends the file as a WhatsApp document.
  *
- * NOTE ON SELECTORS: LK21 has many mirror domains and the markup below is
- * a best-effort guess at a typical WordPress/movie-theme search results
+ * NOTE ON SELECTORS: LK21 has many mirror domains and the search markup
+ * below is a best-effort guess at a typical WordPress/movie-theme results
  * page. If search comes back empty, inspect the live search results page
  * in a browser (F12 → Inspect a result card) and update SEARCH_SELECTORS
- * below to match.
+ * below to match. The movie-page URL format itself (per the package's own
+ * examples) looks like: https://tv.lk21official.us/movie-name-slug
  */
 
 const { cmd } = require("../command");
 const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
-const lk21dl = require("@rindev/lk21dl-core").default || require("@rindev/lk21dl-core");
+const lk21dl = require("lk21dl-core");
 
 const pendingSearch = {};
 const pendingDownload = {};
 
-// Change this if your working mirror domain differs.
-const LK21_BASE = "https://lk21.xxx";
+// Update this to whichever LK21 mirror is currently reachable from your
+// server — mirrors rotate/get taken down periodically.
+const LK21_BASE = "https://tv.lk21official.us";
 
 // Best-guess selectors for the search results page — update if search
 // returns nothing (see NOTE above).
 const SEARCH_SELECTORS = {
   resultCard: "article, .movie-item, .search-item, .box",
-  titleLink: "a[href*='/film/'], a[href*='/movie/']",
+  titleLink: "a[href]",
 };
 
-// ─── Puppeteer-based search (LK21 mirrors are typically JS-light WordPress
-//     themes, but we still use puppeteer for consistency/robustness against
-//     Cloudflare challenge pages that plain axios can't get past) ──────────
+// ─── Puppeteer-based search ─────────────────────────────────────────────────
 async function searchLK21(query) {
   const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
   try {
@@ -70,11 +75,11 @@ async function searchLK21(query) {
       SEARCH_SELECTORS.titleLink
     );
 
-    // De-dupe by URL and cap to 10
+    // De-dupe by URL, drop obvious non-movie links, cap to 10
     const seen = new Set();
     const deduped = [];
     for (const r of results) {
-      if (seen.has(r.url)) continue;
+      if (seen.has(r.url) || r.url === LK21_BASE || r.url === `${LK21_BASE}/`) continue;
       seen.add(r.url);
       r.id = deduped.length + 1;
       deduped.push(r);
@@ -150,7 +155,7 @@ cmd({
   reply(
     `*🎬 ${selected.title}*\n${"─".repeat(28)}\n\n` +
     `*📌 Reply "y" to download and send this movie.*\n` +
-    `_(This may take a few minutes depending on file size.)_`
+    `_(HLS titles are re-encoded via FFmpeg and can take several minutes — 2181 segments isn't unusual for a 2hr movie.)_`
   );
 });
 
@@ -167,43 +172,65 @@ cmd({
   delete pendingDownload[sender];
 
   await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
-  reply(`*⏳ Downloading (Cloudflare bypass + HLS decode in progress)...*\nThis can take a few minutes — please wait. 🙏`);
+  reply(`*⏳ Resolving iframe → bypassing Cloudflare → downloading...*\nThis can take a few minutes for HLS titles — please wait. 🙏`);
 
   const cleanFileName = `${session.title}.mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
   const outputPath = path.join(__dirname, cleanFileName);
 
   try {
-    // lk21dl handles Cloudflare bypass, HLS/M3U8 segment download, and
-    // ffmpeg muxing internally — it returns the path to the finished file.
-    const savedPath = await lk21dl(session.url, outputPath);
+    // lk21dl(url, outputPath) resolves with a Readable STREAM (per its
+    // README), not a saved file — we own writing it to disk and must wait
+    // for the write to actually finish before touching the file.
+    const videoStream = await lk21dl(session.url, outputPath);
 
-    if (!savedPath || !fs.existsSync(savedPath)) {
+    if (!videoStream || typeof videoStream.pipe !== "function") {
+      return reply(`*❌ Download did not return a valid stream.*\n\n🔗 Try manually:\n${session.url}`);
+    }
+
+    const writer = fs.createWriteStream(outputPath);
+    videoStream.pipe(writer);
+
+    await new Promise((resolve, reject) => {
+      writer.on("finish", resolve);
+      writer.on("error", reject);
+      videoStream.on("error", reject);
+    });
+
+    if (!fs.existsSync(outputPath)) {
       return reply(`*❌ Download did not produce a file.*\n\n🔗 Try manually:\n${session.url}`);
     }
 
-    const stats = fs.statSync(savedPath);
+    const stats = fs.statSync(outputPath);
     if (stats.size < 100 * 1024) {
-      if (fs.existsSync(savedPath)) fs.unlinkSync(savedPath);
+      fs.unlinkSync(outputPath);
       return reply(`*❌ Downloaded file too small (${(stats.size / 1024).toFixed(1)}KB) — likely failed.*\n\n🔗 Try manually:\n${session.url}`);
     }
 
     reply(`*⬆️ Uploading movie file to WhatsApp...*`);
 
     await maliya.sendMessage(from, {
-      document: { url: savedPath },
+      document: { url: outputPath },
       mimetype: "video/mp4",
       fileName: cleanFileName,
       caption: `*🎬 ${session.title}*\n\n_Delivered by MALIYA-MD_`,
     }, { quoted: mek });
 
-    if (fs.existsSync(savedPath)) fs.unlinkSync(savedPath);
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
 
   } catch (err) {
     if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
     console.log("[lk21] download error:", err.message);
     console.log("[lk21] stack:", err.stack);
+
+    // The package's own error-handling table names these specific failure
+    // modes — surface them plainly instead of a generic message.
+    let hint = "";
+    if (/iframe/i.test(err.message)) hint = "\n_Page structure may have changed, or the URL is stale._";
+    else if (/video url/i.test(err.message)) hint = "\n_Player may need manual interaction — try opening the link in a browser._";
+    else if (/ffmpeg/i.test(err.message)) hint = "\n_Check that FFmpeg is installed on the server (`ffmpeg -version`)._";
+
     reply(
-      `*⚠️ Download Failed.*\n*Reason:* ${err.message}\n\n🔗 Try manually:\n${session.url}`
+      `*⚠️ Download Failed.*\n*Reason:* ${err.message}${hint}\n\n🔗 Try manually:\n${session.url}`
     );
   }
 });
