@@ -1,72 +1,124 @@
 /**
- * CineSubz.lk Ultimate Scraper Plugin for MALIYA-MD
+ * LK21 Movie Download Plugin for MALIYA-MD
  * ─────────────────────────────────────────────────────────────
- * Search + Metadata : cinesubz-scraper (by VajiraOfficial)
- * Selection matching : filter-based (reliable — works whether or not the
- *                       user quote-replies, unlike strict stanzaId matching)
- * Flow: .film <name> -> reply number (select) -> reply number (quality)
- *       -> bot sends the CineSubz page link for manual download
+ * Download engine : @rindev/lk21dl-core  (npm install @rindev/lk21dl-core)
+ *                    lk21dl(url, outputPath) -> downloads the movie to disk
+ *                    and resolves with the saved file's path. Handles
+ *                    Cloudflare bypass + HLS/M3U8 + ffmpeg internally.
+ * Search           : puppeteer (the package only takes a movie page URL —
+ *                    there's no search function in the README, so search
+ *                    is implemented here separately against LK21's search
+ *                    page, same pattern used for the Sinhalasub/Films365
+ *                    plugins).
  *
- * NOTE: Auto-download via cinesubz-scraper's server-link decryption
- * (scrapeCineSubzServerLink) was removed — CineSubz's bot3.sonic-cloud.online
- * file servers are currently returning "Invalid server" errors across every
- * title (confirmed by opening a resolved link directly in a browser), so the
- * decrypted links the package returns are not reliably usable. Until that's
- * fixed upstream, the bot points the user to the CineSubz page instead of
- * silently failing on a dead auto-download.
+ * Flow: .lk21 <name> -> reply number (select) -> bot downloads + sends
+ *       the file as a WhatsApp document.
+ *
+ * NOTE ON SELECTORS: LK21 has many mirror domains and the markup below is
+ * a best-effort guess at a typical WordPress/movie-theme search results
+ * page. If search comes back empty, inspect the live search results page
+ * in a browser (F12 → Inspect a result card) and update SEARCH_SELECTORS
+ * below to match.
  */
 
 const { cmd } = require("../command");
-const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
+const puppeteer = require("puppeteer");
+const fs = require("fs");
+const path = require("path");
+const lk21dl = require("@rindev/lk21dl-core").default || require("@rindev/lk21dl-core");
 
-// Session tracking
 const pendingSearch = {};
-const pendingQuality = {};
+const pendingDownload = {};
 
-// Helper: clean up messy titles from search results
-function cleanTitle(t = "") {
-  return t
-    .replace(/Direct\s*(&|and)\s*Telegram\s*Download\s*Links?/gi, "")
-    .replace(/sinhala subtitles?.*/i, "")
-    .replace(/සිංහල.*/i, "")
-    .replace(/\|.*/i, "")
-    .replace(/[-–]\s*$/, "")
-    .trim();
+// Change this if your working mirror domain differs.
+const LK21_BASE = "https://lk21.xxx";
+
+// Best-guess selectors for the search results page — update if search
+// returns nothing (see NOTE above).
+const SEARCH_SELECTORS = {
+  resultCard: "article, .movie-item, .search-item, .box",
+  titleLink: "a[href*='/film/'], a[href*='/movie/']",
+};
+
+// ─── Puppeteer-based search (LK21 mirrors are typically JS-light WordPress
+//     themes, but we still use puppeteer for consistency/robustness against
+//     Cloudflare challenge pages that plain axios can't get past) ──────────
+async function searchLK21(query) {
+  const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+    const searchUrl = `${LK21_BASE}/?s=${encodeURIComponent(query)}`;
+    await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 30000 });
+
+    const results = await page.$$eval(
+      SEARCH_SELECTORS.resultCard,
+      (cards, titleLinkSelector) =>
+        cards
+          .map((card, i) => {
+            const a = card.querySelector(titleLinkSelector);
+            if (!a) return null;
+            const img = card.querySelector("img");
+            return {
+              id: i + 1,
+              title: (a.getAttribute("title") || a.textContent || img?.alt || "").trim(),
+              url: a.href,
+              thumb: img?.src || "",
+            };
+          })
+          .filter((r) => r && r.title && r.url),
+      SEARCH_SELECTORS.titleLink
+    );
+
+    // De-dupe by URL and cap to 10
+    const seen = new Set();
+    const deduped = [];
+    for (const r of results) {
+      if (seen.has(r.url)) continue;
+      seen.add(r.url);
+      r.id = deduped.length + 1;
+      deduped.push(r);
+      if (deduped.length >= 10) break;
+    }
+    return deduped;
+  } finally {
+    await browser.close();
+  }
 }
 
-// ─── 💬 1. MAIN FILM SEARCH COMMAND ──────────────────────────────────────────
+// ─── 💬 1. SEARCH COMMAND ────────────────────────────────────────────────────
 cmd({
-  pattern: "film",
-  alias: ["movie", "cinema", "cine"],
+  pattern: "lk21",
+  alias: ["lk21dl"],
   react: "🎬",
-  desc: "Search movies from CineSubz",
+  desc: "Search & download movies from LK21",
   category: "download",
   filename: __filename,
 }, async (maliya, mek, m, { from, q, sender, reply }) => {
-  if (!q) return reply("*🎬 Usage: .film <movie name>*");
+  if (!q) return reply("*🎬 Usage: .lk21 <movie name>*");
 
   await maliya.sendMessage(from, { react: { text: "🔍", key: mek.key } });
 
   try {
-    const results = await searchCineSubz(q);
-    if (!results || !results.length) return reply(`*❌ No results found for "${q}"*`);
+    const results = await searchLK21(q);
+    if (!results.length) {
+      return reply(
+        `*❌ No results found for "${q}"*\n\n` +
+        `_If this keeps happening even for popular titles, the search page ` +
+        `markup may have changed — this plugin needs its selectors updated._`
+      );
+    }
 
-    let text = `*🎬 MALIYA-MD Results: "${q}"*\n${"─".repeat(28)}\n`;
-    results.forEach((r, i) => {
-      text += `*${i + 1}.* ${cleanTitle(r.title)} ${r.rating ? `[⭐ ${r.rating}]` : ""}\n`;
-    });
-    text += `\n*📌 Note:* Reply with the number to select.`;
+    let text = `*🎬 LK21 Results: "${q}"*\n${"─".repeat(28)}\n`;
+    results.forEach((r) => { text += `*${r.id}.* ${r.title}\n`; });
+    text += `\n*📌 Reply with the number to select.*`;
 
-    const sent = await maliya.sendMessage(from, { text }, { quoted: mek });
-
-    pendingSearch[sender] = {
-      results,
-      messageId: sent?.key?.id || null,
-      timestamp: Date.now(),
-    };
+    pendingSearch[sender] = { results, timestamp: Date.now() };
+    await maliya.sendMessage(from, { text }, { quoted: mek });
 
   } catch (e) {
     await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
+    console.log("[lk21] search error:", e.message);
     return reply(`*❌ Search Error:* ${e.message}`);
   }
 });
@@ -84,84 +136,84 @@ cmd({
   if (!session) return;
 
   const index = parseInt(body.trim()) - 1;
-  const selectedMovie = session.results[index];
+  const selected = session.results[index];
   delete pendingSearch[sender];
 
-  await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
+  await maliya.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
-  try {
-    const metadata = await scrapeCineSubz(selectedMovie.url);
-    if (!metadata.downloadLinks || !metadata.downloadLinks.length) {
-      return reply("*❌ Download links no longer available.*");
-    }
-
-    let msg = `*🎬 ${metadata.title || selectedMovie.title}*\n${"─".repeat(32)}\n`;
-    if (metadata.imdb_rate) msg += `⭐ *IMDb:* ${metadata.imdb_rate}\n`;
-    if (metadata.duration) msg += `⏱️ *Duration:* ${metadata.duration}\n`;
-    if (metadata.genre) msg += `🎭 *Genre:* ${metadata.genre}\n\n`;
-
-    msg += `*📥 Quality Select:*\n`;
-    metadata.downloadLinks.forEach((l, i) => {
-      msg += `*${i + 1}.* ${l.quality}\n`;
-    });
-    msg += `\n*📌 Note:* Reply with the quality number.`;
-
-    const sentQualityMsg = await maliya.sendMessage(from, { text: msg }, { quoted: mek });
-
-    pendingQuality[sender] = {
-      title: metadata.title || selectedMovie.title,
-      pageUrl: selectedMovie.url,
-      links: metadata.downloadLinks,
-      messageId: sentQualityMsg?.key?.id || null,
-      timestamp: Date.now(),
-    };
-
-  } catch (e) {
-    return reply(`*❌ Metadata Error:* ${e.message}`);
-  }
-});
-
-// ─── 💬 3. QUALITY SELECTION HANDLER — sends the CineSubz page link ────────
-// The bot3.sonic-cloud.online server links that cinesubz-scraper resolves
-// are frequently stale/broken on CineSubz's backend (server IDs get
-// decommissioned), returning an "Invalid server" page instead of the file —
-// this happens across every title, not just specific ones. Rather than
-// silently failing on auto-download, we send the user directly to the
-// CineSubz movie page so they can grab the current working download link
-// themselves in a browser.
-cmd({
-  filter: (text, { sender }) => {
-    if (!pendingQuality[sender]) return false;
-    const n = parseInt((text || "").trim());
-    return !isNaN(n) && n > 0 && n <= pendingQuality[sender].links.length;
-  },
-  filename: __filename,
-}, async (maliya, mek, m, { body, sender, from, reply }) => {
-  const session = pendingQuality[sender];
-  if (!session) return;
-
-  const index = parseInt(body.trim()) - 1;
-  const chosenLink = session.links[index];
-  delete pendingQuality[sender];
-
-  await maliya.sendMessage(from, { react: { text: "🔗", key: mek.key } });
+  pendingDownload[sender] = {
+    title: selected.title,
+    url: selected.url,
+    timestamp: Date.now(),
+  };
 
   reply(
-    `*🎬 ${session.title}*\n*📊 Quality:* ${chosenLink.quality}\n${"─".repeat(28)}\n\n` +
-    `*⚠️ CineSubz's auto-download server links are currently unreliable ` +
-    `("Invalid server" errors), so downloads are manual for now:*\n\n` +
-    `1️⃣ Open this page:\n${session.pageUrl}\n\n` +
-    `2️⃣ Scroll to the *${chosenLink.quality}* download section\n` +
-    `3️⃣ Tap the working download/Telegram link shown there\n\n` +
-    `_This avoids sending you dead server links that don't work._`
+    `*🎬 ${selected.title}*\n${"─".repeat(28)}\n\n` +
+    `*📌 Reply "y" to download and send this movie.*\n` +
+    `_(This may take a few minutes depending on file size.)_`
   );
 });
 
-// Session expiry — 5 minutes
+// ─── 💬 3. DOWNLOAD CONFIRMATION HANDLER ────────────────────────────────────
+cmd({
+  filter: (text, { sender }) => {
+    if (!pendingDownload[sender]) return false;
+    return /^y(es)?$/i.test((text || "").trim());
+  },
+  filename: __filename,
+}, async (maliya, mek, m, { sender, from, reply }) => {
+  const session = pendingDownload[sender];
+  if (!session) return;
+  delete pendingDownload[sender];
+
+  await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
+  reply(`*⏳ Downloading (Cloudflare bypass + HLS decode in progress)...*\nThis can take a few minutes — please wait. 🙏`);
+
+  const cleanFileName = `${session.title}.mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
+  const outputPath = path.join(__dirname, cleanFileName);
+
+  try {
+    // lk21dl handles Cloudflare bypass, HLS/M3U8 segment download, and
+    // ffmpeg muxing internally — it returns the path to the finished file.
+    const savedPath = await lk21dl(session.url, outputPath);
+
+    if (!savedPath || !fs.existsSync(savedPath)) {
+      return reply(`*❌ Download did not produce a file.*\n\n🔗 Try manually:\n${session.url}`);
+    }
+
+    const stats = fs.statSync(savedPath);
+    if (stats.size < 100 * 1024) {
+      if (fs.existsSync(savedPath)) fs.unlinkSync(savedPath);
+      return reply(`*❌ Downloaded file too small (${(stats.size / 1024).toFixed(1)}KB) — likely failed.*\n\n🔗 Try manually:\n${session.url}`);
+    }
+
+    reply(`*⬆️ Uploading movie file to WhatsApp...*`);
+
+    await maliya.sendMessage(from, {
+      document: { url: savedPath },
+      mimetype: "video/mp4",
+      fileName: cleanFileName,
+      caption: `*🎬 ${session.title}*\n\n_Delivered by MALIYA-MD_`,
+    }, { quoted: mek });
+
+    if (fs.existsSync(savedPath)) fs.unlinkSync(savedPath);
+
+  } catch (err) {
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    console.log("[lk21] download error:", err.message);
+    console.log("[lk21] stack:", err.stack);
+    reply(
+      `*⚠️ Download Failed.*\n*Reason:* ${err.message}\n\n🔗 Try manually:\n${session.url}`
+    );
+  }
+});
+
+// Session expiry — 10 minutes (downloads can be slow, give more headroom
+// than the quick-lookup plugins)
 setInterval(() => {
-  const now = Date.now(), ttl = 5 * 60 * 1000;
+  const now = Date.now(), ttl = 10 * 60 * 1000;
   for (const s in pendingSearch) if (now - pendingSearch[s].timestamp > ttl) delete pendingSearch[s];
-  for (const s in pendingQuality) if (now - pendingQuality[s].timestamp > ttl) delete pendingQuality[s];
+  for (const s in pendingDownload) if (now - pendingDownload[s].timestamp > ttl) delete pendingDownload[s];
 }, 60000);
 
-module.exports = { pendingSearch, pendingQuality };
+module.exports = { pendingSearch, pendingDownload };
