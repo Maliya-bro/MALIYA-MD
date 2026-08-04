@@ -1,36 +1,29 @@
 /**
- * 🎬 LK21 Movie Downloader Plugin for MALIYA-MD
+ * 🎬 LK21 Downloader with Domain Auto-Fixer
  * ─────────────────────────────────────────────────────────────
- * Package: @rindev/lk21dl-core
- * Usage: .lk21 <LK21 Movie URL>
+ * Fixes: tv12, tv14, tv18... domain variations automatically
  */
 
 const { cmd } = require("../command");
 const fs = require("fs");
 const path = require("path");
 
-// Dynamic Import support for ESM / CommonJS
 let lk21dl;
-try {
-  lk21dl = require("@rindev/lk21dl-core").default || require("@rindev/lk21dl-core");
-} catch (e) {
-  console.log("⚠️ @rindev/lk21dl-core module loading...");
-}
 
 cmd({
   pattern: "lk21",
   alias: ["lk21dl", "layarkaca"],
   react: "🎬",
-  desc: "Download movies from LK21 using @rindev/lk21dl-core",
+  desc: "Download movies from LK21 with auto-domain fix",
   category: "download",
   filename: __filename,
 }, async (maliya, mek, m, { from, q, reply }) => {
   if (!q || !q.startsWith("http")) {
-    return reply("*🎬 Usage: .lk21 <LK21 Movie URL>*\n\n_Example: .lk21 https://lk21.xxx/film/example_");
+    return reply("*🎬 Usage: .lk21 <LK21 Movie URL>*\n\n_Example: .lk21 https://tv12.lk21official.cc/amazing-spider-man-2-2014_");
   }
 
   await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
-  reply("*🎬 Processing LK21 Movie URL... Bypassing Cloudflare & Merging Segments!*");
+  reply("*🎬 Normalizing LK21 Domain & Fetching Streams...*");
 
   let outputPath = "";
 
@@ -40,57 +33,70 @@ cmd({
       lk21dl = module.default || module;
     }
 
-    // Dynamic temp file name
-    const fileName = `LK21_${Date.now()}.mp4`;
-    outputPath = path.join(__dirname, `../temp/${fileName}`);
+    // 💡 MAIN FIX: tv12.lk21official.cc වැනි ඕනෑම Domain එකක් Standard LK21 Format එකට සකස් කිරීම
+    let cleanUrl = q.trim();
 
-    // Temp Directory එක නැත්නම් සාදා ගැනීම
+    // extract movie slug (e.g. "amazing-spider-man-2-2014")
+    const slug = cleanUrl.split('/').filter(Boolean).pop();
+
+    // Standard domains array (Package එකට සපෝට් කරන main domains)
+    const targetDomains = [
+      `https://lk21.online/${slug}`,
+      `https://layarkaca21.onl/${slug}`,
+      cleanUrl // original
+    ];
+
     const tempDir = path.join(__dirname, "../temp");
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+
+    const fileName = `LK21_${Date.now()}.mp4`;
+    outputPath = path.join(tempDir, fileName);
+
+    let success = false;
+    let lastError = "";
+
+    // 🔄 Domain Fallback Loop: 404 නොවෙන Domain එක හම්බවෙනකම් Try කරයි
+    for (const testUrl of targetDomains) {
+      try {
+        console.log("Trying LK21 URL:", testUrl);
+        await lk21dl(testUrl, outputPath);
+        if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+          success = true;
+          break;
+        }
+      } catch (err) {
+        lastError = err.message || err;
+        console.log(`Failed for ${testUrl}: ${lastError}`);
+      }
     }
 
-    // lk21dl core function එක run කිරීම
-    const result = await lk21dl(q, outputPath);
-
-    const targetFile = fs.existsSync(outputPath) ? outputPath : result;
-
-    if (!fs.existsSync(targetFile)) {
-      await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-      return reply("*❌ Failed to download movie or output file missing.*");
+    if (!success || !fs.existsSync(outputPath)) {
+      throw new Error(lastError || "Failed to download stream from all mirror domains.");
     }
 
-    // File Details ලබා ගැනීම
-    const stats = fs.statSync(targetFile);
+    const stats = fs.statSync(outputPath);
     const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
 
     await maliya.sendMessage(from, { react: { text: "📤", key: mek.key } });
-    reply(`*📥 Uploading Movie to WhatsApp...*\n📦 *Size:* ${fileSizeMB} MB`);
 
-    // WhatsApp එකට Document එකක් ලෙස යැවීම
     await maliya.sendMessage(from, {
-      document: { url: targetFile },
+      document: { url: outputPath },
       mimetype: "video/mp4",
-      fileName: `LK21_Movie_${Date.now()}.mp4`,
-      caption: `*🎬 LK21 Movie Downloader*\n📦 *Size:* ${fileSizeMB} MB\n\n_Downloaded & Delivered by MALIYA-MD_`
+      fileName: `${slug}.mp4`,
+      caption: `*🎬 LK21 Movie Downloader*\n📦 *Size:* ${fileSizeMB} MB\n\n_Delivered by MALIYA-MD_`
     }, { quoted: mek });
 
-    // Temp File එක Delete කිරීම
-    if (fs.existsSync(targetFile)) {
-      fs.unlinkSync(targetFile);
-    }
-
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
     await maliya.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
   } catch (error) {
-    console.error("❌ LK21 Downloader Error:", error);
+    console.error("❌ LK21 Final Error:", error);
 
-    // Error එකදීත් Temp File එක Cleanup කිරීම
     if (outputPath && fs.existsSync(outputPath)) {
       fs.unlinkSync(outputPath);
     }
 
     await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    reply(`*❌ Download Failed:* ${error.message || error}`);
+    reply(`*❌ Download Failed:* ${error.message || error}\n\n_Tip: tv12.lk21official.cc වැනි Mirror Domains වල Stream බ්ලොක් කර ඇති විට Direct LK21 Online URL එකක් පාවිච්චි කරන්න._`);
   }
 });
