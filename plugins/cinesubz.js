@@ -1,30 +1,10 @@
 /**
  * LK21 Movie Download Plugin for MALIYA-MD
  * ─────────────────────────────────────────────────────────────
- * Download engine : lk21dl-core  (npm install lk21dl-core)
- *                    Requires FFmpeg installed on the SYSTEM (not just npm)
- *                    for HLS/M3U8 titles — see FAQ in the package README.
+ * - Search uses Puppeteer (with robust fallback selectors)
+ * - Download uses lk21dl-core + FFmpeg (system install required)
  *
- *                    API shape (per README): lk21dl(url, outputPath?)
- *                    returns Promise<Readable> — a stream of the video
- *                    data, NOT a saved file path. We pipe it to disk
- *                    ourselves and wait for the write to finish before
- *                    treating the download as complete.
- *
- * Search           : puppeteer (the package only takes a movie page URL —
- *                    no search function in its README — so search is
- *                    implemented here separately, same pattern used for
- *                    the Sinhalasub/Films365 plugins).
- *
- * Flow: .lk21 <name> -> reply number (select) -> reply "y" -> bot downloads
- *       + sends the file as a WhatsApp document.
- *
- * NOTE ON SELECTORS: LK21 has many mirror domains and the search markup
- * below is a best-effort guess at a typical WordPress/movie-theme results
- * page. If search comes back empty, inspect the live search results page
- * in a browser (F12 → Inspect a result card) and update SEARCH_SELECTORS
- * below to match. The movie-page URL format itself (per the package's own
- * examples) looks like: https://tv.lk21official.us/movie-name-slug
+ * ✅ Fixed: dynamic content waiting, fallback mirrors, multiple selectors
  */
 
 const { cmd } = require("../command");
@@ -36,59 +16,118 @@ const lk21dl = require("lk21dl-core");
 const pendingSearch = {};
 const pendingDownload = {};
 
-// Update this to whichever LK21 mirror is currently reachable from your
-// server — mirrors rotate/get taken down periodically.
-const LK21_BASE = "https://tv.lk21official.us";
+// ─── 🎯 PRIMARY MIRROR (update if down) ────────────────────────────────────
+const MIRRORS = [
+  "https://tv.lk21official.us",
+  "https://lk21official.us",
+  "https://www.lk21official.us",
+  "https://tv.lk21official.org",
+  "https://lk21official.org"
+];
 
-// Best-guess selectors for the search results page — update if search
-// returns nothing (see NOTE above).
-const SEARCH_SELECTORS = {
-  resultCard: "article, .movie-item, .search-item, .box",
-  titleLink: "a[href]",
-};
+// ─── 🔍 SEARCH SELECTORS (try multiple) ────────────────────────────────────
+const RESULT_SELECTORS = [
+  "article",
+  ".movie-item",
+  ".search-item",
+  ".box",
+  "div.item",
+  "div.result-item",
+  "li",
+  ".list-movie article",
+  ".movie-list article",
+  ".post-item"
+];
 
-// ─── Puppeteer-based search ─────────────────────────────────────────────────
+// ─── SEARCH FUNCTION (with fallback mirrors & robust waiting) ─────────────
 async function searchLK21(query) {
-  const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
-  try {
-    const page = await browser.newPage();
-    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-    const searchUrl = `${LK21_BASE}/?s=${encodeURIComponent(query)}`;
-    await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 30000 });
+  let browser;
+  let lastError = null;
 
-    const results = await page.$$eval(
-      SEARCH_SELECTORS.resultCard,
-      (cards, titleLinkSelector) =>
-        cards
-          .map((card, i) => {
-            const a = card.querySelector(titleLinkSelector);
-            if (!a) return null;
-            const img = card.querySelector("img");
-            return {
-              id: i + 1,
-              title: (a.getAttribute("title") || a.textContent || img?.alt || "").trim(),
-              url: a.href,
-              thumb: img?.src || "",
-            };
-          })
-          .filter((r) => r && r.title && r.url),
-      SEARCH_SELECTORS.titleLink
-    );
+  for (const baseUrl of MIRRORS) {
+    try {
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"]
+      });
+      const page = await browser.newPage();
+      await page.setUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      );
 
-    // De-dupe by URL, drop obvious non-movie links, cap to 10
-    const seen = new Set();
-    const deduped = [];
-    for (const r of results) {
-      if (seen.has(r.url) || r.url === LK21_BASE || r.url === `${LK21_BASE}/`) continue;
-      seen.add(r.url);
-      r.id = deduped.length + 1;
-      deduped.push(r);
-      if (deduped.length >= 10) break;
+      const searchUrl = `${baseUrl}/?s=${encodeURIComponent(query)}`;
+      await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 30000 });
+
+      // Wait for ANY of the possible result containers
+      let found = false;
+      for (const sel of RESULT_SELECTORS) {
+        try {
+          await page.waitForSelector(sel, { timeout: 8000 });
+          found = true;
+          break;
+        } catch (_) {}
+      }
+
+      if (!found) {
+        // Maybe the page is still loading – try a generic wait
+        await page.waitForFunction(
+          () => document.querySelectorAll("a[href]").length > 5,
+          { timeout: 10000 }
+        );
+      }
+
+      // Extract results using all selectors combined
+      const results = await page.$$eval(
+        RESULT_SELECTORS.join(","),
+        (elements) =>
+          elements
+            .map((el) => {
+              const a = el.querySelector("a[href]");
+              if (!a) return null;
+              const img = el.querySelector("img");
+              const title =
+                a.getAttribute("title") ||
+                a.textContent.trim() ||
+                img?.alt ||
+                "";
+              return {
+                title: title,
+                url: a.href,
+                thumb: img?.src || "",
+              };
+            })
+            .filter((r) => r && r.title && r.url)
+      );
+
+      // Deduplicate by URL
+      const seen = new Set();
+      const deduped = [];
+      for (const r of results) {
+        if (!seen.has(r.url) && r.url !== baseUrl && !r.url.endsWith("/")) {
+          seen.add(r.url);
+          r.id = deduped.length + 1;
+          deduped.push(r);
+          if (deduped.length >= 10) break;
+        }
+      }
+
+      if (deduped.length > 0) {
+        return deduped;
+      } else {
+        // No results on this mirror, try next
+        await browser.close();
+        continue;
+      }
+    } catch (err) {
+      lastError = err;
+      if (browser) await browser.close().catch(() => {});
+      continue; // try next mirror
     }
-    return deduped;
-  } finally {
-    await browser.close();
   }
+
+  throw new Error(
+    `No results found on any mirror. Last error: ${lastError?.message || "unknown"}`
+  );
 }
 
 // ─── 💬 1. SEARCH COMMAND ────────────────────────────────────────────────────
@@ -109,8 +148,7 @@ cmd({
     if (!results.length) {
       return reply(
         `*❌ No results found for "${q}"*\n\n` +
-        `_If this keeps happening even for popular titles, the search page ` +
-        `markup may have changed — this plugin needs its selectors updated._`
+        `_Try a different spelling or use a specific year._`
       );
     }
 
@@ -123,12 +161,12 @@ cmd({
 
   } catch (e) {
     await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    console.log("[lk21] search error:", e.message);
+    console.error("[lk21] search error:", e.message);
     return reply(`*❌ Search Error:* ${e.message}`);
   }
 });
 
-// ─── 💬 2. SELECTION HANDLER (filter-based) ─────────────────────────────────
+// ─── 💬 2. SELECTION HANDLER ─────────────────────────────────────────────────
 cmd({
   filter: (text, { sender }) => {
     if (!pendingSearch[sender]) return false;
@@ -155,11 +193,11 @@ cmd({
   reply(
     `*🎬 ${selected.title}*\n${"─".repeat(28)}\n\n` +
     `*📌 Reply "y" to download and send this movie.*\n` +
-    `_(HLS titles are re-encoded via FFmpeg and can take several minutes — 2181 segments isn't unusual for a 2hr movie.)_`
+    `_(HLS titles are re-encoded via FFmpeg – can take several minutes.)_`
   );
 });
 
-// ─── 💬 3. DOWNLOAD CONFIRMATION HANDLER ────────────────────────────────────
+// ─── 💬 3. DOWNLOAD CONFIRMATION ────────────────────────────────────────────
 cmd({
   filter: (text, { sender }) => {
     if (!pendingDownload[sender]) return false;
@@ -172,19 +210,15 @@ cmd({
   delete pendingDownload[sender];
 
   await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
-  reply(`*⏳ Resolving iframe → bypassing Cloudflare → downloading...*\nThis can take a few minutes for HLS titles — please wait. 🙏`);
+  reply(`*⏳ Resolving iframe → downloading...*\nThis may take a few minutes – please wait. 🙏`);
 
   const cleanFileName = `${session.title}.mp4`.replace(/[^\w\s.\-\[\]()]/gi, "").trim();
   const outputPath = path.join(__dirname, cleanFileName);
 
   try {
-    // lk21dl(url, outputPath) resolves with a Readable STREAM (per its
-    // README), not a saved file — we own writing it to disk and must wait
-    // for the write to actually finish before touching the file.
     const videoStream = await lk21dl(session.url, outputPath);
-
     if (!videoStream || typeof videoStream.pipe !== "function") {
-      return reply(`*❌ Download did not return a valid stream.*\n\n🔗 Try manually:\n${session.url}`);
+      return reply(`*❌ Download stream invalid.*\n\n🔗 Try manually:\n${session.url}`);
     }
 
     const writer = fs.createWriteStream(outputPath);
@@ -197,16 +231,16 @@ cmd({
     });
 
     if (!fs.existsSync(outputPath)) {
-      return reply(`*❌ Download did not produce a file.*\n\n🔗 Try manually:\n${session.url}`);
+      return reply(`*❌ No file produced.*\n\n🔗 Try manually:\n${session.url}`);
     }
 
     const stats = fs.statSync(outputPath);
     if (stats.size < 100 * 1024) {
       fs.unlinkSync(outputPath);
-      return reply(`*❌ Downloaded file too small (${(stats.size / 1024).toFixed(1)}KB) — likely failed.*\n\n🔗 Try manually:\n${session.url}`);
+      return reply(`*❌ File too small (${(stats.size / 1024).toFixed(1)}KB) – download failed.*\n\n🔗 Try manually:\n${session.url}`);
     }
 
-    reply(`*⬆️ Uploading movie file to WhatsApp...*`);
+    reply(`*⬆️ Uploading movie...*`);
 
     await maliya.sendMessage(from, {
       document: { url: outputPath },
@@ -219,24 +253,16 @@ cmd({
 
   } catch (err) {
     if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-    console.log("[lk21] download error:", err.message);
-    console.log("[lk21] stack:", err.stack);
-
-    // The package's own error-handling table names these specific failure
-    // modes — surface them plainly instead of a generic message.
+    console.error("[lk21] download error:", err.message);
     let hint = "";
-    if (/iframe/i.test(err.message)) hint = "\n_Page structure may have changed, or the URL is stale._";
-    else if (/video url/i.test(err.message)) hint = "\n_Player may need manual interaction — try opening the link in a browser._";
-    else if (/ffmpeg/i.test(err.message)) hint = "\n_Check that FFmpeg is installed on the server (`ffmpeg -version`)._";
-
-    reply(
-      `*⚠️ Download Failed.*\n*Reason:* ${err.message}${hint}\n\n🔗 Try manually:\n${session.url}`
-    );
+    if (/iframe/i.test(err.message)) hint = "\n_Page structure may have changed._";
+    else if (/video url/i.test(err.message)) hint = "\n_Player may need manual interaction._";
+    else if (/ffmpeg/i.test(err.message)) hint = "\n_Check FFmpeg is installed (`ffmpeg -version`)._";
+    reply(`*⚠️ Download Failed.*\n*Reason:* ${err.message}${hint}\n\n🔗 Try manually:\n${session.url}`);
   }
 });
 
-// Session expiry — 10 minutes (downloads can be slow, give more headroom
-// than the quick-lookup plugins)
+// ─── SESSION EXPIRY (10 min) ────────────────────────────────────────────────
 setInterval(() => {
   const now = Date.now(), ttl = 10 * 60 * 1000;
   for (const s in pendingSearch) if (now - pendingSearch[s].timestamp > ttl) delete pendingSearch[s];
