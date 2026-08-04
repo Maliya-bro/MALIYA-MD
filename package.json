@@ -76,7 +76,8 @@
     "puppeteer-real-browser": "latest",
     "films365-scraper": "latest",
     "xhamster-scraper": "latest",
-    "my-cloudflare-scraper": "latest"
+    "my-cloudflare-scraper": "latest",
+    "@rindev/lk21dl-core": "latest"
     
     
     
