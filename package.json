@@ -75,7 +75,8 @@
     "axios-retry": "latest",
     "puppeteer-real-browser": "latest",
     "films365-scraper": "latest",
-    "xhamster-scraper": "latest"
+    "xhamster-scraper": "latest",
+    "my-cloudflare-scraper": "latest"
     
     
     
