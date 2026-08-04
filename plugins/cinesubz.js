@@ -15,7 +15,7 @@ const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 
-const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
+const { searchCineSubz, scrapeCineSubz, scrapeCineSubzServerLink } = require("cinesubz-scraper");
 const { scrapePage } = require("my-cloudflare-scraper");
 
 // Session tracking
@@ -144,22 +144,57 @@ cmd({
   const tempFilePath = path.join(__dirname, cleanFileName);
 
   try {
-    // If the link CineSubz gave us is already a direct file (.mp4/.mkv/...),
-    // skip the Cloudflare-resolve step entirely.
-    const isAlreadyDirectFile = /\.(mp4|mkv|avi|mov)(\?.*)?$/i.test(chosenLink.directUrl);
+    // CineSubz's own server links look like:
+    //   https://bot3.sonic-cloud.online/serverX/.../Name-[CineSubz.co]-480p?ext=mp4
+    // — the extension is in a ?ext= query param, NOT the path, so a plain
+    // .mp4/.mkv path-suffix check misses these. Detect them separately and
+    // resolve with cinesubz-scraper's own decryptor (per its README), which
+    // knows this exact URL shape and returns { title, size, telegram }.
+    const isSonicCloudLink = /bot\d*\.sonic-cloud\.online/i.test(chosenLink.directUrl);
+    const isPlainDirectFile = /\.(mp4|mkv|avi|mov)(\?.*)?$/i.test(chosenLink.directUrl);
 
-    let finalDownloadUrl;
+    let finalDownloadUrl = null;
+    let telegramLink = null;
     let sizeInfo = chosenLink.size || null;
 
-    if (isAlreadyDirectFile) {
+    if (isSonicCloudLink) {
+      const decrypted = await scrapeCineSubzServerLink(chosenLink.directUrl);
+
+      if (!decrypted) {
+        return reply(
+          `*❌ Could not decrypt the server link.*\n\n🔗 Try manually:\n${chosenLink.directUrl}`
+        );
+      }
+
+      if (decrypted.size) sizeInfo = decrypted.size;
+
+      // The package's dl example shows this returns a Telegram link, not a
+      // raw file URL — there's no separate "directUrl" field in its output.
+      if (decrypted.telegram) telegramLink = decrypted.telegram;
+      if (decrypted.directUrl) finalDownloadUrl = decrypted.directUrl;
+
+      if (!finalDownloadUrl && !telegramLink) {
+        return reply(
+          `*❌ Decryption returned no usable link.*\n\n🔗 Try manually:\n${chosenLink.directUrl}`
+        );
+      }
+
+      // If we only got a Telegram link, we can't stream/upload it directly —
+      // hand it to the user instead of trying (and failing) to axios-download it.
+      if (!finalDownloadUrl && telegramLink) {
+        return reply(
+          `*📲 Telegram Stream Link:*\n${telegramLink}\n*(Size: ${sizeInfo || "Unknown"})*\n\n_This title is only available via Telegram — open the link above to get it._`
+        );
+      }
+
+    } else if (isPlainDirectFile) {
+      // Already a genuine direct file link — nothing to resolve.
       finalDownloadUrl = chosenLink.directUrl;
+
     } else {
-      // Server/Telegram intermediate page — resolve past Cloudflare with
-      // my-cloudflare-scraper, which waits for the page's real content and
-      // pulls the file URL out of its download() script.
-      const resolved = await scrapePage(chosenLink.directUrl, {
-        timeout: 60000,
-      });
+      // Some other kind of intermediate/landing page — fall back to the
+      // Cloudflare-aware resolver.
+      const resolved = await scrapePage(chosenLink.directUrl, { timeout: 60000 });
 
       if (!resolved || !resolved.directUrl) {
         return reply(
