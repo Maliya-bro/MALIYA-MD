@@ -25,7 +25,14 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 const cheerio = require("cheerio");
-const { launch } = require("cloakbrowser");
+// NOTE: "cloakbrowser" is not a real published npm package — requiring it
+// threw at module load time, which silently prevented this ENTIRE file
+// (including the .cs command) from being registered by the plugin loader.
+// That's why .cs showed "command not recognized" while every other plugin
+// worked fine. Swapped to real puppeteer, which is what the rest of the
+// code (launch/newPage/goto/waitForSelector/click) already assumes.
+const puppeteer = require("puppeteer");
+const launch = (opts) => puppeteer.launch(opts);
 
 // User Sessions Store
 const cinesubzSessions = {};
