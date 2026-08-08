@@ -1,44 +1,54 @@
 /**
- * 🎬 Cinesubz Downloader Plugin (Hybrid Fix)
+ * 🎬 Cinesubz Downloader Plugin (Pure Scraper Version)
  * ─────────────────────────────────────────────────────────────
- * Search & Info: DARKSHAN API
- * Download Link: Direct Scraping Bypasser (Fixes "data: null" error)
+ * Engine: cinesubz-scraper NPM Package
+ * Direct CDN Resolver: Sonic-Cloud 302 Location Header Interceptor
  */
 
 const { cmd } = require("../command");
+const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
 const axios = require("axios");
 const cheerio = require("cheerio");
 
-const API_BASE_URL = "https://api-dark-shan-yt.koyeb.app";
-const API_KEY = "631bfcfb450f9160";
-
 const cinesubzSessions = {};
 
-// Helper: Direct Cinesubz Page Scraper for Download Links
-async function scrapeDirectDownloadLink(pageUrl) {
+// Helper: Intermediate Sonic-Cloud Page එකෙන් Real Direct MP4 CDN URL එක Extract කිරීම
+async function resolveSonicCloudDirectLink(sonicCloudUrl) {
   try {
-    const { data } = await axios.get(pageUrl, {
+    const res = await axios.get(sonicCloudUrl, {
+      maxRedirects: 0,
+      validateStatus: (status) => status >= 200 && status < 400,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      timeout: 10000
-    });
-
-    const $ = cheerio.load(data);
-    let downloadUrl = null;
-
-    // Pixeldrain / Direct Download Links සොයාගැනීම
-    $('a[href*="pixeldrain.com"], a[href*="file"], a.btn-download, .download-link a').each((i, el) => {
-      const href = $(el).attr('href');
-      if (href && !downloadUrl) {
-        downloadUrl = href;
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': sonicCloudUrl
       }
     });
 
-    return downloadUrl;
-  } catch (err) {
-    console.error("Scrape Link Error:", err.message);
-    return null;
+    if (res.headers.location) {
+      return res.headers.location;
+    }
+
+    const $ = cheerio.load(res.data);
+    const directBtn = $('a:contains("Direct Download")').attr('href') || $('a.btn-download').attr('href');
+    
+    if (directBtn) {
+      const btnRes = await axios.get(directBtn, {
+        maxRedirects: 0,
+        validateStatus: (status) => status >= 200 && status < 400,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Referer': sonicCloudUrl
+        }
+      });
+      return btnRes.headers.location || directBtn;
+    }
+
+    return sonicCloudUrl;
+  } catch (error) {
+    if (error.response && error.response.headers.location) {
+      return error.response.headers.location;
+    }
+    return sonicCloudUrl;
   }
 }
 
@@ -47,7 +57,7 @@ cmd({
   pattern: "cinesubz",
   alias: ["cine", "cs"],
   react: "🎬",
-  desc: "Search & Download movies from Cinesubz",
+  desc: "Search & Download movies from Cinesubz using cinesubz-scraper",
   category: "download",
   filename: __filename,
 }, async (maliya, mek, m, { from, q, sender, reply }) => {
@@ -58,11 +68,8 @@ cmd({
   await maliya.sendMessage(from, { react: { text: "🔍", key: mek.key } });
 
   try {
-    // API Call 1: Search
-    const searchUrl = `${API_BASE_URL}/movie/cinesubz-search?q=${encodeURIComponent(q)}&apikey=${API_KEY}`;
-    const searchRes = await axios.get(searchUrl, { timeout: 15000 });
-
-    const results = searchRes.data?.result || searchRes.data?.data || (Array.isArray(searchRes.data) ? searchRes.data : []);
+    // NPM Package Search
+    const results = await searchCineSubz(q);
 
     if (!results || results.length === 0) {
       await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
@@ -92,7 +99,7 @@ cmd({
   }
 });
 
-// ─── 2. SELECTION HANDLER (Info API + Scraped DL Link) ───────────────
+// ─── 2. SELECTION HANDLER (NPM Info + Direct CDN Resolver) ─────────────
 cmd({
   filter: (text, { sender }) => {
     if (!cinesubzSessions[sender]) return false;
@@ -113,22 +120,20 @@ cmd({
   await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
   try {
-    // API Call 2: Movie Info
-    reply("*⏳ Fetching Movie Info via Darkshan API...*");
-    const infoApiUrl = `${API_BASE_URL}/movie/cinesubz-info?url=${encodeURIComponent(moviePageUrl)}&apikey=${API_KEY}`;
-    const infoRes = await axios.get(infoApiUrl, { timeout: 15000 });
+    reply("*⏳ Fetching details & resolving direct CDN link...*");
 
-    const infoData = infoRes.data?.result || infoRes.data?.data || infoRes.data;
+    // NPM Package Details Scraper
+    const metadata = await scrapeCineSubz(moviePageUrl);
 
-    let movieTitle = infoData?.title || selectedMovie.title || "Cinesubz Movie";
-    let posterUrl = infoData?.image || infoData?.poster || selectedMovie.image;
-    let imdb = infoData?.imdb || infoData?.rating || "N/A";
-    let releaseDate = infoData?.date || infoData?.releaseDate || "N/A";
+    let movieTitle = metadata?.title || selectedMovie.title || "Cinesubz Movie";
+    let posterUrl = metadata?.poster || selectedMovie.image;
+    let imdb = metadata?.imdb_rate || metadata?.vote || "N/A";
+    let duration = metadata?.duration || metadata?.info || "N/A";
 
     let captionText = `*🎬 ${movieTitle}*\n${"─".repeat(30)}\n`;
     captionText += `⭐ *IMDb Rating:* ${imdb}\n`;
-    captionText += `📅 *Release Date:* ${releaseDate}\n\n`;
-    captionText += `_⏳ Bypassing broken download API & fetching direct file link..._`;
+    captionText += `⏱️ *Duration:* ${duration}\n\n`;
+    captionText += `_⏳ Extracting direct MP4 stream URL from sonic-cloud..._`;
 
     if (posterUrl) {
       await maliya.sendMessage(from, { image: { url: posterUrl }, caption: captionText }, { quoted: mek });
@@ -136,25 +141,27 @@ cmd({
       await reply(captionText);
     }
 
-    // Fallback: API Download එක broken නිසා Direct Cinesubz Page එකෙන් Scrape කිරීම
-    let downloadUrl = await scrapeDirectDownloadLink(moviePageUrl);
-
-    if (!downloadUrl) {
+    if (!metadata.downloadLinks || metadata.downloadLinks.length === 0) {
       await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-      return reply("❌ *Direct Download Link එක සොයාගැනීමට නොහැකි විය. Cinesubz හි මෙම Movie එකට Links නැත.*");
+      return reply("❌ *Download Links සොයාගැනීමට නොහැකි විය.*");
     }
 
-    // Convert Pixeldrain View URL to Direct File Link
-    if (downloadUrl.includes("pixeldrain.com/u/")) {
-      downloadUrl = downloadUrl.replace("pixeldrain.com/u/", "pixeldrain.com/api/file/");
+    // NPM Package එකෙන් එන sonic-cloud link එක අරගෙන Real MP4 CDN Link එකට Bypassed කිරීම
+    let intermediateUrl = metadata.downloadLinks[0].directUrl || metadata.downloadLinks[0].url;
+    let finalDirectMp4Url = intermediateUrl;
+
+    if (intermediateUrl.includes("sonic-cloud")) {
+      finalDirectMp4Url = await resolveSonicCloudDirectLink(intermediateUrl);
+    } else if (intermediateUrl.includes("pixeldrain.com/u/")) {
+      finalDirectMp4Url = intermediateUrl.replace("pixeldrain.com/u/", "pixeldrain.com/api/file/");
     }
 
     // Send Document
     await maliya.sendMessage(from, { react: { text: "📤", key: mek.key } });
-    reply(`*📥 Downloading Movie Document...*\n_කරුණාකර සුළු වෙලාවක් රැඳී සිටින්න._`);
+    reply(`*📥 Downloading Movie Document...*\n_Resolved CDN Link: ✅_`);
 
     await maliya.sendMessage(from, {
-      document: { url: downloadUrl },
+      document: { url: finalDirectMp4Url },
       mimetype: "video/mp4",
       fileName: `${movieTitle.replace(/[^a-zA-Z0-9 ]/g, "_")}.mp4`,
       caption: `*🎬 ${movieTitle}*\n\n_Delivered by MALIYA-MD_`
