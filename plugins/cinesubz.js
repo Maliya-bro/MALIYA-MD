@@ -1,8 +1,7 @@
 /**
- * 🎬 Cinesubz Downloader Plugin (Pure Custom Scraper + CloakBrowser Engine)
+ * 🎬 Cinesubz Downloader Plugin (Bug Fixed & RAM Optimized)
  * ────────────────────────────────────────────────────────────────────────
- * Search & Page Scraping: Pure Axios + Cheerio (No third-party scraper NPMs)
- * Sonic-Cloud Bypass: CloakBrowser / Playwright Headless Engine
+ * Pure Axios + Cheerio Scraping + CloakBrowser Engine for Sonic-Cloud
  */
 
 const { cmd } = require("../command");
@@ -10,6 +9,7 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 const { launch } = require("cloakbrowser");
 
+// User Sessions Store
 const cinesubzSessions = {};
 
 const HEADERS = {
@@ -20,7 +20,7 @@ const HEADERS = {
 async function searchCineSubz(query) {
   try {
     const searchUrl = `https://cinesubz.co/?s=${encodeURIComponent(query)}`;
-    const { data } = await axios.get(searchUrl, { headers: HEADERS });
+    const { data } = await axios.get(searchUrl, { headers: HEADERS, timeout: 15000 });
     const $ = cheerio.load(data);
     const results = [];
 
@@ -44,7 +44,7 @@ async function searchCineSubz(query) {
 // 2. Pure Axios + Cheerio Movie Details & Download Link Scraper
 async function scrapeCineSubzDetails(movieUrl) {
   try {
-    const { data } = await axios.get(movieUrl, { headers: HEADERS });
+    const { data } = await axios.get(movieUrl, { headers: HEADERS, timeout: 15000 });
     const $ = cheerio.load(data);
 
     const title = $("h1.entry-title, h1").text().trim() || "Cinesubz Movie";
@@ -63,28 +63,32 @@ async function scrapeCineSubzDetails(movieUrl) {
       }
     });
 
-    return {
-      title,
-      poster,
-      imdb,
-      duration,
-      downloadLinks
-    };
+    return { title, poster, imdb, duration, downloadLinks };
   } catch (error) {
     console.error("❌ Movie Page Scraping Error:", error.message);
     return null;
   }
 }
 
-// 3. CloakBrowser Sonic Cloud Bypass Helper
+// 3. CloakBrowser Sonic Cloud Bypass Helper (RAM Optimized)
 async function resolveSonicCloudDirectLink(sonicCloudUrl) {
   let browser;
   try {
-    console.log(`🚀 CloakBrowser Engine Launching for: ${sonicCloudUrl}`);
+    console.log(`🚀 CloakBrowser Launching for: ${sonicCloudUrl}`);
 
     browser = await launch({
       headless: true,
-      humanize: true
+      humanize: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--disable-gpu",
+        "--single-process"
+      ]
     });
 
     const page = await browser.newPage();
@@ -98,20 +102,20 @@ async function resolveSonicCloudDirectLink(sonicCloudUrl) {
       }
     });
 
-    await page.goto(sonicCloudUrl, { waitUntil: "networkidle2", timeout: 45000 });
+    await page.goto(sonicCloudUrl, { waitUntil: "networkidle2", timeout: 40000 });
 
     const btnSelector = "#dl-links button, #dl-links a, .direct-download";
 
     try {
-      await page.waitForSelector(btnSelector, { timeout: 10000 });
-      await new Promise((r) => setTimeout(r, 2000));
+      await page.waitForSelector(btnSelector, { timeout: 8000 });
+      await new Promise((r) => setTimeout(r, 1500));
       await page.click(btnSelector);
     } catch (e) {
       console.log("⚠️ Direct click skipped / auto-redirecting...");
     }
 
     let waited = 0;
-    while (!capturedDownloadUrl && waited < 12000) {
+    while (!capturedDownloadUrl && waited < 10000) {
       await new Promise((r) => setTimeout(r, 500));
       waited += 500;
     }
@@ -131,18 +135,17 @@ cmd({
   pattern: "cinesubz",
   alias: ["cine", "cs"],
   react: "🎬",
-  desc: "Search & Download movies from Cinesubz using pure scraping",
+  desc: "Search & Download movies from Cinesubz",
   category: "download",
   filename: __filename,
 }, async (maliya, mek, m, { from, q, sender, reply }) => {
-  if (!q) {
-    return reply("*🎬 Usage: .cs <movie name>*\n\n_Example: .cs Jungle Cruise_");
-  }
-
-  await maliya.sendMessage(from, { react: { text: "🔍", key: mek.key } });
-
   try {
-    // Pure Axios/Cheerio Search
+    if (!q) {
+      return reply("*🎬 Usage: .cs <movie name>*\n\n_Example: .cs Jungle Cruise_");
+    }
+
+    await maliya.sendMessage(from, { react: { text: "🔍", key: mek.key } });
+
     const results = await searchCineSubz(q);
 
     if (!results || results.length === 0) {
@@ -160,11 +163,19 @@ cmd({
 
     const sentMsg = await maliya.sendMessage(from, { text: text }, { quoted: mek });
 
+    // Store session
     cinesubzSessions[sender] = {
       results: topResults,
       messageId: sentMsg?.key?.id || null,
       timestamp: Date.now()
     };
+
+    // Auto clear session after 5 minutes to free memory
+    setTimeout(() => {
+      if (cinesubzSessions[sender]) {
+        delete cinesubzSessions[sender];
+      }
+    }, 5 * 60 * 1000);
 
   } catch (error) {
     console.error("❌ Search Error:", error.message);
@@ -173,30 +184,34 @@ cmd({
   }
 });
 
-// ─── 2. SELECTION HANDLER (Pure Page Scraper + CloakBrowser) ─────────────
+// ─── 2. SELECTION LISTENER (Safe for other plugins) ───────────────
 cmd({
-  filter: (text, { sender }) => {
-    if (!cinesubzSessions[sender]) return false;
-    const n = parseInt((text || "").trim());
-    return !isNaN(n) && n > 0 && n <= cinesubzSessions[sender].results.length;
-  },
+  on: "text",
   filename: __filename
 }, async (maliya, mek, m, { body, sender, from, reply }) => {
-  const session = cinesubzSessions[sender];
-  if (!session) return;
-
-  const index = parseInt(body.trim()) - 1;
-  const selectedMovie = session.results[index];
-  delete cinesubzSessions[sender];
-
-  const moviePageUrl = selectedMovie.url;
-
-  await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
-
   try {
+    // Session එකක් නැත්නම් කෙළින්ම return වෙනවා (අනික් Plugins වලට ඉඩ දෙනවා)
+    if (!cinesubzSessions[sender]) return;
+
+    const text = body ? body.trim() : "";
+    const n = parseInt(text);
+
+    // Number එකක් නෙවෙයි නම් හෝ පරාසයෙන් පිට නම් Return වෙනවා
+    if (isNaN(n) || n <= 0 || n > cinesubzSessions[sender].results.length) return;
+
+    const session = cinesubzSessions[sender];
+    const index = n - 1;
+    const selectedMovie = session.results[index];
+
+    // Session Clear කිරීම
+    delete cinesubzSessions[sender];
+
+    const moviePageUrl = selectedMovie.url;
+
+    await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
     reply("*⏳ Fetching details & resolving direct CDN link...*");
 
-    // Pure Axios/Cheerio Details Scraper
+    // Pure Details Scraper
     const metadata = await scrapeCineSubzDetails(moviePageUrl);
 
     if (!metadata) {
@@ -228,7 +243,7 @@ cmd({
     let intermediateUrl = metadata.downloadLinks[0];
     let finalDirectMp4Url = intermediateUrl;
 
-    // Sonic Cloud resolution using CloakBrowser
+    // Sonic Cloud Bypass
     if (intermediateUrl.includes("sonic-cloud")) {
       finalDirectMp4Url = await resolveSonicCloudDirectLink(intermediateUrl);
     } else if (intermediateUrl.includes("pixeldrain.com/u/")) {
@@ -249,7 +264,7 @@ cmd({
     await maliya.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
   } catch (error) {
-    console.error("❌ Process Error:", error.message);
+    console.error("❌ Selection Handler Error:", error.message);
     await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
     reply(`*❌ Download Failed:* ${error.message}`);
   }
