@@ -1,36 +1,64 @@
 /**
- * 🎬 Cinesubz Downloader Plugin for MALIYA-MD
+ * 🎬 Cinesubz Downloader Plugin (Hybrid Fix)
  * ─────────────────────────────────────────────────────────────
- * Flow: cinesubz-search => cinesubz-info => cinesubz-download
- * API: DARKSHAN API
+ * Search & Info: DARKSHAN API
+ * Download Link: Direct Scraping Bypasser (Fixes "data: null" error)
  */
 
 const { cmd } = require("../command");
 const axios = require("axios");
+const cheerio = require("cheerio");
 
 const API_BASE_URL = "https://api-dark-shan-yt.koyeb.app";
-const API_KEY = "631bfcfb450f9160"; // Darkshan API Key
+const API_KEY = "631bfcfb450f9160";
 
-// User choice tracking session
 const cinesubzSessions = {};
+
+// Helper: Direct Cinesubz Page Scraper for Download Links
+async function scrapeDirectDownloadLink(pageUrl) {
+  try {
+    const { data } = await axios.get(pageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      },
+      timeout: 10000
+    });
+
+    const $ = cheerio.load(data);
+    let downloadUrl = null;
+
+    // Pixeldrain / Direct Download Links සොයාගැනීම
+    $('a[href*="pixeldrain.com"], a[href*="file"], a.btn-download, .download-link a').each((i, el) => {
+      const href = $(el).attr('href');
+      if (href && !downloadUrl) {
+        downloadUrl = href;
+      }
+    });
+
+    return downloadUrl;
+  } catch (err) {
+    console.error("Scrape Link Error:", err.message);
+    return null;
+  }
+}
 
 // ─── 1. SEARCH COMMAND (.cs / .cinesubz) ───────────────────────────
 cmd({
   pattern: "cinesubz",
   alias: ["cine", "cs"],
   react: "🎬",
-  desc: "Search & Download movies from Cinesubz via Darkshan API",
+  desc: "Search & Download movies from Cinesubz",
   category: "download",
   filename: __filename,
 }, async (maliya, mek, m, { from, q, sender, reply }) => {
   if (!q) {
-    return reply("*🎬 Usage: .cs <movie name>*\n\n_Example: .cs Spider Man_");
+    return reply("*🎬 Usage: .cs <movie name>*\n\n_Example: .cs Jungle Cruise_");
   }
 
   await maliya.sendMessage(from, { react: { text: "🔍", key: mek.key } });
 
   try {
-    // Step 1: Cinesubz Search API Request
+    // API Call 1: Search
     const searchUrl = `${API_BASE_URL}/movie/cinesubz-search?q=${encodeURIComponent(q)}&apikey=${API_KEY}`;
     const searchRes = await axios.get(searchUrl, { timeout: 15000 });
 
@@ -51,7 +79,6 @@ cmd({
 
     const sentMsg = await maliya.sendMessage(from, { text: text }, { quoted: mek });
 
-    // Store session for selection
     cinesubzSessions[sender] = {
       results: topResults,
       messageId: sentMsg?.key?.id || null,
@@ -59,13 +86,13 @@ cmd({
     };
 
   } catch (error) {
-    console.error("❌ Step 1 (Search) Error:", error.response?.data || error.message);
+    console.error("❌ Search Error:", error.message);
     await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    reply(`*❌ Search API Error:* ${error.message}`);
+    reply(`*❌ Search Error:* ${error.message}`);
   }
 });
 
-// ─── 2. SELECTION HANDLER (Info => Download Pipeline) ───────────────
+// ─── 2. SELECTION HANDLER (Info API + Scraped DL Link) ───────────────
 cmd({
   filter: (text, { sender }) => {
     if (!cinesubzSessions[sender]) return false;
@@ -79,21 +106,15 @@ cmd({
 
   const index = parseInt(body.trim()) - 1;
   const selectedMovie = session.results[index];
-  delete cinesubzSessions[sender]; // Clear Session
+  delete cinesubzSessions[sender];
 
   const moviePageUrl = selectedMovie.url || selectedMovie.link;
-
-  if (!moviePageUrl) {
-    return reply("❌ Movie URL is missing from Search Response.");
-  }
 
   await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
   try {
-    // -----------------------------------------------------------------
-    // Step 2: Call Cinesubz Info API
-    // -----------------------------------------------------------------
-    reply("*⏳ Fetching Movie Info...*");
+    // API Call 2: Movie Info
+    reply("*⏳ Fetching Movie Info via Darkshan API...*");
     const infoApiUrl = `${API_BASE_URL}/movie/cinesubz-info?url=${encodeURIComponent(moviePageUrl)}&apikey=${API_KEY}`;
     const infoRes = await axios.get(infoApiUrl, { timeout: 15000 });
 
@@ -104,11 +125,10 @@ cmd({
     let imdb = infoData?.imdb || infoData?.rating || "N/A";
     let releaseDate = infoData?.date || infoData?.releaseDate || "N/A";
 
-    // Send Movie Info Caption + Poster
     let captionText = `*🎬 ${movieTitle}*\n${"─".repeat(30)}\n`;
     captionText += `⭐ *IMDb Rating:* ${imdb}\n`;
     captionText += `📅 *Release Date:* ${releaseDate}\n\n`;
-    captionText += `_⏳ Fetching direct download links..._`;
+    captionText += `_⏳ Bypassing broken download API & fetching direct file link..._`;
 
     if (posterUrl) {
       await maliya.sendMessage(from, { image: { url: posterUrl }, caption: captionText }, { quoted: mek });
@@ -116,64 +136,35 @@ cmd({
       await reply(captionText);
     }
 
-    // -----------------------------------------------------------------
-    // Step 3: Call Cinesubz Download API
-    // -----------------------------------------------------------------
-    const dlApiUrl = `${API_BASE_URL}/movie/cinesubz-download?url=${encodeURIComponent(moviePageUrl)}&apikey=${API_KEY}`;
-    const dlRes = await axios.get(dlApiUrl, { timeout: 20000 });
+    // Fallback: API Download එක broken නිසා Direct Cinesubz Page එකෙන් Scrape කිරීම
+    let downloadUrl = await scrapeDirectDownloadLink(moviePageUrl);
 
-    const dlData = dlRes.data?.result || dlRes.data?.data || dlRes.data?.downloads || (Array.isArray(dlRes.data) ? dlRes.data : null);
-
-    if (!dlData || dlData.length === 0) {
+    if (!downloadUrl) {
       await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-      return reply("❌ *cinesubz-download API එකෙන් Download Links ලැබුණේ නැත (Server Empty Response).*");
+      return reply("❌ *Direct Download Link එක සොයාගැනීමට නොහැකි විය. Cinesubz හි මෙම Movie එකට Links නැත.*");
     }
 
-    // Direct / Pixeldrain / Best Quality selection
-    let selectedDL = Array.isArray(dlData) 
-      ? (dlData.find(d => JSON.stringify(d).toLowerCase().includes("720p") || JSON.stringify(d).toLowerCase().includes("pixeldrain")) || dlData[0])
-      : dlData;
-
-    let finalDownloadUrl = selectedDL?.url || selectedDL?.link || selectedDL?.dl_url || selectedDL?.direct_link || (typeof selectedDL === "string" ? selectedDL : null);
-
-    if (!finalDownloadUrl) {
-      return reply("❌ Valid Direct Video URL extract කර ගැනීමට නොහැකි විය.");
+    // Convert Pixeldrain View URL to Direct File Link
+    if (downloadUrl.includes("pixeldrain.com/u/")) {
+      downloadUrl = downloadUrl.replace("pixeldrain.com/u/", "pixeldrain.com/api/file/");
     }
 
-    // Convert Pixeldrain View URL to Direct Stream Link
-    if (finalDownloadUrl.includes("pixeldrain.com/u/")) {
-      finalDownloadUrl = finalDownloadUrl.replace("pixeldrain.com/u/", "pixeldrain.com/api/file/");
-    }
-
-    const quality = selectedDL?.quality || selectedDL?.title || "HD";
-    const size = selectedDL?.size || "Direct File";
-
-    // -----------------------------------------------------------------
-    // Step 4: Send Document File to WhatsApp
-    // -----------------------------------------------------------------
+    // Send Document
     await maliya.sendMessage(from, { react: { text: "📤", key: mek.key } });
-    reply(`*📥 Uploading Movie Document (${quality})...*\n_කරුණාකර සුළු වෙලාවක් රැඳී සිටින්න._`);
+    reply(`*📥 Downloading Movie Document...*\n_කරුණාකර සුළු වෙලාවක් රැඳී සිටින්න._`);
 
     await maliya.sendMessage(from, {
-      document: { url: finalDownloadUrl },
+      document: { url: downloadUrl },
       mimetype: "video/mp4",
       fileName: `${movieTitle.replace(/[^a-zA-Z0-9 ]/g, "_")}.mp4`,
-      caption: `*🎬 ${movieTitle}*\n⚙️ *Quality:* ${quality}\n📦 *Size:* ${size}\n\n_Delivered by MALIYA-MD_`
+      caption: `*🎬 ${movieTitle}*\n\n_Delivered by MALIYA-MD_`
     }, { quoted: mek });
 
     await maliya.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
   } catch (error) {
-    console.error("❌ Pipeline Error:", error.response?.data || error.message);
+    console.error("❌ Process Error:", error.message);
     await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    reply(`*❌ Process Error:* ${error.response?.data?.message || error.message}`);
+    reply(`*❌ Download Failed:* ${error.message}`);
   }
 });
-
-// Auto Cleanup Sessions
-setInterval(() => {
-  const now = Date.now();
-  for (const s in cinesubzSessions) {
-    if (now - cinesubzSessions[s].timestamp > 300000) delete cinesubzSessions[s];
-  }
-}, 60000);
