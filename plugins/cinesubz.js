@@ -1,87 +1,71 @@
 /**
- * 🎬 Cinesubz Downloader Plugin
- * API: DARKSHAN API (https://api-dark-shan-yt.koyeb.app)
- * API Key: 631bfcfb450f9160
+ * 🎬 Cinesubz Downloader Plugin for MALIYA-MD
+ * ─────────────────────────────────────────────────────────────
+ * Flow: cinesubz-search => cinesubz-info => cinesubz-download
+ * API: DARKSHAN API
  */
 
 const { cmd } = require("../command");
 const axios = require("axios");
 
 const API_BASE_URL = "https://api-dark-shan-yt.koyeb.app";
-const API_KEY = "631bfcfb450f9160";
+const API_KEY = "631bfcfb450f9160"; // Darkshan API Key
 
+// User choice tracking session
 const cinesubzSessions = {};
 
-// Helper: Cinesubz API Request Handler
-async function getCinesubzData(endpoint, params) {
-  try {
-    const response = await axios.get(`${API_BASE_URL}${endpoint}`, {
-      params: { ...params, apikey: API_KEY },
-      timeout: 20000
-    });
-    return response.data;
-  } catch (err) {
-    console.error(`API Error (${endpoint}):`, err.message);
-    return null;
-  }
-}
-
-// ─── 1. SEARCH / DIRECT LINK COMMAND (.cs / .cinesubz) ─────────────
+// ─── 1. SEARCH COMMAND (.cs / .cinesubz) ───────────────────────────
 cmd({
   pattern: "cinesubz",
   alias: ["cine", "cs"],
   react: "🎬",
-  desc: "Search & Download movies from Cinesubz",
+  desc: "Search & Download movies from Cinesubz via Darkshan API",
   category: "download",
   filename: __filename,
 }, async (maliya, mek, m, { from, q, sender, reply }) => {
   if (!q) {
-    return reply("*🎬 Usage: .cs <movie name OR cinesubz url>*\n\n_Example 1: .cs Jungle Cruise_\n_Example 2: .cs https://cinesubz.lk/movies/jungle-cruise-2021-sinhala-subtitles/_");
+    return reply("*🎬 Usage: .cs <movie name>*\n\n_Example: .cs Spider Man_");
   }
 
-  // A. DIRECT CINESUBZ LINK SUBMITTED
-  if (q.includes("cinesubz.lk")) {
-    await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
-    reply("*⏳ Direct Link detected! Fetching download sources...*");
-
-    const dlData = await getCinesubzData("/movie/cinesubz-download", { url: q });
-    if (!dlData) {
-      await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-      return reply("❌ *Download links extraction failed from API.*");
-    }
-
-    return await handleDownloadAndSend(maliya, mek, from, "Cinesubz Movie", dlData, reply);
-  }
-
-  // B. SEARCH BY MOVIE NAME
   await maliya.sendMessage(from, { react: { text: "🔍", key: mek.key } });
 
-  const searchData = await getCinesubzData("/movie/cinesubz-search", { q: q });
-  const results = searchData?.result || searchData?.data || searchData;
+  try {
+    // Step 1: Cinesubz Search API Request
+    const searchUrl = `${API_BASE_URL}/movie/cinesubz-search?q=${encodeURIComponent(q)}&apikey=${API_KEY}`;
+    const searchRes = await axios.get(searchUrl, { timeout: 15000 });
 
-  if (!results || !Array.isArray(results) || results.length === 0) {
+    const results = searchRes.data?.result || searchRes.data?.data || (Array.isArray(searchRes.data) ? searchRes.data : []);
+
+    if (!results || results.length === 0) {
+      await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
+      return reply(`*❌ "${q}" සඳහා Cinesubz හි කිසිදු චිත්‍රපටයක් හමුවූයේ නැත.*`);
+    }
+
+    const topResults = results.slice(0, 10);
+    let text = `*🎬 CINESUBZ MOVIE SEARCH RESULTS*\n${"─".repeat(30)}\n\n`;
+
+    topResults.forEach((item, index) => {
+      text += `*${index + 1}.* ${item.title || item.name}\n`;
+    });
+    text += `\n*📌 Reply with the number (1-${topResults.length}) to download.*`;
+
+    const sentMsg = await maliya.sendMessage(from, { text: text }, { quoted: mek });
+
+    // Store session for selection
+    cinesubzSessions[sender] = {
+      results: topResults,
+      messageId: sentMsg?.key?.id || null,
+      timestamp: Date.now()
+    };
+
+  } catch (error) {
+    console.error("❌ Step 1 (Search) Error:", error.response?.data || error.message);
     await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    return reply(`*❌ "${q}" සඳහා Cinesubz හි කිසිදු චිත්‍රපටයක් හමුවූයේ නැත.*`);
+    reply(`*❌ Search API Error:* ${error.message}`);
   }
-
-  const topResults = results.slice(0, 10);
-  let text = `*🎬 CINESUBZ MOVIE SEARCH RESULTS*\n${"─".repeat(30)}\n\n`;
-  
-  topResults.forEach((item, index) => {
-    text += `*${index + 1}.* ${item.title || item.name}\n`;
-  });
-  text += `\n*📌 Reply with the number (1-${topResults.length}) to download.*`;
-
-  const sentMsg = await maliya.sendMessage(from, { text: text }, { quoted: mek });
-
-  cinesubzSessions[sender] = {
-    results: topResults,
-    messageId: sentMsg?.key?.id || null,
-    timestamp: Date.now()
-  };
 });
 
-// ─── 2. SELECTION REPLY HANDLER ────────────────────────────────────
+// ─── 2. SELECTION HANDLER (Info => Download Pipeline) ───────────────
 cmd({
   filter: (text, { sender }) => {
     if (!cinesubzSessions[sender]) return false;
@@ -95,75 +79,101 @@ cmd({
 
   const index = parseInt(body.trim()) - 1;
   const selectedMovie = session.results[index];
-  delete cinesubzSessions[sender];
+  delete cinesubzSessions[sender]; // Clear Session
 
-  await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
-  reply("*⏳ Fetching Movie Download Links...*");
+  const moviePageUrl = selectedMovie.url || selectedMovie.link;
 
-  const movieUrl = selectedMovie.url || selectedMovie.link;
-  const dlData = await getCinesubzData("/movie/cinesubz-download", { url: movieUrl });
-
-  if (!dlData) {
-    await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    return reply("❌ *මෙම චිත්‍රපටය සඳහා Download Links ලබාගැනීමට නොහැකි විය.*");
+  if (!moviePageUrl) {
+    return reply("❌ Movie URL is missing from Search Response.");
   }
 
-  await handleDownloadAndSend(maliya, mek, from, selectedMovie.title || "Movie", dlData, reply);
-});
+  await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
-// ─── 3. DOWNLOAD & SEND FUNCTION ──────────────────────────────────
-async function handleDownloadAndSend(maliya, mek, from, title, apiResponse, reply) {
   try {
-    let linksArray = apiResponse?.result || apiResponse?.data || apiResponse?.downloads || (Array.isArray(apiResponse) ? apiResponse : []);
+    // -----------------------------------------------------------------
+    // Step 2: Call Cinesubz Info API
+    // -----------------------------------------------------------------
+    reply("*⏳ Fetching Movie Info...*");
+    const infoApiUrl = `${API_BASE_URL}/movie/cinesubz-info?url=${encodeURIComponent(moviePageUrl)}&apikey=${API_KEY}`;
+    const infoRes = await axios.get(infoApiUrl, { timeout: 15000 });
 
-    if (!linksArray || linksArray.length === 0) {
-      return reply("❌ No downloadable video links found in API response.");
+    const infoData = infoRes.data?.result || infoRes.data?.data || infoRes.data;
+
+    let movieTitle = infoData?.title || selectedMovie.title || "Cinesubz Movie";
+    let posterUrl = infoData?.image || infoData?.poster || selectedMovie.image;
+    let imdb = infoData?.imdb || infoData?.rating || "N/A";
+    let releaseDate = infoData?.date || infoData?.releaseDate || "N/A";
+
+    // Send Movie Info Caption + Poster
+    let captionText = `*🎬 ${movieTitle}*\n${"─".repeat(30)}\n`;
+    captionText += `⭐ *IMDb Rating:* ${imdb}\n`;
+    captionText += `📅 *Release Date:* ${releaseDate}\n\n`;
+    captionText += `_⏳ Fetching direct download links..._`;
+
+    if (posterUrl) {
+      await maliya.sendMessage(from, { image: { url: posterUrl }, caption: captionText }, { quoted: mek });
+    } else {
+      await reply(captionText);
     }
 
-    // Direct / Pixeldrain / 720p Link filter
-    let selected = linksArray.find(item => {
-      const str = JSON.stringify(item).toLowerCase();
-      return str.includes("pixeldrain") || str.includes("720p") || str.includes("direct");
-    }) || linksArray[0];
+    // -----------------------------------------------------------------
+    // Step 3: Call Cinesubz Download API
+    // -----------------------------------------------------------------
+    const dlApiUrl = `${API_BASE_URL}/movie/cinesubz-download?url=${encodeURIComponent(moviePageUrl)}&apikey=${API_KEY}`;
+    const dlRes = await axios.get(dlApiUrl, { timeout: 20000 });
 
-    let downloadUrl = selected.url || selected.link || selected.dl_url || selected.direct_link || (typeof selected === 'string' ? selected : null);
+    const dlData = dlRes.data?.result || dlRes.data?.data || dlRes.data?.downloads || (Array.isArray(dlRes.data) ? dlRes.data : null);
 
-    if (!downloadUrl) {
-      return reply("❌ Failed to parse valid direct download URL.");
+    if (!dlData || dlData.length === 0) {
+      await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
+      return reply("❌ *cinesubz-download API එකෙන් Download Links ලැබුණේ නැත (Server Empty Response).*");
     }
 
-    // Fix Pixeldrain viewer link to direct stream link
-    if (downloadUrl.includes("pixeldrain.com/u/")) {
-      downloadUrl = downloadUrl.replace("pixeldrain.com/u/", "pixeldrain.com/api/file/");
+    // Direct / Pixeldrain / Best Quality selection
+    let selectedDL = Array.isArray(dlData) 
+      ? (dlData.find(d => JSON.stringify(d).toLowerCase().includes("720p") || JSON.stringify(d).toLowerCase().includes("pixeldrain")) || dlData[0])
+      : dlData;
+
+    let finalDownloadUrl = selectedDL?.url || selectedDL?.link || selectedDL?.dl_url || selectedDL?.direct_link || (typeof selectedDL === "string" ? selectedDL : null);
+
+    if (!finalDownloadUrl) {
+      return reply("❌ Valid Direct Video URL extract කර ගැනීමට නොහැකි විය.");
     }
 
-    const quality = selected.quality || selected.title || "HD";
-    const size = selected.size || "Direct File";
+    // Convert Pixeldrain View URL to Direct Stream Link
+    if (finalDownloadUrl.includes("pixeldrain.com/u/")) {
+      finalDownloadUrl = finalDownloadUrl.replace("pixeldrain.com/u/", "pixeldrain.com/api/file/");
+    }
 
+    const quality = selectedDL?.quality || selectedDL?.title || "HD";
+    const size = selectedDL?.size || "Direct File";
+
+    // -----------------------------------------------------------------
+    // Step 4: Send Document File to WhatsApp
+    // -----------------------------------------------------------------
     await maliya.sendMessage(from, { react: { text: "📤", key: mek.key } });
-    reply(`*📥 Sending File (${quality})...*\n_කරුණාකර මොහොතක් රැඳී සිටින්න._`);
+    reply(`*📥 Uploading Movie Document (${quality})...*\n_කරුණාකර සුළු වෙලාවක් රැඳී සිටින්න._`);
 
-    // WhatsApp Document ලෙස යැවීම
     await maliya.sendMessage(from, {
-      document: { url: downloadUrl },
+      document: { url: finalDownloadUrl },
       mimetype: "video/mp4",
-      fileName: `${title.replace(/[^a-zA-Z0-9 ]/g, "_")}.mp4`,
-      caption: `*🎬 ${title}*\n⚙️ *Quality:* ${quality}\n📦 *Size:* ${size}\n\n_Powered by MALIYA-MD_`
+      fileName: `${movieTitle.replace(/[^a-zA-Z0-9 ]/g, "_")}.mp4`,
+      caption: `*🎬 ${movieTitle}*\n⚙️ *Quality:* ${quality}\n📦 *Size:* ${size}\n\n_Delivered by MALIYA-MD_`
     }, { quoted: mek });
 
     await maliya.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
   } catch (error) {
-    console.error("Sending Document Error:", error.message);
+    console.error("❌ Pipeline Error:", error.response?.data || error.message);
     await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    reply(`*❌ Download Failed:* ${error.message}`);
+    reply(`*❌ Process Error:* ${error.response?.data?.message || error.message}`);
   }
-}
+});
 
-// Session Expire Cleanup
+// Auto Cleanup Sessions
 setInterval(() => {
   const now = Date.now();
-  for (const key in cinesubzSessions) {
-    if (now - cinesubzSessions[key].timestamp > 300000) delete cinesubzSessions[key];
+  for (const s in cinesubzSessions) {
+    if (now - cinesubzSessions[s].timestamp > 300000) delete cinesubzSessions[s];
   }
 }, 60000);
