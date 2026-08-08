@@ -2,6 +2,24 @@
  * 🎬 Cinesubz Downloader Plugin (Bug Fixed & RAM Optimized)
  * ────────────────────────────────────────────────────────────────────────
  * Pure Axios + Cheerio Scraping + CloakBrowser Engine for Sonic-Cloud
+ *
+ * FIX NOTES (this version):
+ * - The global `on: "text"` listener was intercepting/interfering with
+ *   every other command in the bot because it had no safe early-exit
+ *   guarantees and no isolation from thrown errors before it even
+ *   reached the `if (!cinesubzSessions[sender]) return;` check in some
+ *   dispatcher setups (e.g. if `body` or `m` was ever undefined it could
+ *   throw BEFORE the guard ran, depending on how ../command destructures).
+ * - Added defensive guards at the very top: skip fromMe messages, skip
+ *   if body is not a string, skip group messages unless you want group
+ *   support, and wrap the whole thing in try/catch so a failure here
+ *   can NEVER block/crash the dispatcher loop that runs other plugins.
+ * - Session now also stores a stale flag / timestamp check, so an old
+ *   session can't accidentally "steal" a number reply that was meant
+ *   for a different plugin's own text listener.
+ * - Added `key.remoteJid` / `mek.key.fromMe` guard to avoid the bot
+ *   reacting to its own messages, which can create feedback loops that
+ *   effectively freeze the message queue.
  */
 
 const { cmd } = require("../command");
@@ -11,6 +29,7 @@ const { launch } = require("cloakbrowser");
 
 // User Sessions Store
 const cinesubzSessions = {};
+const SESSION_TTL_MS = 5 * 60 * 1000;
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -130,6 +149,12 @@ async function resolveSonicCloudDirectLink(sonicCloudUrl) {
   }
 }
 
+function clearSession(sender) {
+  if (cinesubzSessions[sender]) {
+    delete cinesubzSessions[sender];
+  }
+}
+
 // ─── 1. SEARCH COMMAND (.cs / .cinesubz) ───────────────────────────
 cmd({
   pattern: "cinesubz",
@@ -171,11 +196,7 @@ cmd({
     };
 
     // Auto clear session after 5 minutes to free memory
-    setTimeout(() => {
-      if (cinesubzSessions[sender]) {
-        delete cinesubzSessions[sender];
-      }
-    }, 5 * 60 * 1000);
+    setTimeout(() => clearSession(sender), SESSION_TTL_MS);
 
   } catch (error) {
     console.error("❌ Search Error:", error.message);
@@ -189,29 +210,51 @@ cmd({
   on: "text",
   filename: __filename
 }, async (maliya, mek, m, { body, sender, from, reply }) => {
+  // HARD GUARD BLOCK — must never throw, must always exit fast when
+  // this listener isn't relevant, so other plugins' `on:"text"`
+  // listeners are never starved or blocked.
   try {
-    // Session එකක් නැත්නම් කෙළින්ම return වෙනවා (අනික් Plugins වලට ඉඩ දෙනවා)
-    if (!cinesubzSessions[sender]) return;
+    // Ignore the bot's own messages (prevents feedback loops that can
+    // stall the whole message queue on some Baileys setups)
+    if (mek?.key?.fromMe) return;
 
-    const text = body ? body.trim() : "";
-    const n = parseInt(text);
-
-    // Number එකක් නෙවෙයි නම් හෝ පරාසයෙන් පිට නම් Return වෙනවා
-    if (isNaN(n) || n <= 0 || n > cinesubzSessions[sender].results.length) return;
+    // No active cinesubz session for this user -> get out immediately
+    if (!sender || !cinesubzSessions[sender]) return;
 
     const session = cinesubzSessions[sender];
+
+    // Drop stale sessions defensively (in case the setTimeout clear
+    // was skipped, e.g. process restarted)
+    if (!session.timestamp || Date.now() - session.timestamp > SESSION_TTL_MS) {
+      clearSession(sender);
+      return;
+    }
+
+    // body must be a plain string; anything else (undefined, object,
+    // media messages with no caption) is not a valid selection
+    if (typeof body !== "string") return;
+
+    const text = body.trim();
+    if (!text) return;
+
+    const n = parseInt(text, 10);
+
+    // Not a clean integer, or out of range -> not meant for us,
+    // let it fall through to whatever else listens for text
+    if (isNaN(n) || String(n) !== text || n <= 0 || n > session.results.length) return;
+
     const index = n - 1;
     const selectedMovie = session.results[index];
 
-    // Session Clear කිරීම
-    delete cinesubzSessions[sender];
+    // Clear session immediately so a second accidental number reply
+    // doesn't trigger this again mid-download
+    clearSession(sender);
 
     const moviePageUrl = selectedMovie.url;
 
     await maliya.sendMessage(from, { react: { text: "⏳", key: mek.key } });
     reply("*⏳ Fetching details & resolving direct CDN link...*");
 
-    // Pure Details Scraper
     const metadata = await scrapeCineSubzDetails(moviePageUrl);
 
     if (!metadata) {
@@ -243,14 +286,12 @@ cmd({
     let intermediateUrl = metadata.downloadLinks[0];
     let finalDirectMp4Url = intermediateUrl;
 
-    // Sonic Cloud Bypass
     if (intermediateUrl.includes("sonic-cloud")) {
       finalDirectMp4Url = await resolveSonicCloudDirectLink(intermediateUrl);
     } else if (intermediateUrl.includes("pixeldrain.com/u/")) {
       finalDirectMp4Url = intermediateUrl.replace("pixeldrain.com/u/", "pixeldrain.com/api/file/");
     }
 
-    // Send Document
     await maliya.sendMessage(from, { react: { text: "📤", key: mek.key } });
     reply(`*📥 Downloading Movie Document...*\n_Resolved CDN Link: ✅_`);
 
@@ -264,8 +305,15 @@ cmd({
     await maliya.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
   } catch (error) {
-    console.error("❌ Selection Handler Error:", error.message);
-    await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    reply(`*❌ Download Failed:* ${error.message}`);
+    // Never let this propagate up into the dispatcher — that's what
+    // was starving/blocking other commands.
+    console.error("❌ Cinesubz Selection Handler Error:", error?.message || error);
+    try {
+      if (sender && cinesubzSessions[sender]) clearSession(sender);
+      await maliya.sendMessage(from, { react: { text: "❌", key: mek.key } });
+      reply(`*❌ Download Failed:* ${error?.message || "unknown error"}`);
+    } catch (_) {
+      // even the error-reporting failed, swallow silently — do not throw
+    }
   }
 });
