@@ -48,13 +48,21 @@ function reactModeText(val) {
   return "ALL CHATS";
 }
 
-function getStatusCard() {
-  const s = readSettings();
+// ✅ NEW: label for work_scope
+function workScopeText(val) {
+  if (val === "private") return "PRIVATE CHAT ONLY";
+  if (val === "group") return "GROUP CHAT ONLY";
+  return "ALL CHATS (PRIVATE + GROUP)";
+}
+
+function getStatusCard(sessionId) {
+  const s = readSettings(sessionId);
 
   return `
 🎀 Ξ *BOT SETTINGS PANEL* Ξ
 
 🍀 | *WORK TYPE:* ${String(s.mode || "public").toUpperCase()}
+🍀 | *WORK SCOPE:* ${workScopeText(String(s.work_scope || "all"))}
 🍀 | *PRESENCE:* ${presenceText(String(s.always_presence || "off"))}
 🍀 | *AI CHAT:* ${onOff(!!s.auto_msg)}
 🍀 | *SEEN ALL MSG:* ${onOff(!!s.seen_all_msg)}
@@ -115,6 +123,11 @@ function mapKey(name = "") {
     return "auto_react_mode";
   }
 
+  // ✅ NEW: work scope key mapping
+  if (["workscope", "work_scope", "worktype", "work_type", "scope"].includes(k)) {
+    return "work_scope";
+  }
+
   return null;
 }
 
@@ -151,18 +164,18 @@ function isDuplicateAction(state, sig) {
   return false;
 }
 
-function applySettingAction(action, value) {
+function applySettingAction(sessionId, action, value) {
   if (action === "status") {
-    return getStatusCard();
+    return getStatusCard(sessionId);
   }
 
   if (action === "private") {
-    setSetting("mode", "private");
+    setSetting(sessionId, "mode", "private");
     return "✅ Bot mode set to PRIVATE";
   }
 
   if (action === "public") {
-    setSetting("mode", "public");
+    setSetting(sessionId, "mode", "public");
     return "✅ Bot mode set to PUBLIC";
   }
 
@@ -170,15 +183,24 @@ function applySettingAction(action, value) {
     if (!["private", "group", "all"].includes(value)) {
       return "❌ Invalid react mode. Use: private, group, or all";
     }
-    setSetting("auto_react_mode", value);
+    setSetting(sessionId, "auto_react_mode", value);
     return `✅ React Mode set to ${reactModeText(value)}`;
+  }
+
+  // ✅ NEW: work scope action
+  if (action === "workscope") {
+    if (!["private", "group", "all"].includes(value)) {
+      return "❌ Invalid work scope. Use: private, group, or all";
+    }
+    setSetting(sessionId, "work_scope", value);
+    return `✅ Work Scope set to ${workScopeText(value)}`;
   }
 
   if (action === "presence") {
     if (!["off", "typing", "recording"].includes(value)) {
       return "❌ Invalid presence mode.";
     }
-    setSetting("always_presence", value);
+    setSetting(sessionId, "always_presence", value);
     return `✅ Always presence set to ${presenceText(value)}`;
   }
 
@@ -187,13 +209,13 @@ function applySettingAction(action, value) {
     if (!key) return "❌ Invalid setting name.";
 
     if (key === "mode") {
-      const now = readSettings();
+      const now = readSettings(sessionId);
       const next = now.mode === "private" ? "public" : "private";
-      setSetting("mode", next);
+      setSetting(sessionId, "mode", next);
       return `✅ Bot mode changed to ${next.toUpperCase()}`;
     }
 
-    const updated = toggleSetting(key);
+    const updated = toggleSetting(sessionId, key);
 
     const responses = {
       auto_status_seen: `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`,
@@ -217,7 +239,7 @@ function applySettingAction(action, value) {
     }
 
     const boolVal = action === "on";
-    const updated = setSetting(key, boolVal);
+    const updated = setSetting(sessionId, key, boolVal);
 
     const responses = {
       auto_status_seen: `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`,
@@ -233,7 +255,7 @@ function applySettingAction(action, value) {
     return responses[key] || `✅ Set ${key} to ${action.toUpperCase()}`;
   }
 
-  return getStatusCard();
+  return getStatusCard(sessionId);
 }
 
 function resolveSettingsActionFromText(text = "") {
@@ -270,6 +292,19 @@ function resolveSettingsActionFromText(text = "") {
 
   if (t === ".setting presence off" || t === "presence off") {
     return { action: "presence", value: "off" };
+  }
+
+  // ✅ NEW: WORK SCOPE commands
+  if (t === ".setting workscope private" || t === "work scope private" || t === "private chat only") {
+    return { action: "workscope", value: "private" };
+  }
+
+  if (t === ".setting workscope group" || t === "work scope group" || t === "group chat only") {
+    return { action: "workscope", value: "group" };
+  }
+
+  if (t === ".setting workscope all" || t === "work scope all" || t === "all chats") {
+    return { action: "workscope", value: "all" };
   }
 
   // AUTO REACT MSG
@@ -385,14 +420,15 @@ function resolveSettingsActionFromText(text = "") {
   return null;
 }
 
-async function sendSettingsHome(conn, from, mek, reply, sender) {
-  const text = getStatusCard();
+async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
+  const text = getStatusCard(sessionId);
 
   const key = makePendingKey(sender, from);
   pendingSettingsMenu[key] = {
     createdAt: Date.now(),
     lastSig: "",
     lastAt: 0,
+    sessionId,
   };
 
   if (!sendInteractiveMessage) {
@@ -402,7 +438,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender) {
         image: { url: SETTINGS_IMAGE },
         caption:
           text +
-          "\n\nUse:\n.setting status\n.setting public\n.setting private\n.setting toggle mode",
+          "\n\nUse:\n.setting status\n.setting public\n.setting private\n.setting toggle mode\n.setting workscope private\n.setting workscope group\n.setting workscope all",
       },
       { quoted: mek }
     );
@@ -448,21 +484,23 @@ async function sendSettingsHome(conn, from, mek, reply, sender) {
   }
 }
 
-async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
+async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) {
   const key = makePendingKey(sender, from);
   pendingSettingsMenu[key] = pendingSettingsMenu[key] || {
     createdAt: Date.now(),
     lastSig: "",
     lastAt: 0,
+    sessionId,
   };
   pendingSettingsMenu[key].createdAt = Date.now();
+  pendingSettingsMenu[key].sessionId = sessionId;
 
   if (!sendInteractiveMessage) {
     return conn.sendMessage(
       from,
       {
         image: { url: SETTINGS_IMAGE },
-        caption: getStatusCard(),
+        caption: getStatusCard(sessionId),
       },
       { quoted: mek }
     );
@@ -499,6 +537,27 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
                       title: "Toggle Mode",
                       description: "Switch public/private",
                       id: ".setting toggle mode",
+                    },
+                  ],
+                },
+                {
+                  // ✅ NEW SECTION: WORK SCOPE
+                  title: "💬 WORK SCOPE (WHERE BOT WORKS)",
+                  rows: [
+                    {
+                      title: "🔒 Private Chat Only",
+                      description: "Bot works in private chats only, ignores groups",
+                      id: ".setting workscope private",
+                    },
+                    {
+                      title: "👥 Group Chat Only",
+                      description: "Bot works in groups only, ignores private chats",
+                      id: ".setting workscope group",
+                    },
+                    {
+                      title: "🌍 All Chats",
+                      description: "Bot works in both private and group chats",
+                      id: ".setting workscope all",
                     },
                   ],
                 },
@@ -660,7 +719,7 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender) {
       from,
       {
         image: { url: SETTINGS_IMAGE },
-        caption: getStatusCard(),
+        caption: getStatusCard(sessionId),
       },
       { quoted: mek }
     );
@@ -675,7 +734,7 @@ cmd(
     category: "owner",
     filename: __filename,
   },
-  async (conn, mek, m, { from, sender, args, reply, isOwner }) => {
+  async (conn, mek, m, { from, sender, args, reply, isOwner, sessionId }) => {
     if (!(isOwner || isRealOwner(sender))) {
       return reply("❌ This command is owner only.");
     }
@@ -687,24 +746,24 @@ cmd(
 
     try {
       if (action === "menu") {
-        return sendSettingsHome(conn, from, mek, reply, sender);
+        return sendSettingsHome(conn, from, mek, reply, sender, sessionId);
       }
 
       if (action === "menuopen") {
-        return sendSettingsRolesMenu(conn, from, mek, reply, sender);
+        return sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId);
       }
 
       if (action === "status") {
-        return reply(getStatusCard());
+        return reply(getStatusCard(sessionId));
       }
 
       if (action === "private") {
-        setSetting("mode", "private");
+        setSetting(sessionId, "mode", "private");
         return reply("✅ Bot mode set to PRIVATE");
       }
 
       if (action === "public") {
-        setSetting("mode", "public");
+        setSetting(sessionId, "mode", "public");
         return reply("✅ Bot mode set to PUBLIC");
       }
 
@@ -714,8 +773,19 @@ cmd(
             "❌ Use:\n.setting reactmode private\n.setting reactmode group\n.setting reactmode all"
           );
         }
-        setSetting("auto_react_mode", value);
+        setSetting(sessionId, "auto_react_mode", value);
         return reply(`✅ React Mode set to ${reactModeText(value)}`);
+      }
+
+      // ✅ NEW: workscope command handler
+      if (action === "workscope") {
+        if (!["private", "group", "all"].includes(value)) {
+          return reply(
+            "❌ Use:\n.setting workscope private\n.setting workscope group\n.setting workscope all"
+          );
+        }
+        setSetting(sessionId, "work_scope", value);
+        return reply(`✅ Work Scope set to ${workScopeText(value)}`);
       }
 
       if (action === "presence") {
@@ -724,7 +794,7 @@ cmd(
             "❌ Use:\n.setting presence off\n.setting presence typing\n.setting presence recording"
           );
         }
-        setSetting("always_presence", value);
+        setSetting(sessionId, "always_presence", value);
         return reply(`✅ Always presence set to ${presenceText(value)}`);
       }
 
@@ -733,13 +803,13 @@ cmd(
         if (!key) return reply("❌ Invalid setting name.");
 
         if (key === "mode") {
-          const now = readSettings();
+          const now = readSettings(sessionId);
           const next = now.mode === "private" ? "public" : "private";
-          setSetting("mode", next);
+          setSetting(sessionId, "mode", next);
           return reply(`✅ Bot mode changed to ${next.toUpperCase()}`);
         }
 
-        const updated = toggleSetting(key);
+        const updated = toggleSetting(sessionId, key);
 
         const responses = {
           auto_status_seen: `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`,
@@ -763,7 +833,7 @@ cmd(
         }
 
         const boolVal = action === "on";
-        const updated = setSetting(key, boolVal);
+        const updated = setSetting(sessionId, key, boolVal);
 
         const responses = {
           auto_status_seen: `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`,
@@ -779,7 +849,7 @@ cmd(
         return reply(responses[key] || `✅ Set ${key} to ${action.toUpperCase()}`);
       }
 
-      return reply(getStatusCard());
+      return reply(getStatusCard(sessionId));
     } catch (e) {
       console.log("SETTING COMMAND ERROR:", e);
       return reply("❌ Error while changing settings.");
@@ -796,12 +866,14 @@ if (!global.__maliya_settings_reply_handler_added) {
       return !!pendingSettingsMenu[key];
     },
 
-    function: async (conn, mek, m, { from, body, sender, reply, isOwner }) => {
+    function: async (conn, mek, m, { from, body, sender, reply, isOwner, sessionId }) => {
       if (!(isOwner || isRealOwner(sender))) return;
 
       const key = makePendingKey(sender, from);
       const state = pendingSettingsMenu[key];
       if (!state) return;
+
+      const sid = sessionId || state.sessionId;
 
       const text = getIncomingText(body, mek, m);
       const resolved = resolveSettingsActionFromText(text);
@@ -813,10 +885,10 @@ if (!global.__maliya_settings_reply_handler_added) {
       try {
         if (resolved.action === "menuopen") {
           state.createdAt = Date.now();
-          return sendSettingsRolesMenu(conn, from, mek, reply, sender);
+          return sendSettingsRolesMenu(conn, from, mek, reply, sender, sid);
         }
 
-        const result = applySettingAction(resolved.action, resolved.value);
+        const result = applySettingAction(sid, resolved.action, resolved.value);
         state.createdAt = Date.now();
         return reply(result);
       } catch (e) {
