@@ -9,7 +9,6 @@
   "scripts": {
     "start": "node index.js"
   },
-  
   "dependencies": {
     "@whiskeysockets/baileys": "latest",
     "api-dylux": "latest",
@@ -41,6 +40,7 @@
     "sadaslk-dlcore": "latest",
     "abir-photo360-apis": "latest",
     "puppeteer": "latest",
+    "puppeteer-core": "latest",
     "google-tts-api": "latest",
     "mathjs": "latest",
     "canvas": "latest",
@@ -63,10 +63,8 @@
     "lk21dl-core": "latest",
     "@gradio/client": "latest",
     "sharp": "latest",
-    "mime-types": "latest",
     "archiver": "latest",
     "split-file": "latest",
-    "@gradio/client": "latest",
     "puppeteer-extra-plugin-stealth": "latest",
     "puppeteer-extra": "latest",
     "puppeteer-extra-plugin-adblocker": "latest",
@@ -78,13 +76,9 @@
     "xhamster-scraper": "latest",
     "my-cloudflare-scraper": "latest",
     "@rindev/lk21dl-core": "latest",
-    "lk21dl-core": "latest",
     "webtorrent": "latest",
     "subz.lk": "latest",
     "cloakbrowser": "latest",
     "playwright-core": "latest"
-    
-    
-    
   }
 }
