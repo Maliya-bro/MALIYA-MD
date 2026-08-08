@@ -48,7 +48,7 @@ function reactModeText(val) {
   return "ALL CHATS";
 }
 
-// ✅ NEW: label for work_scope
+// ✅ label for work_scope
 function workScopeText(val) {
   if (val === "private") return "PRIVATE CHAT ONLY";
   if (val === "group") return "GROUP CHAT ONLY";
@@ -123,7 +123,7 @@ function mapKey(name = "") {
     return "auto_react_mode";
   }
 
-  // ✅ NEW: work scope key mapping
+  // ✅ work scope key mapping
   if (["workscope", "work_scope", "worktype", "work_type", "scope"].includes(k)) {
     return "work_scope";
   }
@@ -131,8 +131,23 @@ function mapKey(name = "") {
   return null;
 }
 
+// ✅ NEW: safe JSON parse helper (mirrors the one in index.js)
+function safeJsonParse(str) {
+  try {
+    return JSON.parse(str);
+  } catch {
+    return null;
+  }
+}
+
+// ✅ FIXED: now also reads interactiveResponseMessage.nativeFlowResponseMessage.paramsJson,
+// which is where single_select / list row taps land depending on the button lib /
+// WhatsApp client version. Previously this field was NOT checked here (even though
+// index.js's getBodyFromMessage() already checked it), so tapping a "Work Scope"
+// row in the interactive menu could resolve to an empty/wrong string, resolveSettingsActionFromText()
+// returned null, and the reply handler silently did nothing — settings never got applied.
 function getIncomingText(body, mek, m) {
-  return String(
+  const direct = String(
     m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
       m?.message?.buttonsResponseMessage?.selectedButtonId ||
       m?.message?.templateButtonReplyMessage?.selectedId ||
@@ -147,9 +162,35 @@ function getIncomingText(body, mek, m) {
       mek?.message?.extendedTextMessage?.text ||
       body ||
       ""
-  )
-    .trim()
-    .toLowerCase();
+  ).trim();
+
+  if (direct) return direct.toLowerCase();
+
+  // ✅ NEW: handle nativeFlowResponseMessage.paramsJson (single_select / list rows)
+  const paramsJson =
+    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+
+  if (paramsJson) {
+    const parsed = safeJsonParse(paramsJson);
+    if (parsed) {
+      return String(
+        parsed.id ||
+          parsed.selectedId ||
+          parsed.selectedRowId ||
+          parsed.title ||
+          parsed.display_text ||
+          parsed.text ||
+          parsed.name ||
+          paramsJson
+      )
+        .trim()
+        .toLowerCase();
+    }
+    return String(paramsJson).trim().toLowerCase();
+  }
+
+  return "";
 }
 
 function isDuplicateAction(state, sig) {
@@ -187,7 +228,7 @@ function applySettingAction(sessionId, action, value) {
     return `✅ React Mode set to ${reactModeText(value)}`;
   }
 
-  // ✅ NEW: work scope action
+  // ✅ work scope action
   if (action === "workscope") {
     if (!["private", "group", "all"].includes(value)) {
       return "❌ Invalid work scope. Use: private, group, or all";
@@ -294,7 +335,7 @@ function resolveSettingsActionFromText(text = "") {
     return { action: "presence", value: "off" };
   }
 
-  // ✅ NEW: WORK SCOPE commands
+  // ✅ WORK SCOPE commands
   if (t === ".setting workscope private" || t === "work scope private" || t === "private chat only") {
     return { action: "workscope", value: "private" };
   }
@@ -541,7 +582,7 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
                   ],
                 },
                 {
-                  // ✅ NEW SECTION: WORK SCOPE
+                  // ✅ WORK SCOPE
                   title: "💬 WORK SCOPE (WHERE BOT WORKS)",
                   rows: [
                     {
@@ -777,7 +818,7 @@ cmd(
         return reply(`✅ React Mode set to ${reactModeText(value)}`);
       }
 
-      // ✅ NEW: workscope command handler
+      // ✅ workscope command handler
       if (action === "workscope") {
         if (!["private", "group", "all"].includes(value)) {
           return reply(
