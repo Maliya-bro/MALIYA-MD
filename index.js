@@ -11,6 +11,16 @@
 //  FIX 3: restore-from-Mongo now skipped if local creds.json already
 //         exists on disk (avoids clobbering a live, already-valid
 //         session with older Mongo data mid-run).
+//  FIX 4 (NEW): readSettings/setSetting/toggleSetting are now
+//         PER-SESSION (sessionId passed everywhere). Previously all
+//         sessions shared ONE global bot_settings.json, so User A
+//         toggling anti-delete OFF silently turned it OFF for every
+//         other user's bot too. Each session now gets its own
+//         data/settings/<sessionId>.json file.
+//  FIX 5 (NEW): WORK SCOPE setting added — "private" (private chats
+//         only), "group" (group chats only), or "all" (both). This
+//         is enforced right after isGroup/isOwner is computed, before
+//         any command / auto-msg / auto-react logic runs.
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -67,7 +77,7 @@ const { MongoClient } = require("mongodb");
 const cors              = require("cors");
 const os               = require("os");
 const config            = require("./config");
-const { readSettings }  = require("./lib/botSettings");
+const { readSettings, isWorkAllowed } = require("./lib/botSettings");
 const { sms }           = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 
@@ -425,6 +435,8 @@ async function startSessionBot(sessionId) {
           }).format(now);
 
           const BOT_VERSION = "v4.0.0";
+          // ✅ per-session settings now used for the connect banner
+          const sessSettings = readSettings(sessionId);
           const up = `
 🌈━━━━━━━━━━━━━🌈
 🔥🤖 *MALIYA-MD* 🤖🔥
@@ -432,7 +444,8 @@ async function startSessionBot(sessionId) {
 
 ✅✨ Connection : CONNECTED & ONLINE
 ⚡🧬 System     : STABLE | FAST | SECURE
-🛡️🔐 Mode      : ${String(readSettings().mode || "public").toUpperCase()}
+🛡️🔐 Mode      : ${String(sessSettings.mode || "public").toUpperCase()}
+💬🌍 Work Scope: ${String(sessSettings.work_scope || "all").toUpperCase()}
 🎯🧩 Prefix    : ${prefix}
 
 🧑‍💻👑 Owner    : ${BOT_OWNER_NAME}
@@ -557,10 +570,11 @@ function startSessionWatcher() {
 
 /* ==================== SESSION MESSAGE HANDLERS ==================== */
 function attachSessionHandlers(sock, sessionCtx) {
+  const sessionId = sessionCtx.sessionId; // ✅ used for every readSettings() call below
 
   sock.ev.on("call", async (calls) => {
     try {
-      const settings = readSettings();
+      const settings = readSettings(sessionId); // ✅ per-session
       if (!settings.auto_reject_calls) return;
 
       for (const call of calls) {
@@ -612,7 +626,9 @@ function attachSessionHandlers(sock, sessionCtx) {
           const participant = participantRaw;
           if (mek.key.fromMe) continue messageLoop;
 
-          if (readSettings().auto_status_seen === true) {
+          const statusSettings = readSettings(sessionId); // ✅ per-session
+
+          if (statusSettings.auto_status_seen === true) {
             try {
               await sock.readMessages([mek.key]);
               console.log(`[✓] Status seen: ${id} (${participant})`);
@@ -632,7 +648,7 @@ function attachSessionHandlers(sock, sessionCtx) {
           processedStatuses.set(uniqueStatusId, now);
           setTimeout(() => processedStatuses.delete(uniqueStatusId), 300000);
 
-          if (readSettings().auto_status_react === true) {
+          if (statusSettings.auto_status_react === true) {
             try {
               const emojis = [
    "😂", "🤣", "😍", "🥰", "😎", "🤔", "😭", "😱", "🔥", "💀",
@@ -665,7 +681,7 @@ function attachSessionHandlers(sock, sessionCtx) {
           }
 
           if (
-            readSettings().auto_download_status === true &&
+            statusSettings.auto_download_status === true &&
             (mek.message?.imageMessage || mek.message?.videoMessage)
           ) {
             try {
@@ -719,8 +735,20 @@ function attachSessionHandlers(sock, sessionCtx) {
         const reply = (text) =>
           sock.sendMessage(from, { text }, { quoted: mek });
 
+        // ✅ NEW: WORK SCOPE ENFORCEMENT
+        // Runs right after isGroup/isOwner are known, before ANY
+        // command / auto-msg / auto-react logic. Owner messages are
+        // always allowed through so the owner can still run
+        // .setting workscope ... to change it back regardless of
+        // current scope (otherwise a wrong scope could lock owner out).
+        if (!isOwner && !isWorkAllowed(sessionId, isGroup)) {
+          continue messageLoop;
+        }
+
+        const botSettings = readSettings(sessionId); // ✅ per-session
+
         try {
-          const presenceMode = readSettings().always_presence;
+          const presenceMode = botSettings.always_presence;
           if (presenceMode === "typing")         await sock.sendPresenceUpdate("composing",  from);
           else if (presenceMode === "recording") await sock.sendPresenceUpdate("recording",  from);
         } catch (_) {}
@@ -730,13 +758,13 @@ function attachSessionHandlers(sock, sessionCtx) {
             await autoReactPlugin.onMessage(sock, mek, m, {
               from, body, args, q, sender, senderNumber,
               isGroup, isOwner, reply, isCmd, commandName, prefix,
+              sessionId,
             });
           }
         } catch (e) {
           console.log("AutoReact hook error:", e?.message || e);
         }
 
-        const botSettings = readSettings();
         if (botSettings.mode === "private" && !isOwner) {
           if (isCmd) continue messageLoop;
         }
@@ -757,6 +785,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               isGroup,
               sessionOwnerPhone:  sessionCtx.ownerNumber[0] || "",
               sessionOwnerName:   BOT_OWNER_NAME,
+              sessionId,
             });
             if (handled) continue messageLoop;
           } catch (e) {
@@ -769,6 +798,7 @@ function attachSessionHandlers(sock, sessionCtx) {
             const res = await cmdFixPlugin.onMessage(sock, mek, m, {
               from, body, args, q, sender, senderNumber,
               isGroup, isOwner, reply, prefix, isCmd, commandName, commands,
+              sessionId,
             });
             if (res?.handled && !res?.newBody) continue messageLoop;
             if (res?.handled && res?.newBody) {
@@ -788,6 +818,7 @@ function attachSessionHandlers(sock, sessionCtx) {
             await pdfScannerPlugin.onMessage(sock, mek, m, {
               from, body, args, q, sender, senderNumber,
               isGroup, isOwner, reply, isCmd, commandName, prefix,
+              sessionId,
             });
           }
         } catch (e) {
@@ -803,6 +834,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               if (h.react) sock.sendMessage(from, { react: { text: h.react, key: mek.key } });
               await h.function(sock, mek, m, {
                 from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
+                sessionId,
               });
               break;
             }
@@ -822,6 +854,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
               sessionOwnerPhone: sessionCtx.ownerNumber[0] || "",
               sessionOwnerName:  BOT_OWNER_NAME,
+              sessionId, // ✅ passed to EVERY command (setting.js relies on this)
             });
           }
         }
@@ -860,6 +893,7 @@ function attachSessionHandlers(sock, sessionCtx) {
                 isGroup:           key.remoteJid.endsWith("@g.us"),
                 sessionOwnerPhone: sessionCtx.ownerNumber[0] || "",
                 sessionOwnerName:  BOT_OWNER_NAME,
+                sessionId,
               });
             } catch (_) {}
           }
