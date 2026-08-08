@@ -81,7 +81,8 @@
     "lk21dl-core": "latest",
     "webtorrent": "latest",
     "subz.lk": "latest",
-    "cloakbrowser": "latest"
+    "cloakbrowser": "latest",
+    "playwright-core": "latest"
     
     
     
