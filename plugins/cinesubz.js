@@ -25,14 +25,14 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 const cheerio = require("cheerio");
-// NOTE: "cloakbrowser" is not a real published npm package — requiring it
-// threw at module load time, which silently prevented this ENTIRE file
-// (including the .cs command) from being registered by the plugin loader.
-// That's why .cs showed "command not recognized" while every other plugin
-// worked fine. Swapped to real puppeteer, which is what the rest of the
-// code (launch/newPage/goto/waitForSelector/click) already assumes.
-const puppeteer = require("puppeteer");
-const launch = (opts) => puppeteer.launch(opts);
+// FIX: cloakbrowser's default export (`require("cloakbrowser")`) returns a
+// Playwright-flavored launch(). This plugin's code uses Puppeteer-style API
+// (page.waitForSelector/click, browser.newPage(), page.on("response")), so
+// it needs the dedicated Puppeteer sub-path instead — otherwise launch()
+// returns a Playwright Browser whose page object doesn't have the same
+// method signatures, causing silent runtime errors deep in step 3.
+// Requires: npm install cloakbrowser puppeteer-core  (peer dep, Node >= 20)
+const { launch } = require("cloakbrowser/puppeteer");
 
 // User Sessions Store
 const cinesubzSessions = {};
@@ -43,21 +43,46 @@ const HEADERS = {
 };
 
 // 1. Pure Axios + Cheerio Search Function
+// FIX: real domain is cinesubz.net (cinesubz.co either redirects or serves a
+// broken/cached shell — that's why search was returning 0 results before).
+// Also widened selectors since WordPress movie-listing themes (Zetaflix,
+// which this site uses per the theme path in its assets) commonly render
+// entries as <article> or <div class="items"><div class="item">... with
+// the title link living in an <h3>/<h2> inside — not just ".title a".
 async function searchCineSubz(query) {
   try {
-    const searchUrl = `https://cinesubz.co/?s=${encodeURIComponent(query)}`;
+    const searchUrl = `https://cinesubz.net/?s=${encodeURIComponent(query)}`;
     const { data } = await axios.get(searchUrl, { headers: HEADERS, timeout: 15000 });
     const $ = cheerio.load(data);
     const results = [];
+    const seen = new Set();
 
-    $(".result-item, article").each((i, el) => {
-      const title = $(el).find(".title a, .entry-title a").text().trim();
-      const link = $(el).find(".title a, .entry-title a").attr("href");
-      const image = $(el).find("img").attr("src");
+    // Try a broad set of likely containers used by Zetaflix-style WP themes
+    const candidateSelectors = [
+      ".result-item",
+      "article",
+      ".items .item",
+      ".movies-list .item",
+      "div.item",
+      ".search-page .item"
+    ];
 
-      if (title && link) {
-        results.push({ title, url: link, image });
-      }
+    candidateSelectors.forEach((sel) => {
+      $(sel).each((i, el) => {
+        const $el = $(el);
+        // title link: try common patterns, fall back to first <a> with text
+        let titleEl = $el.find(".title a, .entry-title a, h3 a, h2 a").first();
+        if (!titleEl.length) titleEl = $el.find("a").filter((_, a) => $(a).text().trim().length > 0).first();
+
+        const title = titleEl.text().trim();
+        const link = titleEl.attr("href");
+        const image = $el.find("img").attr("data-src") || $el.find("img").attr("src");
+
+        if (title && link && link.includes("cinesubz.net") && !seen.has(link)) {
+          seen.add(link);
+          results.push({ title, url: link, image });
+        }
+      });
     });
 
     return results;
@@ -79,13 +104,27 @@ async function scrapeCineSubzDetails(movieUrl) {
     const duration = $(".runtime, .duration").text().trim() || "N/A";
 
     const downloadLinks = [];
+    const seenLinks = new Set();
 
+    // FIX: the site no longer links directly to sonic-cloud.online or
+    // pixeldrain.com from the movie page — confirmed live, current pattern
+    // is cinesubz.net/api-<hash>/<id>/ under a "Direct & Telegram Download
+    // Links" heading. Match on that pattern first; keep the old patterns
+    // too in case some releases still use them, so this doesn't regress.
     $("a").each((i, el) => {
       const href = $(el).attr("href");
-      if (href) {
-        if (href.includes("sonic-cloud.online") || href.includes("pixeldrain.com")) {
-          downloadLinks.push(href);
-        }
+      const text = $(el).text().trim();
+      if (!href || seenLinks.has(href)) return;
+
+      const looksLikeDownload =
+        href.includes("sonic-cloud.online") ||
+        href.includes("pixeldrain.com") ||
+        /cinesubz\.(net|lk|co)\/api-/.test(href) ||
+        /download/i.test(text);
+
+      if (looksLikeDownload) {
+        seenLinks.add(href);
+        downloadLinks.push(href);
       }
     });
 
