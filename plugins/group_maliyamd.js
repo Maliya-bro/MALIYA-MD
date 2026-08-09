@@ -1,7 +1,7 @@
 
 const { cmd } = require("../command");
 const { getGroupAdmins } = require("../lib/functions");
-const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+const { downloadMediaMessage } = require('@itsliaaa/baileys');
 
 
 function getTargetUser(mek, quoted, args) {
