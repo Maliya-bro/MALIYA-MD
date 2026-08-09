@@ -1,7 +1,7 @@
 const { readSettings } = require("../lib/botSettings");
 const {
   downloadContentFromMessage
-} = require("@whiskeysockets/baileys");
+} = require("@itsliaaa/baileys");
 
 const store = new Map();
 
