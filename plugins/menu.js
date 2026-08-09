@@ -1,6 +1,5 @@
 const { cmd, commands } = require("../command");
 const config = require("../config");
-const { generateWAMessageFromContent, proto } = require("@whiskeysockets/baileys");
 
 const pendingMenu = Object.create(null);
 
@@ -30,41 +29,6 @@ const headerImage =
 let cachedMenu = null;
 let cacheTime = 0;
 const MENU_CACHE_MS = 60 * 1000;
-
-/* ================= NATIVE INTERACTIVE BUTTON SENDER ================= */
-// Gifted-btns වෙනුවට සියලුම Device වලට වැඩ කරන Direct Baileys Native Message Sender එක
-async function sendNativeInteractiveMessage(sock, from, options, mek) {
-  const { title, body, footer, imageUrl, buttons } = options;
-
-  const interactiveMessage = {
-    body: proto.Message.InteractiveMessage.Body.create({ text: body || "" }),
-    footer: proto.Message.InteractiveMessage.Footer.create({ text: footer || "" }),
-    header: proto.Message.InteractiveMessage.Header.create({
-      title: title || "",
-      hasVideoMessage: false,
-      ...(imageUrl ? {
-        imageMessage: (await sock.sendMessage(from, { image: { url: imageUrl } }, { upload: sock.waUploadToServer })).message.imageMessage
-      } : {})
-    }),
-    nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
-      buttons: buttons || []
-    })
-  };
-
-  const msg = generateWAMessageFromContent(
-    from,
-    {
-      viewOnceMessage: {
-        message: {
-          interactiveMessage
-        }
-      }
-    },
-    { userJid: sock.user.id, quoted: mek }
-  );
-
-  return await sock.relayMessage(from, msg.message, { messageId: msg.key.id });
-}
 
 /* ================= HELPERS ================= */
 function keyFor(sender, from) {
@@ -343,8 +307,9 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
+/* ================= DARK YASIYA BAILEYS MENU SENDER ================= */
 async function sendMainMenu(sock, from, mek, state, userName) {
-  const buttons = [
+  const interactiveButtons = [
     {
       name: "single_select",
       buttonParamsJson: JSON.stringify({
@@ -368,21 +333,32 @@ async function sendMainMenu(sock, from, mek, state, userName) {
       name: "cta_copy",
       buttonParamsJson: JSON.stringify({
         display_text: "📋 Copy Owner Number",
+        id: "owner_copy",
         copy_code: OWNER_NUMBER,
       }),
     },
   ];
 
-  return sendNativeInteractiveMessage(
-    sock,
+  // Dark-Yasiya Baileys native interactive image message call
+  return await sock.sendMessage(
     from,
     {
-      body: menuHeader(userName),
+      image: { url: headerImage },
+      title: "MALIYA-MD COMMANDS",
+      caption: menuHeader(userName),
       footer: `${BOT_NAME} | Interactive Menu`,
-      imageUrl: headerImage,
-      buttons,
+      interactiveButtons,
+      contextInfo: {
+        forwardingScore: 999,
+        isForwarded: true,
+        forwardedNewsletterMessageInfo: {
+          newsletterJid: CHANNEL_JID,
+          newsletterName: CHANNEL_NAME,
+          serverMessageId: -1,
+        },
+      },
     },
-    mek
+    { quoted: mek }
   );
 }
 
