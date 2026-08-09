@@ -1,23 +1,15 @@
 const { cmd, commands } = require("../command");
 const config = require("../config");
 
-/* ============================================================
-   MALIYA-MD — Native Interactive Menu
-   Engine: @itsliaaa/baileys
-   gifted-btns: REMOVED
-   ============================================================ */
-
 const pendingMenu = Object.create(null);
 
-/* ============ CONFIG ============ */
+/* ============================================================
+   CONFIG
+   ============================================================ */
 
 const BOT_NAME = "MALIYA-MD";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
-
-// Channel Configuration
-const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️ＭＤ 🍁";
 
 const OWNER_NUMBER_RAW = String(config.BOT_OWNER || "").trim();
 
@@ -28,19 +20,27 @@ const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
     : "Not Set";
 
 const OWNER_NAME =
-  String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
+  String(
+    config.OWNER_NAME ||
+    config.BOT_NAME ||
+    "Owner"
+  ).trim() || "Owner";
 
 const headerImage =
   "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
 
-/* ============ CACHE ============ */
+/* ============================================================
+   CACHE
+   ============================================================ */
 
 let cachedMenu = null;
 let cacheTime = 0;
 
 const MENU_CACHE_MS = 60 * 1000;
 
-/* ================= HELPERS ================= */
+/* ============================================================
+   HELPERS
+   ============================================================ */
 
 function keyFor(sender, from) {
   return `${from || ""}::${(sender || "").split(":")[0]}`;
@@ -148,10 +148,17 @@ function getCategoryEmoji(cat) {
   return "✨";
 }
 
+/* ============================================================
+   COMMAND MAP
+   ============================================================ */
+
 function buildCommandMapCached() {
   const now = Date.now();
 
-  if (cachedMenu && now - cacheTime < MENU_CACHE_MS) {
+  if (
+    cachedMenu &&
+    now - cacheTime < MENU_CACHE_MS
+  ) {
     return cachedMenu;
   }
 
@@ -160,7 +167,9 @@ function buildCommandMapCached() {
   for (const c of commands) {
     if (c.dontAddCommandList) continue;
 
-    const cat = (c.category || "MISC").toUpperCase();
+    const cat = (
+      c.category || "MISC"
+    ).toUpperCase();
 
     if (!map[cat]) {
       map[cat] = [];
@@ -169,13 +178,16 @@ function buildCommandMapCached() {
     map[cat].push(c);
   }
 
-  const categories = Object.keys(map).sort((a, b) =>
-    a.localeCompare(b)
+  const categories = Object.keys(map).sort(
+    (a, b) => a.localeCompare(b)
   );
 
   for (const cat of categories) {
-    map[cat].sort((a, b) =>
-      (a.pattern || "").localeCompare(b.pattern || "")
+    map[cat].sort(
+      (a, b) =>
+        (a.pattern || "").localeCompare(
+          b.pattern || ""
+        )
     );
   }
 
@@ -189,8 +201,15 @@ function buildCommandMapCached() {
   return cachedMenu;
 }
 
+/* ============================================================
+   MENU HEADER
+   ============================================================ */
+
 function menuHeader(userName = "User") {
-  const { time, date } = nowLK();
+  const {
+    time,
+    date,
+  } = nowLK();
 
   return `👋 HI ${userName}
 
@@ -206,15 +225,30 @@ function menuHeader(userName = "User") {
 🎀 Select a Command List Below`;
 }
 
-function commandListCaption(cat, list, userName = "User") {
+/* ============================================================
+   COMMAND LIST CAPTION
+   ============================================================ */
+
+function commandListCaption(
+  cat,
+  list,
+  userName = "User"
+) {
   const emo = getCategoryEmoji(cat);
 
   let txt = `👋 HI ${userName}\n\n`;
 
-  txt += `┏━〔 ${emo} ${cat} COMMANDS 〕━⬣\n`;
-  txt += `┃ 📦 Total : ${list.length}\n`;
-  txt += `┃ ✨ Prefix: ${PREFIX}\n`;
-  txt += `┗━━━━━━━━━━━━⬣\n\n`;
+  txt +=
+    `┏━〔 ${emo} ${cat} COMMANDS 〕━⬣\n`;
+
+  txt +=
+    `┃ 📦 Total : ${list.length}\n`;
+
+  txt +=
+    `┃ ✨ Prefix: ${PREFIX}\n`;
+
+  txt +=
+    `┗━━━━━━━━━━━━⬣\n\n`;
 
   list.forEach((c) => {
     const primary = c.pattern
@@ -223,19 +257,26 @@ function commandListCaption(cat, list, userName = "User") {
 
     const aliases = (c.alias || [])
       .filter(Boolean)
-      .map((a) => `${PREFIX}${a}`);
+      .map(
+        (a) => `${PREFIX}${a}`
+      );
 
     txt += `• *${primary}*\n`;
 
     if (aliases.length) {
-      txt += `   ◦ Aliases: ${aliases.join(", ")}\n`;
+      txt +=
+        `   ◦ Aliases: ${aliases.join(", ")}\n`;
     }
 
-    txt += `   ⭕ ${c.desc || "No description"}\n\n`;
+    txt +=
+      `   ⭕ ${c.desc || "No description"}\n\n`;
   });
 
-  txt += `━━━━━━━━━━━━━━━━━━\n`;
-  txt += `👑 Owner: ${OWNER_NUMBER}`;
+  txt +=
+    `━━━━━━━━━━━━━━━━━━\n`;
+
+  txt +=
+    `👑 Owner: ${OWNER_NUMBER}`;
 
   return txt;
 }
@@ -244,20 +285,29 @@ function commandListCaption(cat, list, userName = "User") {
    CATEGORY ROWS
    ============================================================ */
 
-function makeCategoryRows(map, categories) {
+function makeCategoryRows(
+  map,
+  categories
+) {
   return categories.map((cat) => {
-    const emo = getCategoryEmoji(cat);
+    const emo =
+      getCategoryEmoji(cat);
 
     return {
-      title: `${emo} ${cat} MENU`,
-      description: `${map[cat].length} commands available`,
-      id: `menu_view:${cat}`,
+      title:
+        `${emo} ${cat} MENU`,
+
+      description:
+        `${map[cat].length} commands available`,
+
+      id:
+        `menu_view:${cat}`,
     };
   });
 }
 
 /* ============================================================
-   JSON HELPERS
+   JSON PARSER
    ============================================================ */
 
 function tryParseJsonString(s) {
@@ -269,10 +319,14 @@ function tryParseJsonString(s) {
 }
 
 /* ============================================================
-   EXTRACT INTERACTIVE RESPONSE
+   EXTRACT BUTTON RESPONSE
    ============================================================ */
 
-function extractTexts(body, mek, m) {
+function extractTexts(
+  body,
+  mek,
+  m
+) {
   const texts = [];
 
   const direct = [
@@ -282,63 +336,113 @@ function extractTexts(body, mek, m) {
     m?.text,
 
     m?.message?.conversation,
-    m?.message?.extendedTextMessage?.text,
 
-    m?.message?.buttonsResponseMessage?.selectedButtonId,
-    m?.message?.buttonsResponseMessage?.selectedDisplayText,
+    m?.message
+      ?.extendedTextMessage
+      ?.text,
 
-    m?.message?.templateButtonReplyMessage?.selectedId,
-    m?.message?.templateButtonReplyMessage?.selectedDisplayText,
+    m?.message
+      ?.buttonsResponseMessage
+      ?.selectedButtonId,
 
-    m?.message?.listResponseMessage?.title,
-    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message
+      ?.buttonsResponseMessage
+      ?.selectedDisplayText,
 
-    m?.message?.interactiveResponseMessage?.body?.text,
-    m?.message?.interactiveResponseMessage
+    m?.message
+      ?.templateButtonReplyMessage
+      ?.selectedId,
+
+    m?.message
+      ?.templateButtonReplyMessage
+      ?.selectedDisplayText,
+
+    m?.message
+      ?.listResponseMessage
+      ?.title,
+
+    m?.message
+      ?.listResponseMessage
+      ?.singleSelectReply
+      ?.selectedRowId,
+
+    m?.message
+      ?.interactiveResponseMessage
+      ?.body
+      ?.text,
+
+    m?.message
+      ?.interactiveResponseMessage
       ?.nativeFlowResponseMessage
       ?.paramsJson,
 
     mek?.message?.conversation,
-    mek?.message?.extendedTextMessage?.text,
 
-    mek?.message?.buttonsResponseMessage?.selectedButtonId,
-    mek?.message?.buttonsResponseMessage?.selectedDisplayText,
+    mek?.message
+      ?.extendedTextMessage
+      ?.text,
 
-    mek?.message?.templateButtonReplyMessage?.selectedId,
-    mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
+    mek?.message
+      ?.buttonsResponseMessage
+      ?.selectedButtonId,
 
-    mek?.message?.listResponseMessage?.title,
-    mek?.message?.listResponseMessage
+    mek?.message
+      ?.buttonsResponseMessage
+      ?.selectedDisplayText,
+
+    mek?.message
+      ?.templateButtonReplyMessage
+      ?.selectedId,
+
+    mek?.message
+      ?.templateButtonReplyMessage
+      ?.selectedDisplayText,
+
+    mek?.message
+      ?.listResponseMessage
+      ?.title,
+
+    mek?.message
+      ?.listResponseMessage
       ?.singleSelectReply
       ?.selectedRowId,
 
-    mek?.message?.interactiveResponseMessage?.body?.text,
+    mek?.message
+      ?.interactiveResponseMessage
+      ?.body
+      ?.text,
 
-    mek?.message?.interactiveResponseMessage
+    mek?.message
+      ?.interactiveResponseMessage
       ?.nativeFlowResponseMessage
       ?.paramsJson,
   ];
 
   for (const item of direct) {
     if (item) {
-      texts.push(String(item).trim());
+      texts.push(
+        String(item).trim()
+      );
     }
   }
 
   const p1 =
-    m?.message?.interactiveResponseMessage
+    m?.message
+      ?.interactiveResponseMessage
       ?.nativeFlowResponseMessage
       ?.paramsJson;
 
   const p2 =
-    mek?.message?.interactiveResponseMessage
+    mek?.message
+      ?.interactiveResponseMessage
       ?.nativeFlowResponseMessage
       ?.paramsJson;
 
   for (const raw of [p1, p2]) {
     if (!raw) continue;
 
-    const parsed = tryParseJsonString(raw);
+    const parsed =
+      tryParseJsonString(raw);
 
     if (!parsed) continue;
 
@@ -356,7 +460,9 @@ function extractTexts(body, mek, m) {
 
     for (const v of vals) {
       if (v) {
-        texts.push(String(v).trim());
+        texts.push(
+          String(v).trim()
+        );
       }
     }
   }
@@ -369,30 +475,56 @@ function extractTexts(body, mek, m) {
 }
 
 /* ============================================================
-   RESOLVE MENU ACTION
+   RESOLVE ACTION
    ============================================================ */
 
-function resolveMenuAction(texts, state) {
-  const normalized = texts
-    .map((t) => normalizeText(t))
-    .filter(Boolean);
+function resolveMenuAction(
+  texts,
+  state
+) {
+  const normalized =
+    texts
+      .map((t) =>
+        normalizeText(t)
+      )
+      .filter(Boolean);
 
   for (const text of normalized) {
-    if (text.startsWith("MENU_VIEW:")) {
+    if (
+      text.startsWith(
+        "MENU_VIEW:"
+      )
+    ) {
       return {
         type: "view",
-        cat: text.replace("MENU_VIEW:", "").trim(),
+
+        cat: text
+          .replace(
+            "MENU_VIEW:",
+            ""
+          )
+          .trim(),
       };
     }
 
-    for (const cat of state.categories || []) {
-      const catText = normalizeText(cat);
+    for (
+      const cat of
+        state.categories || []
+    ) {
+      const catText =
+        normalizeText(cat);
 
       if (
-        text === `${catText} MENU` ||
-        text.includes(`${catText} MENU`) ||
-        text === `${catText} COMMANDS` ||
-        text.includes(`${catText} COMMANDS`)
+        text ===
+          `${catText} MENU` ||
+        text.includes(
+          `${catText} MENU`
+        ) ||
+        text ===
+          `${catText} COMMANDS` ||
+        text.includes(
+          `${catText} COMMANDS`
+        )
       ) {
         return {
           type: "view",
@@ -406,17 +538,23 @@ function resolveMenuAction(texts, state) {
 }
 
 /* ============================================================
-   DUPLICATE ACTION PROTECTION
+   DUPLICATE PROTECTION
    ============================================================ */
 
-function isDuplicateAction(state, action) {
+function isDuplicateAction(
+  state,
+  action
+) {
   const now = Date.now();
 
-  const sig = `${action.type}:${action.cat || ""}`;
+  const sig =
+    `${action.type}:${action.cat || ""}`;
 
   if (
     state.lastActionSig === sig &&
-    now - (state.lastActionAt || 0) < 2500
+    now -
+      (state.lastActionAt || 0) <
+      2500
   ) {
     return true;
   }
@@ -429,7 +567,6 @@ function isDuplicateAction(state, action) {
 
 /* ============================================================
    MAIN MENU
-   @itsliaaa/baileys native interactiveButtons
    ============================================================ */
 
 async function sendMainMenu(
@@ -439,10 +576,11 @@ async function sendMainMenu(
   state,
   userName
 ) {
-  const categoryRows = makeCategoryRows(
-    state.map,
-    state.categories
-  );
+  const rows =
+    makeCategoryRows(
+      state.map,
+      state.categories
+    );
 
   return sock.sendMessage(
     from,
@@ -451,67 +589,91 @@ async function sendMainMenu(
         url: headerImage,
       },
 
-      caption: menuHeader(userName),
+      caption:
+        menuHeader(userName),
 
-      footer: `${BOT_NAME} | Interactive Menu`,
-
-      /*
-       * @itsliaaa/baileys supports native interactive
-       * buttons directly through sendMessage().
-       *
-       * No gifted-btns required.
-       */
+      footer:
+        `${BOT_NAME} | Interactive Menu`,
 
       interactiveButtons: [
+        /* ==========================================
+           CATEGORY SELECT
+           ========================================== */
+
         {
-          name: "single_select",
+          name:
+            "single_select",
 
-          buttonParamsJson: JSON.stringify({
-            title: "Click Here ↯",
+          buttonParamsJson:
+            JSON.stringify({
+              title:
+                "Click Here ↯",
 
-            sections: [
-              {
-                title: "Command Categories",
+              sections: [
+                {
+                  title:
+                    "Command Categories",
 
-                rows: categoryRows,
-              },
-            ],
-          }),
+                  rows,
+                },
+              ],
+            }),
         },
 
+        /* ==========================================
+           WEBSITE
+           ========================================== */
+
         {
-          name: "cta_url",
+          name:
+            "cta_url",
 
-          buttonParamsJson: JSON.stringify({
-            display_text: "🌐 Official Website",
+          buttonParamsJson:
+            JSON.stringify({
+              display_text:
+                "🌐 Official Website",
 
-            url: "https://maliya-md.vercel.app",
+              url:
+                "https://maliya-md.vercel.app",
 
-            merchant_url: "https://maliya-md.vercel.app",
-          }),
+              merchant_url:
+                "https://maliya-md.vercel.app",
+            }),
         },
 
+        /* ==========================================
+           COPY OWNER NUMBER
+           ========================================== */
+
         {
-          name: "cta_copy",
+          name:
+            "cta_copy",
 
-          buttonParamsJson: JSON.stringify({
-            display_text: "📋 Copy Owner Number",
+          buttonParamsJson:
+            JSON.stringify({
+              display_text:
+                "📋 Copy Owner Number",
 
-            copy_code: OWNER_NUMBER,
-          }),
+              copy_code:
+                OWNER_NUMBER,
+            }),
         },
       ],
+
+      /*
+       * IMPORTANT:
+       *
+       * forwardedNewsletterMessageInfo
+       * intentionally NOT included.
+       *
+       * Therefore WhatsApp should not generate
+       * the "View Channel" button from this menu.
+       */
 
       contextInfo: {
         forwardingScore: 999,
 
         isForwarded: true,
-
-        forwardedNewsletterMessageInfo: {
-          newsletterJid: CHANNEL_JID,
-          newsletterName: CHANNEL_NAME,
-          serverMessageId: -1,
-        },
       },
     },
 
@@ -540,22 +702,17 @@ async function sendCommandsList(
         url: headerImage,
       },
 
-      caption: commandListCaption(
-        cat,
-        list,
-        userName
-      ),
+      caption:
+        commandListCaption(
+          cat,
+          list,
+          userName
+        ),
 
       contextInfo: {
         forwardingScore: 999,
 
         isForwarded: true,
-
-        forwardedNewsletterMessageInfo: {
-          newsletterJid: CHANNEL_JID,
-          newsletterName: CHANNEL_NAME,
-          serverMessageId: -1,
-        },
       },
     },
 
@@ -566,7 +723,7 @@ async function sendCommandsList(
 }
 
 /* ============================================================
-   COMMAND: .menu
+   .MENU COMMAND
    ============================================================ */
 
 cmd(
@@ -575,7 +732,8 @@ cmd(
 
     react: "📜",
 
-    desc: "Show command categories",
+    desc:
+      "Show command categories",
 
     category: "main",
 
@@ -607,25 +765,30 @@ cmd(
       const {
         map,
         categories,
-      } = buildCommandMapCached();
+      } =
+        buildCommandMapCached();
 
-      if (!categories.length) {
+      if (
+        !categories.length
+      ) {
         return reply(
           "❌ No commands found!"
         );
       }
 
-      const userName = getUserName(
-        pushname,
-        m,
-        mek,
-        sender
-      );
+      const userName =
+        getUserName(
+          pushname,
+          m,
+          mek,
+          sender
+        );
 
-      const k = keyFor(
-        sender,
-        from
-      );
+      const k =
+        keyFor(
+          sender,
+          from
+        );
 
       pendingMenu[k] = {
         map,
@@ -634,11 +797,14 @@ cmd(
 
         userName,
 
-        timestamp: Date.now(),
+        timestamp:
+          Date.now(),
 
-        lastActionSig: "",
+        lastActionSig:
+          "",
 
-        lastActionAt: 0,
+        lastActionAt:
+          0,
       };
 
       await sendMainMenu(
@@ -663,23 +829,32 @@ cmd(
 );
 
 /* ============================================================
-   REPLY / INTERACTIVE HANDLER
+   INTERACTIVE REPLY HANDLER
    ============================================================ */
 
 cmd(
   {
-    filter: (_text, { sender, from }) => {
-      const k = keyFor(
+    filter: (
+      _text,
+      {
         sender,
-        from
-      );
+        from,
+      }
+    ) => {
+      const k =
+        keyFor(
+          sender,
+          from
+        );
 
       return !!pendingMenu[k];
     },
 
-    dontAddCommandList: true,
+    dontAddCommandList:
+      true,
 
-    filename: __filename,
+    filename:
+      __filename,
   },
 
   async (
@@ -695,27 +870,31 @@ cmd(
     }
   ) => {
     try {
-      const k = keyFor(
-        sender,
-        from
-      );
+      const k =
+        keyFor(
+          sender,
+          from
+        );
 
-      const state = pendingMenu[k];
+      const state =
+        pendingMenu[k];
 
       if (!state) {
         return;
       }
 
-      const texts = extractTexts(
-        body,
-        mek,
-        m
-      );
+      const texts =
+        extractTexts(
+          body,
+          mek,
+          m
+        );
 
-      const action = resolveMenuAction(
-        texts,
-        state
-      );
+      const action =
+        resolveMenuAction(
+          texts,
+          state
+        );
 
       if (!action) {
         return;
@@ -739,7 +918,8 @@ cmd(
           sender
         );
 
-      const cat = action.cat;
+      const cat =
+        action.cat;
 
       const list =
         state.map[cat] || [];
@@ -750,14 +930,20 @@ cmd(
         );
       }
 
-      state.timestamp = Date.now();
+      state.timestamp =
+        Date.now();
 
       await sock.sendMessage(
         from,
         {
           react: {
-            text: getCategoryEmoji(cat),
-            key: mek.key,
+            text:
+              getCategoryEmoji(
+                cat
+              ),
+
+            key:
+              mek.key,
           },
         }
       );
@@ -785,17 +971,21 @@ cmd(
    ============================================================ */
 
 setInterval(() => {
-  const now = Date.now();
+  const now =
+    Date.now();
 
   const timeout =
     2 * 60 * 1000;
 
   for (
-    const k of Object.keys(pendingMenu)
+    const k of Object.keys(
+      pendingMenu
+    )
   ) {
     if (
       now -
-        pendingMenu[k].timestamp >
+        pendingMenu[k]
+          .timestamp >
       timeout
     ) {
       delete pendingMenu[k];
