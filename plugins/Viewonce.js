@@ -2,7 +2,7 @@ const { cmd } = require("../command");
 const fs = require("fs");
 const path = require("path");
 const P = require("pino");
-const { downloadMediaMessage } = require("@whiskeysockets/baileys");
+const { downloadMediaMessage } = require("@itsliaaa/baileys");
 
 console.log("✅ vv plugin loaded");
 
