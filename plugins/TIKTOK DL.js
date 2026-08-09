@@ -4,6 +4,7 @@ const { tiktok } = require("sadaslk-dlcore");
 cmd(
   {
     pattern: "tiktok",
+    react: "📽️",
     alias: ["tt", "ttdl", "tdl", "tiktokdl"],
     desc: "Download TikTok video",
     category: "download",
