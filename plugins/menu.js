@@ -1,5 +1,4 @@
 const { cmd, commands } = require("../command");
-const { sendInteractiveMessage } = require("baileys_helpers");
 const config = require("../config");
 
 const pendingMenu = Object.create(null);
@@ -26,10 +25,9 @@ const OWNER_NAME =
 const headerImage =
   "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
 
-// If a button send doesn't get any tap response within this window,
-// we don't wait forever — the pending state just expires via cleanup.
-// But we ALSO proactively send a text fallback list right after the
-// button, so devices that can't render/tap buttons still get a menu.
+// Text fallback is sent alongside the native flow buttons so users
+// on any client/device still get a usable menu even if buttons
+// don't render or tap-through on their WhatsApp version.
 const SEND_TEXT_FALLBACK_WITH_BUTTONS = true;
 
 /* ============ CACHE ============ */
@@ -226,10 +224,12 @@ function commandListCaption(cat, list, userName = "User") {
   return txt;
 }
 
+// @itsliaaa/baileys "single_select" style row shape: { header, title, description, id }
 function makeCategoryRows(map, categories) {
   return categories.map((cat) => {
     const emo = getCategoryEmoji(cat);
     return {
+      header: "",
       title: `${emo} ${cat} MENU`,
       description: `${map[cat].length} commands available`,
       id: `menu_view:${cat}`,
@@ -304,8 +304,6 @@ function extractTexts(body, mek, m) {
   return [...new Set(texts.filter(Boolean))];
 }
 
-// Resolves either a button tap (MENU_VIEW:CAT / "CAT MENU" text) OR a
-// plain typed fallback like ".menu 2" / ".menu ai" / "ai".
 function resolveMenuAction(texts, state) {
   const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
 
@@ -368,39 +366,34 @@ async function sendMainMenu(sock, from, mek, state, userName) {
   let buttonsOk = true;
 
   try {
-    await sendInteractiveMessage(
-      sock,
+    // @itsliaaa/baileys native interactive format — single sock.sendMessage
+    // call, no external helper package needed. nativeFlow[] mixes a
+    // "select" entry (sections/rows) with cta_url / cta_copy entries.
+    await sock.sendMessage(
       from,
       {
         image: { url: headerImage },
-        text: menuHeader(userName),
+        caption: menuHeader(userName),
         footer: `${BOT_NAME} | Interactive Menu`,
-        interactiveButtons: [
+        optionText: "Click Here ↯",
+        optionTitle: "Command Categories",
+        nativeFlow: [
           {
-            name: "single_select",
-            buttonParamsJson: JSON.stringify({
-              title: "Click Here ↯",
-              sections: [
-                {
-                  title: "Command Categories",
-                  rows: makeCategoryRows(state.map, state.categories),
-                },
-              ],
-            }),
+            text: "🌐 Official Website",
+            url: "https://maliya-md.vercel.app",
           },
           {
-            name: "cta_url",
-            buttonParamsJson: JSON.stringify({
-              display_text: "🌐 Official Website",
-              url: "https://maliya-md.vercel.app",
-            }),
+            text: "📋 Copy Owner Number",
+            copy: OWNER_NUMBER,
           },
           {
-            name: "cta_copy",
-            buttonParamsJson: JSON.stringify({
-              display_text: "📋 Copy Owner Number",
-              copy_code: OWNER_NUMBER,
-            }),
+            text: "Click Here ↯",
+            sections: [
+              {
+                title: "Command Categories",
+                rows: makeCategoryRows(state.map, state.categories),
+              },
+            ],
           },
         ],
         contextInfo: {
@@ -416,10 +409,9 @@ async function sendMainMenu(sock, from, mek, state, userName) {
       { quoted: mek }
     );
   } catch (e) {
-    // Some clients / gifted-btns versions throw if the target device
-    // can't accept native flow messages at all. Don't let that kill
-    // the whole .menu command — just fall through to text.
-    console.log("INTERACTIVE BUTTON SEND FAILED, falling back to text:", e?.message || e);
+    // If native flow send fails on some client/library edge case,
+    // don't let it kill the whole .menu command — fall through to text.
+    console.log("NATIVE FLOW SEND FAILED, falling back to text:", e?.message || e);
     buttonsOk = false;
   }
 
