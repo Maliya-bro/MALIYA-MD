@@ -1,4 +1,5 @@
 const { cmd, commands } = require("../command");
+const { sendInteractiveMessage } = require("gifted-btns");
 const config = require("../config");
 
 const pendingMenu = Object.create(null);
@@ -8,7 +9,7 @@ const BOT_NAME = "MALIYA-MD";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
-// Channel Configuration
+// Channel Configuration (Synced from Alive)
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️ＭＤ 🍁";
 
@@ -197,9 +198,17 @@ function makeCategoryRows(map, categories) {
     return {
       title: `${emo} ${cat} MENU`,
       description: `${map[cat].length} commands available`,
-      id: `MENU_VIEW:${cat}`,
+      id: `menu_view:${cat}`,
     };
   });
+}
+
+function tryParseJsonString(s) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
 }
 
 function extractTexts(body, mek, m) {
@@ -214,21 +223,47 @@ function extractTexts(body, mek, m) {
     m?.message?.buttonsResponseMessage?.selectedButtonId,
     m?.message?.buttonsResponseMessage?.selectedDisplayText,
     m?.message?.templateButtonReplyMessage?.selectedId,
+    m?.message?.templateButtonReplyMessage?.selectedDisplayText,
+    m?.message?.listResponseMessage?.title,
     m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.interactiveResponseMessage?.body?.text,
     m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
+    mek?.message?.conversation,
+    mek?.message?.extendedTextMessage?.text,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.buttonsResponseMessage?.selectedDisplayText,
+    mek?.message?.templateButtonReplyMessage?.selectedId,
+    mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
+    mek?.message?.listResponseMessage?.title,
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    mek?.message?.interactiveResponseMessage?.body?.text,
     mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
   ];
 
   for (const item of direct) {
-    if (!item) continue;
-    if (typeof item === "string" && item.startsWith("{")) {
-      try {
-        const parsed = JSON.parse(item);
-        if (parsed.id) texts.push(parsed.id);
-        if (parsed.rowId) texts.push(parsed.rowId);
-      } catch (e) {}
-    } else {
-      texts.push(String(item).trim());
+    if (item) texts.push(String(item).trim());
+  }
+
+  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+
+  for (const raw of [p1, p2]) {
+    if (!raw) continue;
+    const parsed = tryParseJsonString(raw);
+    if (!parsed) continue;
+
+    const vals = [
+      parsed.id,
+      parsed.selectedId,
+      parsed.selectedRowId,
+      parsed.title,
+      parsed.display_text,
+      parsed.text,
+      parsed.name,
+    ];
+
+    for (const v of vals) {
+      if (v) texts.push(String(v).trim());
     }
   }
 
@@ -273,31 +308,40 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
-/* ================= @itsliaaa/baileys NATIVE SEND MENU ================= */
 async function sendMainMenu(sock, from, mek, state, userName) {
-  return await sock.sendMessage(
+  return sendInteractiveMessage(
+    sock,
     from,
     {
       image: { url: headerImage },
-      caption: menuHeader(userName),
+      text: menuHeader(userName),
       footer: `${BOT_NAME} | Interactive Menu`,
-      nativeFlow: [
+      interactiveButtons: [
         {
-          text: "Click Here ↯",
-          sections: [
-            {
-              title: "Command Categories",
-              rows: makeCategoryRows(state.map, state.categories),
-            },
-          ],
+          name: "single_select",
+          buttonParamsJson: JSON.stringify({
+            title: "Click Here ↯",
+            sections: [
+              {
+                title: "Command Categories",
+                rows: makeCategoryRows(state.map, state.categories),
+              },
+            ],
+          }),
         },
         {
-          text: "🌐 Official Website",
-          url: "https://maliya-md.vercel.app",
+          name: "cta_url",
+          buttonParamsJson: JSON.stringify({
+            display_text: "🌐 Official Website",
+            url: "https://maliya-md.vercel.app",
+          }),
         },
         {
-          text: "📋 Copy Owner Number",
-          copy: OWNER_NUMBER,
+          name: "cta_copy",
+          buttonParamsJson: JSON.stringify({
+            display_text: "📋 Copy Owner Number",
+            copy_code: OWNER_NUMBER,
+          }),
         },
       ],
       contextInfo: {
@@ -315,7 +359,7 @@ async function sendMainMenu(sock, from, mek, state, userName) {
 }
 
 async function sendCommandsList(sock, from, mek, cat, list, userName) {
-  return await sock.sendMessage(
+  return sock.sendMessage(
     from,
     {
       image: { url: headerImage },
@@ -406,7 +450,7 @@ cmd(
         react: { text: getCategoryEmoji(cat), key: mek.key },
       });
 
-      return await sendCommandsList(sock, from, mek, cat, list, userName);
+      return sendCommandsList(sock, from, mek, cat, list, userName);
     } catch (e) {
       console.log("MENU ACTION ERROR:", e?.message || e);
     }
