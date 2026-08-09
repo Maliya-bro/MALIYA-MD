@@ -1,4 +1,5 @@
 const { cmd, commands } = require("../command");
+const { sendInteractiveMessage } = require("gifted-btns");
 const config = require("../config");
 
 const pendingMenu = Object.create(null);
@@ -8,7 +9,7 @@ const BOT_NAME = "MALIYA-MD";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
-// Channel Configuration (Synced from Alive)
+// Channel Configuration
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️ＭＤ 🍁";
 
@@ -195,9 +196,10 @@ function makeCategoryRows(map, categories) {
   return categories.map((cat) => {
     const emo = getCategoryEmoji(cat);
     return {
-      title: `${emo} ${cat} MENU`,
+      header: emo,
+      title: `${cat} MENU`,
       description: `${map[cat].length} commands available`,
-      id: `MENU_VIEW:${cat}`,
+      id: `menu_view:${cat}`,
     };
   });
 }
@@ -307,47 +309,43 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
-/* ================= DARK YASIYA BAILEYS MENU SENDER ================= */
 async function sendMainMenu(sock, from, mek, state, userName) {
-  const interactiveButtons = [
-    {
-      name: "single_select",
-      buttonParamsJson: JSON.stringify({
-        title: "Click Here ↯",
-        sections: [
-          {
-            title: "Command Categories",
-            rows: makeCategoryRows(state.map, state.categories),
-          },
-        ],
-      }),
-    },
-    {
-      name: "cta_url",
-      buttonParamsJson: JSON.stringify({
-        display_text: "🌐 Official Website",
-        url: "https://maliya-md.vercel.app",
-      }),
-    },
-    {
-      name: "cta_copy",
-      buttonParamsJson: JSON.stringify({
-        display_text: "📋 Copy Owner Number",
-        id: "owner_copy",
-        copy_code: OWNER_NUMBER,
-      }),
-    },
-  ];
-
-  // Dark-Yasiya Baileys native interactive image message call
-  return await sock.sendMessage(
+  return sendInteractiveMessage(
+    sock,
     from,
     {
       image: { url: headerImage },
-      title: "MALIYA-MD COMMANDS",
-      caption: menuHeader(userName),
+      text: menuHeader(userName),
       footer: `${BOT_NAME} | Interactive Menu`,
-      interactiveButtons,
+      aimode: true, // gifted-btns එකේ DM බටන් Fix කිරීමට
+      interactiveButtons: [
+        {
+          name: "single_select",
+          buttonParamsJson: JSON.stringify({
+            title: "Click Here ↯",
+            sections: [
+              {
+                title: "Command Categories",
+                rows: makeCategoryRows(state.map, state.categories),
+              },
+            ],
+          }),
+        },
+        {
+          name: "cta_url",
+          buttonParamsJson: JSON.stringify({
+            display_text: "🌐 Official Website",
+            url: "https://maliya-md.vercel.app",
+          }),
+        },
+        {
+          name: "cta_copy",
+          buttonParamsJson: JSON.stringify({
+            display_text: "📋 Copy Owner Number",
+            copy_code: OWNER_NUMBER,
+          }),
+        },
+      ],
       contextInfo: {
         forwardingScore: 999,
         isForwarded: true,
