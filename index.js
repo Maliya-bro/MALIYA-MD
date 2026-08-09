@@ -73,13 +73,6 @@ const P       = require("pino");
 const express = require("express");
 const path    = require("path");
 const { MongoClient } = require("mongodb");
-const KeyedDB = require("@adiwajshing/keyed-db").default || require("@adiwajshing/keyed-db");
-
-// Active Sessions වේගයෙන් Search කරන්න Memory Cache එකක්
-const sessionCache = new KeyedDB(
-  (sess) => (sess.lastActive || Date.now()) * -1, // අලුත්ම Session උඩට එන ලෙස
-  (sess) => sess.sessionId                        // ID එකෙන් O(1) සොයාගැනීමට
-);
 
 const cors              = require("cors");
 const os               = require("os");
@@ -402,13 +395,6 @@ async function startSessionBot(sessionId) {
 
     sessionCtx.sock = sock;
     activeSessions.set(sessionId, sessionCtx);
-    // දැනට තියෙන activeSessions.set(sessionId, sessionCtx); එකට පහළින්:
-sessionCache.insert({
-  sessionId: sessionId,
-  phone: sessionCtx.ownerNumber[0] || "",
-  connected: true,
-  lastActive: Date.now()
-});
     // We've registered the socket in activeSessions now, so it's
     // safe to release the starting-lock — any future watcher tick
     // will correctly find it via activeSessions.has() instead.
