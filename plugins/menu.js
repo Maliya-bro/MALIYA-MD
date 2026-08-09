@@ -1,5 +1,4 @@
 const { cmd, commands } = require("../command");
-const { sendInteractiveMessage } = require("gifted-btns");
 const config = require("../config");
 
 const pendingMenu = Object.create(null);
@@ -9,7 +8,7 @@ const BOT_NAME = "MALIYA-MD";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
-// Channel Configuration (Synced from Alive)
+// Channel Configuration
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️ＭＤ 🍁";
 
@@ -158,12 +157,12 @@ function menuHeader(userName = "User") {
   return `👋 HI ${userName}
 
 ┏━〔 BOT'S MENU 〕━⬣
-┃ 🤖 Bot    : ${BOT_NAME}
-┃ 👤 User   : ${userName}
-┃ 👑 Owner  : ${OWNER_NUMBER}
-┃ 🕒 Time   : ${time}
-┃ 📅 Date   : ${date}
-┃ ✨ Prefix : ${PREFIX}
+┃ 🤖 Bot     : ${BOT_NAME}
+┃ 👤 User    : ${userName}
+┃ 👑 Owner   : ${OWNER_NUMBER}
+┃ 🕒 Time    : ${time}
+┃ 📅 Date    : ${date}
+┃ ✨ Prefix  : ${PREFIX}
 ┗━━━━━━━━━━━━⬣
 
 🎀 Select a Command List Below`;
@@ -182,8 +181,8 @@ function commandListCaption(cat, list, userName = "User") {
     const aliases = (c.alias || []).filter(Boolean).map((a) => `${PREFIX}${a}`);
 
     txt += `• *${primary}*\n`;
-    if (aliases.length) txt += `    ◦ Aliases: ${aliases.join(", ")}\n`;
-    txt += `    ⭕ ${c.desc || "No description"}\n\n`;
+    if (aliases.length) txt += `   ◦ Aliases: ${aliases.join(", ")}\n`;
+    txt += `   ⭕ ${c.desc || "No description"}\n\n`;
   });
 
   txt += `━━━━━━━━━━━━━━━━━━\n`;
@@ -198,20 +197,11 @@ function makeCategoryRows(map, categories) {
     return {
       title: `${emo} ${cat} MENU`,
       description: `${map[cat].length} commands available`,
-      id: `menu_view:${cat}`,
+      id: `MENU_VIEW:${cat}`,
     };
   });
 }
 
-function tryParseJsonString(s) {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-}
-
-/* ================= IMPROVED EXTRACTION FOR ALL CLIENTS ================= */
 function extractTexts(body, mek, m) {
   const texts = [];
 
@@ -224,49 +214,21 @@ function extractTexts(body, mek, m) {
     m?.message?.buttonsResponseMessage?.selectedButtonId,
     m?.message?.buttonsResponseMessage?.selectedDisplayText,
     m?.message?.templateButtonReplyMessage?.selectedId,
-    m?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    m?.message?.listResponseMessage?.title,
     m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
-    m?.message?.interactiveResponseMessage?.body?.text,
     m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
-    mek?.message?.conversation,
-    mek?.message?.extendedTextMessage?.text,
-    mek?.message?.buttonsResponseMessage?.selectedButtonId,
-    mek?.message?.buttonsResponseMessage?.selectedDisplayText,
-    mek?.message?.templateButtonReplyMessage?.selectedId,
-    mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    mek?.message?.listResponseMessage?.title,
-    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
-    mek?.message?.interactiveResponseMessage?.body?.text,
     mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
   ];
 
   for (const item of direct) {
-    if (item) texts.push(String(item).trim());
-  }
-
-  // Deep Extract JSON Parameters
-  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-
-  for (const raw of [p1, p2]) {
-    if (!raw) continue;
-    const parsed = tryParseJsonString(raw);
-    if (!parsed) continue;
-
-    const vals = [
-      parsed.id,
-      parsed.selectedId,
-      parsed.selectedRowId,
-      parsed.title,
-      parsed.display_text,
-      parsed.text,
-      parsed.name,
-      parsed.rowId,
-    ];
-
-    for (const v of vals) {
-      if (v) texts.push(String(v).trim());
+    if (!item) continue;
+    if (typeof item === "string" && item.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(item);
+        if (parsed.id) texts.push(parsed.id);
+        if (parsed.rowId) texts.push(parsed.rowId);
+      } catch (e) {}
+    } else {
+      texts.push(String(item).trim());
     }
   }
 
@@ -277,18 +239,14 @@ function resolveMenuAction(texts, state) {
   const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
 
   for (const text of normalized) {
-    if (text.includes("MENU_VIEW:")) {
-      const parts = text.split("MENU_VIEW:");
-      if (parts[1]) {
-        return { type: "view", cat: parts[1].trim() };
-      }
+    if (text.startsWith("MENU_VIEW:")) {
+      return { type: "view", cat: text.replace("MENU_VIEW:", "").trim() };
     }
 
     for (const cat of state.categories || []) {
       const catText = normalizeText(cat);
 
       if (
-        text === catText ||
         text === `${catText} MENU` ||
         text.includes(`${catText} MENU`) ||
         text === `${catText} COMMANDS` ||
@@ -306,7 +264,7 @@ function isDuplicateAction(state, action) {
   const now = Date.now();
   const sig = `${action.type}:${action.cat || ""}`;
 
-  if (state.lastActionSig === sig && now - (state.lastActionAt || 0) < 2000) {
+  if (state.lastActionSig === sig && now - (state.lastActionAt || 0) < 2500) {
     return true;
   }
 
@@ -315,40 +273,31 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
+/* ================= @itsliaaa/baileys NATIVE SEND MENU ================= */
 async function sendMainMenu(sock, from, mek, state, userName) {
-  return sendInteractiveMessage(
-    sock,
+  return await sock.sendMessage(
     from,
     {
       image: { url: headerImage },
-      text: menuHeader(userName),
+      caption: menuHeader(userName),
       footer: `${BOT_NAME} | Interactive Menu`,
-      interactiveButtons: [
+      nativeFlow: [
         {
-          name: "single_select",
-          buttonParamsJson: JSON.stringify({
-            title: "Click Here ↯",
-            sections: [
-              {
-                title: "Command Categories",
-                rows: makeCategoryRows(state.map, state.categories),
-              },
-            ],
-          }),
+          text: "Click Here ↯",
+          sections: [
+            {
+              title: "Command Categories",
+              rows: makeCategoryRows(state.map, state.categories),
+            },
+          ],
         },
         {
-          name: "cta_url",
-          buttonParamsJson: JSON.stringify({
-            display_text: "🌐 Official Website",
-            url: "https://maliya-md.vercel.app",
-          }),
+          text: "🌐 Official Website",
+          url: "https://maliya-md.vercel.app",
         },
         {
-          name: "cta_copy",
-          buttonParamsJson: JSON.stringify({
-            display_text: "📋 Copy Owner Number",
-            copy_code: OWNER_NUMBER,
-          }),
+          text: "📋 Copy Owner Number",
+          copy: OWNER_NUMBER,
         },
       ],
       contextInfo: {
@@ -366,7 +315,7 @@ async function sendMainMenu(sock, from, mek, state, userName) {
 }
 
 async function sendCommandsList(sock, from, mek, cat, list, userName) {
-  return sock.sendMessage(
+  return await sock.sendMessage(
     from,
     {
       image: { url: headerImage },
@@ -457,7 +406,7 @@ cmd(
         react: { text: getCategoryEmoji(cat), key: mek.key },
       });
 
-      return sendCommandsList(sock, from, mek, cat, list, userName);
+      return await sendCommandsList(sock, from, mek, cat, list, userName);
     } catch (e) {
       console.log("MENU ACTION ERROR:", e?.message || e);
     }
