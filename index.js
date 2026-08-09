@@ -21,6 +21,9 @@
 //         only), "group" (group chats only), or "all" (both). This
 //         is enforced right after isGroup/isOwner is computed, before
 //         any command / auto-msg / auto-react logic runs.
+//  MIGRATION: baileys core switched from @whiskeysockets/baileys to
+//         @itsliaaa/baileys (core API is compatible — only the
+//         import source changed).
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -66,7 +69,7 @@ const {
   downloadContentFromMessage,
   fetchLatestBaileysVersion,
   Browsers,
-} = require("@whiskeysockets/baileys");
+} = require("@itsliaaa/baileys");
 
 const fs      = require("fs");
 const P       = require("pino");
