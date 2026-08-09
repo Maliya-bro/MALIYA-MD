@@ -1,5 +1,5 @@
 const { cmd, commands } = require("../command");
-const { sendInteractiveMessage } = require("gifted-btns");
+const { sendInteractiveMessage } = require("baileys_helpers");
 const config = require("../config");
 
 const pendingMenu = Object.create(null);
@@ -25,6 +25,12 @@ const OWNER_NAME =
 
 const headerImage =
   "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
+
+// If a button send doesn't get any tap response within this window,
+// we don't wait forever — the pending state just expires via cleanup.
+// But we ALSO proactively send a text fallback list right after the
+// button, so devices that can't render/tap buttons still get a menu.
+const SEND_TEXT_FALLBACK_WITH_BUTTONS = true;
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
@@ -169,6 +175,34 @@ function menuHeader(userName = "User") {
 🎀 Select a Command List Below`;
 }
 
+// Text-only fallback list — works on every device/client since it's
+// just a plain message. Numbered so users can reply with ".menu 3"
+// instead of tapping anything.
+function textMenuFallback(userName, categories, map) {
+  const { time, date } = nowLK();
+
+  let txt = `👋 HI ${userName}\n\n`;
+  txt += `┏━〔 BOT'S MENU 〕━⬣\n`;
+  txt += `┃ 🤖 Bot     : ${BOT_NAME}\n`;
+  txt += `┃ 👤 User    : ${userName}\n`;
+  txt += `┃ 👑 Owner   : ${OWNER_NUMBER}\n`;
+  txt += `┃ 🕒 Time    : ${time}\n`;
+  txt += `┃ 📅 Date    : ${date}\n`;
+  txt += `┃ ✨ Prefix  : ${PREFIX}\n`;
+  txt += `┗━━━━━━━━━━━━⬣\n\n`;
+  txt += `📋 *Buttons not showing / not clicking?*\n`;
+  txt += `Reply with the number OR name below:\n\n`;
+
+  categories.forEach((cat, i) => {
+    const emo = getCategoryEmoji(cat);
+    txt += `${i + 1}. ${emo} ${cat}  (${map[cat].length})\n`;
+  });
+
+  txt += `\nExample: *${PREFIX}menu 1* or *${PREFIX}menu ${categories[0]?.toLowerCase() || "ai"}*`;
+
+  return txt;
+}
+
 function commandListCaption(cat, list, userName = "User") {
   const emo = getCategoryEmoji(cat);
   let txt = `👋 HI ${userName}\n\n`;
@@ -270,6 +304,8 @@ function extractTexts(body, mek, m) {
   return [...new Set(texts.filter(Boolean))];
 }
 
+// Resolves either a button tap (MENU_VIEW:CAT / "CAT MENU" text) OR a
+// plain typed fallback like ".menu 2" / ".menu ai" / "ai".
 function resolveMenuAction(texts, state) {
   const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
 
@@ -290,6 +326,26 @@ function resolveMenuAction(texts, state) {
         return { type: "view", cat };
       }
     }
+
+    // Fallback: user typed the category name directly, optionally
+    // prefixed with the command, e.g. "AI", "MENU AI", ".MENU AI"
+    const stripped = text
+      .replace(new RegExp(`^\\${PREFIX}?MENU\\s*`, "i"), "")
+      .trim();
+
+    for (const cat of state.categories || []) {
+      if (normalizeText(cat) === stripped) {
+        return { type: "view", cat };
+      }
+    }
+
+    // Fallback: user typed a number, e.g. ".menu 3" or just "3"
+    const numMatch = stripped.match(/^\d+$/) ? stripped : text.match(/^\d+$/) ? text : null;
+    if (numMatch) {
+      const idx = parseInt(numMatch, 10) - 1;
+      const cat = (state.categories || [])[idx];
+      if (cat) return { type: "view", cat };
+    }
   }
 
   return null;
@@ -309,53 +365,84 @@ function isDuplicateAction(state, action) {
 }
 
 async function sendMainMenu(sock, from, mek, state, userName) {
-  return sendInteractiveMessage(
-    sock,
-    from,
-    {
-      image: { url: headerImage },
-      text: menuHeader(userName),
-      footer: `${BOT_NAME} | Interactive Menu`,
-      interactiveButtons: [
-        {
-          name: "single_select",
-          buttonParamsJson: JSON.stringify({
-            title: "Click Here ↯",
-            sections: [
-              {
-                title: "Command Categories",
-                rows: makeCategoryRows(state.map, state.categories),
-              },
-            ],
-          }),
-        },
-        {
-          name: "cta_url",
-          buttonParamsJson: JSON.stringify({
-            display_text: "🌐 Official Website",
-            url: "https://maliya-md.vercel.app",
-          }),
-        },
-        {
-          name: "cta_copy",
-          buttonParamsJson: JSON.stringify({
-            display_text: "📋 Copy Owner Number",
-            copy_code: OWNER_NUMBER,
-          }),
-        },
-      ],
-      contextInfo: {
-        forwardingScore: 999,
-        isForwarded: true,
-        forwardedNewsletterMessageInfo: {
-          newsletterJid: CHANNEL_JID,
-          newsletterName: CHANNEL_NAME,
-          serverMessageId: -1,
+  let buttonsOk = true;
+
+  try {
+    await sendInteractiveMessage(
+      sock,
+      from,
+      {
+        image: { url: headerImage },
+        text: menuHeader(userName),
+        footer: `${BOT_NAME} | Interactive Menu`,
+        interactiveButtons: [
+          {
+            name: "single_select",
+            buttonParamsJson: JSON.stringify({
+              title: "Click Here ↯",
+              sections: [
+                {
+                  title: "Command Categories",
+                  rows: makeCategoryRows(state.map, state.categories),
+                },
+              ],
+            }),
+          },
+          {
+            name: "cta_url",
+            buttonParamsJson: JSON.stringify({
+              display_text: "🌐 Official Website",
+              url: "https://maliya-md.vercel.app",
+            }),
+          },
+          {
+            name: "cta_copy",
+            buttonParamsJson: JSON.stringify({
+              display_text: "📋 Copy Owner Number",
+              copy_code: OWNER_NUMBER,
+            }),
+          },
+        ],
+        contextInfo: {
+          forwardingScore: 999,
+          isForwarded: true,
+          forwardedNewsletterMessageInfo: {
+            newsletterJid: CHANNEL_JID,
+            newsletterName: CHANNEL_NAME,
+            serverMessageId: -1,
+          },
         },
       },
-    },
-    { quoted: mek }
-  );
+      { quoted: mek }
+    );
+  } catch (e) {
+    // Some clients / gifted-btns versions throw if the target device
+    // can't accept native flow messages at all. Don't let that kill
+    // the whole .menu command — just fall through to text.
+    console.log("INTERACTIVE BUTTON SEND FAILED, falling back to text:", e?.message || e);
+    buttonsOk = false;
+  }
+
+  // Always (or on failure) also send a plain text version so users on
+  // devices that can't render/tap buttons still get a usable menu.
+  if (!buttonsOk || SEND_TEXT_FALLBACK_WITH_BUTTONS) {
+    await sock.sendMessage(
+      from,
+      {
+        text: textMenuFallback(userName, state.categories, state.map),
+        contextInfo: {
+          forwardingScore: 999,
+          isForwarded: true,
+          forwardedNewsletterMessageInfo: {
+            newsletterJid: CHANNEL_JID,
+            newsletterName: CHANNEL_NAME,
+            serverMessageId: -1,
+          },
+        },
+      },
+      { quoted: mek }
+    );
+  }
 }
 
 async function sendCommandsList(sock, from, mek, cat, list, userName) {
@@ -387,7 +474,7 @@ cmd(
     category: "main",
     filename: __filename,
   },
-  async (sock, mek, m, { from, sender, pushname, reply }) => {
+  async (sock, mek, m, { from, sender, pushname, args, reply }) => {
     try {
       await sock.sendMessage(from, { react: { text: "📜", key: mek.key } });
 
@@ -405,6 +492,27 @@ cmd(
         lastActionSig: "",
         lastActionAt: 0,
       };
+
+      // Direct fallback usage: ".menu 3" or ".menu ai" jumps straight
+      // to that category's command list without needing a button tap.
+      const argText = Array.isArray(args) ? args.join(" ").trim() : String(args || "").trim();
+      if (argText) {
+        const state = pendingMenu[k];
+        const action = resolveMenuAction([argText], state);
+
+        if (action) {
+          const list = state.map[action.cat] || [];
+          if (!list.length) return reply("❌ No commands found in this category.");
+
+          state.timestamp = Date.now();
+          await sock.sendMessage(from, {
+            react: { text: getCategoryEmoji(action.cat), key: mek.key },
+          });
+          return sendCommandsList(sock, from, mek, action.cat, list, userName);
+        }
+
+        return reply(`❌ Category "${argText}" not found. Type *${PREFIX}menu* to see the list.`);
+      }
 
       await sendMainMenu(sock, from, mek, pendingMenu[k], userName);
     } catch (e) {
