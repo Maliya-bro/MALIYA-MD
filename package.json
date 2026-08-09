@@ -78,6 +78,7 @@
     "webtorrent": "latest",
     "subz.lk": "latest",
     "cloakbrowser": "latest",
-    "playwright-core": "latest"
+    "playwright-core": "latest",
+    "gifted-btns": :"latest"
   }
 }
