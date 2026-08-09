@@ -78,6 +78,7 @@
     "@rindev/lk21dl-core": "latest",
     "webtorrent": "latest",
     "subz.lk": "latest",
+    "baileys_helpers": "latest"
     "cloakbrowser": "latest",
     "playwright-core": "latest"
   }
