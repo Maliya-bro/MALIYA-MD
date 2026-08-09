@@ -1,6 +1,6 @@
 const { cmd, commands } = require("../command");
-const { sendInteractiveMessage } = require("gifted-btns");
 const config = require("../config");
+const { generateWAMessageFromContent, proto } = require("@whiskeysockets/baileys");
 
 const pendingMenu = Object.create(null);
 
@@ -30,6 +30,41 @@ const headerImage =
 let cachedMenu = null;
 let cacheTime = 0;
 const MENU_CACHE_MS = 60 * 1000;
+
+/* ================= NATIVE INTERACTIVE BUTTON SENDER ================= */
+// Gifted-btns වෙනුවට සියලුම Device වලට වැඩ කරන Direct Baileys Native Message Sender එක
+async function sendNativeInteractiveMessage(sock, from, options, mek) {
+  const { title, body, footer, imageUrl, buttons } = options;
+
+  const interactiveMessage = {
+    body: proto.Message.InteractiveMessage.Body.create({ text: body || "" }),
+    footer: proto.Message.InteractiveMessage.Footer.create({ text: footer || "" }),
+    header: proto.Message.InteractiveMessage.Header.create({
+      title: title || "",
+      hasVideoMessage: false,
+      ...(imageUrl ? {
+        imageMessage: (await sock.sendMessage(from, { image: { url: imageUrl } }, { upload: sock.waUploadToServer })).message.imageMessage
+      } : {})
+    }),
+    nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+      buttons: buttons || []
+    })
+  };
+
+  const msg = generateWAMessageFromContent(
+    from,
+    {
+      viewOnceMessage: {
+        message: {
+          interactiveMessage
+        }
+      }
+    },
+    { userJid: sock.user.id, quoted: mek }
+  );
+
+  return await sock.relayMessage(from, msg.message, { messageId: msg.key.id });
+}
 
 /* ================= HELPERS ================= */
 function keyFor(sender, from) {
@@ -158,12 +193,12 @@ function menuHeader(userName = "User") {
   return `👋 HI ${userName}
 
 ┏━〔 BOT'S MENU 〕━⬣
-┃ 🤖 Bot     : ${BOT_NAME}
-┃ 👤 User    : ${userName}
-┃ 👑 Owner   : ${OWNER_NUMBER}
-┃ 🕒 Time    : ${time}
-┃ 📅 Date    : ${date}
-┃ ✨ Prefix  : ${PREFIX}
+┃ 🤖 Bot    : ${BOT_NAME}
+┃ 👤 User   : ${userName}
+┃ 👑 Owner  : ${OWNER_NUMBER}
+┃ 🕒 Time   : ${time}
+┃ 📅 Date   : ${date}
+┃ ✨ Prefix : ${PREFIX}
 ┗━━━━━━━━━━━━⬣
 
 🎀 Select a Command List Below`;
@@ -182,8 +217,8 @@ function commandListCaption(cat, list, userName = "User") {
     const aliases = (c.alias || []).filter(Boolean).map((a) => `${PREFIX}${a}`);
 
     txt += `• *${primary}*\n`;
-    if (aliases.length) txt += `   ◦ Aliases: ${aliases.join(", ")}\n`;
-    txt += `   ⭕ ${c.desc || "No description"}\n\n`;
+    if (aliases.length) txt += `    ◦ Aliases: ${aliases.join(", ")}\n`;
+    txt += `    ⭕ ${c.desc || "No description"}\n\n`;
   });
 
   txt += `━━━━━━━━━━━━━━━━━━\n`;
@@ -198,7 +233,7 @@ function makeCategoryRows(map, categories) {
     return {
       title: `${emo} ${cat} MENU`,
       description: `${map[cat].length} commands available`,
-      id: `menu_view:${cat}`,
+      id: `MENU_VIEW:${cat}`,
     };
   });
 }
@@ -309,52 +344,45 @@ function isDuplicateAction(state, action) {
 }
 
 async function sendMainMenu(sock, from, mek, state, userName) {
-  return sendInteractiveMessage(
+  const buttons = [
+    {
+      name: "single_select",
+      buttonParamsJson: JSON.stringify({
+        title: "Click Here ↯",
+        sections: [
+          {
+            title: "Command Categories",
+            rows: makeCategoryRows(state.map, state.categories),
+          },
+        ],
+      }),
+    },
+    {
+      name: "cta_url",
+      buttonParamsJson: JSON.stringify({
+        display_text: "🌐 Official Website",
+        url: "https://maliya-md.vercel.app",
+      }),
+    },
+    {
+      name: "cta_copy",
+      buttonParamsJson: JSON.stringify({
+        display_text: "📋 Copy Owner Number",
+        copy_code: OWNER_NUMBER,
+      }),
+    },
+  ];
+
+  return sendNativeInteractiveMessage(
     sock,
     from,
     {
-      image: { url: headerImage },
-      text: menuHeader(userName),
+      body: menuHeader(userName),
       footer: `${BOT_NAME} | Interactive Menu`,
-      interactiveButtons: [
-        {
-          name: "single_select",
-          buttonParamsJson: JSON.stringify({
-            title: "Click Here ↯",
-            sections: [
-              {
-                title: "Command Categories",
-                rows: makeCategoryRows(state.map, state.categories),
-              },
-            ],
-          }),
-        },
-        {
-          name: "cta_url",
-          buttonParamsJson: JSON.stringify({
-            display_text: "🌐 Official Website",
-            url: "https://maliya-md.vercel.app",
-          }),
-        },
-        {
-          name: "cta_copy",
-          buttonParamsJson: JSON.stringify({
-            display_text: "📋 Copy Owner Number",
-            copy_code: OWNER_NUMBER,
-          }),
-        },
-      ],
-      contextInfo: {
-        forwardingScore: 999,
-        isForwarded: true,
-        forwardedNewsletterMessageInfo: {
-          newsletterJid: CHANNEL_JID,
-          newsletterName: CHANNEL_NAME,
-          serverMessageId: -1,
-        },
-      },
+      imageUrl: headerImage,
+      buttons,
     },
-    { quoted: mek }
+    mek
   );
 }
 
