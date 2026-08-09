@@ -9,7 +9,7 @@ const BOT_NAME = "MALIYA-MD";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
-// Channel Configuration
+// Channel Configuration (Synced from Alive)
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️ＭＤ 🍁";
 
@@ -196,8 +196,7 @@ function makeCategoryRows(map, categories) {
   return categories.map((cat) => {
     const emo = getCategoryEmoji(cat);
     return {
-      header: emo,
-      title: `${cat} MENU`,
+      title: `${emo} ${cat} MENU`,
       description: `${map[cat].length} commands available`,
       id: `menu_view:${cat}`,
     };
@@ -212,6 +211,7 @@ function tryParseJsonString(s) {
   }
 }
 
+/* ================= IMPROVED EXTRACTION FOR ALL CLIENTS ================= */
 function extractTexts(body, mek, m) {
   const texts = [];
 
@@ -245,6 +245,7 @@ function extractTexts(body, mek, m) {
     if (item) texts.push(String(item).trim());
   }
 
+  // Deep Extract JSON Parameters
   const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
 
@@ -261,6 +262,7 @@ function extractTexts(body, mek, m) {
       parsed.display_text,
       parsed.text,
       parsed.name,
+      parsed.rowId,
     ];
 
     for (const v of vals) {
@@ -275,14 +277,18 @@ function resolveMenuAction(texts, state) {
   const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
 
   for (const text of normalized) {
-    if (text.startsWith("MENU_VIEW:")) {
-      return { type: "view", cat: text.replace("MENU_VIEW:", "").trim() };
+    if (text.includes("MENU_VIEW:")) {
+      const parts = text.split("MENU_VIEW:");
+      if (parts[1]) {
+        return { type: "view", cat: parts[1].trim() };
+      }
     }
 
     for (const cat of state.categories || []) {
       const catText = normalizeText(cat);
 
       if (
+        text === catText ||
         text === `${catText} MENU` ||
         text.includes(`${catText} MENU`) ||
         text === `${catText} COMMANDS` ||
@@ -300,7 +306,7 @@ function isDuplicateAction(state, action) {
   const now = Date.now();
   const sig = `${action.type}:${action.cat || ""}`;
 
-  if (state.lastActionSig === sig && now - (state.lastActionAt || 0) < 2500) {
+  if (state.lastActionSig === sig && now - (state.lastActionAt || 0) < 2000) {
     return true;
   }
 
@@ -317,7 +323,6 @@ async function sendMainMenu(sock, from, mek, state, userName) {
       image: { url: headerImage },
       text: menuHeader(userName),
       footer: `${BOT_NAME} | Interactive Menu`,
-      aimode: true, // gifted-btns එකේ DM බටන් Fix කිරීමට
       interactiveButtons: [
         {
           name: "single_select",
