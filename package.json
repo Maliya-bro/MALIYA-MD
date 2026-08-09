@@ -10,7 +10,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "latest",
+    "@itsliaaa/baileys": "latest",
     "api-dylux": "latest",
     "axios": "latest",
     "browser-id3-writer": "latest",
@@ -48,7 +48,6 @@
     "@ffprobe-installer/ffprobe": "latest",
     "tesseract.js": "latest",
     "pdf-parse": "latest",
-    "gifted-btns": "latest",
     "mongodb": "latest",
     "xnxx-scraper": "latest",
     "http": "latest",
@@ -78,7 +77,6 @@
     "@rindev/lk21dl-core": "latest",
     "webtorrent": "latest",
     "subz.lk": "latest",
-    "baileys_helpers": "latest"
     "cloakbrowser": "latest",
     "playwright-core": "latest"
   }
