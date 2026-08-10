@@ -10,7 +10,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "6.7.24",
+    "@whiskeysockets/baileys": "latest",
     "api-dylux": "latest",
     "axios": "latest",
     "browser-id3-writer": "latest",
