@@ -312,6 +312,7 @@ async function sendMainMenu(sock, from, mek, state, userName) {
       image: { url: headerImage },
       text: menuHeader(userName),
       footer: `${BOT_NAME} | Interactive Menu`,
+      viewOnce: true,
       interactiveButtons: [
         {
           name: "single_select",
