@@ -1,6 +1,7 @@
 FROM node:22-slim
 RUN apt-get update && apt-get install -y \
     git \
+    ca-certificates \
     openssh-client \
     xvfb \
     xauth \
@@ -14,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     libatk-bridge2.0-0 \
     libgtk-3-0 \
     --no-install-recommends && \
+    update-ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package*.json ./
