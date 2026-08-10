@@ -1,19 +1,19 @@
 FROM node:22-slim
 
+
 RUN apt-get update && apt-get install -y \
-    xvfb \
-    xauth \
-    x11vnc \
-    xterm \
-    chromium \
-    libgconf-2-4 \
-    libnss3 \
-    libxss1 \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libgtk-3-0 \
-    --no-install-recommends && \
-    rm -rf /var/lib/apt/lists/*
+    xvfb \
+    x11vnc \
+    xterm \
+    chromium \
+    libgconf-2-4 \
+    libnss3 \
+    libxss1 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libgtk-3-0 \
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
