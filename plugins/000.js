@@ -1,48 +1,73 @@
 const { cmd } = require("../command");
-const { sendInteractiveMessage } = require("gifted-btns");
+const { generateWAMessageFromContent, proto } = require("@whiskeysockets/baileys");
 
 cmd(
   {
-    pattern: "testbtn",
-    alias: ["btn", "tb"],
-    desc: "Test Native Flow Quick Reply Buttons",
+    pattern: "testbtn3",
+    alias: ["btn3"],
+    desc: "Test Pure Native Flow Buttons using Whiskeysockets",
     category: "main",
     filename: __filename,
   },
-  async (sock, mek, m, { from, reply }) => {
+  async (sock, mek, m, { from }) => {
     try {
-      // Reaction එකක් දාන්න
-      await sock.sendMessage(from, { react: { text: "🔘", key: mek.key } });
-
-      // Native Flow Quick Reply Buttons යැවීම
-      await sendInteractiveMessage(
-        sock,
+      const msg = generateWAMessageFromContent(
         from,
         {
-          text: "👋 *Native Flow Button Test*\n\nපහත Buttons හරියට Render වෙනවාද කියලා Check කරන්න.",
-          footer: "MALIYA-MD | Button Test",
-          interactiveButtons: [
-            {
-              name: "quick_reply",
-              buttonParamsJson: JSON.stringify({
-                display_text: "⚡ Click Me!",
-                id: "test_btn_1",
+          viewOnceMessage: {
+            message: {
+              interactiveMessage: proto.Message.InteractiveMessage.create({
+                body: proto.Message.InteractiveMessage.Body.create({
+                  text: "👋 *Whiskeysockets Native Flow Test*\n\nමෙන්න pure Baileys interactive buttons.",
+                }),
+                footer: proto.Message.InteractiveMessage.Footer.create({
+                  text: "MALIYA-MD | Whiskeysockets Baileys",
+                }),
+                header: proto.Message.InteractiveMessage.Header.create({
+                  title: "🔥 Modern Native Buttons",
+                  hasMediaAttachment: false,
+                }),
+                nativeFlowMessage:
+                  proto.Message.InteractiveMessage.NativeFlowMessage.create({
+                    buttons: [
+                      // 1. Quick Reply Button
+                      {
+                        name: "quick_reply",
+                        buttonParamsJson: JSON.stringify({
+                          display_text: "⚡ Quick Action",
+                          id: ".ping",
+                        }),
+                      },
+                      // 2. Copy Code Button
+                      {
+                        name: "cta_copy",
+                        buttonParamsJson: JSON.stringify({
+                          display_text: "📋 Copy Code",
+                          id: "copy_btn",
+                          copy_code: "MALIYA-MD",
+                        }),
+                      },
+                      // 3. URL Link Button
+                      {
+                        name: "cta_url",
+                        buttonParamsJson: JSON.stringify({
+                          display_text: "🌐 Open Link",
+                          url: "https://github.com",
+                          merchant_url: "https://github.com",
+                        }),
+                      },
+                    ],
+                  }),
               }),
             },
-            {
-              name: "quick_reply",
-              buttonParamsJson: JSON.stringify({
-                display_text: "📌 Ping Bot",
-                id: ".ping",
-              }),
-            },
-          ],
+          },
         },
         { quoted: mek }
       );
+
+      await sock.relayMessage(from, msg.message, { messageId: msg.key.id });
     } catch (e) {
-      console.log("BUTTON TEST ERROR:", e);
-      reply("❌ Button Message එක යවන්න බැරි වුණා: " + e.message);
+      console.log("BUTTON ERROR:", e);
     }
   }
 );
