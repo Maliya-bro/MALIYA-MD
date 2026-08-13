@@ -153,8 +153,8 @@ async function bypassAndGetDirectLink(targetUrl) {
       return null;
     });
 
-    const targetX = buttonCoords ? buttonCoords.x : 960;
-    const startY = buttonCoords ? buttonCoords.y : 380;
+    const targetX = buttonCoords ? buttonCoords.x : 755;
+    const startY = buttonCoords ? buttonCoords.y : 270;
 
     console.log(`[+] Target Button Center -> X: ${targetX} | Y: ${startY}`);
 
