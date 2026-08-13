@@ -1,5 +1,5 @@
 /**
- * CineSubz.lk Movie Downloader Plugin with Puppeteer Clicker for MALIYA-MD
+ * CineSubz.lk Movie Downloader Plugin for MALIYA-MD
  * ────────────────────────────────────────────────────────────────────────
  * Required Packages:
  * npm install axios cheerio puppeteer-real-browser
@@ -17,7 +17,7 @@ const pendingSearch = {};
 const pendingQuality = {};
 
 const BASE = "https://cinesubz.lk";
-const MAX_MB = 2048;
+const MAX_MB = 2048; // Max WhatsApp Document Limit (2GB)
 const TIMEOUT = 20_000;
 
 const HEADERS = {
@@ -63,9 +63,41 @@ function normalizeQuality(t = "") {
   return t.trim() || "Unknown";
 }
 
-// ─── Puppeteer Dynamic Clicker & Stream Extractor (1920x1080) ─────────────────
+// ─── Smart API Bypass (Puppeteer රහිතව секуන්ඩුවෙන් Bypass කිරීම) ──────────────
 
 async function bypassAndGetDirectLink(targetUrl) {
+  try {
+    const parsedUrl = new URL(targetUrl);
+    const apiPath = `/api/download-data${parsedUrl.pathname}${parsedUrl.search}`;
+    const apiUrl = `${parsedUrl.origin}${apiPath}`;
+
+    console.log(`[+] Requesting direct API bypass: ${apiUrl}`);
+
+    const res = await axios.get(apiUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Referer": targetUrl,
+      },
+      timeout: 15000,
+    });
+
+    if (res.data && res.data.redirect) {
+      console.log(`🎯 DIRECT LINK CAPTURED VIA API: ${res.data.redirect}`);
+      return res.data.redirect;
+    }
+
+  } catch (err) {
+    console.error("API Bypass Error, falling back to Puppeteer:", err.message);
+  }
+
+  // API එක Fail වුවහොත් පමණක් Puppeteer Fallback එක වැඩ කරයි
+  return await puppeteerFallbackBypass(targetUrl);
+}
+
+// ─── Puppeteer Fallback Bypass ────────────────────────────────────────────────
+
+async function puppeteerFallbackBypass(targetUrl) {
   const customProfileDir = path.join(os.tmpdir(), "puppeteer_real_profile_" + Date.now());
   if (!fs.existsSync(customProfileDir)) {
     fs.mkdirSync(customProfileDir, { recursive: true });
@@ -77,115 +109,32 @@ async function bypassAndGetDirectLink(targetUrl) {
     const { browser, page } = await connect({
       headless: false,
       turnstile: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--window-size=1920,1080"
-      ],
-      customConfig: { userDataDir: customProfileDir },
-      connectOption: { defaultViewport: { width: 1920, height: 1080 } }
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+      customConfig: { userDataDir: customProfileDir }
     });
 
-    const processUrl = (url) => {
-      if (!url || url === "about:blank" || url.startsWith("data:") || url.startsWith("chrome-extension://")) return;
-      if (url.includes("bot3.sonic-cloud.online")) return;
-
-      const isAd = 
-        url.includes("doubleclick") || 
-        url.includes("googleads") || 
-        url.includes("adsterra") || 
-        url.includes(".apk") || 
-        url.includes(".exe") || 
-        url.includes("pop") || 
-        url.includes("redirect");
-
-      const isRealFilm = 
-        url.includes("avatarzone") ||
-        (url.includes("token=") && (url.includes(".mp4") || url.includes(".mkv") || url.includes("ext=mp4")));
-
-      if (isRealFilm && !isAd && !capturedDirectLink) {
-        capturedDirectLink = url;
-        console.log(`\n🎯 REAL FILM DIRECT LINK CAPTURED: ${capturedDirectLink}\n`);
-      }
-    };
-
-    const setupCDP = async (target) => {
-      try {
-        if (target.type() === "page") {
-          const cdp = await target.createCDPSession();
-          await cdp.send("Network.enable");
-          await cdp.send("Page.enable");
-
-          await cdp.send("Browser.setDownloadBehavior", {
-            behavior: "allow",
-            downloadPath: "/tmp"
-          });
-
-          cdp.on("Network.requestWillBeSent", (e) => processUrl(e.request.url));
-          cdp.on("Network.responseReceived", (e) => processUrl(e.response.url));
-
-          cdp.on("Page.downloadWillBegin", (e) => {
-            if (e.url) processUrl(e.url);
-          });
-        }
-      } catch (e) {}
-    };
-
-    await setupCDP(page.target());
-    browser.on("targetcreated", async (target) => await setupCDP(target));
-
-    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await new Promise((r) => setTimeout(r, 4000));
-
-    const buttonCoords = await page.evaluate(() => {
-      const btn = document.querySelector("a.btn, button.btn, #download-btn, a[href*='download'], .download-button, a.btn-success, a.btn-primary");
-      if (btn) {
-        const rect = btn.getBoundingClientRect();
-        return {
-          x: Math.round(rect.left + rect.width / 2),
-          y: Math.round(rect.top + rect.height / 2)
-        };
-      }
-      return null;
-    });
-
-    const targetX = buttonCoords ? buttonCoords.x : 755;
-    const startY = buttonCoords ? buttonCoords.y : 270;
-
-    console.log(`[+] Target Button Center -> X: ${targetX} | Y: ${startY}`);
-
-    for (let pass = 1; pass <= 2; pass++) {
-      if (capturedDirectLink) break;
-
-      for (let offsetY = -15; offsetY <= 15; offsetY += 5) {
-        if (capturedDirectLink) {
-          console.log("🛑 Real Movie Link captured! Breaking click loop.");
-          break;
-        }
-
-        const currentY = startY + offsetY;
-        console.log(`[+] Click Attempt (Pass ${pass}) -> X: ${targetX} | Y: ${currentY}`);
-
+    page.on("response", async (response) => {
+      const url = response.url();
+      if (url.includes("/api/download-data")) {
         try {
-          if (page.realCursor) {
-            await page.realCursor.moveTo({ x: targetX, y: currentY });
-            await page.realCursor.click();
-          } else {
-            await page.mouse.move(targetX, currentY, { steps: 3 });
-            await page.mouse.click(targetX, currentY);
+          const json = await response.json();
+          if (json && json.redirect) {
+            capturedDirectLink = json.redirect;
           }
-        } catch (err) {}
-
-        await new Promise((r) => setTimeout(r, 1200));
+        } catch (e) {}
+      } else if (url.includes("avatarzone") || (url.includes("token=") && url.includes("ext="))) {
+        capturedDirectLink = url;
       }
-    }
+    });
+
+    await page.goto(targetUrl, { waitUntil: "networkidle2", timeout: 30000 });
+    await new Promise((r) => setTimeout(r, 3000));
 
     await browser.close().catch(() => {});
     return capturedDirectLink;
 
   } catch (err) {
-    console.error("Puppeteer Bypass Error:", err.message);
+    console.error("Puppeteer Fallback Error:", err.message);
     return null;
   }
 }
@@ -417,7 +366,7 @@ cmd({
   } catch (_) { await maliya.sendMessage(from, { text: msg }, { quoted: mek }); }
 });
 
-// ── Step 3: quality → Local Temp File Download → WhatsApp Send ────────────────
+// ── Step 3: quality → Local Temp File Download → WhatsApp Document Send ─────
 
 cmd({
   filter: (text, { sender }) =>
@@ -449,17 +398,16 @@ cmd({
     }, { quoted: mek });
   }
 
-  reply(`*🚀 Bypassing protection via Puppeteer Engine...*\n*Wait 10-15 seconds.. 🤖*`);
+  reply(`*🚀 Bypassing protection via Smart API Engine... 🤖*`);
 
   const finalDirectUrl = await bypassAndGetDirectLink(bot3Url);
   const targetLinkToSend = finalDirectUrl || bot3Url;
 
-  reply(`*⬇️ Downloading Movie to Temp Storage.. (${chosen.size})*\nPlease wait 1-2 minutes.. 🍿`);
+  reply(`*⬇️ Downloading Movie to Temp Storage.. (${chosen.size})*\nPlease wait a moment.. 🍿`);
 
   const fileName = `${title} [${quality}] [CineSubz].mp4`
     .replace(/[^\w\s.\-\[\]()]/gi, "").trim();
 
-  // Local Temp Storage Path
   const tempFilePath = path.join(os.tmpdir(), `film_${Date.now()}.mp4`);
 
   try {
@@ -482,9 +430,9 @@ cmd({
       writer.on("error", reject);
     });
 
-    reply(`*📤 File Downloaded Successfully! Sending Document to WhatsApp..* 🚀`);
+    reply(`*📤 Send Document to WhatsApp..* 🚀`);
 
-    // 2️⃣ Download වූ Local File එක WhatsApp එකට Document එකක් ලෙස යැවීම
+    // 2️⃣ Download වූ Local File එක WhatsApp Document එකක් ලෙස Send කිරීම
     await maliya.sendMessage(from, {
       document: fs.readFileSync(tempFilePath),
       mimetype: "video/mp4",
@@ -506,7 +454,7 @@ cmd({
         `⚠️ Document send failed.\n\n📥 *Direct Link:*\n${targetLinkToSend}`,
     }, { quoted: mek });
   } finally {
-    // 3️⃣ Send වී අවසන් වූ පසු / Fail වූ පසු Local Temp File එක Delete කර Server RAM/Disk Clean කිරීම
+    // 3️⃣ Send වී අවසන් වූ පසු Local Temp File එක Delete කිරීම
     if (fs.existsSync(tempFilePath)) {
       fs.unlinkSync(tempFilePath);
     }
