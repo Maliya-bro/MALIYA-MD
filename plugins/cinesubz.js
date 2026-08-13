@@ -421,7 +421,7 @@ cmd({
   } catch (_) { await maliya.sendMessage(from, { text: msg }, { quoted: mek }); }
 });
 
-// ── Step 3: quality → Puppeteer Bypass → send document ────────────────────────
+// ── Step 3: quality → Puppeteer Bypass → send document via Stream ─────────────
 
 cmd({
   filter: (text, { sender }) =>
@@ -437,7 +437,7 @@ cmd({
   const chosen = links[+body.trim() - 1];
   const quality = normalizeQuality(chosen.quality || chosen.label);
 
-  reply(`*⏳ ${quality} (${chosen.size}) — Resolving sonic-cloud link..*`);
+  reply(`*⏳ ${quality} (${chosen.size}) — Resolving download link..*`);
 
   let bot3Url;
   try { bot3Url = await resolveZtLink(chosen.ztUrl); }
@@ -447,25 +447,39 @@ cmd({
     return reply(`*❌ Can't get page link.*\nTry manually:\n${chosen.ztUrl}`);
   }
 
+  // Telegram Link එකක් නම්
   if (bot3Url.includes("t.me") || bot3Url.includes("telegram.me")) {
     return maliya.sendMessage(from, {
       text: `*🎬 ${title}*\n*Quality:* ${quality}  |  *Size:* ${chosen.size}\n\n📲 *Telegram Link:*\n${bot3Url}`,
     }, { quoted: mek });
   }
 
-  reply(`*🚀 Bypassing download protection via Puppeteer Engine...*\n*Wait 10-15 seconds.. 🤖*`);
+  reply(`*🚀 Bypassing protection via Puppeteer Engine...*\n*Wait 10-15 seconds.. 🤖*`);
 
   const finalDirectUrl = await bypassAndGetDirectLink(bot3Url);
   const targetLinkToSend = finalDirectUrl || bot3Url;
 
-  reply(`*⬇️ Sending Film Document to WhatsApp.. (${chosen.size})*\nPlease wait a moment.. 🍿`);
+  reply(`*⬇️ Streaming & Sending Film Document to WhatsApp.. (${chosen.size})*\nPlease wait a moment.. 🍿`);
 
   const fileName = `${title} [${quality}] [CineSubz].mp4`
     .replace(/[^\w\s.\-\[\]()]/gi, "").trim();
 
   try {
+    // 🎯 Browser Headers සමඟ Stream එක Download කර WhatsApp එකට Direct Pipe කිරීම
+    const mediaStream = await axios({
+      method: "get",
+      url: targetLinkToSend,
+      responseType: "stream",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Referer": "https://cinesubz.lk/",
+      },
+      timeout: 120000,
+    });
+
     await maliya.sendMessage(from, {
-      document: { url: targetLinkToSend },
+      document: mediaStream.data, // Direct Axios Stream
       mimetype: "video/mp4",
       fileName,
       caption:
@@ -478,10 +492,11 @@ cmd({
     await maliya.sendMessage(from, { react: { text: "🎉", key: mek.key } });
 
   } catch (err) {
+    console.error("Stream Send Error:", err.message);
     await maliya.sendMessage(from, {
       text:
         `*🎬 ${title}*  [${quality}]  ${chosen.size}\n\n` +
-        `⚠️ Document send failed (Link may expired or file too large).\n\n📥 *Direct Link:*\n${targetLinkToSend}`,
+        `⚠️ Document send failed (Stream Connection Reset).\n\n📥 *Direct Link:*\n${targetLinkToSend}`,
     }, { quoted: mek });
   }
 });
