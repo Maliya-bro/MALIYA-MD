@@ -161,7 +161,7 @@ function menuHeader(userName = "User") {
 ┃ ✨ Prefix  : ${PREFIX}
 ┗━━━━━━━━━━━━⬣
 
-🎀 Swipe the cards below or tap Categories to pick a section`;
+🎀 Tap a category below to view its commands`;
 }
 
 function commandListCaption(cat, list, userName = "User") {
@@ -198,29 +198,21 @@ function makeCategoryRows(map, categories) {
   });
 }
 
-// ✅ NEW: build one carousel card per category.
-// Uses the same header image for every card (no per-category art yet),
-// a cta_url quick-select id-style button won't work on carousel cards
-// (carousel buttons don't support arbitrary reply ids the same way),
-// so each card's button is a quick_reply carrying the category id —
-// this lands back in messages.upsert as normal text via
-// selectedDisplayText/selectedButtonId, which extractTexts() already reads.
-function makeCategoryCards(map, categories) {
+// ✅ NEW: one flat quick_reply button per category, stacked
+// vertically (no cards, no per-category image — avoids the
+// duplicate-header-over-image look the carousel produced).
+// Each button carries the category id, which lands back in
+// messages.upsert via selectedDisplayText/selectedButtonId —
+// already handled by extractTexts()/resolveMenuAction().
+function makeCategoryButtons(map, categories) {
   return categories.map((cat) => {
     const emo = getCategoryEmoji(cat);
     return {
-      headerTitle: `${emo} ${cat}`,
-      imageUrl: headerImage,
-      bodyText: `${map[cat].length} commands available`,
-      buttons: [
-        {
-          name: "quick_reply",
-          params: {
-            display_text: `📂 Open ${cat}`,
-            id: `menu_view:${cat}`,
-          },
-        },
-      ],
+      name: "quick_reply",
+      buttonParamsJson: JSON.stringify({
+        display_text: `${emo} ${cat}`,
+        id: `menu_view:${cat}`,
+      }),
     };
   });
 }
@@ -332,17 +324,20 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
-// ✅ NEW: quick action row sent as a plain interactive-buttons message,
-// separate from the carousel (carousel cards carry the category
-// buttons; this small follow-up carries the "global" actions —
-// full categories list, website, copy owner number).
-async function sendQuickActions(sock, from, mek, state) {
+// ✅ NEW: single header image with a flat, stacked button list —
+// one button per category, plus the quick-action row (all
+// categories / website / copy number) appended at the end.
+// No cards, no per-category image, no duplicate header-over-image.
+async function sendMainMenu(sock, from, mek, state, userName) {
   return sock.sendMessage(
     from,
     {
-      text: "⚡ Quick Actions",
-      footer: `${BOT_NAME} | Interactive Menu`,
+      image: { url: headerImage },
+      caption: menuHeader(userName),
+      footer: `${BOT_NAME} | ${state.categories.length} categories`,
+      media: true,
       interactiveButtons: [
+        ...makeCategoryButtons(state.map, state.categories),
         {
           name: "single_select",
           buttonParamsJson: JSON.stringify({
@@ -373,25 +368,6 @@ async function sendQuickActions(sock, from, mek, state) {
     },
     { quoted: mek }
   );
-}
-
-// ✅ NEW: main menu now sends a category carousel first (via
-// @nexustechpro/baileys' carouselMessage), then a quick-actions
-// interactive-buttons message right after, in the same command.
-async function sendMainMenu(sock, from, mek, state, userName) {
-  await sock.sendMessage(
-    from,
-    {
-      carouselMessage: {
-        caption: menuHeader(userName),
-        footer: `${BOT_NAME} | ${state.categories.length} categories`,
-        cards: makeCategoryCards(state.map, state.categories),
-      },
-    },
-    { quoted: mek }
-  );
-
-  return sendQuickActions(sock, from, mek, state);
 }
 
 async function sendCommandsList(sock, from, mek, cat, list, userName) {
