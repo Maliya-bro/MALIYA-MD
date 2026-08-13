@@ -81,7 +81,7 @@ async function bypassAndGetDirectLink(targetUrl) {
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
-        "--window-size=1920,1080" // 🖥️ 1920x1080 Resolution Configuration
+        "--window-size=1920,1080"
       ],
       customConfig: { userDataDir: customProfileDir },
       connectOption: { defaultViewport: { width: 1920, height: 1080 } }
@@ -91,7 +91,6 @@ async function bypassAndGetDirectLink(targetUrl) {
       if (!url || url === "about:blank" || url.startsWith("data:") || url.startsWith("chrome-extension://")) return;
       if (url.includes("bot3.sonic-cloud.online")) return;
 
-      // Ad Domain / Ad File Extensions Filter
       const isAd = 
         url.includes("doubleclick") || 
         url.includes("googleads") || 
@@ -101,7 +100,6 @@ async function bypassAndGetDirectLink(targetUrl) {
         url.includes("pop") || 
         url.includes("redirect");
 
-      // Validating Actual Movie Link
       const isRealFilm = 
         url.includes("avatarzone") ||
         (url.includes("token=") && (url.includes(".mp4") || url.includes(".mkv") || url.includes("ext=mp4")));
@@ -140,7 +138,6 @@ async function bypassAndGetDirectLink(targetUrl) {
     await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
     await new Promise((r) => setTimeout(r, 4000));
 
-    // 🎯 1. Dynamic Button Coordinates Detection in 1920x1080 Viewport
     const buttonCoords = await page.evaluate(() => {
       const btn = document.querySelector("a.btn, button.btn, #download-btn, a[href*='download'], .download-button, a.btn-success, a.btn-primary");
       if (btn) {
@@ -158,7 +155,6 @@ async function bypassAndGetDirectLink(targetUrl) {
 
     console.log(`[+] Target Button Center -> X: ${targetX} | Y: ${startY}`);
 
-    // 🎯 2. Dynamic Clicking around Button Area with Auto Break
     for (let pass = 1; pass <= 2; pass++) {
       if (capturedDirectLink) break;
 
@@ -421,7 +417,7 @@ cmd({
   } catch (_) { await maliya.sendMessage(from, { text: msg }, { quoted: mek }); }
 });
 
-// ── Step 3: quality → Puppeteer Bypass → send document via Stream ─────────────
+// ── Step 3: quality → Local Temp File Download → WhatsApp Send ────────────────
 
 cmd({
   filter: (text, { sender }) =>
@@ -447,7 +443,6 @@ cmd({
     return reply(`*❌ Can't get page link.*\nTry manually:\n${chosen.ztUrl}`);
   }
 
-  // Telegram Link එකක් නම්
   if (bot3Url.includes("t.me") || bot3Url.includes("telegram.me")) {
     return maliya.sendMessage(from, {
       text: `*🎬 ${title}*\n*Quality:* ${quality}  |  *Size:* ${chosen.size}\n\n📲 *Telegram Link:*\n${bot3Url}`,
@@ -459,27 +454,39 @@ cmd({
   const finalDirectUrl = await bypassAndGetDirectLink(bot3Url);
   const targetLinkToSend = finalDirectUrl || bot3Url;
 
-  reply(`*⬇️ Streaming & Sending Film Document to WhatsApp.. (${chosen.size})*\nPlease wait a moment.. 🍿`);
+  reply(`*⬇️ Downloading Movie to Temp Storage.. (${chosen.size})*\nPlease wait 1-2 minutes.. 🍿`);
 
   const fileName = `${title} [${quality}] [CineSubz].mp4`
     .replace(/[^\w\s.\-\[\]()]/gi, "").trim();
 
+  // Local Temp Storage Path
+  const tempFilePath = path.join(os.tmpdir(), `film_${Date.now()}.mp4`);
+
   try {
-    // 🎯 Browser Headers සමඟ Stream එක Download කර WhatsApp එකට Direct Pipe කිරීම
-    const mediaStream = await axios({
-      method: "get",
+    // 1️⃣ File එක Local Server එකට Full Download කරගැනීම
+    const writer = fs.createWriteStream(tempFilePath);
+    const response = await axios({
       url: targetLinkToSend,
+      method: "GET",
       responseType: "stream",
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "*/*",
         "Referer": "https://cinesubz.lk/",
       },
-      timeout: 120000,
     });
 
+    response.data.pipe(writer);
+
+    await new Promise((resolve, reject) => {
+      writer.on("finish", resolve);
+      writer.on("error", reject);
+    });
+
+    reply(`*📤 File Downloaded Successfully! Sending Document to WhatsApp..* 🚀`);
+
+    // 2️⃣ Download වූ Local File එක WhatsApp එකට Document එකක් ලෙස යැවීම
     await maliya.sendMessage(from, {
-      document: mediaStream.data, // Direct Axios Stream
+      document: fs.readFileSync(tempFilePath),
       mimetype: "video/mp4",
       fileName,
       caption:
@@ -492,12 +499,17 @@ cmd({
     await maliya.sendMessage(from, { react: { text: "🎉", key: mek.key } });
 
   } catch (err) {
-    console.error("Stream Send Error:", err.message);
+    console.error("Local File Download/Send Error:", err.message);
     await maliya.sendMessage(from, {
       text:
         `*🎬 ${title}*  [${quality}]  ${chosen.size}\n\n` +
-        `⚠️ Document send failed (Stream Connection Reset).\n\n📥 *Direct Link:*\n${targetLinkToSend}`,
+        `⚠️ Document send failed.\n\n📥 *Direct Link:*\n${targetLinkToSend}`,
     }, { quoted: mek });
+  } finally {
+    // 3️⃣ Send වී අවසන් වූ පසු / Fail වූ පසු Local Temp File එක Delete කර Server RAM/Disk Clean කිරීම
+    if (fs.existsSync(tempFilePath)) {
+      fs.unlinkSync(tempFilePath);
+    }
   }
 });
 
