@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y \
     libxkbcommon0 \
     libxcomposite1 \
     libxdamage1 \
-    libxfixe3 \
+    libxfixes3 \
     libxrandr2 \
     libgbm1 \
     libasound2 \
