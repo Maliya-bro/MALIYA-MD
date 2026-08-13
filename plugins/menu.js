@@ -1,4 +1,5 @@
 const { cmd, commands } = require("../command");
+const { sendInteractiveMessage } = require("gifted-btns");
 const config = require("../config");
 
 const pendingMenu = Object.create(null);
@@ -161,7 +162,7 @@ function menuHeader(userName = "User") {
 ┃ ✨ Prefix  : ${PREFIX}
 ┗━━━━━━━━━━━━⬣
 
-🎀 Tap a category below to view its commands`;
+🎀 Select a Command List Below`;
 }
 
 function commandListCaption(cat, list, userName = "User") {
@@ -194,25 +195,6 @@ function makeCategoryRows(map, categories) {
       title: `${emo} ${cat} MENU`,
       description: `${map[cat].length} commands available`,
       id: `menu_view:${cat}`,
-    };
-  });
-}
-
-// ✅ NEW: one flat quick_reply button per category, stacked
-// vertically (no cards, no per-category image — avoids the
-// duplicate-header-over-image look the carousel produced).
-// Each button carries the category id, which lands back in
-// messages.upsert via selectedDisplayText/selectedButtonId —
-// already handled by extractTexts()/resolveMenuAction().
-function makeCategoryButtons(map, categories) {
-  return categories.map((cat) => {
-    const emo = getCategoryEmoji(cat);
-    return {
-      name: "quick_reply",
-      buttonParamsJson: JSON.stringify({
-        display_text: `${emo} ${cat}`,
-        id: `menu_view:${cat}`,
-      }),
     };
   });
 }
@@ -299,9 +281,7 @@ function resolveMenuAction(texts, state) {
         text === `${catText} MENU` ||
         text.includes(`${catText} MENU`) ||
         text === `${catText} COMMANDS` ||
-        text.includes(`${catText} COMMANDS`) ||
-        text === `OPEN ${catText}` ||
-        text.includes(`OPEN ${catText}`)
+        text.includes(`${catText} COMMANDS`)
       ) {
         return { type: "view", cat };
       }
@@ -324,24 +304,19 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
-// ✅ NEW: single header image with a flat, stacked button list —
-// one button per category, plus the quick-action row (all
-// categories / website / copy number) appended at the end.
-// No cards, no per-category image, no duplicate header-over-image.
 async function sendMainMenu(sock, from, mek, state, userName) {
-  return sock.sendMessage(
+  return sendInteractiveMessage(
+    sock,
     from,
     {
       image: { url: headerImage },
-      caption: menuHeader(userName),
-      footer: `${BOT_NAME} | ${state.categories.length} categories`,
-      media: true,
+      text: menuHeader(userName),
+      footer: `${BOT_NAME} | Interactive Menu`,
       interactiveButtons: [
-        ...makeCategoryButtons(state.map, state.categories),
         {
           name: "single_select",
           buttonParamsJson: JSON.stringify({
-            title: "📚 All Categories",
+            title: "Click Here ↯",
             sections: [
               {
                 title: "Command Categories",
