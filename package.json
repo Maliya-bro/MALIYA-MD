@@ -10,6 +10,7 @@
     "start": "node index.js"
   },
   "dependencies": {
+    "@nexustechpro/baileys": "latest",
     "@whiskeysockets/baileys": "latest",
     "api-dylux": "latest",
     "axios": "latest",
