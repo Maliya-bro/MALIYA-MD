@@ -63,7 +63,7 @@ function normalizeQuality(t = "") {
   return t.trim() || "Unknown";
 }
 
-// ─── Puppeteer Auto Clicker & Single Download Stream Extractor ────────────────
+// ─── Puppeteer Dynamic Clicker & Stream Extractor (1920x1080) ─────────────────
 
 async function bypassAndGetDirectLink(targetUrl) {
   const customProfileDir = path.join(os.tmpdir(), "puppeteer_real_profile_" + Date.now());
@@ -81,25 +81,34 @@ async function bypassAndGetDirectLink(targetUrl) {
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
-        "--window-size=1280,720"
+        "--window-size=1920,1080" // 🖥️ 1920x1080 Resolution Configuration
       ],
       customConfig: { userDataDir: customProfileDir },
-      connectOption: { defaultViewport: { width: 1280, height: 720 } }
+      connectOption: { defaultViewport: { width: 1920, height: 1080 } }
     });
 
     const processUrl = (url) => {
       if (!url || url === "about:blank" || url.startsWith("data:") || url.startsWith("chrome-extension://")) return;
       if (url.includes("bot3.sonic-cloud.online")) return;
 
-      const isTargetLink = 
-        url.includes("avatarzone") ||
-        url.includes("token=") ||
-        url.includes(".mp4") ||
-        url.includes(".mkv");
+      // Ad Domain / Ad File Extensions Filter
+      const isAd = 
+        url.includes("doubleclick") || 
+        url.includes("googleads") || 
+        url.includes("adsterra") || 
+        url.includes(".apk") || 
+        url.includes(".exe") || 
+        url.includes("pop") || 
+        url.includes("redirect");
 
-      if (isTargetLink && !capturedDirectLink) {
+      // Validating Actual Movie Link
+      const isRealFilm = 
+        url.includes("avatarzone") ||
+        (url.includes("token=") && (url.includes(".mp4") || url.includes(".mkv") || url.includes("ext=mp4")));
+
+      if (isRealFilm && !isAd && !capturedDirectLink) {
         capturedDirectLink = url;
-        console.log(`\n🎯 DIRECT LINK CAPTURED! Stopping further clicks: ${capturedDirectLink}\n`);
+        console.log(`\n🎯 REAL FILM DIRECT LINK CAPTURED: ${capturedDirectLink}\n`);
       }
     };
 
@@ -110,7 +119,6 @@ async function bypassAndGetDirectLink(targetUrl) {
           await cdp.send("Network.enable");
           await cdp.send("Page.enable");
 
-          // Browser File Download Handler
           await cdp.send("Browser.setDownloadBehavior", {
             behavior: "allow",
             downloadPath: "/tmp"
@@ -119,7 +127,6 @@ async function bypassAndGetDirectLink(targetUrl) {
           cdp.on("Network.requestWillBeSent", (e) => processUrl(e.request.url));
           cdp.on("Network.responseReceived", (e) => processUrl(e.response.url));
 
-          // File download trigger detection
           cdp.on("Page.downloadWillBegin", (e) => {
             if (e.url) processUrl(e.url);
           });
@@ -133,29 +140,49 @@ async function bypassAndGetDirectLink(targetUrl) {
     await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
     await new Promise((r) => setTimeout(r, 4000));
 
-    const clickX = 755;
-    for (let currentY = 250; currentY <= 300; currentY += 5) {
-
-      // 🛑 Button Press වුණු සැනින් Duplicate Clicks සිදු නොවී මෙතැනින් නවතී
-      if (capturedDirectLink) {
-        console.log("🛑 Button Triggered Successfully. Stopping click loop.");
-        break;
+    // 🎯 1. Dynamic Button Coordinates Detection in 1920x1080 Viewport
+    const buttonCoords = await page.evaluate(() => {
+      const btn = document.querySelector("a.btn, button.btn, #download-btn, a[href*='download'], .download-button, a.btn-success, a.btn-primary");
+      if (btn) {
+        const rect = btn.getBoundingClientRect();
+        return {
+          x: Math.round(rect.left + rect.width / 2),
+          y: Math.round(rect.top + rect.height / 2)
+        };
       }
+      return null;
+    });
 
-      console.log(`[+] Click Attempt -> X: ${clickX} | Y: ${currentY}`);
+    const targetX = buttonCoords ? buttonCoords.x : 960;
+    const startY = buttonCoords ? buttonCoords.y : 380;
 
-      try {
-        if (page.realCursor) {
-          await page.realCursor.moveTo({ x: clickX, y: currentY });
-          await page.realCursor.click();
-        } else {
-          await page.mouse.move(clickX, currentY, { steps: 3 });
-          await page.mouse.click(clickX, currentY);
+    console.log(`[+] Target Button Center -> X: ${targetX} | Y: ${startY}`);
+
+    // 🎯 2. Dynamic Clicking around Button Area with Auto Break
+    for (let pass = 1; pass <= 2; pass++) {
+      if (capturedDirectLink) break;
+
+      for (let offsetY = -15; offsetY <= 15; offsetY += 5) {
+        if (capturedDirectLink) {
+          console.log("🛑 Real Movie Link captured! Breaking click loop.");
+          break;
         }
-      } catch (err) {}
 
-      // Click එකෙන් පසු Network Event එක Intercept වෙන්න 1.2s මදක් රැඳී සිටියි
-      await new Promise((r) => setTimeout(r, 1200));
+        const currentY = startY + offsetY;
+        console.log(`[+] Click Attempt (Pass ${pass}) -> X: ${targetX} | Y: ${currentY}`);
+
+        try {
+          if (page.realCursor) {
+            await page.realCursor.moveTo({ x: targetX, y: currentY });
+            await page.realCursor.click();
+          } else {
+            await page.mouse.move(targetX, currentY, { steps: 3 });
+            await page.mouse.click(targetX, currentY);
+          }
+        } catch (err) {}
+
+        await new Promise((r) => setTimeout(r, 1200));
+      }
     }
 
     await browser.close().catch(() => {});
