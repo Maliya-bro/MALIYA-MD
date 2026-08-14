@@ -1,7 +1,9 @@
 FROM node:22-slim
 
-# Puppeteer, Chromium සහ XVFB (Virtual Display) සඳහා අවශ්‍ය සියලුම System Libraries Install කිරීම
+# Puppeteer, Chromium, XVFB, Python3 සහ FFmpeg සඳහා අවශ්‍ය සියලුම System Libraries Install කිරීම
 RUN apt-get update && apt-get install -y \
+    python3 \
+    ffmpeg \
     chromium \
     xvfb \
     xauth \
