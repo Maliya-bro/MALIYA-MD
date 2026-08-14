@@ -79,6 +79,7 @@
     "@rindev/lk21dl-core": "latest",
     "webtorrent": "latest",
     "subz.lk": "latest",
-    "baileys_helpers": "latest"
+    "baileys_helpers": "latest",
+    "@distube/ytdl-core": "latest"
   }
 }
