@@ -15,8 +15,8 @@ ffmpeg.setFfprobePath(ffprobePath);
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-const AUDIO_LIMIT_MB = 45;
-const pendingAudioActions = Object.create(null);
+const MEDIA_LIMIT_MB = 45;
+const pendingMediaChoice = Object.create(null);
 
 function makeTempFile(ext = ".mp3") {
   const id = crypto.randomBytes(6).toString("hex");
@@ -56,8 +56,8 @@ function getFileSizeMB(filePath) {
   return stats.size / (1024 * 1024);
 }
 
-function sanitizeFileName(name = "youtube_audio") {
-  return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_audio";
+function sanitizeFileName(name = "youtube_download") {
+  return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_download";
 }
 
 function normalizeText(s = "") {
@@ -140,19 +140,18 @@ function extractTexts(body, mek, m) {
   return [...new Set(texts.filter(Boolean))];
 }
 
-function getAudioActionFromTexts(texts) {
+function extractOptionFromTexts(texts) {
   const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
 
   for (const text of normalized) {
-    if (text.includes("AUDIO:MP3") || text.includes("GET AUDIO")) return "audio";
-    if (text.includes("AUDIO:PTT") || text.includes("GET VOICE NOTE")) return "ptt";
-    if (text.includes("AUDIO:DOC") || text.includes("GET DOCUMENT")) return "doc";
+    if (text.includes("TYPE:AUDIO") || text === "AUDIO" || text === "1") return "audio";
+    if (text.includes("TYPE:DOC") || text === "DOCUMENT" || text === "2") return "doc";
   }
 
   return null;
 }
 
-function buildAudioDetails(video) {
+function buildSongDetails(video) {
   const title = video.title || "Unknown Title";
   const channel = video.author?.name || "Unknown Channel";
   const duration = video.timestamp || formatSeconds(video.seconds) || "0:00";
@@ -163,33 +162,27 @@ function buildAudioDetails(video) {
 
   return `🎵 *${title}*
 
-╭━━━〔 📄 SONG DETAILS 〕━━━╮
+╭━━━〔 📄 AUDIO DETAILS 〕━━━╮
 👤 *Channel:* ${channel}
 🆔 *Video ID:* ${videoId}
 ⏱️ *Duration:* ${duration}
 👀 *Views:* ${views}
 📅 *Uploaded:* ${uploaded}
 🔗 *Link:* ${url}
-╰━━━━━━━━━━━━━━━╯
+╰━━━━━━━━━━━━━━━━━━━━━━━╯
 
 ${generateProgressBar(duration)}`;
 }
 
-function buildFinalAudioCaption(video, mode, sizeMB) {
-  const modeLabel =
-    mode === "audio" ? "Audio" :
-    mode === "ptt" ? "Voice Note" :
-    "Document";
-
+function buildFinalCaption(video, typeLabel, sizeMB) {
   return `╭━〔 ✅ DOWNLOAD COMPLETE 〕━╮
 🎵 *Title:* ${video.title || "Unknown Title"}
 👤 *Channel:* ${video.author?.name || "Unknown Channel"}
-📦 *Type:* ${modeLabel}
+🎧 *Type:* ${typeLabel}
 ⏱️ *Duration:* ${video.timestamp || formatSeconds(video.seconds) || "0:00"}
 👀 *Views:* ${formatViews(video.views)}
-📅 *Uploaded:* ${video.ago || "Unknown"}
-💾 *Size:* ${sizeMB.toFixed(2)} MB
-╰━━━━━━━━━━━━━╯`;
+📦 *Size:* ${sizeMB.toFixed(2)} MB
+╰━━━━━━━━━━━━━━━━━╯`;
 }
 
 async function getYoutube(query) {
@@ -209,78 +202,36 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// ---- Core download logic using yt-dlp-exec ----
-async function downloadAudioWithYtdl(videoUrl, outPath) {
-  await ytDlp(videoUrl, {
-    extractAudio: true,
-    audioFormat: "mp3",
-    output: outPath,
-    ffmpegLocation: ffmpegPath,
-    noWarnings: true,
-    noCheckCertificates: true,
-    addHeader: [
-      "referer:youtube.com",
-      "user-agent:googlebot"
-    ]
-  });
-  return outPath;
-}
-
-// Ensure clean mp3 format with standard parameters if needed
-async function convertToMp3(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
-      .audioCodec("libmp3lame")
-      .audioBitrate("128k")
-      .format("mp3")
-      .on("end", () => resolve(outputPath))
-      .on("error", reject)
-      .save(outputPath);
-  });
-}
-
-async function convertToOpusPTT(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
-      .audioCodec("libopus")
-      .audioBitrate("64k")
-      .audioChannels(1)
-      .audioFrequency(48000)
-      .format("ogg")
-      .on("end", () => resolve(outputPath))
-      .on("error", reject)
-      .save(outputPath);
-  });
-}
-
-async function sendAudioInteractiveButtons(sock, from, mek, video) {
+async function sendInteractiveAudioMenu(sock, from, mek, video) {
   return sendInteractiveMessage(
     sock,
     from,
     {
       image: { url: video.thumbnail },
-      text: buildAudioDetails(video),
-      footer: "MALIYA-MD | Audio Selector",
+      text: buildSongDetails(video),
+      footer: "MALIYA-MD | Audio Downloader",
       interactiveButtons: [
         {
-          name: "quick_reply",
+          name: "single_select",
           buttonParamsJson: JSON.stringify({
-            display_text: "🎵 Get Audio",
-            id: "audio:mp3",
-          }),
-        },
-        {
-          name: "quick_reply",
-          buttonParamsJson: JSON.stringify({
-            display_text: "🎙️ Get Voice Note",
-            id: "audio:ptt",
-          }),
-        },
-        {
-          name: "quick_reply",
-          buttonParamsJson: JSON.stringify({
-            display_text: "📄 Get Document",
-            id: "audio:doc",
+            title: "Select Format ↯",
+            sections: [
+              {
+                title: "Audio Options",
+                rows: [
+                  {
+                    title: "🎶 Audio File (MP3)",
+                    description: "Listen directly in WhatsApp",
+                    id: "type:audio",
+                  },
+                  {
+                    title: "📁 Document File",
+                    description: "Download as MP3 Document",
+                    id: "type:doc",
+                  },
+                ],
+              },
+            ],
           }),
         },
       ],
@@ -289,143 +240,95 @@ async function sendAudioInteractiveButtons(sock, from, mek, video) {
   );
 }
 
-function isDuplicateAction(state, action) {
-  const now = Date.now();
-  const sig = `audio:${action}`;
-
-  if (state.lastActionSig === sig && now - (state.lastActionAt || 0) < 5000) {
-    return true;
-  }
-
-  state.lastActionSig = sig;
-  state.lastActionAt = now;
-  return false;
-}
-
-async function handleAudioAction(sock, mek, from, sender, reply, actionRaw) {
+async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice) {
   const key = makePendingKey(sender, from);
-  const pending = pendingAudioActions[key];
+  const pending = pendingMediaChoice[key];
   if (!pending) return;
 
-  const action =
-    actionRaw === "audio" || actionRaw === "ptt" || actionRaw === "doc"
-      ? actionRaw
-      : null;
-
-  if (!action) return;
   if (pending.isProcessing) return;
-  if (isDuplicateAction(pending, action)) return;
-
   pending.isProcessing = true;
 
-  let rawStreamFile = null;
-  let mp3File = null;
-  let pttFile = null;
+  let audioFile = null;
 
   try {
-    const actionLabel =
-      action === "audio" ? "audio" :
-      action === "ptt" ? "voice note" :
-      "document";
+    const isDoc = optionChoice === "doc";
+    const label = isDoc ? "Document" : "Audio";
 
-    await reply(`⬇️ Downloading *${actionLabel}*...`);
+    await reply(`⬇️ Downloading *${label}*...`);
 
-    // Download direct MP3 via yt-dlp-exec
-    mp3File = makeTempFile(".mp3");
-    await downloadAudioWithYtdl(pending.video.url, mp3File);
+    audioFile = makeTempFile(".mp3");
 
-    const sizeMB = getFileSizeMB(mp3File);
+    // Stable yt-dlp-exec extraction
+    await ytDlp(pending.video.url, {
+      extractAudio: true,
+      audioFormat: "mp3",
+      audioQuality: "0",
+      output: audioFile,
+      noWarnings: true,
+      noCheckCertificates: true,
+      addHeader: [
+        "referer:youtube.com",
+        "user-agent:googlebot"
+      ]
+    });
+
+    if (!fs.existsSync(audioFile) || fs.statSync(audioFile).size === 0) {
+      throw new Error("Downloaded file is missing or empty.");
+    }
+
+    const sizeMB = getFileSizeMB(audioFile);
     const cleanTitle = sanitizeFileName(pending.video.title);
 
-    if (sizeMB > AUDIO_LIMIT_MB && action !== "doc") {
+    if (isDoc || sizeMB > MEDIA_LIMIT_MB) {
       await sock.sendMessage(
         from,
         {
-          document: fs.readFileSync(mp3File),
+          document: fs.readFileSync(audioFile),
           mimetype: "audio/mpeg",
           fileName: `${cleanTitle}.mp3`,
-          caption: buildFinalAudioCaption(pending.video, "doc", sizeMB),
+          caption: buildFinalCaption(pending.video, "Document MP3", sizeMB),
         },
         { quoted: mek }
       );
-
-      delete pendingAudioActions[key];
-      return;
-    }
-
-    if (action === "audio") {
+    } else {
       await sock.sendMessage(
         from,
         {
-          audio: fs.readFileSync(mp3File),
+          audio: fs.readFileSync(audioFile),
           mimetype: "audio/mpeg",
           fileName: `${cleanTitle}.mp3`,
-        },
-        { quoted: mek }
-      );
-
-      await reply(buildFinalAudioCaption(pending.video, "audio", sizeMB));
-    }
-
-    if (action === "ptt") {
-      pttFile = makeTempFile(".ogg");
-      await reply("🎙️ Converting to voice note...");
-      await convertToOpusPTT(mp3File, pttFile);
-
-      await sock.sendMessage(
-        from,
-        {
-          audio: fs.readFileSync(pttFile),
-          mimetype: "audio/ogg; codecs=opus",
-          ptt: true,
-        },
-        { quoted: mek }
-      );
-
-      await reply(buildFinalAudioCaption(pending.video, "ptt", sizeMB));
-    }
-
-    if (action === "doc") {
-      await sock.sendMessage(
-        from,
-        {
-          document: fs.readFileSync(mp3File),
-          mimetype: "audio/mpeg",
-          fileName: `${cleanTitle}.mp3`,
-          caption: buildFinalAudioCaption(pending.video, "doc", sizeMB),
+          caption: buildFinalCaption(pending.video, "Audio MP3", sizeMB),
+          ptt: false,
         },
         { quoted: mek }
       );
     }
 
-    delete pendingAudioActions[key];
+    delete pendingMediaChoice[key];
   } catch (e) {
-    console.log("AUDIO ACTION ERROR:", e && e.message, e && e.stack);
+    console.log("AUDIO DOWNLOAD ERROR:", e && e.message);
     reply("❌ Error while downloading/sending audio.");
-    delete pendingAudioActions[key];
+    delete pendingMediaChoice[key];
   } finally {
-    safeUnlink(rawStreamFile);
-    safeUnlink(mp3File);
-    safeUnlink(pttFile);
-
-    if (pendingAudioActions[key]) {
-      pendingAudioActions[key].isProcessing = false;
+    safeUnlink(audioFile);
+    if (pendingMediaChoice[key]) {
+      pendingMediaChoice[key].isProcessing = false;
     }
   }
 }
 
 cmd(
   {
-    pattern: "audio",
-    alias: ["ytmp3", "song", "play", "adl"],
+    pattern: "song",
+    alias: ["play", "ytmp3", "yta"],
     react: "🎵",
-    desc: "Download YouTube audio with 3 direct buttons",
+    desc: "Download YouTube audio with options",
     category: "download",
     filename: __filename,
   },
   async (sock, mek, m, { from, q, sender, reply }) => {
     try {
-      if (!q) return reply("🎵 Please provide a YouTube link or song name.");
+      if (!q) return reply("🎵 Please provide a song name or YouTube link.");
 
       await reply("🔍 Searching Audio...");
 
@@ -434,19 +337,17 @@ cmd(
 
       const key = makePendingKey(sender, from);
 
-      pendingAudioActions[key] = {
+      pendingMediaChoice[key] = {
         video,
         from,
         createdAt: Date.now(),
         isProcessing: false,
-        lastActionSig: "",
-        lastActionAt: 0,
       };
 
-      await sendAudioInteractiveButtons(sock, from, mek, video);
+      await sendInteractiveAudioMenu(sock, from, mek, video);
     } catch (e) {
-      console.log("AUDIO MENU ERROR:", e && e.message, e && e.stack);
-      reply("❌ Error while preparing audio buttons.");
+      console.log("SONG MENU ERROR:", e && e.message);
+      reply("❌ Error while preparing audio menu.");
     }
   }
 );
@@ -454,21 +355,24 @@ cmd(
 replyHandlers.push({
   filter: (_body, { sender, from }) => {
     const key = makePendingKey(sender, from);
-    return !!pendingAudioActions[key];
+    return !!pendingMediaChoice[key];
   },
 
   function: async (sock, mek, m, { from, body, sender, reply }) => {
     const key = makePendingKey(sender, from);
-    const pending = pendingAudioActions[key];
-    if (!pending) return;
-    if (pending.isProcessing) return;
+    const pending = pendingMediaChoice[key];
+    if (!pending || pending.isProcessing) return;
 
     const texts = extractTexts(body, mek, m);
-    const action = getAudioActionFromTexts(texts);
+    let choice = extractOptionFromTexts(texts);
 
-    if (!action) return;
+    if (!choice && /^[1-2]$/.test(String(body || "").trim())) {
+      choice = body.trim() === "1" ? "audio" : "doc";
+    }
 
-    return handleAudioAction(sock, mek, from, sender, reply, action);
+    if (!choice) return;
+
+    return handleAudioDownload(sock, mek, from, sender, reply, choice);
   },
 });
 
@@ -476,9 +380,9 @@ setInterval(() => {
   const now = Date.now();
   const timeout = 2 * 60 * 1000;
 
-  for (const key of Object.keys(pendingAudioActions)) {
-    if (now - pendingAudioActions[key].createdAt > timeout) {
-      delete pendingAudioActions[key];
+  for (const key of Object.keys(pendingMediaChoice)) {
+    if (now - pendingMediaChoice[key].createdAt > timeout) {
+      delete pendingMediaChoice[key];
     }
   }
 }, 30000);
