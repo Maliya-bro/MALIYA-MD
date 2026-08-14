@@ -1,7 +1,6 @@
 const { cmd, replyHandlers } = require("../command");
-const { ytmp3 } = require("sadaslk-dlcore");
+const ytdl = require("@distube/ytdl-core");
 const yts = require("yt-search");
-const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -210,21 +209,40 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-async function downloadFile(url, outPath) {
-  const res = await axios({
-    url,
-    method: "GET",
-    responseType: "stream",
-    timeout: 180000,
-    headers: { "User-Agent": "Mozilla/5.0" },
-    maxRedirects: 5,
-  });
+// ---- Core download logic using @distube/ytdl-core ----
+// Downloads the best available audio-only stream to rawMp3Path (as .m4a/.webm container,
+// then ffmpeg below re-encodes it to real mp3).
+async function downloadAudioWithYtdl(videoUrl, outPath) {
+  const info = await ytdl.getInfo(videoUrl);
+
+  const format = ytdl.chooseFormat(info.formats, { quality: "highestaudio", filter: "audioonly" });
+  if (!format) {
+    throw new Error("No audio-only format available for this video.");
+  }
 
   return new Promise((resolve, reject) => {
+    const stream = ytdl.downloadFromInfo(info, { format });
     const writer = fs.createWriteStream(outPath);
-    res.data.pipe(writer);
-    writer.on("finish", () => resolve(outPath));
+
+    stream.on("error", reject);
     writer.on("error", reject);
+    writer.on("finish", () => resolve(outPath));
+
+    stream.pipe(writer);
+  });
+}
+
+// Re-encode whatever container ytdl gave us into a clean mp3 (also normalizes
+// container issues, since ytdl audio-only streams are usually webm/m4a, not mp3).
+async function convertToMp3(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .audioCodec("libmp3lame")
+      .audioBitrate("128k")
+      .format("mp3")
+      .on("end", () => resolve(outputPath))
+      .on("error", reject)
+      .save(outputPath);
   });
 }
 
@@ -307,7 +325,8 @@ async function handleAudioAction(sock, mek, from, sender, reply, actionRaw) {
 
   pending.isProcessing = true;
 
-  let rawMp3 = null;
+  let rawStreamFile = null;
+  let mp3File = null;
   let pttFile = null;
 
   try {
@@ -318,24 +337,20 @@ async function handleAudioAction(sock, mek, from, sender, reply, actionRaw) {
 
     await reply(`⬇️ Downloading *${actionLabel}*...`);
 
-    const data = await ytmp3(pending.video.url);
+    rawStreamFile = makeTempFile(".raw");
+    await downloadAudioWithYtdl(pending.video.url, rawStreamFile);
 
-    if (!data?.url) {
-      delete pendingAudioActions[key];
-      return reply("❌ Failed to download audio.");
-    }
+    mp3File = makeTempFile(".mp3");
+    await convertToMp3(rawStreamFile, mp3File);
 
-    rawMp3 = makeTempFile(".mp3");
-    await downloadFile(data.url, rawMp3);
-
-    const sizeMB = getFileSizeMB(rawMp3);
+    const sizeMB = getFileSizeMB(mp3File);
     const cleanTitle = sanitizeFileName(pending.video.title);
 
     if (sizeMB > AUDIO_LIMIT_MB && action !== "doc") {
       await sock.sendMessage(
         from,
         {
-          document: fs.readFileSync(rawMp3),
+          document: fs.readFileSync(mp3File),
           mimetype: "audio/mpeg",
           fileName: `${cleanTitle}.mp3`,
           caption: buildFinalAudioCaption(pending.video, "doc", sizeMB),
@@ -351,7 +366,7 @@ async function handleAudioAction(sock, mek, from, sender, reply, actionRaw) {
       await sock.sendMessage(
         from,
         {
-          audio: fs.readFileSync(rawMp3),
+          audio: fs.readFileSync(mp3File),
           mimetype: "audio/mpeg",
           fileName: `${cleanTitle}.mp3`,
         },
@@ -364,7 +379,7 @@ async function handleAudioAction(sock, mek, from, sender, reply, actionRaw) {
     if (action === "ptt") {
       pttFile = makeTempFile(".ogg");
       await reply("🎙️ Converting to voice note...");
-      await convertToOpusPTT(rawMp3, pttFile);
+      await convertToOpusPTT(mp3File, pttFile);
 
       await sock.sendMessage(
         from,
@@ -383,7 +398,7 @@ async function handleAudioAction(sock, mek, from, sender, reply, actionRaw) {
       await sock.sendMessage(
         from,
         {
-          document: fs.readFileSync(rawMp3),
+          document: fs.readFileSync(mp3File),
           mimetype: "audio/mpeg",
           fileName: `${cleanTitle}.mp3`,
           caption: buildFinalAudioCaption(pending.video, "doc", sizeMB),
@@ -394,11 +409,12 @@ async function handleAudioAction(sock, mek, from, sender, reply, actionRaw) {
 
     delete pendingAudioActions[key];
   } catch (e) {
-    console.log("AUDIO ACTION ERROR:", e);
+    console.log("AUDIO ACTION ERROR:", e && e.message, e && e.stack);
     reply("❌ Error while downloading/sending audio.");
     delete pendingAudioActions[key];
   } finally {
-    safeUnlink(rawMp3);
+    safeUnlink(rawStreamFile);
+    safeUnlink(mp3File);
     safeUnlink(pttFile);
 
     if (pendingAudioActions[key]) {
@@ -438,7 +454,7 @@ cmd(
 
       await sendAudioInteractiveButtons(sock, from, mek, video);
     } catch (e) {
-      console.log("AUDIO MENU ERROR:", e);
+      console.log("AUDIO MENU ERROR:", e && e.message, e && e.stack);
       reply("❌ Error while preparing audio buttons.");
     }
   }
