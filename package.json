@@ -4,7 +4,7 @@
   "description": "A Powerfull AI Whatsapp Bot",
   "main": "index.js",
   "engines": {
-    "node": "20.x"
+    "node": ">=22.0.0"
   },
   "scripts": {
     "start": "node index.js"
@@ -25,14 +25,10 @@
     "node-fetch": "latest",
     "node-id3": "latest",
     "node-webpmux": "latest",
-    "path": "latest",
     "pino": "latest",
     "pm2": "latest",
-    "punycode": "latest",
     "qrcode-terminal": "latest",
     "tmp": "latest",
-    "util": "latest",
-    "vm": "latest",
     "@mrnima/tiktok-downloader": "latest",
     "jimp": "latest",
     "genius-lyrics": "latest",
@@ -52,15 +48,11 @@
     "gifted-btns": "latest",
     "mongodb": "latest",
     "xnxx-scraper": "latest",
-    "http": "latest",
-    "https": "latest",
     "@soyaxell09/zenbot-scraper": "latest",
     "qrcode": "latest",
     "cors": "latest",
     "mime-types": "latest",
     "cinesubz-scraper": "latest",
-    "stream": "latest",
-    "child_process": "latest",
     "lk21dl-core": "latest",
     "@gradio/client": "latest",
     "sharp": "latest",
