@@ -1,0 +1,44 @@
+{
+  "providers": ["node"],
+  "nixPkgs": [
+    "nodejs_22",
+    "python3",
+    "python3Packages.pip",
+    "ffmpeg",
+    "yt-dlp",
+    "chromium",
+    "xorg.xvfb",
+    "xorg.xauth",
+    "x11vnc",
+    "xterm",
+    "nss",
+    "atk",
+    "at-spi2-atk",
+    "cups",
+    "libdrm",
+    "libxkbcommon",
+    "xorg.libXcomposite",
+    "xorg.libXdamage",
+    "xorg.libXfixes",
+    "xorg.libXrandr",
+    "mesa",
+    "alsa-lib",
+    "pango",
+    "cairo",
+    "libexif"
+  ],
+  "variables": {
+    "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD": "true",
+    "PUPPETEER_EXECUTABLE_PATH": "/nix/store/chromium/bin/chromium"
+  },
+  "phases": {
+    "setup": {
+      "nixPkgs": [
+        "..."
+      ]
+    }
+  },
+  "start": {
+    "cmd": "xvfb-run --server-args='-screen 0 1280x720x24' node index.js"
+  }
+}
