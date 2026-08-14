@@ -1,7 +1,6 @@
 const { cmd, replyHandlers } = require("../command");
-const { ytmp4 } = require("sadaslk-dlcore");
+const ytDlp = require("yt-dlp-exec");
 const yts = require("yt-search");
-const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -272,22 +271,24 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-async function downloadFile(url, outPath) {
-  const res = await axios({
-    url,
-    method: "GET",
-    responseType: "stream",
-    timeout: 180000,
-    headers: { "User-Agent": "Mozilla/5.0" },
-    maxRedirects: 5,
+// ---- Core download logic using yt-dlp-exec ----
+async function downloadVideoWithYtdl(videoUrl, quality, outPath) {
+  // Quality Selection Format: closest height matching requested quality
+  const formatStr = `bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}][ext=mp4]/best`;
+
+  await ytDlp(videoUrl, {
+    format: formatStr,
+    output: outPath,
+    ffmpegLocation: ffmpegPath,
+    noWarnings: true,
+    noCheckCertificates: true,
+    addHeader: [
+      "referer:youtube.com",
+      "user-agent:googlebot"
+    ]
   });
 
-  return new Promise((resolve, reject) => {
-    const writer = fs.createWriteStream(outPath);
-    res.data.pipe(writer);
-    writer.on("finish", () => resolve(outPath));
-    writer.on("error", reject);
-  });
+  return outPath;
 }
 
 async function reencodeForWhatsApp(inputPath, outputPath) {
@@ -395,20 +396,12 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
   try {
     await reply(`⬇️ Downloading *${qualityLabel}* video...`);
 
-    const data = await ytmp4(pending.video.url, {
-      format: "mp4",
-      videoQuality: quality,
-    });
-
-    if (!data?.url) {
-      delete pendingVideoQuality[key];
-      return reply("❌ Failed to download selected quality video.");
-    }
-
     rawFile = makeTempFile(".mp4");
     fixedFile = makeTempFile(".mp4");
 
-    await downloadFile(data.url, rawFile);
+    // Direct download via yt-dlp-exec
+    await downloadVideoWithYtdl(pending.video.url, quality, rawFile);
+
     await reply("🛠 Converting video for phone support...");
     await reencodeForWhatsApp(rawFile, fixedFile);
 
@@ -442,7 +435,7 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
 
     delete pendingVideoQuality[key];
   } catch (e) {
-    console.log("VIDEO QUALITY ERROR:", e);
+    console.log("VIDEO QUALITY ERROR:", e && e.message, e && e.stack);
     reply("❌ Error while downloading/converting selected quality video.");
     delete pendingVideoQuality[key];
   } finally {
@@ -486,7 +479,7 @@ cmd(
 
       await sendQualityInteractiveMenu(sock, from, mek, video);
     } catch (e) {
-      console.log("VIDEO MENU ERROR:", e);
+      console.log("VIDEO MENU ERROR:", e && e.message, e && e.stack);
       reply("❌ Error while preparing video menu.");
     }
   }
@@ -511,7 +504,7 @@ replyHandlers.push({
       quality = getQualityFromChoice(body);
     }
 
-    if (!quality) return; // unrelated message නම් ignore
+    if (!quality) return;
 
     return handleVideoQualityDownload(sock, mek, from, sender, reply, quality);
   },
