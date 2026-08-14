@@ -1,5 +1,5 @@
 const { cmd, replyHandlers } = require("../command");
-const ytdl = require("@distube/ytdl-core");
+const ytDlp = require("yt-dlp-exec");
 const yts = require("yt-search");
 const fs = require("fs");
 const path = require("path");
@@ -209,31 +209,24 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// ---- Core download logic using @distube/ytdl-core ----
-// Downloads the best available audio-only stream to rawMp3Path (as .m4a/.webm container,
-// then ffmpeg below re-encodes it to real mp3).
+// ---- Core download logic using yt-dlp-exec ----
 async function downloadAudioWithYtdl(videoUrl, outPath) {
-  const info = await ytdl.getInfo(videoUrl);
-
-  const format = ytdl.chooseFormat(info.formats, { quality: "highestaudio", filter: "audioonly" });
-  if (!format) {
-    throw new Error("No audio-only format available for this video.");
-  }
-
-  return new Promise((resolve, reject) => {
-    const stream = ytdl.downloadFromInfo(info, { format });
-    const writer = fs.createWriteStream(outPath);
-
-    stream.on("error", reject);
-    writer.on("error", reject);
-    writer.on("finish", () => resolve(outPath));
-
-    stream.pipe(writer);
+  await ytDlp(videoUrl, {
+    extractAudio: true,
+    audioFormat: "mp3",
+    output: outPath,
+    ffmpegLocation: ffmpegPath,
+    noWarnings: true,
+    noCheckCertificates: true,
+    addHeader: [
+      "referer:youtube.com",
+      "user-agent:googlebot"
+    ]
   });
+  return outPath;
 }
 
-// Re-encode whatever container ytdl gave us into a clean mp3 (also normalizes
-// container issues, since ytdl audio-only streams are usually webm/m4a, not mp3).
+// Ensure clean mp3 format with standard parameters if needed
 async function convertToMp3(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     ffmpeg(inputPath)
@@ -337,11 +330,9 @@ async function handleAudioAction(sock, mek, from, sender, reply, actionRaw) {
 
     await reply(`⬇️ Downloading *${actionLabel}*...`);
 
-    rawStreamFile = makeTempFile(".raw");
-    await downloadAudioWithYtdl(pending.video.url, rawStreamFile);
-
+    // Download direct MP3 via yt-dlp-exec
     mp3File = makeTempFile(".mp3");
-    await convertToMp3(rawStreamFile, mp3File);
+    await downloadAudioWithYtdl(pending.video.url, mp3File);
 
     const sizeMB = getFileSizeMB(mp3File);
     const cleanTitle = sanitizeFileName(pending.video.title);
