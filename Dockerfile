@@ -1,8 +1,9 @@
 FROM node:22-slim
 
-# Puppeteer, Chromium, XVFB, Python3 සහ FFmpeg සඳහා අවශ්‍ය සියලුම System Libraries Install කිරීම
+# Puppeteer, Chromium, XVFB, Python3, python-is-python3 සහ FFmpeg install කිරීම
 RUN apt-get update && apt-get install -y \
     python3 \
+    python-is-python3 \
     ffmpeg \
     chromium \
     xvfb \
@@ -29,7 +30,6 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Puppeteer එක අලුතෙන් Chromium Download නොකර Linux System Chromium එක භාවිත කිරීමට Set කිරීම
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
@@ -38,5 +38,4 @@ RUN npm install
 
 COPY . .
 
-# Virtual Screen Size එක 1280x720 (Standard Desktop Viewport) ලෙස Set කර Run කිරීම
 CMD ["xvfb-run", "--server-args=-screen 0 1280x720x24", "node", "index.js"]
