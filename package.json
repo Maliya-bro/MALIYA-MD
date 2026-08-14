@@ -80,6 +80,7 @@
     "webtorrent": "latest",
     "subz.lk": "latest",
     "baileys_helpers": "latest",
-    "@distube/ytdl-core": "latest"
+    "@distube/ytdl-core": "latest",
+    "yt-dlp-exec": "latest"
   }
 }
