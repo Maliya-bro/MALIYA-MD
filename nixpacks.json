@@ -3,7 +3,6 @@
   "nixPkgs": [
     "nodejs_22",
     "python3",
-    "python3Packages.pip",
     "ffmpeg",
     "yt-dlp",
     "chromium",
@@ -28,15 +27,16 @@
     "libexif"
   ],
   "variables": {
+    "NIXPACKS_NODE_VERSION": "22",
     "NODE_VERSION": "22",
     "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD": "true",
-    "PUPPETEER_EXECUTABLE_PATH": "/nix/store/chromium/bin/chromium"
+    "PUPPETEER_EXECUTABLE_PATH": "/root/.nix-profile/bin/chromium"
   },
   "phases": {
     "setup": {
       "cmds": [
-        "mkdir -p /usr/bin",
-        "ln -sf $(which python3) /usr/bin/python || true"
+        "mkdir -p /usr/local/bin",
+        "ln -sf $(which python3) /usr/local/bin/python"
       ]
     }
   },
