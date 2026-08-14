@@ -28,15 +28,14 @@
   ],
   "variables": {
     "NIXPACKS_NODE_VERSION": "22",
-    "NODE_VERSION": "22",
     "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD": "true",
     "PUPPETEER_EXECUTABLE_PATH": "/root/.nix-profile/bin/chromium"
   },
   "phases": {
     "setup": {
       "cmds": [
-        "mkdir -p /usr/local/bin",
-        "ln -sf $(which python3) /usr/local/bin/python"
+        "ln -sf /root/.nix-profile/bin/python3 /root/.nix-profile/bin/python",
+        "ln -sf /nix/var/nix/profiles/default/bin/python3 /nix/var/nix/profiles/default/bin/python || true"
       ]
     }
   },
