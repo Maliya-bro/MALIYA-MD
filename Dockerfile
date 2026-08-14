@@ -1,10 +1,12 @@
 FROM node:22-slim
 
-# Puppeteer, Chromium, XVFB, Python3, python-is-python3 සහ FFmpeg install කිරීම
+# Install system dependencies including Python, FFmpeg, and yt-dlp
 RUN apt-get update && apt-get install -y \
     python3 \
     python-is-python3 \
     ffmpeg \
+    yt-dlp \
+    ca-certificates \
     chromium \
     xvfb \
     xauth \
