@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["nodejs_22", "python3", "ffmpeg", "libwebp", "pkg-config", "cairo", "pango", "libjpeg", "giflib", "librsvg"]
+
+[phases.install]
+cmds = ["npm install --production=false"]
+
+[start]
+cmd = "npm start"
