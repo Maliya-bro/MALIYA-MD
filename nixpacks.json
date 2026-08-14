@@ -28,13 +28,15 @@
     "libexif"
   ],
   "variables": {
+    "NODE_VERSION": "22",
     "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD": "true",
     "PUPPETEER_EXECUTABLE_PATH": "/nix/store/chromium/bin/chromium"
   },
   "phases": {
     "setup": {
-      "nixPkgs": [
-        "..."
+      "cmds": [
+        "mkdir -p /usr/bin",
+        "ln -sf $(which python3) /usr/bin/python || true"
       ]
     }
   },
