@@ -6,7 +6,7 @@ const { readSettings } = require("../lib/botSettings");
 const pendingMenu = Object.create(null);
 
 /* ============ CONFIG ============ */
-const BOT_NAME = "𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻"; 
+const BOT_NAME = "𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
@@ -138,30 +138,35 @@ function buildCommandMapCached() {
 
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
-  return `╭━━━〔 𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻 〕━━━╮
-  👤 User   : ${userName}
-  👑 Owner  : ${OWNER_NUMBER}
-  🕒 Time   : ${time}
-  📅 Date   : ${date}
-  ✨ Prefix : ${PREFIX}
-╰━━━━━━━━━━━━━━━━━━╯
+  return `👋 HI ${userName}
+
+┏━〔 BOT'S MENU 〕━⬣
+┃ 🤖 Bot     : ${BOT_NAME}
+┃ 👤 User    : ${userName}
+┃ 👑 Owner   : ${OWNER_NUMBER}
+┃ 🕒 Time    : ${time}
+┃ 📅 Date    : ${date}
+┃ ✨ Prefix  : ${PREFIX}
+┗━━━━━━━━━━━━⬣
+
 🎀 Select a Command List Below`;
 }
 
 function commandListCaption(cat, list, userName = "User") {
   const emo = getCategoryEmoji(cat);
-  let txt = `╭━━━〔 ${emo} ${cat} 〕━━━╮\n`;
-  txt += ` 📦 Total : ${list.length}\n`;
-  txt += ` ✨ Prefix: ${PREFIX}\n`;
-  txt += `╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+  let txt = `👋 HI ${userName}\n\n`;
+  txt += `┏━〔 ${emo} ${cat} COMMANDS 〕━⬣\n`;
+  txt += `┃ 📦 Total : ${list.length}\n`;
+  txt += `┃ ✨ Prefix: ${PREFIX}\n`;
+  txt += `┗━━━━━━━━━━━━⬣\n\n`;
   list.forEach((c) => {
     const primary = c.pattern ? `${PREFIX}${c.pattern}` : "No Pattern";
     const aliases = (c.alias || []).filter(Boolean).map((a) => `${PREFIX}${a}`);
-    txt += `▫️ *${primary}*\n`;
-    if (aliases.length) txt += `   • Aliases: ${aliases.join(", ")}\n`;
-    txt += `   • ${c.desc || "No description"}\n\n`;
+    txt += `• *${primary}*\n`;
+    if (aliases.length) txt += `   ◦ Aliases: ${aliases.join(", ")}\n`;
+    txt += `   ⭕ ${c.desc || "No description"}\n\n`;
   });
-  txt += `─────── • 👑 • ───────\n`;
+  txt += `━━━━━━━━━━━━━━━━━━\n`;
   txt += `👑 Owner: ${OWNER_NUMBER}`;
   return txt;
 }
@@ -262,23 +267,25 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
-// Phone Screen Friendly Main Menu (Boxed Compact Design)
+// ----- Build a beautifully styled numbered main menu -----
 function buildStyledMainMenu(state, userName) {
   const { categories } = state;
-  let msg = `╭━━━〔 𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻 〕━━━╮\n`;
-  msg += `│ 👤 User : ${userName}\n`;
-  msg += `│ 👑 Owner : ${OWNER_NAME}\n`;
-  msg += `╰━━━━━━━━━━━━━━━━━━╯\n\n`;
-  msg += `┌───〔 CATEGORIES 〕───┐\n`;
+  const line = "━━━━━━━━━━━━━━━━━━━━━━━━━";
+  let msg = `╔═════════════════════════════════════╗\n`;
+  msg += `║  ★彡 𝕄𝔼ℕ𝕌 彡★  ║\n`;
+  msg += `╚═════════════════════════════════════╝\n\n`;
+  msg += `👋 *Hi ${userName}*\n\n`;
+  msg += line + "\n";
   categories.forEach((cat, idx) => {
     const emo = getCategoryEmoji(cat);
-    msg += `│ [${idx + 1}] ${emo} ${cat}\n`;
+    msg += `*${idx+1}.* ${emo} ${cat} (${state.map[cat].length} commands)\n`;
   });
-  msg += `└━━━━━━━━━━━━━━━━━━┘\n\n`;
-  msg += `📌 *Reply with category number.*`;
+  msg += line + "\n\n";
+  msg += `📌 *Reply with the number of the category.*`;
   return msg;
 }
 
+// ----- Send numbered main menu with image and styled text -----
 async function sendNumberedMainMenu(sock, from, mek, state, userName) {
   const caption = buildStyledMainMenu(state, userName);
   return sock.sendMessage(
@@ -292,7 +299,7 @@ async function sendNumberedMainMenu(sock, from, mek, state, userName) {
 }
 
 async function sendMainMenu(sock, from, mek, state, userName) {
-  const settings = readSettings();
+  const settings = await readSettings(); // <--- FIXED: async/await
   const btnsOn = !!settings.btns_enabled;
 
   if (btnsOn && sendInteractiveMessage) {
@@ -340,6 +347,7 @@ async function sendMainMenu(sock, from, mek, state, userName) {
     }
   }
 
+  // Numbered menu fallback (always works)
   return sendNumberedMainMenu(sock, from, mek, state, userName);
 }
 
