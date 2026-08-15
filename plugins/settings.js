@@ -58,7 +58,6 @@ function btnsModeText(val) {
   return val ? "🔘 ɪɴᴛᴇʀᴀᴄᴛɪᴠᴇ ʙᴜᴛᴛᴏɴs" : "🔢 ɴᴜᴍʙᴇʀ ʀᴇᴘʟʏ (ᴛᴇxᴛ ᴍᴇɴᴜ)";
 }
 
-// ✅ FIX: Made async
 async function getStatusCard(sessionId) {
   const s = await readSettings(sessionId);
   return `
@@ -181,7 +180,6 @@ function isDuplicateAction(state, sig) {
   return false;
 }
 
-// ✅ FIX: Made async
 async function applySettingAction(sessionId, action, value) {
   if (action === "status") {
     return await getStatusCard(sessionId);
@@ -342,10 +340,9 @@ function resolveSettingsActionFromText(text = "") {
   return null;
 }
 
-// ----- Helper: build a beautifully styled numbered menu with fancy fonts -----
-function buildStyledMenu(title, options, footer = "") {
-  let msg = `\n`;
-  msg += `┌───❮ 👑 *${title.toUpperCase()}* 👑 ❯───\n`;
+// ----- Helper: build options menu (added below status card) -----
+function buildOptionsMenu(options, footer = "") {
+  let msg = `\n┌───❮ 👑 *ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ* 👑 ❯───\n`;
   msg += `│\n`;
   options.forEach((opt, idx) => {
     const num = String(idx + 1).padStart(2, '0');
@@ -354,13 +351,13 @@ function buildStyledMenu(title, options, footer = "") {
   msg += `│\n`;
   msg += `└───❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ* ❯───\n`;
   if (footer) msg += `\n*${footer}*`;
-
   return msg;
 }
 
-// ----- Send numbered menu with image and styled text -----
-async function sendNumberedMenu(conn, from, mek, title, options, footer = "", imageUrl = SETTINGS_IMAGE) {
-  const caption = buildStyledMenu(title, options, footer);
+// ----- Send numbered menu: headerText (status card) on top, options below -----
+async function sendNumberedMenu(conn, from, mek, headerText, options, footer = "", imageUrl = SETTINGS_IMAGE) {
+  let caption = headerText + "\n\n";
+  caption += buildOptionsMenu(options, footer);
   return conn.sendMessage(
     from,
     {
@@ -386,7 +383,6 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
   const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
-  // ✅ If buttons are enabled, show interactive buttons
   if (btnsOn && sendInteractiveMessage) {
     try {
       return await sendInteractiveMessage(
@@ -420,7 +416,6 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     }
   }
 
-  // ✅ Numbered menu fallback (always works)
   const options = [
     { label: "⚙️ Change Settings", action: "menuopen" },
     { label: "📊 Show Full Status", action: "status" },
@@ -430,7 +425,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     conn,
     from,
     mek,
-    text + "\n\n✨ *ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ:*",
+    text + "\n✨ *ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ:*",
     options,
     "© MALIYA-MD",
     SETTINGS_IMAGE
@@ -453,7 +448,6 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
   const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
-  // ✅ If buttons are enabled, show interactive buttons
   if (btnsOn && sendInteractiveMessage) {
     try {
       return await sendInteractiveMessage(
@@ -546,7 +540,6 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
     }
   }
 
-  // ✅ Numbered menu fallback (always works)
   const allOptions = [
     { label: "🌐 Public Mode", action: "public" },
     { label: "🔒 Private Mode", action: "private" },
