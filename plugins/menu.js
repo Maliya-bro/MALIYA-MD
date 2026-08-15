@@ -1,6 +1,7 @@
 const { cmd, commands } = require("../command");
 const { sendInteractiveMessage } = require("gifted-btns");
 const config = require("../config");
+const { readSettings } = require("../lib/botSettings");
 
 const pendingMenu = Object.create(null);
 
@@ -52,24 +53,20 @@ function getUserName(pushname, m, mek, sender = "") {
     m?.chatName,
     mek?.chatName,
   ];
-
   for (const item of candidates) {
     if (item && String(item).trim()) {
       return String(item).trim();
     }
   }
-
   if (sameNumber(sender.split("@")[0].split(":")[0], OWNER_NUMBER)) {
     return OWNER_NAME;
   }
-
   const num = String(sender || "").split("@")[0].split(":")[0];
   return num || "User";
 }
 
 function nowLK() {
   const d = new Date();
-
   const time = new Intl.DateTimeFormat("en-GB", {
     timeZone: TZ,
     hour: "2-digit",
@@ -77,14 +74,12 @@ function nowLK() {
     second: "2-digit",
     hour12: true,
   }).format(d);
-
   const date = new Intl.DateTimeFormat("en-GB", {
     timeZone: TZ,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   }).format(d);
-
   return { time, date };
 }
 
@@ -99,7 +94,6 @@ function normalizeText(s = "") {
 
 function getCategoryEmoji(cat) {
   const c = String(cat || "").toUpperCase();
-
   if (c.includes("DOWNLOAD")) return "📥";
   if (c.includes("AI")) return "🤖";
   if (c.includes("ANIME")) return "🍥";
@@ -119,7 +113,6 @@ function getCategoryEmoji(cat) {
   if (c.includes("STICKER")) return "🖼️";
   if (c.includes("CONVERT")) return "♻️";
   if (c.includes("UTILITY")) return "🧰";
-
   return "✨";
 }
 
@@ -128,21 +121,16 @@ function buildCommandMapCached() {
   if (cachedMenu && now - cacheTime < MENU_CACHE_MS) {
     return cachedMenu;
   }
-
   const map = Object.create(null);
-
   for (const c of commands) {
     if (c.dontAddCommandList) continue;
     const cat = (c.category || "MISC").toUpperCase();
     (map[cat] ||= []).push(c);
   }
-
   const categories = Object.keys(map).sort((a, b) => a.localeCompare(b));
-
   for (const cat of categories) {
     map[cat].sort((a, b) => (a.pattern || "").localeCompare(b.pattern || ""));
   }
-
   cachedMenu = { map, categories };
   cacheTime = now;
   return cachedMenu;
@@ -150,7 +138,6 @@ function buildCommandMapCached() {
 
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
-
   return `👋 HI ${userName}
 
 ┏━〔 BOT'S MENU 〕━⬣
@@ -172,44 +159,32 @@ function commandListCaption(cat, list, userName = "User") {
   txt += `┃ 📦 Total : ${list.length}\n`;
   txt += `┃ ✨ Prefix: ${PREFIX}\n`;
   txt += `┗━━━━━━━━━━━━⬣\n\n`;
-
   list.forEach((c) => {
     const primary = c.pattern ? `${PREFIX}${c.pattern}` : "No Pattern";
     const aliases = (c.alias || []).filter(Boolean).map((a) => `${PREFIX}${a}`);
-
     txt += `• *${primary}*\n`;
     if (aliases.length) txt += `   ◦ Aliases: ${aliases.join(", ")}\n`;
     txt += `   ⭕ ${c.desc || "No description"}\n\n`;
   });
-
   txt += `━━━━━━━━━━━━━━━━━━\n`;
   txt += `👑 Owner: ${OWNER_NUMBER}`;
-
   return txt;
 }
 
 function makeCategoryRows(map, categories) {
-  return categories.map((cat) => {
-    const emo = getCategoryEmoji(cat);
-    return {
-      title: `${emo} ${cat} MENU`,
-      description: `${map[cat].length} commands available`,
-      id: `menu_view:${cat}`,
-    };
-  });
+  return categories.map((cat) => ({
+    title: `${getCategoryEmoji(cat)} ${cat} MENU`,
+    description: `${map[cat].length} commands available`,
+    id: `menu_view:${cat}`,
+  }));
 }
 
 function tryParseJsonString(s) {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(s); } catch { return null; }
 }
 
 function extractTexts(body, mek, m) {
   const texts = [];
-
   const direct = [
     body,
     m?.body,
@@ -235,19 +210,15 @@ function extractTexts(body, mek, m) {
     mek?.message?.interactiveResponseMessage?.body?.text,
     mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
   ];
-
   for (const item of direct) {
     if (item) texts.push(String(item).trim());
   }
-
   const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-
   for (const raw of [p1, p2]) {
     if (!raw) continue;
     const parsed = tryParseJsonString(raw);
     if (!parsed) continue;
-
     const vals = [
       parsed.id,
       parsed.selectedId,
@@ -257,26 +228,21 @@ function extractTexts(body, mek, m) {
       parsed.text,
       parsed.name,
     ];
-
     for (const v of vals) {
       if (v) texts.push(String(v).trim());
     }
   }
-
   return [...new Set(texts.filter(Boolean))];
 }
 
 function resolveMenuAction(texts, state) {
   const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
-
   for (const text of normalized) {
     if (text.startsWith("MENU_VIEW:")) {
       return { type: "view", cat: text.replace("MENU_VIEW:", "").trim() };
     }
-
     for (const cat of state.categories || []) {
       const catText = normalizeText(cat);
-
       if (
         text === `${catText} MENU` ||
         text.includes(`${catText} MENU`) ||
@@ -287,62 +253,83 @@ function resolveMenuAction(texts, state) {
       }
     }
   }
-
   return null;
 }
 
 function isDuplicateAction(state, action) {
   const now = Date.now();
   const sig = `${action.type}:${action.cat || ""}`;
-
   if (state.lastActionSig === sig && now - (state.lastActionAt || 0) < 2500) {
     return true;
   }
-
   state.lastActionSig = sig;
   state.lastActionAt = now;
   return false;
 }
 
+async function sendNumberedMainMenu(sock, from, mek, state, userName) {
+  const { categories } = state;
+  let msg = menuHeader(userName) + "\n\n";
+  categories.forEach((cat, idx) => {
+    const emo = getCategoryEmoji(cat);
+    msg += `${idx+1}. ${emo} ${cat} (${state.map[cat].length} commands)\n`;
+  });
+  msg += "\n📌 Reply with the number of the category.";
+  return sock.sendMessage(from, { text: msg }, { quoted: mek });
+}
+
 async function sendMainMenu(sock, from, mek, state, userName) {
-  return sendInteractiveMessage(
-    sock,
-    from,
-    {
-      image: { url: headerImage },
-      text: menuHeader(userName),
-      footer: `${BOT_NAME} | Interactive Menu`,
-      interactiveButtons: [
+  const settings = readSettings();
+  const btnsOn = !!settings.btns_enabled;
+
+  if (btnsOn && sendInteractiveMessage) {
+    try {
+      return await sendInteractiveMessage(
+        sock,
+        from,
         {
-          name: "single_select",
-          buttonParamsJson: JSON.stringify({
-            title: "Click Here ↯",
-            sections: [
-              {
-                title: "Command Categories",
-                rows: makeCategoryRows(state.map, state.categories),
-              },
-            ],
-          }),
+          image: { url: headerImage },
+          text: menuHeader(userName),
+          footer: `${BOT_NAME} | Interactive Menu`,
+          interactiveButtons: [
+            {
+              name: "single_select",
+              buttonParamsJson: JSON.stringify({
+                title: "Click Here ↯",
+                sections: [
+                  {
+                    title: "Command Categories",
+                    rows: makeCategoryRows(state.map, state.categories),
+                  },
+                ],
+              }),
+            },
+            {
+              name: "cta_url",
+              buttonParamsJson: JSON.stringify({
+                display_text: "🌐 Official Website",
+                url: "https://maliya-md.replit.app",
+              }),
+            },
+            {
+              name: "cta_copy",
+              buttonParamsJson: JSON.stringify({
+                display_text: "📋 Copy Owner Number",
+                copy_code: OWNER_NUMBER,
+              }),
+            },
+          ],
         },
-        {
-          name: "cta_url",
-          buttonParamsJson: JSON.stringify({
-            display_text: "🌐 Official Website",
-            url: "https://maliya-md.replit.app",
-          }),
-        },
-        {
-          name: "cta_copy",
-          buttonParamsJson: JSON.stringify({
-            display_text: "📋 Copy Owner Number",
-            copy_code: OWNER_NUMBER,
-          }),
-        },
-      ],
-    },
-    { quoted: mek }
-  );
+        { quoted: mek }
+      );
+    } catch (e) {
+      console.log("MENU BUTTON ERROR:", e);
+      // fallback
+    }
+  }
+
+  // Numbered reply fallback
+  return sendNumberedMainMenu(sock, from, mek, state, userName);
 }
 
 async function sendCommandsList(sock, from, mek, cat, list, userName) {
@@ -409,7 +396,15 @@ cmd(
       if (!state) return;
 
       const texts = extractTexts(body, mek, m);
-      const action = resolveMenuAction(texts, state);
+      // Try to resolve via text (category names)
+      let action = resolveMenuAction(texts, state);
+      if (!action) {
+        // Try numeric reply
+        const num = parseInt(String(body || "").trim(), 10);
+        if (!isNaN(num) && num > 0 && num <= state.categories.length) {
+          action = { type: "view", cat: state.categories[num-1] };
+        }
+      }
       if (!action) return;
 
       if (isDuplicateAction(state, action)) return;
@@ -417,7 +412,6 @@ cmd(
       const userName = state.userName || getUserName(pushname, m, mek, sender);
       const cat = action.cat;
       const list = state.map[cat] || [];
-
       if (!list.length) {
         return reply("❌ No commands found in this category.");
       }
@@ -439,7 +433,6 @@ cmd(
 setInterval(() => {
   const now = Date.now();
   const timeout = 2 * 60 * 1000;
-
   for (const k of Object.keys(pendingMenu)) {
     if (now - pendingMenu[k].timestamp > timeout) {
       delete pendingMenu[k];
