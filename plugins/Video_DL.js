@@ -15,6 +15,11 @@ ffmpeg.setFfprobePath(ffprobePath);
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
+// Path to your exported YouTube cookies.txt file.
+// Place cookies.txt in your project root (one level above /commands).
+const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
+const HAS_COOKIES = fs.existsSync(COOKIES_PATH);
+
 const VIDEO_LIMIT_MB = 45;
 const pendingVideoQuality = Object.create(null);
 
@@ -237,7 +242,7 @@ function buildVideoDetails(video) {
 📅 *Uploaded:* ${uploaded}
 📡 *Live:* ${live}
 🔗 *Link:* ${url}
-╰━━━━━━━━━━━━━━━━━━━━━━━╯
+╰━━━━━━━━━━━━━━╯
 
 ${generateProgressBar(duration)}`;
 }
@@ -276,16 +281,37 @@ async function downloadVideoWithYtdl(videoUrl, quality, outPath) {
   // Quality Selection Format: closest height matching requested quality
   const formatStr = `bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}][ext=mp4]/best`;
 
+  if (!HAS_COOKIES) {
+    console.log(
+      `VIDEO DOWNLOAD WARNING: cookies.txt not found at ${COOKIES_PATH}. ` +
+      `YouTube will likely block this download with a "Sign in to confirm you're not a bot" error. ` +
+      `Export cookies.txt from a logged-in YouTube session and place it there.`
+    );
+  }
+
+  // yt-dlp extraction options:
+  // - cookies: required now that YouTube actively bot-checks server/VPS
+  //   IPs. Without a valid cookies.txt exported from a logged-in browser
+  //   session, most downloads fail with "Sign in to confirm you're not a
+  //   bot". Only passed if the file actually exists.
+  // - extractorArgs: prefer the android client, falls back to web. Avoids
+  //   most signature/PO-token issues on top of the cookie auth.
+  // - Removed the "googlebot" user-agent: YouTube now flags/blocks it and
+  //   often returns empty or broken player responses when it's used.
+  // - noPlaylist: a single video URL never accidentally resolves as a
+  //   playlist.
   await ytDlp(videoUrl, {
     format: formatStr,
     output: outPath,
     ffmpegLocation: ffmpegPath,
     noWarnings: true,
     noCheckCertificates: true,
+    noPlaylist: true,
+    extractorArgs: "youtube:player_client=android,web",
+    ...(HAS_COOKIES ? { cookies: COOKIES_PATH } : {}),
     addHeader: [
       "referer:youtube.com",
-      "user-agent:googlebot"
-    ]
+    ],
   });
 
   return outPath;
@@ -435,7 +461,10 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
 
     delete pendingVideoQuality[key];
   } catch (e) {
-    console.log("VIDEO QUALITY ERROR:", e && e.message, e && e.stack);
+    // Log the real yt-dlp stderr when available — "exit code 1" alone
+    // doesn't say what actually failed. e.stderr has the real reason
+    // (bot-check, format not available, expired cookies, etc.)
+    console.log("VIDEO QUALITY ERROR:", e && (e.stderr || e.message), e && e.stack);
     reply("❌ Error while downloading/converting selected quality video.");
     delete pendingVideoQuality[key];
   } finally {
