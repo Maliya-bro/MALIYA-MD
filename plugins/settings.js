@@ -372,6 +372,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
   const settings = readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
+  // If buttons are enabled AND the library exists, show interactive buttons
   if (btnsOn && sendInteractiveMessage) {
     try {
       return await sendInteractiveMessage(
@@ -402,9 +403,11 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
       );
     } catch (e) {
       console.log("SETTINGS HOME ERROR:", e);
+      // Fallback to numbered menu on error
     }
   }
 
+  // Numbered menu fallback (always works)
   const options = [
     { label: "⚙️ Change Settings", action: "menuopen" },
     { label: "📊 Show Full Status", action: "status" },
@@ -437,6 +440,7 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
   const settings = readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
+  // If buttons are enabled AND the library exists, show interactive buttons
   if (btnsOn && sendInteractiveMessage) {
     try {
       return await sendInteractiveMessage(
@@ -526,9 +530,11 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
       );
     } catch (e) {
       console.log("SETTINGS ROLES MENU ERROR:", e);
+      // Fallback to numbered menu on error
     }
   }
 
+  // Numbered menu fallback (always works)
   const allOptions = [
     { label: "🌐 Public Mode", action: "public" },
     { label: "🔒 Private Mode", action: "private" },
@@ -585,10 +591,10 @@ cmd(
 
     try {
       if (action === "menu") {
-        return sendSettingsHome(conn, from, mek, reply, sender, sessionId);
+        return await sendSettingsHome(conn, from, mek, reply, sender, sessionId);
       }
       if (action === "menuopen") {
-        return sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId);
+        return await sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId);
       }
       if (action === "status") {
         return reply(getStatusCard(sessionId));
@@ -688,7 +694,7 @@ if (!global.__maliya_settings_reply_handler_added) {
           if (resolved.action === "menuopen") {
             state.createdAt = Date.now();
             state.stage = "roles";
-            return sendSettingsRolesMenu(conn, from, mek, reply, sender, sid);
+            return await sendSettingsRolesMenu(conn, from, mek, reply, sender, sid);
           }
           const result = applySettingAction(sid, resolved.action, resolved.value);
           state.createdAt = Date.now();
@@ -709,7 +715,7 @@ if (!global.__maliya_settings_reply_handler_added) {
           if (opt.action === "menuopen") {
             state.createdAt = Date.now();
             state.stage = "roles";
-            return sendSettingsRolesMenu(conn, from, mek, reply, sender, sid);
+            return await sendSettingsRolesMenu(conn, from, mek, reply, sender, sid);
           }
           const result = applySettingAction(sid, opt.action, opt.value);
           state.createdAt = Date.now();
