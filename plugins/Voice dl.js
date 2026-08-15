@@ -258,7 +258,17 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
 
     audioFile = makeTempFile(".mp3");
 
-    // Stable yt-dlp-exec extraction
+    // yt-dlp extraction
+    // - Removed the "googlebot" user-agent: YouTube now flags/blocks it and
+    //   often returns empty or broken player responses when it's used.
+    // - Added extractorArgs to force the android client first (falls back to
+    //   web). The android client avoids most current signature/PO-token
+    //   failures that break the default "web" client extraction.
+    // - Added noPlaylist to make sure a single video URL never accidentally
+    //   resolves as a playlist.
+    // - Keep binaries updated separately via `npm install yt-dlp-exec@latest`
+    //   and `npm rebuild yt-dlp-exec` — YouTube changes frequently enough
+    //   that a stale bundled binary is the #1 cause of failures here.
     await ytDlp(pending.video.url, {
       extractAudio: true,
       audioFormat: "mp3",
@@ -266,10 +276,11 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
       output: audioFile,
       noWarnings: true,
       noCheckCertificates: true,
+      noPlaylist: true,
+      extractorArgs: "youtube:player_client=android,web",
       addHeader: [
         "referer:youtube.com",
-        "user-agent:googlebot"
-      ]
+      ],
     });
 
     if (!fs.existsSync(audioFile) || fs.statSync(audioFile).size === 0) {
@@ -306,7 +317,10 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
 
     delete pendingMediaChoice[key];
   } catch (e) {
-    console.log("AUDIO DOWNLOAD ERROR:", e && e.message);
+    // Log the real yt-dlp stderr when available — "exit code 1" alone
+    // doesn't say what actually failed. e.stderr has the real reason
+    // (e.g. bot-check, format not available, video unavailable, etc.)
+    console.log("AUDIO DOWNLOAD ERROR:", e && (e.stderr || e.message));
     reply("❌ Error while downloading/sending audio.");
     delete pendingMediaChoice[key];
   } finally {
