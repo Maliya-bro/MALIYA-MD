@@ -117,15 +117,6 @@ function getQualityLabel(choice) {
   }
 }
 
-function normalizeText(s = "") {
-  return String(s)
-    .replace(/\r/g, "")
-    .replace(/\n+/g, "\n")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toUpperCase();
-}
-
 function tryParseJsonString(s) {
   try { return JSON.parse(s); } catch { return null; }
 }
@@ -134,74 +125,44 @@ function makePendingKey(sender, from) {
   return `${from || ""}::${(sender || "").split(":")[0]}`;
 }
 
-function extractTexts(body, mek, m) {
-  const texts = [];
-  const direct = [
-    body,
-    m?.body,
-    m?.text,
-    m?.message?.conversation,
-    m?.message?.extendedTextMessage?.text,
-    m?.message?.buttonsResponseMessage?.selectedButtonId,
-    m?.message?.buttonsResponseMessage?.selectedDisplayText,
-    m?.message?.templateButtonReplyMessage?.selectedId,
-    m?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    m?.message?.listResponseMessage?.title,
-    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
-    m?.message?.interactiveResponseMessage?.body?.text,
-    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
-    mek?.message?.conversation,
-    mek?.message?.extendedTextMessage?.text,
-    mek?.message?.buttonsResponseMessage?.selectedButtonId,
-    mek?.message?.buttonsResponseMessage?.selectedDisplayText,
-    mek?.message?.templateButtonReplyMessage?.selectedId,
-    mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    mek?.message?.listResponseMessage?.title,
-    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
-    mek?.message?.interactiveResponseMessage?.body?.text,
-    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
-  ];
-  for (const item of direct) {
-    if (item) texts.push(String(item).trim());
-  }
-  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  for (const raw of [p1, p2]) {
-    if (!raw) continue;
-    const parsed = tryParseJsonString(raw);
-    if (!parsed) continue;
-    const vals = [
-      parsed.id,
-      parsed.selectedId,
-      parsed.selectedRowId,
-      parsed.title,
-      parsed.display_text,
-      parsed.text,
-      parsed.name,
-    ];
-    for (const v of vals) {
-      if (v) texts.push(String(v).trim());
+// පරිශීලකයාගේ නවතම Response එකෙන් පමණක් Quality එක Extract කරගැනීමට සකස් කරන ලදී
+function extractQualityFromMessage(body, mek, m) {
+  const candidates = [];
+
+  if (body) candidates.push(String(body).trim());
+  if (m?.body) candidates.push(String(m.body).trim());
+  if (m?.text) candidates.push(String(m.text).trim());
+
+  // Interactive Single Select List responses
+  const listId = m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+                 mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId;
+  if (listId) candidates.push(String(listId).trim());
+
+  // Buttons responses
+  const btnId = m?.message?.buttonsResponseMessage?.selectedButtonId ||
+                mek?.message?.buttonsResponseMessage?.selectedButtonId;
+  if (btnId) candidates.push(String(btnId).trim());
+
+  // Native flow responses (Interactive menu)
+  const paramsRaw = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+                    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  if (paramsRaw) {
+    const parsed = tryParseJsonString(paramsRaw);
+    if (parsed) {
+      if (parsed.id) candidates.push(String(parsed.id).trim());
+      if (parsed.selectedId) candidates.push(String(parsed.selectedId).trim());
+      if (parsed.selectedRowId) candidates.push(String(parsed.selectedRowId).trim());
     }
   }
-  return [...new Set(texts.filter(Boolean))];
-}
 
-function extractQualityFromTexts(texts) {
-  const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
-  for (const text of normalized) {
-    if (text.includes("QUALITY:360")) return "360";
-    if (text.includes("QUALITY:480")) return "480";
-    if (text.includes("QUALITY:720")) return "720";
-    if (text.includes("QUALITY:1080")) return "1080";
-    if (text === "360P" || text.includes("360P")) return "360";
-    if (text === "480P" || text.includes("480P")) return "480";
-    if (text === "720P" || text.includes("720P")) return "720";
-    if (text === "1080P" || text.includes("1080P")) return "1080";
-    if (text === "1") return "360";
-    if (text === "2") return "480";
-    if (text === "3") return "720";
-    if (text === "4") return "1080";
+  for (const str of candidates) {
+    const cleaned = str.toLowerCase();
+    if (cleaned === "1" || cleaned === "360" || cleaned === "360p" || cleaned === "quality:360") return "360";
+    if (cleaned === "2" || cleaned === "480" || cleaned === "480p" || cleaned === "quality:480") return "480";
+    if (cleaned === "3" || cleaned === "720" || cleaned === "720p" || cleaned === "quality:720") return "720";
+    if (cleaned === "4" || cleaned === "1080" || cleaned === "1080p" || cleaned === "quality:1080") return "1080";
   }
+
   return null;
 }
 
@@ -219,7 +180,7 @@ function buildVideoDetails(video) {
   ⏱️ Duration : ${duration}
   👀 Views    : ${views}
   📅 Date     : ${uploaded}
-╚═══════════════════════╝
+╚════════════════════╝
 
 ${generateProgressBar(duration)}`;
 }
@@ -293,19 +254,18 @@ async function reencodeForWhatsApp(inputPath, outputPath) {
   });
 }
 
-// Phone Screen Friendly Sharp Block Theme
 function buildStyledVideoMenu(video) {
   const details = buildVideoDetails(video);
-  let msg = `=========================\n`;
+  let msg = `=====================\n`;
   msg += `   🎬 VIDEO DOWNLOADER   \n`;
-  msg += `=========================\n\n`;
+  msg += `=====================\n\n`;
   msg += details + "\n\n";
   msg += `╔══ SELECT QUALITY ══╗\n`;
   msg += `  [1] 360p (Fast)\n`;
   msg += `  [2] 480p (Standard)\n`;
   msg += `  [3] 720p (HD)\n`;
   msg += `  [4] 1080p (FHD)\n`;
-  msg += `╚════════════════════╝\n\n`;
+  msg += `╚══════════════════╝\n\n`;
   msg += `📌 *Reply with 1, 2, 3, or 4.*`;
   return msg;
 }
@@ -487,22 +447,21 @@ cmd(
 replyHandlers.push({
   filter: (_body, { sender, from }) => {
     const key = makePendingKey(sender, from);
-    return !!pendingVideoQuality[key];
+    const pending = pendingVideoQuality[key];
+    if (!pending) return false;
+
+    // Menu එක යවා තත්පර 1.5ක් යනතුරු ස්වයංක්‍රීය Trigger වීම වැළැක්වීමට Cooldown එකක්
+    if (Date.now() - pending.createdAt < 1500) return false;
+
+    return true;
   },
 
   function: async (sock, mek, m, { from, body, sender, reply }) => {
     const key = makePendingKey(sender, from);
     const pending = pendingVideoQuality[key];
-    if (!pending) return;
-    if (pending.isProcessing) return;
+    if (!pending || pending.isProcessing) return;
 
-    const texts = extractTexts(body, mek, m);
-    let quality = extractQualityFromTexts(texts);
-
-    if (!quality && /^[1-4]$/.test(String(body || "").trim())) {
-      quality = getQualityFromChoice(body);
-    }
-
+    const quality = extractQualityFromMessage(body, mek, m);
     if (!quality) return;
 
     return handleVideoQualityDownload(sock, mek, from, sender, reply, quality);
