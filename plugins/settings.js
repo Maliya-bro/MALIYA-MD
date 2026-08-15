@@ -55,6 +55,11 @@ function workScopeText(val) {
   return "ALL CHATS (PRIVATE + GROUP)";
 }
 
+// ✅ label for btns_enabled
+function btnsModeText(val) {
+  return val ? "INTERACTIVE BUTTONS" : "NUMBER REPLY (TEXT MENU)";
+}
+
 function getStatusCard(sessionId) {
   const s = readSettings(sessionId);
 
@@ -62,13 +67,14 @@ function getStatusCard(sessionId) {
 🎀 Ξ *BOT SETTINGS PANEL* Ξ
 
 🍀 | *WORK TYPE:* ${String(s.mode || "public").toUpperCase()}
-🍀 | *WORK SCOPE:* ${workScopeText(String(s.work_scope || "all"))}
+🍀 | *WORK SCOPE:* ${workScopeText(String(s.work_scope || "private"))}
+🍀 | *MENU MODE:* ${btnsModeText(!!s.btns_enabled)}
 🍀 | *PRESENCE:* ${presenceText(String(s.always_presence || "off"))}
 🍀 | *AI CHAT:* ${onOff(!!s.auto_msg)}
 🍀 | *SEEN ALL MSG:* ${onOff(!!s.seen_all_msg)}
 🍀 | *AUTO MSG REACT:* ${onOff(!!s.auto_react_msg)}
 🍀 | *REACT MODE:* ${reactModeText(String(s.auto_react_mode || "all"))}
-🍀 | *ANTI DELETE:* ${onOff(!!s.anti_delete)}
+🍀 | *ANTI DELETE:* ${onOff(!!s.anti_delete)} _(private chats only)_
 🍀 | *ANTI CALL:* ${onOff(!!s.auto_reject_calls)}
 🍀 | *AUTO STATUS:* ${onOff(!!s.auto_status_seen)}
 🍀 | *AUTO REACT:* ${onOff(!!s.auto_status_react)}
@@ -128,10 +134,15 @@ function mapKey(name = "") {
     return "work_scope";
   }
 
+  // ✅ btns key mapping
+  if (["btns", "buttons", "btns_enabled", "menumode", "menu_mode"].includes(k)) {
+    return "btns_enabled";
+  }
+
   return null;
 }
 
-// ✅ NEW: safe JSON parse helper (mirrors the one in index.js)
+// ✅ safe JSON parse helper (mirrors the one in index.js)
 function safeJsonParse(str) {
   try {
     return JSON.parse(str);
@@ -140,12 +151,9 @@ function safeJsonParse(str) {
   }
 }
 
-// ✅ FIXED: now also reads interactiveResponseMessage.nativeFlowResponseMessage.paramsJson,
+// ✅ reads interactiveResponseMessage.nativeFlowResponseMessage.paramsJson,
 // which is where single_select / list row taps land depending on the button lib /
-// WhatsApp client version. Previously this field was NOT checked here (even though
-// index.js's getBodyFromMessage() already checked it), so tapping a "Work Scope"
-// row in the interactive menu could resolve to an empty/wrong string, resolveSettingsActionFromText()
-// returned null, and the reply handler silently did nothing — settings never got applied.
+// WhatsApp client version.
 function getIncomingText(body, mek, m) {
   const direct = String(
     m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
@@ -166,7 +174,7 @@ function getIncomingText(body, mek, m) {
 
   if (direct) return direct.toLowerCase();
 
-  // ✅ NEW: handle nativeFlowResponseMessage.paramsJson (single_select / list rows)
+  // ✅ handle nativeFlowResponseMessage.paramsJson (single_select / list rows)
   const paramsJson =
     m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
     mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
@@ -264,9 +272,10 @@ function applySettingAction(sessionId, action, value) {
       auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
       auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
       seen_all_msg: `✅ Seen All Msg: ${onOff(updated.seen_all_msg)}`,
-      anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)}`,
+      anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)} (private chats only)`,
       auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
       auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
+      btns_enabled: `✅ Menu Mode: ${btnsModeText(updated.btns_enabled)}`,
     };
 
     return responses[key] || `✅ Toggled ${key}`;
@@ -288,9 +297,10 @@ function applySettingAction(sessionId, action, value) {
       auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
       auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
       seen_all_msg: `✅ Seen All Msg: ${onOff(updated.seen_all_msg)}`,
-      anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)}`,
+      anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)} (private chats only)`,
       auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
       auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
+      btns_enabled: `✅ Menu Mode: ${btnsModeText(updated.btns_enabled)}`,
     };
 
     return responses[key] || `✅ Set ${key} to ${action.toUpperCase()}`;
@@ -346,6 +356,19 @@ function resolveSettingsActionFromText(text = "") {
 
   if (t === ".setting workscope all" || t === "work scope all" || t === "all chats") {
     return { action: "workscope", value: "all" };
+  }
+
+  // ✅ BTNS (menu mode) commands
+  if (t === ".setting on btns" || t === "enable btns" || t === "btns on" || t === "interactive buttons on") {
+    return { action: "on", value: "btns" };
+  }
+
+  if (t === ".setting off btns" || t === "disable btns" || t === "btns off" || t === "interactive buttons off") {
+    return { action: "off", value: "btns" };
+  }
+
+  if (t === ".setting toggle btns" || t === "toggle btns" || t === "toggle menu mode") {
+    return { action: "toggle", value: "btns" };
   }
 
   // AUTO REACT MSG
@@ -479,7 +502,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
         image: { url: SETTINGS_IMAGE },
         caption:
           text +
-          "\n\nUse:\n.setting status\n.setting public\n.setting private\n.setting toggle mode\n.setting workscope private\n.setting workscope group\n.setting workscope all",
+          "\n\nUse:\n.setting status\n.setting public\n.setting private\n.setting toggle mode\n.setting workscope private\n.setting workscope group\n.setting workscope all\n.setting toggle btns",
       },
       { quoted: mek }
     );
@@ -603,6 +626,27 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
                   ],
                 },
                 {
+                  // ✅ MENU MODE (BUTTONS)
+                  title: "🔘 MENU MODE (BUTTONS)",
+                  rows: [
+                    {
+                      title: "✅ Interactive Buttons ON",
+                      description: "Use WhatsApp buttons/lists in song, video, alive menus",
+                      id: ".setting on btns",
+                    },
+                    {
+                      title: "❌ Interactive Buttons OFF",
+                      description: "Use plain number-reply text menus instead",
+                      id: ".setting off btns",
+                    },
+                    {
+                      title: "🔄 Toggle Menu Mode",
+                      description: "Switch between buttons and number-reply",
+                      id: ".setting toggle btns",
+                    },
+                  ],
+                },
+                {
                   title: "✨ BOT PRESENCE",
                   rows: [
                     {
@@ -687,7 +731,7 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
                     },
                     {
                       title: "Enable Anti Delete",
-                      description: "Turn ON anti delete",
+                      description: "Turn ON anti delete (private chats only)",
                       id: ".setting on antidelete",
                     },
                     {
@@ -858,9 +902,10 @@ cmd(
           auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
           auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
           seen_all_msg: `✅ Seen All Msg: ${onOff(updated.seen_all_msg)}`,
-          anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)}`,
+          anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)} (private chats only)`,
           auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
           auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
+          btns_enabled: `✅ Menu Mode: ${btnsModeText(updated.btns_enabled)}`,
         };
 
         return reply(responses[key] || `✅ Toggled ${key}`);
@@ -882,9 +927,10 @@ cmd(
           auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
           auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
           seen_all_msg: `✅ Seen All Msg: ${onOff(updated.seen_all_msg)}`,
-          anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)}`,
+          anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)} (private chats only)`,
           auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
           auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
+          btns_enabled: `✅ Menu Mode: ${btnsModeText(updated.btns_enabled)}`,
         };
 
         return reply(responses[key] || `✅ Set ${key} to ${action.toUpperCase()}`);
