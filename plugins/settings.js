@@ -33,51 +33,53 @@ function isRealOwner(sender = "") {
 }
 
 function onOff(val) {
-  return val ? "ON" : "OFF";
+  return val ? "🟢 ᴏɴ" : "🔴 ᴏғғ";
 }
 
 function presenceText(val) {
-  if (val === "typing") return "AUTO TYPING";
-  if (val === "recording") return "AUTO RECORDING";
-  return "OFF";
+  if (val === "typing") return "⌨️ ᴀᴜᴛᴏ ᴛʏᴘɪɴɢ";
+  if (val === "recording") return "🎙️ ᴀᴜᴛᴏ ʀᴇᴄᴏʀᴅɪɴɢ";
+  return "🔴 ᴏғғ";
 }
 
 function reactModeText(val) {
-  if (val === "private") return "PRIVATE ONLY";
-  if (val === "group") return "GROUP ONLY";
-  return "ALL CHATS";
+  if (val === "private") return "🔒 ᴘʀɪᴠᴀᴛᴇ ᴏɴʟʏ";
+  if (val === "group") return "👥 ɢʀᴏᴜᴘ ᴏɴʟʏ";
+  return "🌍 ᴀʟʟ ᴄʜᴀᴛs";
 }
 
 function workScopeText(val) {
-  if (val === "private") return "PRIVATE CHAT ONLY";
-  if (val === "group") return "GROUP CHAT ONLY";
-  return "ALL CHATS (PRIVATE + GROUP)";
+  if (val === "private") return "🔒 ᴘʀɪᴠᴀᴛᴇ ᴄʜᴀᴛ ᴏɴʟʏ";
+  if (val === "group") return "👥 ɢʀᴏᴜᴘ ᴄʜᴀᴛ ᴏɴʟʏ";
+  return "🌍 ᴀʟʟ ᴄʜᴀᴛs (ᴘʀɪᴠᴀᴛᴇ + ɢʀᴏᴜᴘ)";
 }
 
 function btnsModeText(val) {
-  return val ? "INTERACTIVE BUTTONS" : "NUMBER REPLY (TEXT MENU)";
+  return val ? "🔘 ɪɴᴛᴇʀᴀᴄᴛɪᴠᴇ ʙᴜᴛᴛᴏɴs" : "🔢 ɴᴜᴍʙᴇʀ ʀᴇᴘʟʏ (ᴛᴇxᴛ ᴍᴇɴᴜ)";
 }
 
 function getStatusCard(sessionId) {
   const s = readSettings(sessionId);
   return `
-🎀 Ξ *BOT SETTINGS PANEL* Ξ
-
-🍀 | *WORK TYPE:* ${String(s.mode || "public").toUpperCase()}
-🍀 | *WORK SCOPE:* ${workScopeText(String(s.work_scope || "private"))}
-🍀 | *MENU MODE:* ${btnsModeText(!!s.btns_enabled)}
-🍀 | *PRESENCE:* ${presenceText(String(s.always_presence || "off"))}
-🍀 | *AI CHAT:* ${onOff(!!s.auto_msg)}
-🍀 | *SEEN ALL MSG:* ${onOff(!!s.seen_all_msg)}
-🍀 | *AUTO MSG REACT:* ${onOff(!!s.auto_react_msg)}
-🍀 | *REACT MODE:* ${reactModeText(String(s.auto_react_mode || "all"))}
-🍀 | *ANTI DELETE:* ${onOff(!!s.anti_delete)} _(private chats only)_
-🍀 | *ANTI CALL:* ${onOff(!!s.auto_reject_calls)}
-🍀 | *AUTO STATUS:* ${onOff(!!s.auto_status_seen)}
-🍀 | *AUTO REACT:* ${onOff(!!s.auto_status_react)}
-🍀 | *AUTO DOWNLOAD STATUS:* ${onOff(!!s.auto_download_status)}
-
-© MALIYA-MD
+‎
+┌─❖ 🌟 *━━━━ ʙᴏᴛ sᴇᴛᴛɪɴɢs ᴘᴀɴᴇʟ ━━━━* 🌟
+│
+├─► ⚙️ *ᴡᴏʀᴋ ᴛʏᴘᴇ:* ${String(s.mode || "public").toUpperCase()}
+├─► 🎯 *ᴡᴏʀᴋ sᴄᴏᴘᴇ:* ${workScopeText(String(s.work_scope || "private"))}
+├─► 🕹️ *ᴍᴇɴᴜ ᴍᴏᴅᴇ:* ${btnsModeText(!!s.btns_enabled)}
+├─► 🎭 *ᴘʀᴇsᴇɴᴄᴇ:* ${presenceText(String(s.always_presence || "off"))}
+├─► 🤖 *ᴀɪ ᴄʜᴀᴛ:* ${onOff(!!s.auto_msg)}
+├─► 👁️ *sᴇᴇɴ ᴀʟʟ ᴍsɢ:* ${onOff(!!s.seen_all_msg)}
+├─► 💖 *ᴀᴜᴛᴏ ᴍsɢ ʀᴇᴀᴄᴛ:* ${onOff(!!s.auto_react_msg)}
+├─► 🔮 *ʀᴇᴀᴄᴛ ᴍᴏᴅᴇ:* ${reactModeText(String(s.auto_react_mode || "all"))}
+├─► 🛡️ *ᴀɴᴛɪ ᴅᴇʟᴇᴛᴇ:* ${onOff(!!s.anti_delete)} _(private chats only)_
+├─► 🚫 *ᴀɴᴛɪ ᴄᴀʟʟ:* ${onOff(!!s.auto_reject_calls)}
+├─► 👁️‍🗨️ *ᴀᴜᴛᴏ sᴛᴀᴛᴜs:* ${onOff(!!s.auto_status_seen)}
+├─► ❤️ *ᴀᴜᴛᴏ ʀᴇᴀᴄᴛ:* ${onOff(!!s.auto_status_react)}
+├─► 📥 *ᴀᴜᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ sᴛᴀᴛᴜs:* ${onOff(!!s.auto_download_status)}
+│
+└───────────────────────────❖
+📌 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*
 `.trim();
 }
 
@@ -186,82 +188,82 @@ function applySettingAction(sessionId, action, value) {
   }
   if (action === "private") {
     setSetting(sessionId, "mode", "private");
-    return "✅ Bot mode set to PRIVATE";
+    return "✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘʀɪᴠᴀᴛᴇ ]`*";
   }
   if (action === "public") {
     setSetting(sessionId, "mode", "public");
-    return "✅ Bot mode set to PUBLIC";
+    return "✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘᴜʙʟɪᴄ ]`*";
   }
   if (action === "reactmode") {
     if (!["private", "group", "all"].includes(value)) {
-      return "❌ Invalid react mode. Use: private, group, or all";
+      return "❌ *`[ ɪɴᴠᴀʟɪᴅ ʀᴇᴀᴄᴛ ᴍᴏᴅᴇ ]`*";
     }
     setSetting(sessionId, "auto_react_mode", value);
-    return `✅ React Mode set to ${reactModeText(value)}`;
+    return `✨ *\`[ ✅ ʀᴇᴀᴄᴛ ᴍᴏᴅᴇ: ${reactModeText(value)} ]\`*`;
   }
   if (action === "workscope") {
     if (!["private", "group", "all"].includes(value)) {
-      return "❌ Invalid work scope. Use: private, group, or all";
+      return "❌ *`[ ɪɴᴠᴀʟɪᴅ ᴡᴏʀᴋ sᴄᴏᴘᴇ ]`*";
     }
     setSetting(sessionId, "work_scope", value);
-    return `✅ Work Scope set to ${workScopeText(value)}`;
+    return `✨ *\`[ ✅ ᴡᴏʀᴋ sᴄᴏᴘᴇ: ${workScopeText(value)} ]\`*`;
   }
   if (action === "presence") {
     if (!["off", "typing", "recording"].includes(value)) {
-      return "❌ Invalid presence mode.";
+      return "❌ *`[ ɪɴᴠᴀʟɪᴅ ᴘʀᴇsᴇɴᴄᴇ ᴍᴏᴅᴇ ]`*";
     }
     setSetting(sessionId, "always_presence", value);
-    return `✅ Always presence set to ${presenceText(value)}`;
+    return `✨ *\`[ ✅ ᴘʀᴇsᴇɴᴄᴇ: ${presenceText(value)} ]\`*`;
   }
   if (action === "toggle") {
     const key = mapKey(value);
-    if (!key) return "❌ Invalid setting name.";
+    if (!key) return "❌ *`[ ɪɴᴠᴀʟɪᴅ sᴇᴛᴛɪɴɢ ɴᴀᴍᴇ ]`*";
 
     if (key === "mode") {
       const now = readSettings(sessionId);
       const next = now.mode === "private" ? "public" : "private";
       setSetting(sessionId, "mode", next);
-      return `✅ Bot mode changed to ${next.toUpperCase()}`;
+      return `✨ *\`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ: ${next.toUpperCase()} ]\`*`;
     }
 
     const updated = toggleSetting(sessionId, key);
 
     const responses = {
-      auto_status_seen: `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`,
-      auto_status_react: `✅ Auto Status React: ${onOff(updated.auto_status_react)}`,
-      auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
-      auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
-      seen_all_msg: `✅ Seen All Msg: ${onOff(updated.seen_all_msg)}`,
-      anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)} _(private chats only)_`,
-      auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
-      auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
-      btns_enabled: `✅ Menu Mode: ${btnsModeText(!!updated.btns_enabled)}`,
+      auto_status_seen: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs sᴇᴇɴ: ${onOff(updated.auto_status_seen)} ]\`*`,
+      auto_status_react: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs ʀᴇᴀᴄᴛ: ${onOff(updated.auto_status_react)} ]\`*`,
+      auto_download_status: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ sᴛᴀᴛᴜs: ${onOff(updated.auto_download_status)} ]\`*`,
+      auto_msg: `✨ *\`[ ✅ ᴀɪ ᴄʜᴀᴛ: ${onOff(updated.auto_msg)} ]\`*`,
+      seen_all_msg: `✨ *\`[ ✅ sᴇᴇɴ ᴀʟʟ ᴍsɢ: ${onOff(updated.seen_all_msg)} ]\`*`,
+      anti_delete: `✨ *\`[ ✅ ᴀɴᴛɪ ᴅᴇʟᴇᴛᴇ: ${onOff(updated.anti_delete)} ]\`*`,
+      auto_reject_calls: `✨ *\`[ ✅ ʀᴇᴊᴇᴄᴛ ᴄᴀʟʟs: ${onOff(updated.auto_reject_calls)} ]\`*`,
+      auto_react_msg: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴍsɢ ʀᴇᴀᴄᴛ: ${onOff(updated.auto_react_msg)} ]\`*`,
+      btns_enabled: `✨ *\`[ ✅ ᴍᴇɴᴜ ᴍᴏᴅᴇ: ${btnsModeText(!!updated.btns_enabled)} ]\`*`,
     };
 
-    return responses[key] || `✅ Toggled ${key}`;
+    return responses[key] || `✨ *\`[ ✅ ᴛᴏɢɢʟᴇᴅ ${key.toUpperCase()} ]\`*`;
   }
 
   if (action === "on" || action === "off") {
     const key = mapKey(value);
     if (!key || key === "mode") {
-      return "❌ Invalid setting name.";
+      return "❌ *`[ ɪɴᴠᴀʟɪᴅ sᴇᴛᴛɪɴɢ ɴᴀᴍᴇ ]`*";
     }
     const boolVal = action === "on";
     const updated = setSetting(sessionId, key, boolVal);
 
     const responses = {
-      auto_status_seen: `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`,
-      auto_status_react: `✅ Auto Status React: ${onOff(updated.auto_status_react)}`,
-      auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
-      auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
-      seen_all_msg: `✅ Seen All Msg: ${onOff(updated.seen_all_msg)}`,
-      anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)} _(private chats only)_`,
-      auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
-      auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
-      btns_enabled: `✅ Menu Mode: ${btnsModeText(!!updated.btns_enabled)}`,
+      auto_status_seen: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs sᴇᴇɴ: ${onOff(updated.auto_status_seen)} ]\`*`,
+      auto_status_react: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs ʀᴇᴀᴄᴛ: ${onOff(updated.auto_status_react)} ]\`*`,
+      auto_download_status: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ sᴛᴀᴛᴜs: ${onOff(updated.auto_download_status)} ]\`*`,
+      auto_msg: `✨ *\`[ ✅ ᴀɪ ᴄʜᴀᴛ: ${onOff(updated.auto_msg)} ]\`*`,
+      seen_all_msg: `✨ *\`[ ✅ sᴇᴇɴ ᴀʟʟ ᴍsɢ: ${onOff(updated.seen_all_msg)} ]\`*`,
+      anti_delete: `✨ *\`[ ✅ ᴀɴᴛɪ ᴅᴇʟᴇᴛᴇ: ${onOff(updated.anti_delete)} ]\`*`,
+      auto_reject_calls: `✨ *\`[ ✅ ʀᴇᴊᴇᴄᴛ ᴄᴀʟʟs: ${onOff(updated.auto_reject_calls)} ]\`*`,
+      auto_react_msg: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴍsɢ ʀᴇᴀᴄᴛ: ${onOff(updated.auto_react_msg)} ]\`*`,
+      btns_enabled: `✨ *\`[ ✅ ᴍᴇɴᴜ ᴍᴏᴅᴇ: ${btnsModeText(!!updated.btns_enabled)} ]\`*`,
     };
 
-    return responses[key] || `✅ Set ${key} to ${action.toUpperCase()}`;
+    return responses[key] || `✨ *\`[ ✅ sᴇᴛ ${key.toUpperCase()} ᴛᴏ ${action.toUpperCase()} ]\`*`;
   }
 
   return getStatusCard(sessionId);
@@ -399,19 +401,17 @@ function resolveSettingsActionFromText(text = "") {
 
 // ----- Helper: build a beautifully styled numbered menu with fancy fonts -----
 function buildStyledMenu(title, options, footer = "") {
-  const line = "━━━━━━━━━━━";
-  const top = "╔" + "═".repeat(36) + "╗";
-  const bottom = "╚" + "═".repeat(36) + "╝";
-  let msg = `╔════════════════╗\n`;
-  msg +=    `║  ★彡 ${title} 彡★  ║\n`;
-  msg +=    `╚════════════════╝\n\n`;
-  msg += line + "\n";
+  let msg = `‎\n`;
+  msg += `┌─❖ 👑 *${title.toUpperCase()}* 👑\n`;
+  msg += `│\n`;
   options.forEach((opt, idx) => {
-    msg += `*${idx+1}.* ${opt.label}\n`;
+    const num = String(idx + 1).padStart(2, '0');
+    msg += `├─► 📱 *[ ${num} ]* ➔ \`${opt.label}\`\n`;
   });
-  msg += line + "\n\n";
-  msg += `📌 *Reply with the number of your choice.*`;
-  if (footer) msg += "\n" + footer;
+  msg += `│\n`;
+  msg += `└───────────────────────────❖\n\n`;
+  msg += `💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ ᴏғ ʏᴏᴜʀ ᴄʜᴏɪᴄᴇ* ⚡\n`;
+  if (footer) msg += `\n*${footer}*`;
 
   return msg;
 }
@@ -457,14 +457,14 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
             {
               name: "quick_reply",
               buttonParamsJson: JSON.stringify({
-                display_text: "Change Settings",
+                display_text: "⚙️ Change Settings",
                 id: ".setting menuopen",
               }),
             },
             {
               name: "quick_reply",
               buttonParamsJson: JSON.stringify({
-                display_text: "Show Full Status",
+                display_text: "📊 Show Full Status",
                 id: ".setting status",
               }),
             },
@@ -486,7 +486,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     conn,
     from,
     mek,
-    text + "\n\n*✨ Choose an option:*",
+    text + "\n\n✨ *ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ:*",
     options,
     "© MALIYA-MD",
     SETTINGS_IMAGE
@@ -516,7 +516,7 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
         from,
         {
           image: { url: SETTINGS_IMAGE },
-          text: "⚙️ *Choose a setting role below*",
+          text: "⚙️ *ᴄʜᴏᴏsᴇ ᴀ sᴇᴛᴛɪɴɢ ʀᴏʟᴇ ʙᴇʟᴏᴡ*",
           footer: "Change Settings",
           interactiveButtons: [
             {
@@ -649,7 +649,7 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
   ];
 
   pendingSettingsMenu[key].options = allOptions;
-  const header = "⚙️ *Choose a setting to change:*";
+  const header = "⚙️ *sᴇᴛᴛɪɴɢs ᴄᴏɴғɪɢᴜʀᴀᴛɪᴏɴ ᴍᴇɴᴜ*";
   return sendNumberedMenu(conn, from, mek, header, allOptions, "© MALIYA-MD", SETTINGS_IMAGE);
 }
 
@@ -663,7 +663,7 @@ cmd(
   },
   async (conn, mek, m, { from, sender, args, reply, isOwner, sessionId }) => {
     if (!(isOwner || isRealOwner(sender))) {
-      return reply("❌ This command is owner only.");
+      return reply("❌ *`[ ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ ɪs ᴏᴡɴᴇʀ ᴏɴʟʏ. ]`*");
     }
 
     const action = String(args[0] || "menu").toLowerCase().trim();
@@ -681,94 +681,94 @@ cmd(
       }
       if (action === "private") {
         setSetting(sessionId, "mode", "private");
-        return reply("✅ Bot mode set to PRIVATE");
+        return reply("✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘʀɪᴠᴀᴛᴇ ]`*");
       }
       if (action === "public") {
         setSetting(sessionId, "mode", "public");
-        return reply("✅ Bot mode set to PUBLIC");
+        return reply("✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘᴜʙʟɪᴄ ]`*");
       }
       if (action === "reactmode") {
         if (!["private", "group", "all"].includes(value)) {
           return reply(
-            "❌ Use:\n.setting reactmode private\n.setting reactmode group\n.setting reactmode all"
+            "❌ *`[ ᴜsᴇ: .setting reactmode private | group | all ]`*"
           );
         }
         setSetting(sessionId, "auto_react_mode", value);
-        return reply(`✅ React Mode set to ${reactModeText(value)}`);
+        return reply(`✨ *\`[ ✅ ʀᴇᴀᴄᴛ ᴍᴏᴅᴇ: ${reactModeText(value)} ]\`*`);
       }
       if (action === "workscope") {
         if (!["private", "group", "all"].includes(value)) {
           return reply(
-            "❌ Use:\n.setting workscope private\n.setting workscope group\n.setting workscope all"
+            "❌ *`[ ᴜsᴇ: .setting workscope private | group | all ]`*"
           );
         }
         setSetting(sessionId, "work_scope", value);
-        return reply(`✅ Work Scope set to ${workScopeText(value)}`);
+        return reply(`✨ *\`[ ✅ ᴡᴏʀᴋ sᴄᴏᴘᴇ: ${workScopeText(value)} ]\`*`);
       }
       if (action === "presence") {
         if (!["off", "typing", "recording"].includes(value)) {
           return reply(
-            "❌ Use:\n.setting presence off\n.setting presence typing\n.setting presence recording"
+            "❌ *`[ ᴜsᴇ: .setting presence off | typing | recording ]`*"
           );
         }
         setSetting(sessionId, "always_presence", value);
-        return reply(`✅ Always presence set to ${presenceText(value)}`);
+        return reply(`✨ *\`[ ✅ ᴘʀᴇsᴇɴᴄᴇ: ${presenceText(value)} ]\`*`);
       }
       if (action === "toggle") {
         const key = mapKey(value);
-        if (!key) return reply("❌ Invalid setting name.");
+        if (!key) return reply("❌ *`[ ɪɴᴠᴀʟɪᴅ sᴇᴛᴛɪɴɢ ɴᴀᴍᴇ ]`*");
 
         if (key === "mode") {
           const now = readSettings(sessionId);
           const next = now.mode === "private" ? "public" : "private";
           setSetting(sessionId, "mode", next);
-          return reply(`✅ Bot mode changed to ${next.toUpperCase()}`);
+          return reply(`✨ *\`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ: ${next.toUpperCase()} ]\`*`);
         }
 
         const updated = toggleSetting(sessionId, key);
 
         const responses = {
-          auto_status_seen: `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`,
-          auto_status_react: `✅ Auto Status React: ${onOff(updated.auto_status_react)}`,
-          auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
-          auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
-          seen_all_msg: `✅ Seen All Msg: ${onOff(updated.seen_all_msg)}`,
-          anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)} _(private chats only)_`,
-          auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
-          auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
-          btns_enabled: `✅ Menu Mode: ${btnsModeText(!!updated.btns_enabled)}`,
+          auto_status_seen: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs sᴇᴇɴ: ${onOff(updated.auto_status_seen)} ]\`*`,
+          auto_status_react: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs ʀᴇᴀᴄᴛ: ${onOff(updated.auto_status_react)} ]\`*`,
+          auto_download_status: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ sᴛᴀᴛᴜs: ${onOff(updated.auto_download_status)} ]\`*`,
+          auto_msg: `✨ *\`[ ✅ ᴀɪ ᴄʜᴀᴛ: ${onOff(updated.auto_msg)} ]\`*`,
+          seen_all_msg: `✨ *\`[ ✅ sᴇᴇɴ ᴀʟʟ ᴍsɢ: ${onOff(updated.seen_all_msg)} ]\`*`,
+          anti_delete: `✨ *\`[ ✅ ᴀɴᴛɪ ᴅᴇʟᴇᴛᴇ: ${onOff(updated.anti_delete)} ]\`*`,
+          auto_reject_calls: `✨ *\`[ ✅ ʀᴇᴊᴇᴄᴛ ᴄᴀʟʟs: ${onOff(updated.auto_reject_calls)} ]\`*`,
+          auto_react_msg: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴍsɢ ʀᴇᴀᴄᴛ: ${onOff(updated.auto_react_msg)} ]\`*`,
+          btns_enabled: `✨ *\`[ ✅ ᴍᴇɴᴜ ᴍᴏᴅᴇ: ${btnsModeText(!!updated.btns_enabled)} ]\`*`,
         };
 
-        return reply(responses[key] || `✅ Toggled ${key}`);
+        return reply(responses[key] || `✨ *\`[ ✅ ᴛᴏɢɢʟᴇᴅ ${key.toUpperCase()} ]\`*`);
       }
 
       if (action === "on" || action === "off") {
         const key = mapKey(value);
         if (!key || key === "mode") {
-          return reply("❌ Invalid setting name.");
+          return reply("❌ *`[ ɪɴᴠᴀʟɪᴅ sᴇᴛᴛɪɴɢ ɴᴀᴍᴇ ]`*");
         }
         const boolVal = action === "on";
         const updated = setSetting(sessionId, key, boolVal);
 
         const responses = {
-          auto_status_seen: `✅ Auto Status Seen: ${onOff(updated.auto_status_seen)}`,
-          auto_status_react: `✅ Auto Status React: ${onOff(updated.auto_status_react)}`,
-          auto_download_status: `✅ Auto Download Status: ${onOff(updated.auto_download_status)}`,
-          auto_msg: `✅ AI Chat: ${onOff(updated.auto_msg)}`,
-          seen_all_msg: `✅ Seen All Msg: ${onOff(updated.seen_all_msg)}`,
-          anti_delete: `✅ Anti Delete: ${onOff(updated.anti_delete)} _(private chats only)_`,
-          auto_reject_calls: `✅ Reject Calls: ${onOff(updated.auto_reject_calls)}`,
-          auto_react_msg: `✅ Auto Message React: ${onOff(updated.auto_react_msg)}`,
-          btns_enabled: `✅ Menu Mode: ${btnsModeText(!!updated.btns_enabled)}`,
+          auto_status_seen: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs sᴇᴇɴ: ${onOff(updated.auto_status_seen)} ]\`*`,
+          auto_status_react: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs ʀᴇᴀᴄᴛ: ${onOff(updated.auto_status_react)} ]\`*`,
+          auto_download_status: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ sᴛᴀᴛᴜs: ${onOff(updated.auto_download_status)} ]\`*`,
+          auto_msg: `✨ *\`[ ✅ ᴀɪ ᴄʜᴀᴛ: ${onOff(updated.auto_msg)} ]\`*`,
+          seen_all_msg: `✨ *\`[ ✅ sᴇᴇɴ ᴀʟʟ ᴍsɢ: ${onOff(updated.seen_all_msg)} ]\`*`,
+          anti_delete: `✨ *\`[ ✅ ᴀɴᴛɪ ᴅᴇʟᴇᴛᴇ: ${onOff(updated.anti_delete)} ]\`*`,
+          auto_reject_calls: `✨ *\`[ ✅ ʀᴇᴊᴇᴄᴛ ᴄᴀʟʟs: ${onOff(updated.auto_reject_calls)} ]\`*`,
+          auto_react_msg: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴍsɢ ʀᴇᴀᴄᴛ: ${onOff(updated.auto_react_msg)} ]\`*`,
+          btns_enabled: `✨ *\`[ ✅ ᴍᴇɴᴜ ᴍᴏᴅᴇ: ${btnsModeText(!!updated.btns_enabled)} ]\`*`,
         };
 
-        return reply(responses[key] || `✅ Set ${key} to ${action.toUpperCase()}`);
+        return reply(responses[key] || `✨ *\`[ ✅ sᴇᴛ ${key.toUpperCase()} ᴛᴏ ${action.toUpperCase()} ]\`*`);
       }
 
       return reply(getStatusCard(sessionId));
     } catch (e) {
       console.log("SETTING COMMAND ERROR:", e);
-      return reply("❌ Error while changing settings.");
+      return reply("❌ *`[ ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴄʜᴀɴɢɪɴɢ sᴇᴛᴛɪɴɢs. ]`*");
     }
   }
 );
@@ -808,7 +808,7 @@ if (!global.__maliya_settings_reply_handler_added) {
           return reply(result);
         } catch (e) {
           console.log("SETTINGS REPLY HANDLER ERROR:", e);
-          return reply("❌ Error while processing settings action.");
+          return reply("❌ *`[ ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴘʀᴏᴄᴇssɪɴɢ sᴇᴛᴛɪɴɢs ᴀᴄᴛɪᴏɴ. ]`*");
         }
       }
 
@@ -829,7 +829,7 @@ if (!global.__maliya_settings_reply_handler_added) {
           return reply(result);
         } catch (e) {
           console.log("SETTINGS NUMERIC ERROR:", e);
-          return reply("❌ Error while applying setting.");
+          return reply("❌ *`[ ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴀᴘᴘʟʏɪɴɢ sᴇᴛᴛɪɴɢ. ]`*");
         }
       }
     },
