@@ -8,6 +8,7 @@ const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 const ffprobePath = require("@ffprobe-installer/ffprobe").path;
 const { sendInteractiveMessage } = require("gifted-btns");
+const { readSettings } = require("../lib/botSettings");
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
@@ -40,7 +41,6 @@ function formatSeconds(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
-
   if (h > 0) {
     return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
@@ -48,7 +48,7 @@ function formatSeconds(seconds) {
 }
 
 function generateProgressBar(duration = "0:00") {
-  return `*00:00* ──────────◉ *${duration}*`;
+  return `00:00 ───🔘──────── ${duration}`;
 }
 
 function getFileSizeMB(filePath) {
@@ -70,11 +70,7 @@ function normalizeText(s = "") {
 }
 
 function tryParseJsonString(s) {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(s); } catch { return null; }
 }
 
 function makePendingKey(sender, from) {
@@ -83,7 +79,6 @@ function makePendingKey(sender, from) {
 
 function extractTexts(body, mek, m) {
   const texts = [];
-
   const direct = [
     body,
     m?.body,
@@ -109,19 +104,15 @@ function extractTexts(body, mek, m) {
     mek?.message?.interactiveResponseMessage?.body?.text,
     mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
   ];
-
   for (const item of direct) {
     if (item) texts.push(String(item).trim());
   }
-
   const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-
   for (const raw of [p1, p2]) {
     if (!raw) continue;
     const parsed = tryParseJsonString(raw);
     if (!parsed) continue;
-
     const vals = [
       parsed.id,
       parsed.selectedId,
@@ -131,23 +122,19 @@ function extractTexts(body, mek, m) {
       parsed.text,
       parsed.name,
     ];
-
     for (const v of vals) {
       if (v) texts.push(String(v).trim());
     }
   }
-
   return [...new Set(texts.filter(Boolean))];
 }
 
 function extractOptionFromTexts(texts) {
   const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
-
   for (const text of normalized) {
     if (text.includes("TYPE:AUDIO") || text === "AUDIO" || text === "1") return "audio";
     if (text.includes("TYPE:DOC") || text === "DOCUMENT" || text === "2") return "doc";
   }
-
   return null;
 }
 
@@ -157,32 +144,27 @@ function buildSongDetails(video) {
   const duration = video.timestamp || formatSeconds(video.seconds) || "0:00";
   const views = formatViews(video.views);
   const uploaded = video.ago || "Unknown";
-  const videoId = video.videoId || "Unknown";
-  const url = video.url || "Unavailable";
 
   return `🎵 *${title}*
 
-╭━━━〔 📄 AUDIO DETAILS 〕━━━╮
-👤 *Channel:* ${channel}
-🆔 *Video ID:* ${videoId}
-⏱️ *Duration:* ${duration}
-👀 *Views:* ${views}
-📅 *Uploaded:* ${uploaded}
-🔗 *Link:* ${url}
-╰━━━━━━━━━━━━━━━━━━━━━━━╯
+┌───〔 AUDIO DETAILS 〕───┐
+│ 👤 Channel  : ${channel}
+│ ⏱️ Duration : ${duration}
+│ 👀 Views    : ${views}
+│ 📅 Date     : ${uploaded}
+└━━━━━━━━━━━━━━━━━━┘
 
 ${generateProgressBar(duration)}`;
 }
 
 function buildFinalCaption(video, typeLabel, sizeMB) {
-  return `╭━〔 ✅ DOWNLOAD COMPLETE 〕━╮
-🎵 *Title:* ${video.title || "Unknown Title"}
-👤 *Channel:* ${video.author?.name || "Unknown Channel"}
-🎧 *Type:* ${typeLabel}
-⏱️ *Duration:* ${video.timestamp || formatSeconds(video.seconds) || "0:00"}
-👀 *Views:* ${formatViews(video.views)}
-📦 *Size:* ${sizeMB.toFixed(2)} MB
-╰━━━━━━━━━━━━━━━━━╯`;
+  return `┌───〔 ✅ AUDIO READY 〕───┐
+│ 🎵 Title : ${video.title || "Unknown"}
+│ 👤 Artist: ${video.author?.name || "Unknown"}
+│ 🎧 Format: ${typeLabel}
+│ ⏱️ Time  : ${video.timestamp || formatSeconds(video.seconds) || "0:00"}
+│ 📦 Size  : ${sizeMB.toFixed(2)} MB
+└━━━━━━━━━━━━━━━━━━┘`;
 }
 
 async function getYoutube(query) {
@@ -192,7 +174,6 @@ async function getYoutube(query) {
     const id = query.includes("v=")
       ? query.split("v=")[1].split("&")[0]
       : query.split("/").pop().split("?")[0];
-
     const info = await yts({ videoId: id });
     return info;
   }
@@ -202,42 +183,70 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-async function sendInteractiveAudioMenu(sock, from, mek, video) {
-  return sendInteractiveMessage(
-    sock,
+// Phone Screen Friendly Minimalist Curve Theme
+function buildStyledAudioMenu(video) {
+  const details = buildSongDetails(video);
+  let msg = `╭━ AUDIO DOWNLOADER ━╮\n\n`;
+  msg += details + "\n\n";
+  msg += `╭──〔 SELECT OPTION 〕──╮\n`;
+  msg += `│ [1] 🎶 Audio File (MP3)\n`;
+  msg += `│ [2] 📁 Document File\n`;
+  msg += `╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+  msg += `📌 *Reply with 1 or 2.*`;
+  return msg;
+}
+
+async function sendNumberedAudioMenu(sock, from, mek, video) {
+  const caption = buildStyledAudioMenu(video);
+  return sock.sendMessage(
     from,
     {
       image: { url: video.thumbnail },
-      text: buildSongDetails(video),
-      footer: "MALIYA-MD | Audio Downloader",
-      interactiveButtons: [
-        {
-          name: "single_select",
-          buttonParamsJson: JSON.stringify({
-            title: "Select Format ↯",
-            sections: [
-              {
-                title: "Audio Options",
-                rows: [
-                  {
-                    title: "🎶 Audio File (MP3)",
-                    description: "Listen directly in WhatsApp",
-                    id: "type:audio",
-                  },
-                  {
-                    title: "📁 Document File",
-                    description: "Download as MP3 Document",
-                    id: "type:doc",
-                  },
-                ],
-              },
-            ],
-          }),
-        },
-      ],
+      caption: caption,
     },
     { quoted: mek }
   );
+}
+
+async function sendInteractiveAudioMenu(sock, from, mek, video) {
+  const settings = readSettings();
+  const btnsOn = !!settings.btns_enabled;
+
+  if (btnsOn && sendInteractiveMessage) {
+    try {
+      return await sendInteractiveMessage(
+        sock,
+        from,
+        {
+          image: { url: video.thumbnail },
+          text: buildSongDetails(video),
+          footer: "MALIYA-MD | Audio Downloader",
+          interactiveButtons: [
+            {
+              name: "single_select",
+              buttonParamsJson: JSON.stringify({
+                title: "Select Format ↯",
+                sections: [
+                  {
+                    title: "Audio Options",
+                    rows: [
+                      { title: "🎶 Audio File (MP3)", description: "Listen directly in WhatsApp", id: "type:audio" },
+                      { title: "📁 Document File", description: "Download as MP3 Document", id: "type:doc" },
+                    ],
+                  },
+                ],
+              }),
+            },
+          ],
+        },
+        { quoted: mek }
+      );
+    } catch (e) {
+      console.log("AUDIO BUTTON ERROR:", e);
+    }
+  }
+
+  return sendNumberedAudioMenu(sock, from, mek, video);
 }
 
 async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice) {
@@ -258,17 +267,6 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
 
     audioFile = makeTempFile(".mp3");
 
-    // yt-dlp extraction
-    // - Removed the "googlebot" user-agent: YouTube now flags/blocks it and
-    //   often returns empty or broken player responses when it's used.
-    // - Added extractorArgs to force the android client first (falls back to
-    //   web). The android client avoids most current signature/PO-token
-    //   failures that break the default "web" client extraction.
-    // - Added noPlaylist to make sure a single video URL never accidentally
-    //   resolves as a playlist.
-    // - Keep binaries updated separately via `npm install yt-dlp-exec@latest`
-    //   and `npm rebuild yt-dlp-exec` — YouTube changes frequently enough
-    //   that a stale bundled binary is the #1 cause of failures here.
     await ytDlp(pending.video.url, {
       extractAudio: true,
       audioFormat: "mp3",
@@ -317,9 +315,6 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
 
     delete pendingMediaChoice[key];
   } catch (e) {
-    // Log the real yt-dlp stderr when available — "exit code 1" alone
-    // doesn't say what actually failed. e.stderr has the real reason
-    // (e.g. bot-check, format not available, video unavailable, etc.)
     console.log("AUDIO DOWNLOAD ERROR:", e && (e.stderr || e.message));
     reply("❌ Error while downloading/sending audio.");
     delete pendingMediaChoice[key];
@@ -393,7 +388,6 @@ replyHandlers.push({
 setInterval(() => {
   const now = Date.now();
   const timeout = 2 * 60 * 1000;
-
   for (const key of Object.keys(pendingMediaChoice)) {
     if (now - pendingMediaChoice[key].createdAt > timeout) {
       delete pendingMediaChoice[key];
