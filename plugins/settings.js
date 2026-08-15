@@ -3,7 +3,6 @@ const config = require("../config");
 const {
   readSettings,
   setSetting,
-  toggleSetting,
 } = require("../lib/botSettings");
 
 let sendInteractiveMessage = null;
@@ -61,7 +60,7 @@ function btnsModeText(val) {
 function getStatusCard(sessionId) {
   const s = readSettings(sessionId);
   return `
-‎┌───❮ 🌟 *ᴍᴀʟɪʏᴀ-ᴍᴅ sᴇᴛᴛɪɴɢs* 🌟 ❯───
+┌───❮ 🌟 *ᴍᴀʟɪʏᴀ-ᴍᴅ sᴇᴛᴛɪɴɢs* 🌟 ❯───
 │
 ├─► ⚙️ *ᴡᴏʀᴋ ᴛʏᴘᴇ:* ${String(s.mode || "public").toUpperCase()}
 ├─► 🎯 *ᴡᴏʀᴋ sᴄᴏᴘᴇ:* ${workScopeText(String(s.work_scope || "private"))}
@@ -107,17 +106,8 @@ function mapKey(name = "") {
   if (["rejectcalls", "auto_reject_calls", "calls", "anticall"].includes(k)) {
     return "auto_reject_calls";
   }
-  if (["mode", "botmode", "privatepublic"].includes(k)) {
-    return "mode";
-  }
   if (["autoreactmsg", "auto_react_msg", "msgreact"].includes(k)) {
     return "auto_react_msg";
-  }
-  if (["reactmode", "auto_react_mode"].includes(k)) {
-    return "auto_react_mode";
-  }
-  if (["workscope", "work_scope", "worktype", "work_type", "scope"].includes(k)) {
-    return "work_scope";
   }
   if (["btns", "buttons", "btns_enabled", "menumode", "menu_mode"].includes(k)) {
     return "btns_enabled";
@@ -213,37 +203,10 @@ function applySettingAction(sessionId, action, value) {
     setSetting(sessionId, "always_presence", value);
     return `✨ *\`[ ✅ ᴘʀᴇsᴇɴᴄᴇ: ${presenceText(value)} ]\`*`;
   }
-  if (action === "toggle") {
-    const key = mapKey(value);
-    if (!key) return "❌ *`[ ɪɴᴠᴀʟɪᴅ sᴇᴛᴛɪɴɢ ɴᴀᴍᴇ ]`*";
-
-    if (key === "mode") {
-      const now = readSettings(sessionId);
-      const next = now.mode === "private" ? "public" : "private";
-      setSetting(sessionId, "mode", next);
-      return `✨ *\`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ: ${next.toUpperCase()} ]\`*`;
-    }
-
-    const updated = toggleSetting(sessionId, key);
-
-    const responses = {
-      auto_status_seen: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs sᴇᴇɴ: ${onOff(updated.auto_status_seen)} ]\`*`,
-      auto_status_react: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs ʀᴇᴀᴄᴛ: ${onOff(updated.auto_status_react)} ]\`*`,
-      auto_download_status: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ sᴛᴀᴛᴜs: ${onOff(updated.auto_download_status)} ]\`*`,
-      auto_msg: `✨ *\`[ ✅ ᴀɪ ᴄʜᴀᴛ: ${onOff(updated.auto_msg)} ]\`*`,
-      seen_all_msg: `✨ *\`[ ✅ sᴇᴇɴ ᴀʟʟ ᴍsɢ: ${onOff(updated.seen_all_msg)} ]\`*`,
-      anti_delete: `✨ *\`[ ✅ ᴀɴᴛɪ ᴅᴇʟᴇᴛᴇ: ${onOff(updated.anti_delete)} ]\`*`,
-      auto_reject_calls: `✨ *\`[ ✅ ʀᴇᴊᴇᴄᴛ ᴄᴀʟʟs: ${onOff(updated.auto_reject_calls)} ]\`*`,
-      auto_react_msg: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴍsɢ ʀᴇᴀᴄᴛ: ${onOff(updated.auto_react_msg)} ]\`*`,
-      btns_enabled: `✨ *\`[ ✅ ᴍᴇɴᴜ ᴍᴏᴅᴇ: ${btnsModeText(!!updated.btns_enabled)} ]\`*`,
-    };
-
-    return responses[key] || `✨ *\`[ ✅ ᴛᴏɢɢʟᴇᴅ ${key.toUpperCase()} ]\`*`;
-  }
 
   if (action === "on" || action === "off") {
     const key = mapKey(value);
-    if (!key || key === "mode") {
+    if (!key) {
       return "❌ *`[ ɪɴᴠᴀʟɪᴅ sᴇᴛᴛɪɴɢ ɴᴀᴍᴇ ]`*";
     }
     const boolVal = action === "on";
@@ -283,9 +246,6 @@ function resolveSettingsActionFromText(text = "") {
   if (t === ".setting private" || t === "private mode") {
     return { action: "private" };
   }
-  if (t === ".setting toggle mode" || t === "toggle mode") {
-    return { action: "toggle", value: "mode" };
-  }
   if (t === ".setting presence typing" || t === "auto typing") {
     return { action: "presence", value: "typing" };
   }
@@ -310,17 +270,11 @@ function resolveSettingsActionFromText(text = "") {
   if (t === ".setting off btns" || t === "disable btns" || t === "btns off" || t === "interactive buttons off") {
     return { action: "off", value: "btns" };
   }
-  if (t === ".setting toggle btns" || t === "toggle btns" || t === "toggle menu mode") {
-    return { action: "toggle", value: "btns" };
-  }
   if (t === ".setting on autoreactmsg" || t === "enable auto react msg" || t === "auto react msg on" || t === ".setting on auto_react_msg") {
     return { action: "on", value: "autoreactmsg" };
   }
   if (t === ".setting off autoreactmsg" || t === "disable auto react msg" || t === "auto react msg off" || t === ".setting off auto_react_msg") {
     return { action: "off", value: "autoreactmsg" };
-  }
-  if (t === ".setting toggle autoreactmsg" || t === "toggle auto react msg" || t === "auto react msg toggle" || t === ".setting toggle auto_react_msg") {
-    return { action: "toggle", value: "autoreactmsg" };
   }
   if (t === ".setting reactmode private") {
     return { action: "reactmode", value: "private" };
@@ -337,17 +291,11 @@ function resolveSettingsActionFromText(text = "") {
   if (t === ".setting msg off" || t === "disable ai chat") {
     return { action: "off", value: "automsg" };
   }
-  if (t === ".setting toggle automsg" || t === "toggle ai chat") {
-    return { action: "toggle", value: "automsg" };
-  }
   if (t === ".setting on seenallmsg" || t === "enable seen all msg" || t === "seen all msg on") {
     return { action: "on", value: "seenallmsg" };
   }
   if (t === ".setting off seenallmsg" || t === "disable seen all msg" || t === "seen all msg off") {
     return { action: "off", value: "seenallmsg" };
-  }
-  if (t === ".setting toggle seenallmsg" || t === "toggle seen all msg") {
-    return { action: "toggle", value: "seenallmsg" };
   }
   if (t === ".setting on antidelete" || t === "enable anti delete") {
     return { action: "on", value: "antidelete" };
@@ -355,17 +303,11 @@ function resolveSettingsActionFromText(text = "") {
   if (t === ".setting off antidelete" || t === "disable anti delete") {
     return { action: "off", value: "antidelete" };
   }
-  if (t === ".setting toggle antidelete" || t === "toggle anti delete") {
-    return { action: "toggle", value: "antidelete" };
-  }
   if (t === ".setting on rejectcalls" || t === "reject calls on") {
     return { action: "on", value: "rejectcalls" };
   }
   if (t === ".setting off rejectcalls" || t === "reject calls off") {
     return { action: "off", value: "rejectcalls" };
-  }
-  if (t === ".setting toggle rejectcalls" || t === "toggle reject calls") {
-    return { action: "toggle", value: "rejectcalls" };
   }
   if (t === ".setting on autoseen" || t === "auto status view on") {
     return { action: "on", value: "autoseen" };
@@ -373,17 +315,11 @@ function resolveSettingsActionFromText(text = "") {
   if (t === ".setting off autoseen" || t === "auto status view off") {
     return { action: "off", value: "autoseen" };
   }
-  if (t === ".setting toggle autoseen" || t === "toggle auto seen") {
-    return { action: "toggle", value: "autoseen" };
-  }
   if (t === ".setting on autoreact" || t === "auto status react on") {
     return { action: "on", value: "autoreact" };
   }
   if (t === ".setting off autoreact" || t === "auto status react off") {
     return { action: "off", value: "autoreact" };
-  }
-  if (t === ".setting toggle autoreact" || t === "toggle auto react") {
-    return { action: "toggle", value: "autoreact" };
   }
   if (t === ".setting on autodownloadstatus" || t === "auto download status on") {
     return { action: "on", value: "autodownloadstatus" };
@@ -391,14 +327,11 @@ function resolveSettingsActionFromText(text = "") {
   if (t === ".setting off autodownloadstatus" || t === "auto download status off") {
     return { action: "off", value: "autodownloadstatus" };
   }
-  if (t === ".setting toggle autodownloadstatus" || t === "toggle auto download status") {
-    return { action: "toggle", value: "autodownloadstatus" };
-  }
   return null;
 }
 
 function buildStyledMenu(title, options, footer = "") {
-  let msg = `‎\n`;
+  let msg = `\n`;
   msg += `┌───❮ 👑 *${title.toUpperCase()}* 👑 ❯───\n`;
   msg += `│\n`;
   options.forEach((opt, idx) => {
@@ -524,7 +457,6 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
                     rows: [
                       { title: "Public Mode", description: "Set bot mode to public", id: ".setting public" },
                       { title: "Private Mode", description: "Set bot mode to private", id: ".setting private" },
-                      { title: "Toggle Mode", description: "Switch public/private", id: ".setting toggle mode" },
                     ],
                   },
                   {
@@ -540,7 +472,6 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
                     rows: [
                       { title: "✅ Interactive Buttons ON", description: "Use WhatsApp buttons/lists in song, video, alive menus", id: ".setting on btns" },
                       { title: "❌ Interactive Buttons OFF", description: "Use plain number-reply text menus instead", id: ".setting off btns" },
-                      { title: "🔄 Toggle Menu Mode", description: "Switch between buttons and number-reply", id: ".setting toggle btns" },
                     ],
                   },
                   {
@@ -556,7 +487,6 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
                     rows: [
                       { title: "✅ Auto React Msg ON", description: "Enable message auto react", id: ".setting on autoreactmsg" },
                       { title: "❌ Auto React Msg OFF", description: "Disable message auto react", id: ".setting off autoreactmsg" },
-                      { title: "🔄 Toggle Auto React Msg", description: "Switch auto react on/off", id: ".setting toggle autoreactmsg" },
                       { title: "🔒 React Mode: Private Only", description: "React only in private chats", id: ".setting reactmode private" },
                       { title: "👥 React Mode: Group Only", description: "React only in groups", id: ".setting reactmode group" },
                       { title: "🌍 React Mode: All Chats", description: "React in all chats", id: ".setting reactmode all" },
@@ -565,11 +495,10 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
                   {
                     title: "🤖 AI & TOOLS",
                     rows: [
-                      { title: "Enable AI Chat", description: "Turn ON auto msg", id: ".setting on automsg" },
-                      { title: "Disable AI Chat", description: "Turn OFF auto msg", id: ".setting off automsg" },
+                      { title: "Enable AI Chat", description: "Turn ON auto msg", id: ".setting msg on" },
+                      { title: "Disable AI Chat", description: "Turn OFF auto msg", id: ".setting msg off" },
                       { title: "✅ Seen All Msg ON", description: "Auto-read every private + group msg", id: ".setting on seenallmsg" },
                       { title: "❌ Seen All Msg OFF", description: "Stop auto-reading every message", id: ".setting off seenallmsg" },
-                      { title: "🔄 Toggle Seen All Msg", description: "Switch seen-all on/off", id: ".setting toggle seenallmsg" },
                       { title: "Enable Anti Delete", description: "Turn ON anti delete (private chats only)", id: ".setting on antidelete" },
                       { title: "Disable Anti Delete", description: "Turn OFF anti delete", id: ".setting off antidelete" },
                       { title: "Reject Calls ON", description: "Turn ON reject calls", id: ".setting on rejectcalls" },
@@ -603,43 +532,33 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
   const allOptions = [
     { label: "🌐 Public Mode", action: "public" },
     { label: "🔒 Private Mode", action: "private" },
-    { label: "🔄 Toggle Mode", action: "toggle", value: "mode" },
     { label: "🔒 Work Scope: Private", action: "workscope", value: "private" },
     { label: "👥 Work Scope: Group", action: "workscope", value: "group" },
     { label: "🌍 Work Scope: All", action: "workscope", value: "all" },
     { label: "✅ Buttons ON", action: "on", value: "btns" },
     { label: "❌ Buttons OFF", action: "off", value: "btns" },
-    { label: "🔄 Toggle Buttons", action: "toggle", value: "btns" },
     { label: "⌨️ Presence: Typing", action: "presence", value: "typing" },
     { label: "🎙️ Presence: Recording", action: "presence", value: "recording" },
     { label: "⛔ Presence: OFF", action: "presence", value: "off" },
     { label: "✅ Auto React Msg ON", action: "on", value: "autoreactmsg" },
     { label: "❌ Auto React Msg OFF", action: "off", value: "autoreactmsg" },
-    { label: "🔄 Toggle Auto React Msg", action: "toggle", value: "autoreactmsg" },
     { label: "🔒 React Mode: Private", action: "reactmode", value: "private" },
     { label: "👥 React Mode: Group", action: "reactmode", value: "group" },
     { label: "🌍 React Mode: All", action: "reactmode", value: "all" },
     { label: "🤖 AI Chat ON", action: "on", value: "automsg" },
     { label: "🤖 AI Chat OFF", action: "off", value: "automsg" },
-    { label: "🔄 Toggle AI Chat", action: "toggle", value: "automsg" },
     { label: "✅ Seen All Msg ON", action: "on", value: "seenallmsg" },
     { label: "❌ Seen All Msg OFF", action: "off", value: "seenallmsg" },
-    { label: "🔄 Toggle Seen All Msg", action: "toggle", value: "seenallmsg" },
     { label: "🛡️ Anti Delete ON", action: "on", value: "antidelete" },
     { label: "🛡️ Anti Delete OFF", action: "off", value: "antidelete" },
-    { label: "🔄 Toggle Anti Delete", action: "toggle", value: "antidelete" },
     { label: "📞 Reject Calls ON", action: "on", value: "rejectcalls" },
     { label: "📞 Reject Calls OFF", action: "off", value: "rejectcalls" },
-    { label: "🔄 Toggle Reject Calls", action: "toggle", value: "rejectcalls" },
     { label: "👁️ Auto Status View ON", action: "on", value: "autoseen" },
     { label: "👁️ Auto Status View OFF", action: "off", value: "autoseen" },
-    { label: "🔄 Toggle Auto Status View", action: "toggle", value: "autoseen" },
     { label: "❤️ Auto Status React ON", action: "on", value: "autoreact" },
     { label: "❤️ Auto Status React OFF", action: "off", value: "autoreact" },
-    { label: "🔄 Toggle Auto Status React", action: "toggle", value: "autoreact" },
     { label: "📥 Auto Download Status ON", action: "on", value: "autodownloadstatus" },
     { label: "📥 Auto Download Status OFF", action: "off", value: "autodownloadstatus" },
-    { label: "🔄 Toggle Auto Download Status", action: "toggle", value: "autodownloadstatus" },
     { label: "📊 Show Full Status", action: "status" },
   ];
 
@@ -709,37 +628,10 @@ cmd(
         setSetting(sessionId, "always_presence", value);
         return reply(`✨ *\`[ ✅ ᴘʀᴇsᴇɴᴄᴇ: ${presenceText(value)} ]\`*`);
       }
-      if (action === "toggle") {
-        const key = mapKey(value);
-        if (!key) return reply("❌ *`[ ɪɴᴠᴀʟɪᴅ sᴇᴛᴛɪɴɢ ɴᴀᴍᴇ ]`*");
-
-        if (key === "mode") {
-          const now = readSettings(sessionId);
-          const next = now.mode === "private" ? "public" : "private";
-          setSetting(sessionId, "mode", next);
-          return reply(`✨ *\`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ: ${next.toUpperCase()} ]\`*`);
-        }
-
-        const updated = toggleSetting(sessionId, key);
-
-        const responses = {
-          auto_status_seen: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs sᴇᴇɴ: ${onOff(updated.auto_status_seen)} ]\`*`,
-          auto_status_react: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs ʀᴇᴀᴄᴛ: ${onOff(updated.auto_status_react)} ]\`*`,
-          auto_download_status: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ sᴛᴀᴛᴜs: ${onOff(updated.auto_download_status)} ]\`*`,
-          auto_msg: `✨ *\`[ ✅ ᴀɪ ᴄʜᴀᴛ: ${onOff(updated.auto_msg)} ]\`*`,
-          seen_all_msg: `✨ *\`[ ✅ sᴇᴇɴ ᴀʟʟ ᴍsɢ: ${onOff(updated.seen_all_msg)} ]\`*`,
-          anti_delete: `✨ *\`[ ✅ ᴀɴᴛɪ ᴅᴇʟᴇᴛᴇ: ${onOff(updated.anti_delete)} ]\`*`,
-          auto_reject_calls: `✨ *\`[ ✅ ʀᴇᴊᴇᴄᴛ ᴄᴀʟʟs: ${onOff(updated.auto_reject_calls)} ]\`*`,
-          auto_react_msg: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴍsɢ ʀᴇᴀᴄᴛ: ${onOff(updated.auto_react_msg)} ]\`*`,
-          btns_enabled: `✨ *\`[ ✅ ᴍᴇɴᴜ ᴍᴏᴅᴇ: ${btnsModeText(!!updated.btns_enabled)} ]\`*`,
-        };
-
-        return reply(responses[key] || `✨ *\`[ ✅ ᴛᴏɢɢʟᴇᴅ ${key.toUpperCase()} ]\`*`);
-      }
 
       if (action === "on" || action === "off") {
         const key = mapKey(value);
-        if (!key || key === "mode") {
+        if (!key) {
           return reply("❌ *`[ ɪɴᴠᴀʟɪᴅ sᴇᴛᴛɪɴɢ ɴᴀᴍᴇ ]`*");
         }
         const boolVal = action === "on";
