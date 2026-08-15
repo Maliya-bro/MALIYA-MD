@@ -372,7 +372,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
   const settings = readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
-  // ✅ If buttons are enabled AND the library exists, show interactive buttons
+  // ✅ If buttons are enabled, show interactive buttons
   if (btnsOn && sendInteractiveMessage) {
     try {
       return await sendInteractiveMessage(
@@ -440,7 +440,7 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
   const settings = readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
-  // ✅ If buttons are enabled AND the library exists, show interactive buttons
+  // ✅ If buttons are enabled, show interactive buttons
   if (btnsOn && sendInteractiveMessage) {
     try {
       return await sendInteractiveMessage(
