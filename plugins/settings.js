@@ -3,6 +3,7 @@ const config = require("../config");
 const {
   readSettings,
   setSetting,
+  toggleSetting,
 } = require("../lib/botSettings");
 
 let sendInteractiveMessage = null;
@@ -57,8 +58,9 @@ function btnsModeText(val) {
   return val ? "🔘 ɪɴᴛᴇʀᴀᴄᴛɪᴠᴇ ʙᴜᴛᴛᴏɴs" : "🔢 ɴᴜᴍʙᴇʀ ʀᴇᴘʟʏ (ᴛᴇxᴛ ᴍᴇɴᴜ)";
 }
 
-function getStatusCard(sessionId) {
-  const s = readSettings(sessionId);
+// ✅ FIX: Made async
+async function getStatusCard(sessionId) {
+  const s = await readSettings(sessionId);
   return `
 ┌───❮ 🌟 *ᴍᴀʟɪʏᴀ-ᴍᴅ sᴇᴛᴛɪɴɢs* 🌟 ❯───
 │
@@ -106,8 +108,17 @@ function mapKey(name = "") {
   if (["rejectcalls", "auto_reject_calls", "calls", "anticall"].includes(k)) {
     return "auto_reject_calls";
   }
+  if (["mode", "botmode", "privatepublic"].includes(k)) {
+    return "mode";
+  }
   if (["autoreactmsg", "auto_react_msg", "msgreact"].includes(k)) {
     return "auto_react_msg";
+  }
+  if (["reactmode", "auto_react_mode"].includes(k)) {
+    return "auto_react_mode";
+  }
+  if (["workscope", "work_scope", "worktype", "work_type", "scope"].includes(k)) {
+    return "work_scope";
   }
   if (["btns", "buttons", "btns_enabled", "menumode", "menu_mode"].includes(k)) {
     return "btns_enabled";
@@ -170,37 +181,38 @@ function isDuplicateAction(state, sig) {
   return false;
 }
 
-function applySettingAction(sessionId, action, value) {
+// ✅ FIX: Made async
+async function applySettingAction(sessionId, action, value) {
   if (action === "status") {
-    return getStatusCard(sessionId);
+    return await getStatusCard(sessionId);
   }
   if (action === "private") {
-    setSetting(sessionId, "mode", "private");
+    await setSetting(sessionId, "mode", "private");
     return "✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘʀɪᴠᴀᴛᴇ ]`*";
   }
   if (action === "public") {
-    setSetting(sessionId, "mode", "public");
+    await setSetting(sessionId, "mode", "public");
     return "✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘᴜʙʟɪᴄ ]`*";
   }
   if (action === "reactmode") {
     if (!["private", "group", "all"].includes(value)) {
       return "❌ *`[ ɪɴᴠᴀʟɪᴅ ʀᴇᴀᴄᴛ ᴍᴏᴅᴇ ]`*";
     }
-    setSetting(sessionId, "auto_react_mode", value);
+    await setSetting(sessionId, "auto_react_mode", value);
     return `✨ *\`[ ✅ ʀᴇᴀᴄᴛ ᴍᴏᴅᴇ: ${reactModeText(value)} ]\`*`;
   }
   if (action === "workscope") {
     if (!["private", "group", "all"].includes(value)) {
       return "❌ *`[ ɪɴᴠᴀʟɪᴅ ᴡᴏʀᴋ sᴄᴏᴘᴇ ]`*";
     }
-    setSetting(sessionId, "work_scope", value);
+    await setSetting(sessionId, "work_scope", value);
     return `✨ *\`[ ✅ ᴡᴏʀᴋ sᴄᴏᴘᴇ: ${workScopeText(value)} ]\`*`;
   }
   if (action === "presence") {
     if (!["off", "typing", "recording"].includes(value)) {
       return "❌ *`[ ɪɴᴠᴀʟɪᴅ ᴘʀᴇsᴇɴᴄᴇ ᴍᴏᴅᴇ ]`*";
     }
-    setSetting(sessionId, "always_presence", value);
+    await setSetting(sessionId, "always_presence", value);
     return `✨ *\`[ ✅ ᴘʀᴇsᴇɴᴄᴇ: ${presenceText(value)} ]\`*`;
   }
 
@@ -210,7 +222,7 @@ function applySettingAction(sessionId, action, value) {
       return "❌ *`[ ɪɴᴠᴀʟɪᴅ sᴇᴛᴛɪɴɢ ɴᴀᴍᴇ ]`*";
     }
     const boolVal = action === "on";
-    const updated = setSetting(sessionId, key, boolVal);
+    const updated = await setSetting(sessionId, key, boolVal);
 
     const responses = {
       auto_status_seen: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs sᴇᴇɴ: ${onOff(updated.auto_status_seen)} ]\`*`,
@@ -227,7 +239,7 @@ function applySettingAction(sessionId, action, value) {
     return responses[key] || `✨ *\`[ ✅ sᴇᴛ ${key.toUpperCase()} ᴛᴏ ${action.toUpperCase()} ]\`*`;
   }
 
-  return getStatusCard(sessionId);
+  return await getStatusCard(sessionId);
 }
 
 function resolveSettingsActionFromText(text = "") {
@@ -330,6 +342,7 @@ function resolveSettingsActionFromText(text = "") {
   return null;
 }
 
+// ----- Helper: build a beautifully styled numbered menu with fancy fonts -----
 function buildStyledMenu(title, options, footer = "") {
   let msg = `\n`;
   msg += `┌───❮ 👑 *${title.toUpperCase()}* 👑 ❯───\n`;
@@ -345,6 +358,7 @@ function buildStyledMenu(title, options, footer = "") {
   return msg;
 }
 
+// ----- Send numbered menu with image and styled text -----
 async function sendNumberedMenu(conn, from, mek, title, options, footer = "", imageUrl = SETTINGS_IMAGE) {
   const caption = buildStyledMenu(title, options, footer);
   return conn.sendMessage(
@@ -358,7 +372,7 @@ async function sendNumberedMenu(conn, from, mek, title, options, footer = "", im
 }
 
 async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
-  const text = getStatusCard(sessionId);
+  const text = await getStatusCard(sessionId);
   const key = makePendingKey(sender, from);
   pendingSettingsMenu[key] = {
     createdAt: Date.now(),
@@ -369,7 +383,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     options: null,
   };
 
-  const settings = readSettings(sessionId);
+  const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
   // ✅ If buttons are enabled, show interactive buttons
@@ -403,7 +417,6 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
       );
     } catch (e) {
       console.log("SETTINGS HOME ERROR:", e);
-      // Fallback to numbered menu on error
     }
   }
 
@@ -437,7 +450,7 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
   pendingSettingsMenu[key].sessionId = sessionId;
   pendingSettingsMenu[key].stage = "roles";
 
-  const settings = readSettings(sessionId);
+  const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
   // ✅ If buttons are enabled, show interactive buttons
@@ -530,7 +543,6 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
       );
     } catch (e) {
       console.log("SETTINGS ROLES MENU ERROR:", e);
-      // Fallback to numbered menu on error
     }
   }
 
@@ -597,14 +609,14 @@ cmd(
         return await sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId);
       }
       if (action === "status") {
-        return reply(getStatusCard(sessionId));
+        return reply(await getStatusCard(sessionId));
       }
       if (action === "private") {
-        setSetting(sessionId, "mode", "private");
+        await setSetting(sessionId, "mode", "private");
         return reply("✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘʀɪᴠᴀᴛᴇ ]`*");
       }
       if (action === "public") {
-        setSetting(sessionId, "mode", "public");
+        await setSetting(sessionId, "mode", "public");
         return reply("✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘᴜʙʟɪᴄ ]`*");
       }
       if (action === "reactmode") {
@@ -613,7 +625,7 @@ cmd(
             "❌ *`[ ᴜsᴇ: .setting reactmode private | group | all ]`*"
           );
         }
-        setSetting(sessionId, "auto_react_mode", value);
+        await setSetting(sessionId, "auto_react_mode", value);
         return reply(`✨ *\`[ ✅ ʀᴇᴀᴄᴛ ᴍᴏᴅᴇ: ${reactModeText(value)} ]\`*`);
       }
       if (action === "workscope") {
@@ -622,7 +634,7 @@ cmd(
             "❌ *`[ ᴜsᴇ: .setting workscope private | group | all ]`*"
           );
         }
-        setSetting(sessionId, "work_scope", value);
+        await setSetting(sessionId, "work_scope", value);
         return reply(`✨ *\`[ ✅ ᴡᴏʀᴋ sᴄᴏᴘᴇ: ${workScopeText(value)} ]\`*`);
       }
       if (action === "presence") {
@@ -631,7 +643,7 @@ cmd(
             "❌ *`[ ᴜsᴇ: .setting presence off | typing | recording ]`*"
           );
         }
-        setSetting(sessionId, "always_presence", value);
+        await setSetting(sessionId, "always_presence", value);
         return reply(`✨ *\`[ ✅ ᴘʀᴇsᴇɴᴄᴇ: ${presenceText(value)} ]\`*`);
       }
 
@@ -641,7 +653,7 @@ cmd(
           return reply("❌ *`[ ɪɴᴠᴀʟɪᴅ sᴇᴛᴛɪɴɢ ɴᴀᴍᴇ ]`*");
         }
         const boolVal = action === "on";
-        const updated = setSetting(sessionId, key, boolVal);
+        const updated = await setSetting(sessionId, key, boolVal);
 
         const responses = {
           auto_status_seen: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs sᴇᴇɴ: ${onOff(updated.auto_status_seen)} ]\`*`,
@@ -658,7 +670,7 @@ cmd(
         return reply(responses[key] || `✨ *\`[ ✅ sᴇᴛ ${key.toUpperCase()} ᴛᴏ ${action.toUpperCase()} ]\`*`);
       }
 
-      return reply(getStatusCard(sessionId));
+      return reply(await getStatusCard(sessionId));
     } catch (e) {
       console.log("SETTING COMMAND ERROR:", e);
       return reply("❌ *`[ ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴄʜᴀɴɢɪɴɢ sᴇᴛᴛɪɴɢs. ]`*");
@@ -696,7 +708,7 @@ if (!global.__maliya_settings_reply_handler_added) {
             state.stage = "roles";
             return await sendSettingsRolesMenu(conn, from, mek, reply, sender, sid);
           }
-          const result = applySettingAction(sid, resolved.action, resolved.value);
+          const result = await applySettingAction(sid, resolved.action, resolved.value);
           state.createdAt = Date.now();
           return reply(result);
         } catch (e) {
@@ -717,7 +729,7 @@ if (!global.__maliya_settings_reply_handler_added) {
             state.stage = "roles";
             return await sendSettingsRolesMenu(conn, from, mek, reply, sender, sid);
           }
-          const result = applySettingAction(sid, opt.action, opt.value);
+          const result = await applySettingAction(sid, opt.action, opt.value);
           state.createdAt = Date.now();
           return reply(result);
         } catch (e) {
