@@ -340,9 +340,9 @@ function resolveSettingsActionFromText(text = "") {
   return null;
 }
 
-// ----- Helper: build options menu (added below status card) -----
-function buildOptionsMenu(options, footer = "") {
-  let msg = `\n┌───❮ 👑 *ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ* 👑 ❯───\n`;
+function buildStyledMenu(title, options, footer = "") {
+  let msg = `\n`;
+  msg += `┌───❮ 👑 *${title.toUpperCase()}* 👑 ❯───\n`;
   msg += `│\n`;
   options.forEach((opt, idx) => {
     const num = String(idx + 1).padStart(2, '0');
@@ -351,13 +351,12 @@ function buildOptionsMenu(options, footer = "") {
   msg += `│\n`;
   msg += `└───❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ* ❯───\n`;
   if (footer) msg += `\n*${footer}*`;
+
   return msg;
 }
 
-// ----- Send numbered menu: headerText (status card) on top, options below -----
-async function sendNumberedMenu(conn, from, mek, headerText, options, footer = "", imageUrl = SETTINGS_IMAGE) {
-  let caption = headerText + "\n\n";
-  caption += buildOptionsMenu(options, footer);
+async function sendNumberedMenu(conn, from, mek, title, options, footer = "", imageUrl = SETTINGS_IMAGE) {
+  const caption = buildStyledMenu(title, options, footer);
   return conn.sendMessage(
     from,
     {
@@ -425,7 +424,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     conn,
     from,
     mek,
-    text + "\n✨ *ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ:*",
+    text + "\n\n✨ *ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ:*",
     options,
     "© MALIYA-MD",
     SETTINGS_IMAGE
@@ -703,6 +702,12 @@ if (!global.__maliya_settings_reply_handler_added) {
           }
           const result = await applySettingAction(sid, resolved.action, resolved.value);
           state.createdAt = Date.now();
+          
+          // ✅ Add reaction to the user's message
+          await conn.sendMessage(from, {
+            react: { text: "✅", key: mek.key }
+          });
+          
           return reply(result);
         } catch (e) {
           console.log("SETTINGS REPLY HANDLER ERROR:", e);
@@ -724,6 +729,12 @@ if (!global.__maliya_settings_reply_handler_added) {
           }
           const result = await applySettingAction(sid, opt.action, opt.value);
           state.createdAt = Date.now();
+          
+          // ✅ Add reaction to the user's message
+          await conn.sendMessage(from, {
+            react: { text: "✅", key: mek.key }
+          });
+          
           return reply(result);
         } catch (e) {
           console.log("SETTINGS NUMERIC ERROR:", e);
