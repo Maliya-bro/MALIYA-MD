@@ -61,8 +61,7 @@ function btnsModeText(val) {
 function getStatusCard(sessionId) {
   const s = readSettings(sessionId);
   return `
-‎
-┌─❖ 🌟 *━━━━ ʙᴏᴛ sᴇᴛᴛɪɴɢs ᴘᴀɴᴇʟ ━━━━* 🌟
+‎┌───❮ 🌟 *ᴍᴀʟɪʏᴀ-ᴍᴅ sᴇᴛᴛɪɴɢs* 🌟 ❯───
 │
 ├─► ⚙️ *ᴡᴏʀᴋ ᴛʏᴘᴇ:* ${String(s.mode || "public").toUpperCase()}
 ├─► 🎯 *ᴡᴏʀᴋ sᴄᴏᴘᴇ:* ${workScopeText(String(s.work_scope || "private"))}
@@ -72,14 +71,13 @@ function getStatusCard(sessionId) {
 ├─► 👁️ *sᴇᴇɴ ᴀʟʟ ᴍsɢ:* ${onOff(!!s.seen_all_msg)}
 ├─► 💖 *ᴀᴜᴛᴏ ᴍsɢ ʀᴇᴀᴄᴛ:* ${onOff(!!s.auto_react_msg)}
 ├─► 🔮 *ʀᴇᴀᴄᴛ ᴍᴏᴅᴇ:* ${reactModeText(String(s.auto_react_mode || "all"))}
-├─► 🛡️ *ᴀɴᴛɪ ᴅᴇʟᴇᴛᴇ:* ${onOff(!!s.anti_delete)} _(private chats only)_
+├─► 🛡️ *ᴀɴᴛɪ ᴅᴇʟᴇᴛᴇ:* ${onOff(!!s.anti_delete)} _(Private Only)_
 ├─► 🚫 *ᴀɴᴛɪ ᴄᴀʟʟ:* ${onOff(!!s.auto_reject_calls)}
 ├─► 👁️‍🗨️ *ᴀᴜᴛᴏ sᴛᴀᴛᴜs:* ${onOff(!!s.auto_status_seen)}
-├─► ❤️ *ᴀᴜᴛᴏ ʀᴇᴀᴄᴛ:* ${onOff(!!s.auto_status_react)}
-├─► 📥 *ᴀᴜᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ sᴛᴀᴛᴜs:* ${onOff(!!s.auto_download_status)}
+├─► ❤️ *sᴛᴀᴛᴜs ʀᴇᴀᴄᴛ:* ${onOff(!!s.auto_status_react)}
+├─► 📥 *sᴛᴀᴛᴜs ᴅᴏᴡɴʟᴏᴀᴅ:* ${onOff(!!s.auto_download_status)}
 │
-└───────────────────────────❖
-📌 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*
+└───❮ 📌 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ* ❯───
 `.trim();
 }
 
@@ -399,24 +397,21 @@ function resolveSettingsActionFromText(text = "") {
   return null;
 }
 
-// ----- Helper: build a beautifully styled numbered menu with fancy fonts -----
 function buildStyledMenu(title, options, footer = "") {
   let msg = `‎\n`;
-  msg += `┌─❖ 👑 *${title.toUpperCase()}* 👑\n`;
+  msg += `┌───❮ 👑 *${title.toUpperCase()}* 👑 ❯───\n`;
   msg += `│\n`;
   options.forEach((opt, idx) => {
     const num = String(idx + 1).padStart(2, '0');
     msg += `├─► 📱 *[ ${num} ]* ➔ \`${opt.label}\`\n`;
   });
   msg += `│\n`;
-  msg += `└───────────────────────────❖\n\n`;
-  msg += `💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ ᴏғ ʏᴏᴜʀ ᴄʜᴏɪᴄᴇ* ⚡\n`;
+  msg += `└───❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ* ❯───\n`;
   if (footer) msg += `\n*${footer}*`;
 
   return msg;
 }
 
-// ----- Send numbered menu with image and styled text -----
 async function sendNumberedMenu(conn, from, mek, title, options, footer = "", imageUrl = SETTINGS_IMAGE) {
   const caption = buildStyledMenu(title, options, footer);
   return conn.sendMessage(
