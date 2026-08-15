@@ -8,6 +8,7 @@ const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 const ffprobePath = require("@ffprobe-installer/ffprobe").path;
 const { sendInteractiveMessage } = require("gifted-btns");
+const { readSettings } = require("../lib/botSettings");
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
@@ -15,8 +16,6 @@ ffmpeg.setFfprobePath(ffprobePath);
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-// Path to your exported YouTube cookies.txt file.
-// Place cookies.txt in your project root (one level above /commands).
 const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
 const HAS_COOKIES = fs.existsSync(COOKIES_PATH);
 
@@ -45,7 +44,6 @@ function formatSeconds(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
-
   if (h > 0) {
     return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
@@ -53,7 +51,7 @@ function formatSeconds(seconds) {
 }
 
 function generateProgressBar(duration = "0:00") {
-  return `*00:00* ──────────◉ *${duration}*`;
+  return `00:00 ───🔘──────── ${duration}`;
 }
 
 function getFileSizeMB(filePath) {
@@ -129,11 +127,7 @@ function normalizeText(s = "") {
 }
 
 function tryParseJsonString(s) {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(s); } catch { return null; }
 }
 
 function makePendingKey(sender, from) {
@@ -142,7 +136,6 @@ function makePendingKey(sender, from) {
 
 function extractTexts(body, mek, m) {
   const texts = [];
-
   const direct = [
     body,
     m?.body,
@@ -168,19 +161,15 @@ function extractTexts(body, mek, m) {
     mek?.message?.interactiveResponseMessage?.body?.text,
     mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
   ];
-
   for (const item of direct) {
     if (item) texts.push(String(item).trim());
   }
-
   const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-
   for (const raw of [p1, p2]) {
     if (!raw) continue;
     const parsed = tryParseJsonString(raw);
     if (!parsed) continue;
-
     const vals = [
       parsed.id,
       parsed.selectedId,
@@ -190,35 +179,29 @@ function extractTexts(body, mek, m) {
       parsed.text,
       parsed.name,
     ];
-
     for (const v of vals) {
       if (v) texts.push(String(v).trim());
     }
   }
-
   return [...new Set(texts.filter(Boolean))];
 }
 
 function extractQualityFromTexts(texts) {
   const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
-
   for (const text of normalized) {
     if (text.includes("QUALITY:360")) return "360";
     if (text.includes("QUALITY:480")) return "480";
     if (text.includes("QUALITY:720")) return "720";
     if (text.includes("QUALITY:1080")) return "1080";
-
     if (text === "360P" || text.includes("360P")) return "360";
     if (text === "480P" || text.includes("480P")) return "480";
     if (text === "720P" || text.includes("720P")) return "720";
     if (text === "1080P" || text.includes("1080P")) return "1080";
-
     if (text === "1") return "360";
     if (text === "2") return "480";
     if (text === "3") return "720";
     if (text === "4") return "1080";
   }
-
   return null;
 }
 
@@ -228,35 +211,27 @@ function buildVideoDetails(video) {
   const duration = video.timestamp || formatSeconds(video.seconds) || "0:00";
   const views = formatViews(video.views);
   const uploaded = video.ago || "Unknown";
-  const videoId = video.videoId || "Unknown";
-  const url = video.url || "Unavailable";
-  const live = video.live ? "Yes" : "No";
 
   return `🎥 *${title}*
 
-╭━━━〔 📄 VIDEO DETAILS 〕━━━╮
-👤 *Channel:* ${channel}
-🆔 *Video ID:* ${videoId}
-⏱️ *Duration:* ${duration}
-👀 *Views:* ${views}
-📅 *Uploaded:* ${uploaded}
-📡 *Live:* ${live}
-🔗 *Link:* ${url}
-╰━━━━━━━━━━━━━━╯
+╔════ VIDEO DETAILS ════╗
+  👤 Channel  : ${channel}
+  ⏱️ Duration : ${duration}
+  👀 Views    : ${views}
+  📅 Date     : ${uploaded}
+╚═══════════════════════╝
 
 ${generateProgressBar(duration)}`;
 }
 
 function buildFinalCaption(video, qualityLabel, sizeMB) {
-  return `╭━〔 ✅ DOWNLOAD COMPLETE 〕━╮
-🎥 *Title:* ${video.title || "Unknown Title"}
-👤 *Channel:* ${video.author?.name || "Unknown Channel"}
-🎞️ *Quality:* ${qualityLabel}
-⏱️ *Duration:* ${video.timestamp || formatSeconds(video.seconds) || "0:00"}
-👀 *Views:* ${formatViews(video.views)}
-📅 *Uploaded:* ${video.ago || "Unknown"}
-📦 *Size:* ${sizeMB.toFixed(2)} MB
-╰━━━━━━━━━━━━━━━━━╯`;
+  return `╔════ VIDEO READY ════╗
+  🎥 Title   : ${video.title || "Unknown"}
+  👤 Channel : ${video.author?.name || "Unknown"}
+  🎞️ Quality : ${qualityLabel}
+  ⏱️ Time    : ${video.timestamp || formatSeconds(video.seconds) || "0:00"}
+  📦 Size    : ${sizeMB.toFixed(2)} MB
+╚═════════════════════╝`;
 }
 
 async function getYoutube(query) {
@@ -266,7 +241,6 @@ async function getYoutube(query) {
     const id = query.includes("v=")
       ? query.split("v=")[1].split("&")[0]
       : query.split("/").pop().split("?")[0];
-
     const info = await yts({ videoId: id });
     return info;
   }
@@ -276,30 +250,9 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// ---- Core download logic using yt-dlp-exec ----
 async function downloadVideoWithYtdl(videoUrl, quality, outPath) {
-  // Quality Selection Format: closest height matching requested quality
   const formatStr = `bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}][ext=mp4]/best`;
 
-  if (!HAS_COOKIES) {
-    console.log(
-      `VIDEO DOWNLOAD WARNING: cookies.txt not found at ${COOKIES_PATH}. ` +
-      `YouTube will likely block this download with a "Sign in to confirm you're not a bot" error. ` +
-      `Export cookies.txt from a logged-in YouTube session and place it there.`
-    );
-  }
-
-  // yt-dlp extraction options:
-  // - cookies: required now that YouTube actively bot-checks server/VPS
-  //   IPs. Without a valid cookies.txt exported from a logged-in browser
-  //   session, most downloads fail with "Sign in to confirm you're not a
-  //   bot". Only passed if the file actually exists.
-  // - extractorArgs: prefer the android client, falls back to web. Avoids
-  //   most signature/PO-token issues on top of the cookie auth.
-  // - Removed the "googlebot" user-agent: YouTube now flags/blocks it and
-  //   often returns empty or broken player responses when it's used.
-  // - noPlaylist: a single video URL never accidentally resolves as a
-  //   playlist.
   await ytDlp(videoUrl, {
     format: formatStr,
     output: outPath,
@@ -340,62 +293,84 @@ async function reencodeForWhatsApp(inputPath, outputPath) {
   });
 }
 
-async function sendQualityInteractiveMenu(sock, from, mek, video) {
-  return sendInteractiveMessage(
-    sock,
+// Phone Screen Friendly Sharp Block Theme
+function buildStyledVideoMenu(video) {
+  const details = buildVideoDetails(video);
+  let msg = `=========================\n`;
+  msg += `   🎬 VIDEO DOWNLOADER   \n`;
+  msg += `=========================\n\n`;
+  msg += details + "\n\n";
+  msg += `╔══ SELECT QUALITY ══╗\n`;
+  msg += `  [1] 360p (Fast)\n`;
+  msg += `  [2] 480p (Standard)\n`;
+  msg += `  [3] 720p (HD)\n`;
+  msg += `  [4] 1080p (FHD)\n`;
+  msg += `╚════════════════════╝\n\n`;
+  msg += `📌 *Reply with 1, 2, 3, or 4.*`;
+  return msg;
+}
+
+async function sendNumberedVideoMenu(sock, from, mek, video) {
+  const caption = buildStyledVideoMenu(video);
+  return sock.sendMessage(
     from,
     {
       image: { url: video.thumbnail },
-      text: buildVideoDetails(video),
-      footer: "MALIYA-MD | Quality Selector",
-      interactiveButtons: [
-        {
-          name: "single_select",
-          buttonParamsJson: JSON.stringify({
-            title: "Select Quality ↯",
-            sections: [
-              {
-                title: "Video Qualities",
-                rows: [
-                  {
-                    title: "📹 360p",
-                    description: "Fast & smaller size",
-                    id: "quality:360",
-                  },
-                  {
-                    title: "📺 480p",
-                    description: "Better standard quality",
-                    id: "quality:480",
-                  },
-                  {
-                    title: "✨ 720p HD",
-                    description: "HD quality video",
-                    id: "quality:720",
-                  },
-                  {
-                    title: "🔥 1080p FHD",
-                    description: "Full HD quality video",
-                    id: "quality:1080",
-                  },
-                ],
-              },
-            ],
-          }),
-        },
-      ],
+      caption: caption,
     },
     { quoted: mek }
   );
 }
 
+async function sendQualityInteractiveMenu(sock, from, mek, video) {
+  const settings = readSettings();
+  const btnsOn = !!settings.btns_enabled;
+
+  if (btnsOn && sendInteractiveMessage) {
+    try {
+      return await sendInteractiveMessage(
+        sock,
+        from,
+        {
+          image: { url: video.thumbnail },
+          text: buildVideoDetails(video),
+          footer: "MALIYA-MD | Quality Selector",
+          interactiveButtons: [
+            {
+              name: "single_select",
+              buttonParamsJson: JSON.stringify({
+                title: "Select Quality ↯",
+                sections: [
+                  {
+                    title: "Video Qualities",
+                    rows: [
+                      { title: "📹 360p", description: "Fast & smaller size", id: "quality:360" },
+                      { title: "📺 480p", description: "Better standard quality", id: "quality:480" },
+                      { title: "✨ 720p HD", description: "HD quality video", id: "quality:720" },
+                      { title: "🔥 1080p FHD", description: "Full HD quality video", id: "quality:1080" },
+                    ],
+                  },
+                ],
+              }),
+            },
+          ],
+        },
+        { quoted: mek }
+      );
+    } catch (e) {
+      console.log("VIDEO BUTTON ERROR:", e);
+    }
+  }
+
+  return sendNumberedVideoMenu(sock, from, mek, video);
+}
+
 function isDuplicateQualityAction(state, quality) {
   const now = Date.now();
   const sig = `quality:${quality}`;
-
   if (state.lastActionSig === sig && now - (state.lastActionAt || 0) < 5000) {
     return true;
   }
-
   state.lastActionSig = sig;
   state.lastActionAt = now;
   return false;
@@ -425,7 +400,6 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
     rawFile = makeTempFile(".mp4");
     fixedFile = makeTempFile(".mp4");
 
-    // Direct download via yt-dlp-exec
     await downloadVideoWithYtdl(pending.video.url, quality, rawFile);
 
     await reply("🛠 Converting video for phone support...");
@@ -461,16 +435,12 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
 
     delete pendingVideoQuality[key];
   } catch (e) {
-    // Log the real yt-dlp stderr when available — "exit code 1" alone
-    // doesn't say what actually failed. e.stderr has the real reason
-    // (bot-check, format not available, expired cookies, etc.)
     console.log("VIDEO QUALITY ERROR:", e && (e.stderr || e.message), e && e.stack);
     reply("❌ Error while downloading/converting selected quality video.");
     delete pendingVideoQuality[key];
   } finally {
     safeUnlink(rawFile);
     safeUnlink(fixedFile);
-
     if (pendingVideoQuality[key]) {
       pendingVideoQuality[key].isProcessing = false;
     }
@@ -542,7 +512,6 @@ replyHandlers.push({
 setInterval(() => {
   const now = Date.now();
   const timeout = 2 * 60 * 1000;
-
   for (const key of Object.keys(pendingVideoQuality)) {
     if (now - pendingVideoQuality[key].createdAt > timeout) {
       delete pendingVideoQuality[key];
