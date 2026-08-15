@@ -397,16 +397,37 @@ function resolveSettingsActionFromText(text = "") {
   return null;
 }
 
-// ----- Helper to send a numbered menu (used when btns_enabled = false) -----
-async function sendNumberedMenu(conn, from, mek, text, options, footer = "") {
-  let msg = text + "\n\n";
+// ----- Helper: build a beautifully styled numbered menu -----
+function buildStyledMenu(title, options, footer = "") {
+  const line = "━━━━━━━━━━━━━━━━━━━━━━━━━";
+  const top = "╔" + "═".repeat(36) + "╗";
+  const bottom = "╚" + "═".repeat(36) + "╝";
+
+  let msg = `╔═════════════════════════════════════╗\n`;
+  msg += `║  ✦ ${title} ✦  ║\n`;
+  msg += `╚═════════════════════════════════════╝\n\n`;
+  msg += line + "\n";
   options.forEach((opt, idx) => {
-    msg += `${idx+1}. ${opt.label}\n`;
+    msg += `*${idx+1}.* ${opt.label}\n`;
   });
-  msg += "\n📌 Reply with the number of your choice.";
+  msg += line + "\n\n";
+  msg += `📌 *Reply with the number of your choice.*`;
   if (footer) msg += "\n" + footer;
 
-  return conn.sendMessage(from, { text: msg }, { quoted: mek });
+  return msg;
+}
+
+// ----- Send numbered menu with image and styled text -----
+async function sendNumberedMenu(conn, from, mek, title, options, footer = "", imageUrl = SETTINGS_IMAGE) {
+  const caption = buildStyledMenu(title, options, footer);
+  return conn.sendMessage(
+    from,
+    {
+      image: { url: imageUrl },
+      caption: caption,
+    },
+    { quoted: mek }
+  );
 }
 
 async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
@@ -417,8 +438,8 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     lastSig: "",
     lastAt: 0,
     sessionId,
-    stage: "home",   // home or roles
-    options: null,   // for roles menu
+    stage: "home",
+    options: null,
   };
 
   const settings = readSettings(sessionId);
@@ -454,24 +475,24 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
       );
     } catch (e) {
       console.log("SETTINGS HOME ERROR:", e);
-      // fallback to text
+      // fallback
     }
   }
 
-  // Numbered reply fallback
+  // Numbered reply fallback with style
   const options = [
-    { label: "Change Settings", action: "menuopen" },
-    { label: "Show Full Status", action: "status" },
+    { label: "⚙️ Change Settings", action: "menuopen" },
+    { label: "📊 Show Full Status", action: "status" },
   ];
-  // store options in state so reply handler can map numbers
   pendingSettingsMenu[key].options = options;
   return sendNumberedMenu(
     conn,
     from,
     mek,
-    text + "\n\n⚙️ *Choose an option:*",
+    text + "\n\n*✨ Choose an option:*",
     options,
-    "© MALIYA-MD"
+    "© MALIYA-MD",
+    SETTINGS_IMAGE
   );
 }
 
@@ -584,59 +605,57 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
       );
     } catch (e) {
       console.log("SETTINGS ROLES MENU ERROR:", e);
-      // fallback to text
+      // fallback
     }
   }
 
-  // Numbered reply fallback: build a flat list of all options grouped by section
-  // We'll list all options with numbers 1..N, but to avoid huge list, we can group by categories.
-  // For simplicity, we list each setting command with a number.
+  // Numbered reply fallback (beautiful)
   const allOptions = [
-    { label: "Public Mode", action: "public" },
-    { label: "Private Mode", action: "private" },
-    { label: "Toggle Mode", action: "toggle", value: "mode" },
-    { label: "Work Scope: Private", action: "workscope", value: "private" },
-    { label: "Work Scope: Group", action: "workscope", value: "group" },
-    { label: "Work Scope: All", action: "workscope", value: "all" },
-    { label: "Buttons ON", action: "on", value: "btns" },
-    { label: "Buttons OFF", action: "off", value: "btns" },
-    { label: "Toggle Buttons", action: "toggle", value: "btns" },
-    { label: "Presence: Typing", action: "presence", value: "typing" },
-    { label: "Presence: Recording", action: "presence", value: "recording" },
-    { label: "Presence: OFF", action: "presence", value: "off" },
-    { label: "Auto React Msg ON", action: "on", value: "autoreactmsg" },
-    { label: "Auto React Msg OFF", action: "off", value: "autoreactmsg" },
-    { label: "Toggle Auto React Msg", action: "toggle", value: "autoreactmsg" },
-    { label: "React Mode: Private", action: "reactmode", value: "private" },
-    { label: "React Mode: Group", action: "reactmode", value: "group" },
-    { label: "React Mode: All", action: "reactmode", value: "all" },
-    { label: "AI Chat ON", action: "on", value: "automsg" },
-    { label: "AI Chat OFF", action: "off", value: "automsg" },
-    { label: "Toggle AI Chat", action: "toggle", value: "automsg" },
-    { label: "Seen All Msg ON", action: "on", value: "seenallmsg" },
-    { label: "Seen All Msg OFF", action: "off", value: "seenallmsg" },
-    { label: "Toggle Seen All Msg", action: "toggle", value: "seenallmsg" },
-    { label: "Anti Delete ON", action: "on", value: "antidelete" },
-    { label: "Anti Delete OFF", action: "off", value: "antidelete" },
-    { label: "Toggle Anti Delete", action: "toggle", value: "antidelete" },
-    { label: "Reject Calls ON", action: "on", value: "rejectcalls" },
-    { label: "Reject Calls OFF", action: "off", value: "rejectcalls" },
-    { label: "Toggle Reject Calls", action: "toggle", value: "rejectcalls" },
-    { label: "Auto Status View ON", action: "on", value: "autoseen" },
-    { label: "Auto Status View OFF", action: "off", value: "autoseen" },
-    { label: "Toggle Auto Status View", action: "toggle", value: "autoseen" },
-    { label: "Auto Status React ON", action: "on", value: "autoreact" },
-    { label: "Auto Status React OFF", action: "off", value: "autoreact" },
-    { label: "Toggle Auto Status React", action: "toggle", value: "autoreact" },
-    { label: "Auto Download Status ON", action: "on", value: "autodownloadstatus" },
-    { label: "Auto Download Status OFF", action: "off", value: "autodownloadstatus" },
-    { label: "Toggle Auto Download Status", action: "toggle", value: "autodownloadstatus" },
-    { label: "Show Full Status", action: "status" },
+    { label: "🌐 Public Mode", action: "public" },
+    { label: "🔒 Private Mode", action: "private" },
+    { label: "🔄 Toggle Mode", action: "toggle", value: "mode" },
+    { label: "🔒 Work Scope: Private", action: "workscope", value: "private" },
+    { label: "👥 Work Scope: Group", action: "workscope", value: "group" },
+    { label: "🌍 Work Scope: All", action: "workscope", value: "all" },
+    { label: "✅ Buttons ON", action: "on", value: "btns" },
+    { label: "❌ Buttons OFF", action: "off", value: "btns" },
+    { label: "🔄 Toggle Buttons", action: "toggle", value: "btns" },
+    { label: "⌨️ Presence: Typing", action: "presence", value: "typing" },
+    { label: "🎙️ Presence: Recording", action: "presence", value: "recording" },
+    { label: "⛔ Presence: OFF", action: "presence", value: "off" },
+    { label: "✅ Auto React Msg ON", action: "on", value: "autoreactmsg" },
+    { label: "❌ Auto React Msg OFF", action: "off", value: "autoreactmsg" },
+    { label: "🔄 Toggle Auto React Msg", action: "toggle", value: "autoreactmsg" },
+    { label: "🔒 React Mode: Private", action: "reactmode", value: "private" },
+    { label: "👥 React Mode: Group", action: "reactmode", value: "group" },
+    { label: "🌍 React Mode: All", action: "reactmode", value: "all" },
+    { label: "🤖 AI Chat ON", action: "on", value: "automsg" },
+    { label: "🤖 AI Chat OFF", action: "off", value: "automsg" },
+    { label: "🔄 Toggle AI Chat", action: "toggle", value: "automsg" },
+    { label: "✅ Seen All Msg ON", action: "on", value: "seenallmsg" },
+    { label: "❌ Seen All Msg OFF", action: "off", value: "seenallmsg" },
+    { label: "🔄 Toggle Seen All Msg", action: "toggle", value: "seenallmsg" },
+    { label: "🛡️ Anti Delete ON", action: "on", value: "antidelete" },
+    { label: "🛡️ Anti Delete OFF", action: "off", value: "antidelete" },
+    { label: "🔄 Toggle Anti Delete", action: "toggle", value: "antidelete" },
+    { label: "📞 Reject Calls ON", action: "on", value: "rejectcalls" },
+    { label: "📞 Reject Calls OFF", action: "off", value: "rejectcalls" },
+    { label: "🔄 Toggle Reject Calls", action: "toggle", value: "rejectcalls" },
+    { label: "👁️ Auto Status View ON", action: "on", value: "autoseen" },
+    { label: "👁️ Auto Status View OFF", action: "off", value: "autoseen" },
+    { label: "🔄 Toggle Auto Status View", action: "toggle", value: "autoseen" },
+    { label: "❤️ Auto Status React ON", action: "on", value: "autoreact" },
+    { label: "❤️ Auto Status React OFF", action: "off", value: "autoreact" },
+    { label: "🔄 Toggle Auto Status React", action: "toggle", value: "autoreact" },
+    { label: "📥 Auto Download Status ON", action: "on", value: "autodownloadstatus" },
+    { label: "📥 Auto Download Status OFF", action: "off", value: "autodownloadstatus" },
+    { label: "🔄 Toggle Auto Download Status", action: "toggle", value: "autodownloadstatus" },
+    { label: "📊 Show Full Status", action: "status" },
   ];
 
   pendingSettingsMenu[key].options = allOptions;
   const header = "⚙️ *Choose a setting to change:*";
-  return sendNumberedMenu(conn, from, mek, header, allOptions, "© MALIYA-MD");
+  return sendNumberedMenu(conn, from, mek, header, allOptions, "© MALIYA-MD", SETTINGS_IMAGE);
 }
 
 cmd(
@@ -778,7 +797,6 @@ if (!global.__maliya_settings_reply_handler_added) {
       const sid = sessionId || state.sessionId;
 
       const text = getIncomingText(body, mek, m);
-      // First try to resolve as a command (like .setting public)
       const resolved = resolveSettingsActionFromText(text);
       if (resolved) {
         const sig = `${resolved.action}:${resolved.value || ""}`;
@@ -799,7 +817,7 @@ if (!global.__maliya_settings_reply_handler_added) {
         }
       }
 
-      // If no command matched, try numeric selection from stored options
+      // numeric selection
       const num = parseInt(text, 10);
       if (!isNaN(num) && state.options && state.options.length >= num && num > 0) {
         const opt = state.options[num-1];
@@ -807,7 +825,6 @@ if (!global.__maliya_settings_reply_handler_added) {
         if (isDuplicateAction(state, sig)) return;
 
         try {
-          // If user selected "menuopen" we need to send roles menu
           if (opt.action === "menuopen") {
             state.createdAt = Date.now();
             state.stage = "roles";
@@ -821,8 +838,6 @@ if (!global.__maliya_settings_reply_handler_added) {
           return reply("❌ Error while applying setting.");
         }
       }
-
-      // If nothing matched, ignore
     },
   });
 }
