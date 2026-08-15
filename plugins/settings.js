@@ -397,15 +397,14 @@ function resolveSettingsActionFromText(text = "") {
   return null;
 }
 
-// ----- Helper: build a beautifully styled numbered menu -----
+// ----- Helper: build a beautifully styled numbered menu with fancy fonts -----
 function buildStyledMenu(title, options, footer = "") {
-  const line = "━━━━━━━━━━━━━━━━━━━━━━━━━";
+  const line = "━━━━━━━━━━━";
   const top = "╔" + "═".repeat(36) + "╗";
   const bottom = "╚" + "═".repeat(36) + "╝";
-
-  let msg = `╔═════════════════════════════════════╗\n`;
-  msg += `║  ✦ ${title} ✦  ║\n`;
-  msg += `╚═════════════════════════════════════╝\n\n`;
+  let msg = `╔════════════════╗\n`;
+  msg +=    `║  ★彡 ${title} 彡★  ║\n`;
+  msg +=    `╚════════════════╝\n\n`;
   msg += line + "\n";
   options.forEach((opt, idx) => {
     msg += `*${idx+1}.* ${opt.label}\n`;
@@ -475,11 +474,9 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
       );
     } catch (e) {
       console.log("SETTINGS HOME ERROR:", e);
-      // fallback
     }
   }
 
-  // Numbered reply fallback with style
   const options = [
     { label: "⚙️ Change Settings", action: "menuopen" },
     { label: "📊 Show Full Status", action: "status" },
@@ -605,11 +602,9 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
       );
     } catch (e) {
       console.log("SETTINGS ROLES MENU ERROR:", e);
-      // fallback
     }
   }
 
-  // Numbered reply fallback (beautiful)
   const allOptions = [
     { label: "🌐 Public Mode", action: "public" },
     { label: "🔒 Private Mode", action: "private" },
@@ -817,7 +812,6 @@ if (!global.__maliya_settings_reply_handler_added) {
         }
       }
 
-      // numeric selection
       const num = parseInt(text, 10);
       if (!isNaN(num) && state.options && state.options.length >= num && num > 0) {
         const opt = state.options[num-1];
