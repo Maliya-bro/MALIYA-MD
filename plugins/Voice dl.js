@@ -16,6 +16,24 @@ ffmpeg.setFfprobePath(ffprobePath);
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
+// Cookies path - one level up from commands folder
+const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
+
+// Re-checked fresh each download (not just once at startup) so that
+// adding/replacing cookies.txt while the bot is running is picked up
+// immediately, without needing a restart.
+function cookiesStatus() {
+  if (!fs.existsSync(COOKIES_PATH)) {
+    return { exists: false, sizeBytes: 0 };
+  }
+  try {
+    const stat = fs.statSync(COOKIES_PATH);
+    return { exists: true, sizeBytes: stat.size };
+  } catch {
+    return { exists: false, sizeBytes: 0 };
+  }
+}
+
 const MEDIA_LIMIT_MB = 45;
 const pendingMediaChoice = Object.create(null);
 
@@ -48,7 +66,7 @@ function formatSeconds(seconds) {
 }
 
 function generateProgressBar(duration = "0:00") {
-  return `00:00 ───🔘──────── ${duration}`;
+  return `▰▰▰▰▰▰▰▰▰ *${duration}*`;
 }
 
 function getFileSizeMB(filePath) {
@@ -144,27 +162,33 @@ function buildSongDetails(video) {
   const duration = video.timestamp || formatSeconds(video.seconds) || "0:00";
   const views = formatViews(video.views);
   const uploaded = video.ago || "Unknown";
+  const videoId = video.videoId || "Unknown";
+  const url = video.url || "Unavailable";
 
-  return `🎵 *${title}*
-
-┌───〔 AUDIO DETAILS 〕───┐
-│ 👤 Channel  : ${channel}
-│ ⏱️ Duration : ${duration}
-│ 👀 Views    : ${views}
-│ 📅 Date     : ${uploaded}
-└━━━━━━━━━━━━━━━━━━┘
-
-${generateProgressBar(duration)}`;
+  return `┌─❮ 🎵 *𝕊𝕆ℕ𝔾 𝔻𝔼𝕋𝔸𝕀𝕃𝕊* ❯─
+│
+├─► 🎶 *ᴛɪᴛʟᴇ:* ${title}
+├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${channel}
+├─► 🆔 *ᴠɪᴅᴇᴏ ɪᴅ:* ${videoId}
+├─► ⏱️ *ᴅᴜʀᴀᴛɪᴏɴ:* ${duration}
+├─► 👀 *ᴠɪᴇᴡs:* ${views}
+├─► 📅 *ᴜᴘʟᴏᴀᴅᴇᴅ:* ${uploaded}
+├─► 🔗 *ʟɪɴᴋ:* ${url}
+│
+└─❮ ${generateProgressBar(duration)} ❯─`;
 }
 
 function buildFinalCaption(video, typeLabel, sizeMB) {
-  return `┌───〔 ✅ AUDIO READY 〕───┐
-│ 🎵 Title : ${video.title || "Unknown"}
-│ 👤 Artist: ${video.author?.name || "Unknown"}
-│ 🎧 Format: ${typeLabel}
-│ ⏱️ Time  : ${video.timestamp || formatSeconds(video.seconds) || "0:00"}
-│ 📦 Size  : ${sizeMB.toFixed(2)} MB
-└━━━━━━━━━━━━━━━━━━┘`;
+  return `┌❮ ✅ *𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻 ℂ𝕆𝕄ℙ𝕃𝔼𝕋𝔼* ❯─
+│
+├─► 🎵 *ᴛɪᴛʟᴇ:* ${video.title || "Unknown Title"}
+├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${video.author?.name || "Unknown Channel"}
+├─► 🎧 *ᴛʏᴘᴇ:* ${typeLabel}
+├─► ⏱️ *ᴅᴜʀᴀᴛɪᴏɴ:* ${video.timestamp || formatSeconds(video.seconds) || "0:00"}
+├─► 👀 *ᴠɪᴇᴡs:* ${formatViews(video.views)}
+├─► 📦 *sɪᴢᴇ:* ${sizeMB.toFixed(2)} MB
+│
+└─❮ 💾 *sᴀᴠᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ* ❯─`;
 }
 
 async function getYoutube(query) {
@@ -183,17 +207,17 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// Phone Screen Friendly Minimalist Curve Theme
+// ----- Build styled audio menu -----
 function buildStyledAudioMenu(video) {
   const details = buildSongDetails(video);
-  let msg = `╭━ AUDIO DOWNLOADER ━╮\n\n`;
-  msg += details + "\n\n";
-  msg += `╭──〔 SELECT OPTION 〕──╮\n`;
-  msg += `│ [1] 🎶 Audio File (MP3)\n`;
-  msg += `│ [2] 📁 Document File\n`;
-  msg += `╰━━━━━━━━━━━━━━━━━━╯\n\n`;
-  msg += `📌 *Reply with 1 or 2.*`;
-  return msg;
+  return details + `
+
+┌─❮ 🎵 *𝔸𝕌𝔻𝕀𝕆 𝕆ℙ𝕋𝕀𝕆ℕ𝕊* ❯─
+│
+├─► 📱 *[ 01 ]* ➔ 🎶 ᴀᴜᴅɪᴏ ғɪʟᴇ (ᴍᴘ3)
+├─► 📱 *[ 02 ]* ➔ 📁 ᴅᴏᴄᴜᴍᴇɴᴛ ғɪʟᴇ
+│
+└─❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2* ❯─`;
 }
 
 async function sendNumberedAudioMenu(sock, from, mek, video) {
@@ -209,7 +233,7 @@ async function sendNumberedAudioMenu(sock, from, mek, video) {
 }
 
 async function sendInteractiveAudioMenu(sock, from, mek, video) {
-  const settings = readSettings();
+  const settings = await readSettings();
   const btnsOn = !!settings.btns_enabled;
 
   if (btnsOn && sendInteractiveMessage) {
@@ -220,7 +244,7 @@ async function sendInteractiveAudioMenu(sock, from, mek, video) {
         {
           image: { url: video.thumbnail },
           text: buildSongDetails(video),
-          footer: "MALIYA-MD | Audio Downloader",
+          footer: "𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻 | 𝔸𝕌𝔻𝕀𝕆 𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻𝔼ℝ",
           interactiveButtons: [
             {
               name: "single_select",
@@ -249,6 +273,21 @@ async function sendInteractiveAudioMenu(sock, from, mek, video) {
   return sendNumberedAudioMenu(sock, from, mek, video);
 }
 
+// Detects whether a yt-dlp failure is caused by missing/invalid/expired
+// cookies (the "Sign in to confirm you're not a bot" family of errors),
+// so we can tell the user exactly what's wrong instead of a generic
+// "error while downloading" message.
+function isCookiesRelatedError(errText = "") {
+  const t = String(errText).toLowerCase();
+  return (
+    t.includes("sign in to confirm") ||
+    t.includes("not a bot") ||
+    t.includes("cookies") ||
+    t.includes("login required") ||
+    t.includes("private video") && t.includes("sign in")
+  );
+}
+
 async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice) {
   const key = makePendingKey(sender, from);
   const pending = pendingMediaChoice[key];
@@ -263,11 +302,17 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
     const isDoc = optionChoice === "doc";
     const label = isDoc ? "Document" : "Audio";
 
-    await reply(`⬇️ Downloading *${label}*...`);
+    await reply(`⬇️ *ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ* ${label}...`);
 
     audioFile = makeTempFile(".mp3");
 
-    await ytDlp(pending.video.url, {
+    // Cookies are checked fresh right before each download attempt, so a
+    // cookies.txt added/replaced while the bot is already running is
+    // picked up immediately without a restart.
+    const cookies = cookiesStatus();
+
+    // Build yt-dlp args with cookies if available
+    const ytArgs = {
       extractAudio: true,
       audioFormat: "mp3",
       audioQuality: "0",
@@ -279,7 +324,20 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
       addHeader: [
         "referer:youtube.com",
       ],
-    });
+    };
+
+    if (cookies.exists && cookies.sizeBytes > 0) {
+      ytArgs.cookies = COOKIES_PATH;
+      console.log(`🍪 Using cookies.txt for YouTube download (${cookies.sizeBytes} bytes)`);
+    } else if (cookies.exists && cookies.sizeBytes === 0) {
+      // File exists but is empty — almost always means the export was
+      // done wrong or the browser session had no YouTube cookies yet.
+      console.log("⚠️ cookies.txt exists but is EMPTY (0 bytes) - re-export it from a logged-in YouTube session");
+    } else {
+      console.log("⚠️ cookies.txt not found at " + COOKIES_PATH + " - download may fail with a bot-check error");
+    }
+
+    await ytDlp(pending.video.url, ytArgs);
 
     if (!fs.existsSync(audioFile) || fs.statSync(audioFile).size === 0) {
       throw new Error("Downloaded file is missing or empty.");
@@ -315,8 +373,35 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
 
     delete pendingMediaChoice[key];
   } catch (e) {
-    console.log("AUDIO DOWNLOAD ERROR:", e && (e.stderr || e.message));
-    reply("❌ Error while downloading/sending audio.");
+    const errText = (e && (e.stderr || e.message)) || "";
+    console.log("AUDIO DOWNLOAD ERROR:", errText);
+
+    // Give the user (and whoever is watching logs) a precise, actionable
+    // message instead of a generic failure when this looks like a
+    // cookies problem — this is the #1 cause of download failures.
+    if (isCookiesRelatedError(errText)) {
+      const cookies = cookiesStatus();
+      if (!cookies.exists) {
+        reply(
+          "❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴍɪssɪɴɢ.*\n\n" +
+          "YouTube is blocking this download with a bot-check.\n" +
+          "Export a fresh `cookies.txt` from a logged-in YouTube session and place it in the bot's root folder."
+        );
+      } else if (cookies.sizeBytes === 0) {
+        reply(
+          "❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs.ᴛxᴛ ɪs ᴇᴍᴘᴛʏ.*\n\n" +
+          "Re-export cookies.txt from a logged-in YouTube session (make sure you're actually signed in when exporting)."
+        );
+      } else {
+        reply(
+          "❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴇxᴘɪʀᴇᴅ ᴏʀ ɪɴᴠᴀʟɪᴅ.*\n\n" +
+          "Your saved cookies.txt is no longer valid. Export a fresh one from a logged-in YouTube session and replace the old file."
+        );
+      }
+    } else {
+      reply("❌ *ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ/sᴇɴᴅɪɴɢ ᴀᴜᴅɪᴏ.*");
+    }
+
     delete pendingMediaChoice[key];
   } finally {
     safeUnlink(audioFile);
@@ -337,12 +422,12 @@ cmd(
   },
   async (sock, mek, m, { from, q, sender, reply }) => {
     try {
-      if (!q) return reply("🎵 Please provide a song name or YouTube link.");
+      if (!q) return reply("🎵 *ᴘʟᴇᴀsᴇ ᴘʀᴏᴠɪᴅᴇ ᴀ sᴏɴɢ ɴᴀᴍᴇ ᴏʀ ʏᴏᴜᴛᴜʙᴇ ʟɪɴᴋ.*");
 
-      await reply("🔍 Searching Audio...");
+      await reply("🔍 *sᴇᴀʀᴄʜɪɴɢ ᴀᴜᴅɪᴏ...*");
 
       const video = await getYoutube(q);
-      if (!video) return reply("❌ No results found.");
+      if (!video) return reply("❌ *ɴᴏ ʀᴇsᴜʟᴛs ғᴏᴜɴᴅ.*");
 
       const key = makePendingKey(sender, from);
 
@@ -356,7 +441,7 @@ cmd(
       await sendInteractiveAudioMenu(sock, from, mek, video);
     } catch (e) {
       console.log("SONG MENU ERROR:", e && e.message);
-      reply("❌ Error while preparing audio menu.");
+      reply("❌ *ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴘʀᴇᴘᴀʀɪɴɢ ᴀᴜᴅɪᴏ ᴍᴇɴᴜ.*");
     }
   }
 );
