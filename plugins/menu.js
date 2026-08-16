@@ -154,7 +154,7 @@ function menuHeader(userName = "User") {
   const styledUser = toSmallCaps(userName);
   return `✨ 👋 *ʜɪ, ${styledUser}!* ✨
 
-╭━━━〔 🌟 *${BOT_NAME}* 🌟 〕━━━
+╭━〔 🌟 *${BOT_NAME}* 🌟 〕━
 ┃
 ┃ 🤖 *ʙᴏᴛ ɴᴀᴍᴇ* : ${BOT_NAME}
 ┃ 👤 *ᴜsᴇʀ*     : ${styledUser}
@@ -163,7 +163,7 @@ function menuHeader(userName = "User") {
 ┃ 📅 *ᴅᴀᴛᴇ*    : ${date}
 ┃ 🎯 *ᴘʀᴇғɪx*  : [ ${PREFIX} ]
 ┃
-╰━━━━━━━━━━━━━━━━━━━━━━━
+╰━━━━━━━━━━━━━━
 
 👇 *Select a command category below to view commands:*`;
 }
@@ -173,10 +173,10 @@ function commandListCaption(cat, list, userName = "User") {
   const styledCat = toSmallCaps(cat);
   const styledUser = toSmallCaps(userName);
   let txt = `✨ 👋 *ʜɪ, ${styledUser}!* ✨\n\n`;
-  txt += `╭━━━〔 ${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs* 〕━━━\n`;
+  txt += `╭━〔 ${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs* 〕━\n`;
   txt += `┃ 📦 *ᴛᴏᴛᴀʟ*  : ${list.length} Commands\n`;
   txt += `┃ 🎯 *ᴘʀᴇғɪx*  : [ ${PREFIX} ]\n`;
-  txt += `╰━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+  txt += `╰━━━━━━━━━━━━━━━━\n\n`;
   
   list.forEach((c) => {
     const primary = c.pattern ? `${PREFIX}${toSmallCaps(c.pattern)}` : "No Pattern";
@@ -290,11 +290,11 @@ function isDuplicateAction(state, action) {
 // ----- Build a beautifully styled numbered main menu -----
 function buildStyledMainMenu(state, userName) {
   const { categories } = state;
-  const line = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+  const line = "━━━━━━━━━━━━━━━━━";
   const styledUser = toSmallCaps(userName);
-  let msg = `╔═════════════════════════════╗\n`;
+  let msg = `╔════════════════════════╗\n`;
   msg += `║  ★彡 𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻 𝕄𝔼ℕ𝕌 彡★  ║\n`;
-  msg += `╚═════════════════════════════╝\n\n`;
+  msg += `╚════════════════════════╝\n\n`;
   msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
   msg += line + "\n";
   categories.forEach((cat, idx) => {
