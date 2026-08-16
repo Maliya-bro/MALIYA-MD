@@ -41,6 +41,19 @@ function sameNumber(a = "", b = "") {
   return cleanPhone(a) === cleanPhone(b);
 }
 
+// Custom Font Converter Helper (Converts normal ABC to Fancy Serif Bold)
+function toFancyFont(str = "") {
+  const normal = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const fancy  = "𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳𝟎𝟏𝟐𝟑𝟒𝟓𝟔𝟕𝟖𝟗";
+  return String(str)
+    .split("")
+    .map((char) => {
+      const idx = normal.indexOf(char);
+      return idx !== -1 ? fancy[idx] : char;
+    })
+    .join("");
+}
+
 function getUserName(pushname, m, mek, sender = "") {
   const candidates = [
     pushname,
@@ -138,42 +151,49 @@ function buildCommandMapCached() {
 
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
-  return `👋 HI ${userName}
+  const fancyName = toFancyFont(userName);
+  return `✨ 👋 *ᕼI, ${fancyName}!* ✨
 
-┏━〔 BOT'S MENU 〕━⬣
-┃ 🤖 Bot     : ${BOT_NAME}
-┃ 👤 User    : ${userName}
-┃ 👑 Owner   : ${OWNER_NUMBER}
-┃ 🕒 Time    : ${time}
-┃ 📅 Date    : ${date}
-┃ ✨ Prefix  : ${PREFIX}
-┗━━━━━━━━━━━━⬣
+╭━━━〔 🌟 *${BOT_NAME}* 🌟 〕━━━
+┃
+┃ 🤖 𝐁𝐨𝐭 𝐍𝐚𝐦𝐞 : ${BOT_NAME}
+┃ 👤 𝐔𝐬𝐞𝐫     : ${fancyName}
+┃ 👑 𝐎𝐰𝐧𝐞𝐫    : ${OWNER_NUMBER}
+┃ 🕒 𝐓𝐢𝐦𝐞    : ${time}
+┃ 📅 𝐃𝐚𝐭𝐞    : ${date}
+┃ 🎯 𝐏𝐫𝐞𝐟𝐢𝐱  : [ ${PREFIX} ]
+┃
+╰━━━━━━━━━━━━━━━━━━━━━━━
 
-🎀 Select a Command List Below`;
+👇 *Select a command category below to view commands:*`;
 }
 
 function commandListCaption(cat, list, userName = "User") {
   const emo = getCategoryEmoji(cat);
-  let txt = `👋 HI ${userName}\n\n`;
-  txt += `┏━〔 ${emo} ${cat} COMMANDS 〕━⬣\n`;
-  txt += `┃ 📦 Total : ${list.length}\n`;
-  txt += `┃ ✨ Prefix: ${PREFIX}\n`;
-  txt += `┗━━━━━━━━━━━━⬣\n\n`;
+  const fancyCat = toFancyFont(cat);
+  const fancyName = toFancyFont(userName);
+  let txt = `✨ 👋 *ᕼI, ${fancyName}!* ✨\n\n`;
+  txt += `╭━━━〔 ${emo} *${fancyCat} 𝐂𝐎𝐌𝐌𝐀𝐍𝐃𝐒* 〕━━━\n`;
+  txt += `┃ 📦 𝐓𝐨𝐭𝐚𝐥  : ${list.length} Commands\n`;
+  txt += `┃ 🎯 𝐏𝐫𝐞𝐟𝐢𝐱  : [ ${PREFIX} ]\n`;
+  txt += `╰━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+  
   list.forEach((c) => {
-    const primary = c.pattern ? `${PREFIX}${c.pattern}` : "No Pattern";
-    const aliases = (c.alias || []).filter(Boolean).map((a) => `${PREFIX}${a}`);
-    txt += `• *${primary}*\n`;
-    if (aliases.length) txt += `   ◦ Aliases: ${aliases.join(", ")}\n`;
-    txt += `   ⭕ ${c.desc || "No description"}\n\n`;
+    const primary = c.pattern ? `${PREFIX}${toFancyFont(c.pattern)}` : "No Pattern";
+    const aliases = (c.alias || []).filter(Boolean).map((a) => `${PREFIX}${toFancyFont(a)}`);
+    txt += `🔹 *${primary}*\n`;
+    if (aliases.length) txt += `   ↳ 💬 𝐀𝐥𝐢𝐚𝐬𝐞𝐬: \`${aliases.join(", ")}\`\n`;
+    txt += `   ↳ 📌 𝐃𝐞𝐬𝐜: _${c.desc || "No description"}_\n\n`;
   });
-  txt += `━━━━━━━━━━━━━━━━━━\n`;
-  txt += `👑 Owner: ${OWNER_NUMBER}`;
+  
+  txt += `───────────────────\n`;
+  txt += `👑 𝐏𝐨𝐰𝐞𝐫𝐞𝐝 𝐁𝐲: ${BOT_NAME} | 𝐎𝐰𝐧𝐞𝐫: ${OWNER_NUMBER}`;
   return txt;
 }
 
 function makeCategoryRows(map, categories) {
   return categories.map((cat) => ({
-    title: `${getCategoryEmoji(cat)} ${cat} MENU`,
+    title: `${getCategoryEmoji(cat)} ${toFancyFont(cat)} MENU`,
     description: `${map[cat].length} commands available`,
     id: `menu_view:${cat}`,
   }));
@@ -270,18 +290,21 @@ function isDuplicateAction(state, action) {
 // ----- Build a beautifully styled numbered main menu -----
 function buildStyledMainMenu(state, userName) {
   const { categories } = state;
-  const line = "━━━━━━━━━━━━━━━━━━━━━━━━━";
-  let msg = `╔═════════════════════════════════════╗\n`;
-  msg += `║  ★彡 𝕄𝔼ℕ𝕌 彡★  ║\n`;
-  msg += `╚═════════════════════════════════════╝\n\n`;
-  msg += `👋 *Hi ${userName}*\n\n`;
+  const line = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+  const fancyName = toFancyFont(userName);
+  let msg = `╔═════════════════════════════╗\n`;
+  msg += `║  ★彡 𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻 𝕄𝔼ℕ𝕌 彡★  ║\n`;
+  msg += `╚═════════════════════════════╝\n\n`;
+  msg += `✨ 👋 *ᕼi, ${fancyName}!*\n\n`;
   msg += line + "\n";
   categories.forEach((cat, idx) => {
     const emo = getCategoryEmoji(cat);
-    msg += `*${idx+1}.* ${emo} ${cat} (${state.map[cat].length} commands)\n`;
+    const numStr = String(idx + 1).padStart(2, "0");
+    const fancyCat = toFancyFont(cat);
+    msg += `*[ ${numStr} ]*  ${emo}  *${fancyCat}*  _(${state.map[cat].length})_\n`;
   });
   msg += line + "\n\n";
-  msg += `📌 *Reply with the number of the category.*`;
+  msg += `📌 *Reply with the number of your choice (e.g. 1)*`;
   return msg;
 }
 
@@ -299,7 +322,7 @@ async function sendNumberedMainMenu(sock, from, mek, state, userName) {
 }
 
 async function sendMainMenu(sock, from, mek, state, userName) {
-  const settings = await readSettings(); // <--- FIXED: async/await
+  const settings = await readSettings();
   const btnsOn = !!settings.btns_enabled;
 
   if (btnsOn && sendInteractiveMessage) {
