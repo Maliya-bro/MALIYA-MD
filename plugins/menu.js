@@ -154,7 +154,7 @@ function menuHeader(userName = "User") {
   const styledUser = toSmallCaps(userName);
   return `✨ 👋 *ʜɪ, ${styledUser}!* ✨
 
-╭━〔 🌟 *${BOT_NAME}* 🌟 〕━
+╭〔 🌟 *${BOT_NAME}* 🌟 〕━
 ┃
 ┃ 🤖 *ʙᴏᴛ ɴᴀᴍᴇ* : ${BOT_NAME}
 ┃ 👤 *ᴜsᴇʀ*     : ${styledUser}
@@ -290,11 +290,11 @@ function isDuplicateAction(state, action) {
 // ----- Build a beautifully styled numbered main menu -----
 function buildStyledMainMenu(state, userName) {
   const { categories } = state;
-  const line = "━━━━━━━━━━━━━━━━━";
+  const line = "━━━━━━━━━━━━━";
   const styledUser = toSmallCaps(userName);
-  let msg = `╔════════════════════════╗\n`;
-  msg += `║  ★彡 𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻 𝕄𝔼ℕ𝕌 彡★  ║\n`;
-  msg += `╚════════════════════════╝\n\n`;
+  let msg = `╔══════════════════╗\n`;
+  msg += `║  ★彡 𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻 彡★ ║\n`;
+  msg += `╚══════════════════╝\n\n`;
   msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
   msg += line + "\n";
   categories.forEach((cat, idx) => {
