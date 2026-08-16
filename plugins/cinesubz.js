@@ -1,13 +1,40 @@
 const { cmd } = require("../command");
 const { scrapeMovieData } = require("films365-scraper");
 const axios = require("axios");
-const cheerio = require("cheerio");
+
+// MALIYA-MD AI API Configs
+const AI_API_KEY = "MALIYA-MD-1F8F414EDA13073B9B6B3E0BF503AA4B022AEBF4";
+const AI_API_URL = "https://maliya--md-pro.replit.app/api/chat/v1";
+
+// Helper function to call MALIYA-MD AI
+async function askAI(prompt) {
+  try {
+    const res = await axios.post(
+      AI_API_URL,
+      {
+        message: prompt,
+        sessionId: "films365-search-session",
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": AI_API_KEY,
+        },
+        timeout: 10000,
+      }
+    );
+    return res.data?.reply || null;
+  } catch (err) {
+    console.error("AI API Error:", err.message);
+    return null;
+  }
+}
 
 cmd(
   {
     pattern: "film",
     alias: ["films365", "f365", "movie365"],
-    desc: "Search movies on Films365 with Cheerio fallback and download",
+    desc: "Search movies using AI & download directly from Films365",
     category: "download",
     react: "🎬",
     filename: __filename,
@@ -22,88 +49,66 @@ cmd(
 
       let movieUrl = q.trim();
 
-      // direct URL එකක් නොවේ නම් Search Scraping ආරම්භ කිරීම
+      // Direct Link එකක් නොවේ නම් AI Support එකෙන් Movie Query එක Resolve කරගැනීම
       if (!q.startsWith("http://") && !q.startsWith("https://")) {
-        await reply(`🔎 *Searching for "${q}" on Films365...*`);
+        await reply(`🔎 *Searching for "${q}" on Films365 via AI...*`);
 
-        // Search Query එක පිරිසිදු කිරීම
-        const searchQuery = q.replace(/\(\d{4}\)/g, "").trim();
+        // 1. AI එකෙන් Exact Title එක සහ Search Formatting සකසා ගැනීම
+        const aiPrompt = `You are a helper for a movie downloader bot. Fix and format this movie search query into the official movie title. Return ONLY the clean official movie name, nothing else. Query: "${q}"`;
+        const formattedTitle = (await askAI(aiPrompt)) || q;
 
-        // 1. Cheerio/Axios මගින් Films365 Direct Web Search එක Scrap කිරීම
+        const cleanQuery = formattedTitle.replace(/[^a-zA-Z0-9 ]/g, "").trim();
+
+        // 2. Films365 Search Endpoint එක පරීක්ෂා කිරීම
+        const searchApi = `https://www.films365.org/api/search?q=${encodeURIComponent(cleanQuery)}`;
+        
         try {
-          const searchPageUrl = `https://www.films365.org/?search=${encodeURIComponent(searchQuery)}`;
-          const { data: html } = await axios.get(searchPageUrl, {
+          const searchRes = await axios.get(searchApi, {
             headers: {
               "User-Agent":
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              Accept: "application/json, text/plain, */*",
             },
-            timeout: 10000,
+            timeout: 8000,
           });
 
-          const $ = cheerio.load(html);
-          let foundHref = null;
+          const results = searchRes.data?.results || searchRes.data;
 
-          // HTML Elements ඇතුළෙන් movie/tvshow links සෙවීම
-          $("a[href*='/movie/'], a[href*='/tvshows/']").each((i, el) => {
-            const href = $(el).attr("href");
-            if (href && !foundHref) {
-              foundHref = href;
+          if (Array.isArray(results) && results.length > 0) {
+            const item = results[0];
+            const movieId = item.id || item._id || item.uuid || item.slug;
+            const mediaType = item.type === "tv" ? "tvshows" : "movie";
+            
+            if (movieId) {
+              movieUrl = `https://www.films365.org/${mediaType}/${movieId}`;
             }
-          });
-
-          if (foundHref) {
-            movieUrl = foundHref.startsWith("http")
-              ? foundHref
-              : `https://www.films365.org${foundHref}`;
           }
-        } catch (err) {
-          console.error("Web Scrape Search Failed:", err.message);
+        } catch (e) {
+          console.error("Direct Search API Error:", e.message);
         }
 
-        // 2. Web search එක සාර්ථක නොවුණහොත් Search API Attempts පරීක්ෂා කිරීම
+        // 3. Search API අසාර්ථක වුවහොත් AI එකෙන් Films365 URL Structure එක / Slug එක Predict කරගැනීම
         if (!movieUrl.startsWith("http://") && !movieUrl.startsWith("https://")) {
-          const apiEndpoints = [
-            `https://www.films365.org/api/search?q=${encodeURIComponent(searchQuery)}`,
-            `https://www.films365.org/api/v1/search?q=${encodeURIComponent(searchQuery)}`
-          ];
+          const fallbackPrompt = `Give me only the Films365 URL format or movie UUID/slug for "${cleanQuery}" if known, or write "UNKNOWN".`;
+          const aiResponse = await askAI(fallbackPrompt);
 
-          for (const endpoint of apiEndpoints) {
-            try {
-              const res = await axios.get(endpoint, {
-                headers: {
-                  "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                },
-                timeout: 8000
-              });
-
-              const results = res.data?.results || res.data?.data || res.data;
-              if (Array.isArray(results) && results.length > 0) {
-                const item = results[0];
-                const id = item.id || item._id || item.uuid || item.slug;
-                if (id) {
-                  const mediaType = item.type === "tv" ? "tvshows" : "movie";
-                  movieUrl = `https://www.films365.org/${mediaType}/${id}`;
-                  break;
-                }
-              }
-            } catch (e) {
-              // Ignore API fails
-            }
+          if (aiResponse && aiResponse.includes("films365.org")) {
+            const urlMatch = aiResponse.match(/https?:\/\/[^\s]+/);
+            if (urlMatch) movieUrl = urlMatch[0];
           }
         }
 
-        // Link එකක් සොයා ගැනීමට නොහැකි නම්
+        // තවමත් Link එක නැත්නම් Error එක යැවීම
         if (!movieUrl.startsWith("http://") && !movieUrl.startsWith("https://")) {
           return await reply(
-            "❌ සොයන ලද චිත්‍රපටය සොයා ගැනීමට නොහැකි විය.\n\n💡 *Tip:* Films365 direct URL එක ලබාදී උත්සාහ කරන්න."
+            `❌ "*${q}*" චිත්‍රපටය සොයා ගැනීමට නොහැකි විය.\n\n💡 *Tip:* Films365 Direct Movie Link එක ලබා දී උත්සාහ කරන්න.`
           );
         }
       }
 
       await reply("⏳ *Extracting movie details and download links...*");
 
-      // films365-scraper මගින් metadata & downloadUrl ලබා ගැනීම
+      // films365-scraper මගින් Meta Data & Download URL එක ලබා ගැනීම
       const metadata = await scrapeMovieData(movieUrl);
 
       if (!metadata || !metadata.downloadUrl) {
@@ -118,10 +123,10 @@ cmd(
         `📝 *Description:* ${metadata.desc || "N/A"}\n\n` +
         `📥 *Uploading movie file... Please wait!*`;
 
-      // 1. Details Caption යැවීම
+      // 1. Details Message එක යැවීම
       await conn.sendMessage(m.chat, { text: caption }, { quoted: mek });
 
-      // 2. Direct Video File එක Upload කිරීම
+      // 2. Direct Video File එක WhatsApp Document එකක් ලෙස Upload කිරීම
       const cleanFileName = (metadata.title || "Movie")
         .replace(/[^a-zA-Z0-9 space]/g, "")
         .trim();
