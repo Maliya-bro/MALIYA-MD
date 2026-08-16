@@ -1,6 +1,6 @@
 const os = require("os");
 const { cmd } = require("../command");
-const { sendButtons, sendInteractiveMessage } = require("lilgabriel-btns");
+const { sendInteractiveMessage } = require("lilgabriel-btns");
 
 // Uptime formatter
 function formatUptime(seconds) {
@@ -18,7 +18,7 @@ cmd(
   {
     pattern: "ping",
     alias: ["p", "latency"],
-    desc: "Check bot response time with native buttons",
+    desc: "Check bot response time",
     category: "system",
     react: "🏓",
     filename: __filename,
@@ -44,41 +44,40 @@ cmd(
         `🧩 *Node:* ${nodeV}\n` +
         `💻 *Platform:* ${platform}`;
 
-      // Native Flow Interactive Message එකක් ලෙස යැවීම
       await sendInteractiveMessage(conn, m.chat, {
-        text: text,
+        body: text,
         footer: "MALIYA-MD BOT SYSTEM",
         interactiveButtons: [
           {
             name: "quick_reply",
-            buttonParamsJson: {
+            buttonParamsJson: JSON.stringify({
               display_text: "📜 Main Menu",
-              id: ".menu"
-            }
+              id: ".menu",
+            }),
           },
           {
             name: "quick_reply",
-            buttonParamsJson: {
-              display_text: "🔥 Check status",
-              id: ".owner"
-            }
+            buttonParamsJson: JSON.stringify({
+              display_text: "👤 Owner Info",
+              id: ".owner",
+            }),
           },
           {
             name: "single_select",
-            buttonParamsJson: {
+            buttonParamsJson: JSON.stringify({
               title: "📊 System Details",
               sections: [
                 {
                   title: "Bot Performance",
                   rows: [
                     { id: ".systeminfo", title: "System Info", description: "View detailed server info" },
-                    { id: ".ping", title: "Re-Ping", description: "Test connection again" }
-                  ]
-                }
-              ]
-            }
-          }
-        ]
+                    { id: ".ping", title: "Re-Ping", description: "Test connection again" },
+                  ],
+                },
+              ],
+            }),
+          },
+        ],
       }, { quoted: mek });
 
     } catch (e) {
