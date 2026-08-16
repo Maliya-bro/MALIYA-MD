@@ -84,7 +84,7 @@ function formatSeconds(seconds) {
 }
 
 function generateProgressBar(duration = "0:00") {
-  return `▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰ *${duration}*`;
+  return `▰▰▰▰▰▰▰ *${duration}*`;
 }
 
 function getFileSizeMB(filePath) {
@@ -183,7 +183,7 @@ function buildSongDetails(video) {
   const videoId = video.videoId || "Unknown";
   const url = video.url || "Unavailable";
 
-  return `┌───❮ 🎵 *𝕊𝕆ℕ𝔾 𝔻𝔼𝕋𝔸𝕀𝕃𝕊* ❯───
+  return `┌─❮ 🎵 *𝕊𝕆ℕ𝔾 𝔻𝔼𝕋𝔸𝕀𝕃𝕊* ❯─
 │
 ├─► 🎶 *ᴛɪᴛʟᴇ:* ${title}
 ├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${channel}
@@ -193,11 +193,11 @@ function buildSongDetails(video) {
 ├─► 📅 *ᴜᴘʟᴏᴀᴅᴇᴅ:* ${uploaded}
 ├─► 🔗 *ʟɪɴᴋ:* ${url}
 │
-└───❮ ${generateProgressBar(duration)} ❯───`;
+└─❮ ${generateProgressBar(duration)} ❯─`;
 }
 
 function buildFinalCaption(video, typeLabel, sizeMB) {
-  return `┌───❮ ✅ *𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻 ℂ𝕆𝕄ℙ𝕃𝔼𝕋𝔼* ❯───
+  return `┌─❮ ✅ *𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻 ℂ𝕆𝕄ℙ𝕃𝔼𝕋𝔼* ❯─
 │
 ├─► 🎵 *ᴛɪᴛʟᴇ:* ${video.title || "Unknown Title"}
 ├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${video.author?.name || "Unknown Channel"}
@@ -206,7 +206,7 @@ function buildFinalCaption(video, typeLabel, sizeMB) {
 ├─► 👀 *ᴠɪᴇᴡs:* ${formatViews(video.views)}
 ├─► 📦 *sɪᴢᴇ:* ${sizeMB.toFixed(2)} MB
 │
-└───❮ 💾 *sᴀᴠᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ* ❯───`;
+└─❮ 💾 *sᴀᴠᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ* ❯─`;
 }
 
 async function getYoutube(query) {
@@ -230,12 +230,12 @@ function buildStyledAudioMenu(video) {
   const details = buildSongDetails(video);
   return details + `
 
-┌───❮ 🎵 *𝔸𝕌𝔻𝕀𝕆 𝕆ℙ𝕋𝕀𝕆ℕ𝕊* ❯───
+┌─❮ 🎵 *𝔸𝕌𝔻𝕀𝕆 𝕆ℙ𝕋𝕀𝕆ℕ𝕊* ❯─
 │
-├─► 📱 *[ 01 ]* ➔ 🎶 ᴀᴜᴅɪᴏ ғɪʟᴇ (ᴍᴘ3)
-├─► 📱 *[ 02 ]* ➔ 📁 ᴅᴏᴄᴜᴍᴇɴᴛ ғɪʟᴇ
+├─► *[ 01 ]* ➔ 🎶 ᴀᴜᴅɪᴏ ғɪʟᴇ (ᴍᴘ3)
+├─► *[ 02 ]* ➔ 📁 ᴅᴏᴄᴜᴍᴇɴᴛ ғɪʟᴇ
 │
-└───❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2* ❯───`;
+└─❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2* ❯─`;
 }
 
 // Number-reply mode (btns_enabled = OFF): plain sendMessage with the
