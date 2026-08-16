@@ -19,6 +19,24 @@ if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 // Cookies path - one level up from commands folder
 const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
 
+// Channel branding (same as alive.js) - only shown when btns_enabled
+// is OFF (number-reply mode). When ON, the interactive button menu is
+// sent clean, with no forwarded/channel branding.
+const CHANNEL_JID = "120363427174988449@newsletter";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
+
+function channelContextInfo() {
+  return {
+    forwardingScore: 999,
+    isForwarded: true,
+    forwardedNewsletterMessageInfo: {
+      newsletterJid: CHANNEL_JID,
+      newsletterName: CHANNEL_NAME,
+      serverMessageId: -1,
+    },
+  };
+}
+
 // Re-checked fresh each download (not just once at startup) so that
 // adding/replacing cookies.txt while the bot is running is picked up
 // immediately, without needing a restart.
@@ -66,7 +84,7 @@ function formatSeconds(seconds) {
 }
 
 function generateProgressBar(duration = "0:00") {
-  return `▰▰▰▰▰▰▰▰▰ *${duration}*`;
+  return `▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰ *${duration}*`;
 }
 
 function getFileSizeMB(filePath) {
@@ -165,7 +183,7 @@ function buildSongDetails(video) {
   const videoId = video.videoId || "Unknown";
   const url = video.url || "Unavailable";
 
-  return `┌─❮ 🎵 *𝕊𝕆ℕ𝔾 𝔻𝔼𝕋𝔸𝕀𝕃𝕊* ❯─
+  return `┌───❮ 🎵 *𝕊𝕆ℕ𝔾 𝔻𝔼𝕋𝔸𝕀𝕃𝕊* ❯───
 │
 ├─► 🎶 *ᴛɪᴛʟᴇ:* ${title}
 ├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${channel}
@@ -175,11 +193,11 @@ function buildSongDetails(video) {
 ├─► 📅 *ᴜᴘʟᴏᴀᴅᴇᴅ:* ${uploaded}
 ├─► 🔗 *ʟɪɴᴋ:* ${url}
 │
-└─❮ ${generateProgressBar(duration)} ❯─`;
+└───❮ ${generateProgressBar(duration)} ❯───`;
 }
 
 function buildFinalCaption(video, typeLabel, sizeMB) {
-  return `┌❮ ✅ *𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻 ℂ𝕆𝕄ℙ𝕃𝔼𝕋𝔼* ❯─
+  return `┌───❮ ✅ *𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻 ℂ𝕆𝕄ℙ𝕃𝔼𝕋𝔼* ❯───
 │
 ├─► 🎵 *ᴛɪᴛʟᴇ:* ${video.title || "Unknown Title"}
 ├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${video.author?.name || "Unknown Channel"}
@@ -188,7 +206,7 @@ function buildFinalCaption(video, typeLabel, sizeMB) {
 ├─► 👀 *ᴠɪᴇᴡs:* ${formatViews(video.views)}
 ├─► 📦 *sɪᴢᴇ:* ${sizeMB.toFixed(2)} MB
 │
-└─❮ 💾 *sᴀᴠᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ* ❯─`;
+└───❮ 💾 *sᴀᴠᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ* ❯───`;
 }
 
 async function getYoutube(query) {
@@ -207,19 +225,21 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// ----- Build styled audio menu -----
+// ----- Build styled audio menu (number-reply mode) -----
 function buildStyledAudioMenu(video) {
   const details = buildSongDetails(video);
   return details + `
 
-┌─❮ 🎵 *𝔸𝕌𝔻𝕀𝕆 𝕆ℙ𝕋𝕀𝕆ℕ𝕊* ❯─
+┌───❮ 🎵 *𝔸𝕌𝔻𝕀𝕆 𝕆ℙ𝕋𝕀𝕆ℕ𝕊* ❯───
 │
 ├─► 📱 *[ 01 ]* ➔ 🎶 ᴀᴜᴅɪᴏ ғɪʟᴇ (ᴍᴘ3)
 ├─► 📱 *[ 02 ]* ➔ 📁 ᴅᴏᴄᴜᴍᴇɴᴛ ғɪʟᴇ
 │
-└─❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2* ❯─`;
+└───❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2* ❯───`;
 }
 
+// Number-reply mode (btns_enabled = OFF): plain sendMessage with the
+// channel forward branding, same pattern as alive.js.
 async function sendNumberedAudioMenu(sock, from, mek, video) {
   const caption = buildStyledAudioMenu(video);
   return sock.sendMessage(
@@ -227,6 +247,7 @@ async function sendNumberedAudioMenu(sock, from, mek, video) {
     {
       image: { url: video.thumbnail },
       caption: caption,
+      contextInfo: channelContextInfo(),
     },
     { quoted: mek }
   );
@@ -238,6 +259,8 @@ async function sendInteractiveAudioMenu(sock, from, mek, video) {
 
   if (btnsOn && sendInteractiveMessage) {
     try {
+      // Interactive buttons mode: no channel forward branding, clean
+      // single_select menu only.
       return await sendInteractiveMessage(
         sock,
         from,
@@ -284,7 +307,7 @@ function isCookiesRelatedError(errText = "") {
     t.includes("not a bot") ||
     t.includes("cookies") ||
     t.includes("login required") ||
-    t.includes("private video") && t.includes("sign in")
+    (t.includes("private video") && t.includes("sign in"))
   );
 }
 
@@ -330,8 +353,6 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
       ytArgs.cookies = COOKIES_PATH;
       console.log(`🍪 Using cookies.txt for YouTube download (${cookies.sizeBytes} bytes)`);
     } else if (cookies.exists && cookies.sizeBytes === 0) {
-      // File exists but is empty — almost always means the export was
-      // done wrong or the browser session had no YouTube cookies yet.
       console.log("⚠️ cookies.txt exists but is EMPTY (0 bytes) - re-export it from a logged-in YouTube session");
     } else {
       console.log("⚠️ cookies.txt not found at " + COOKIES_PATH + " - download may fail with a bot-check error");
@@ -376,9 +397,6 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
     const errText = (e && (e.stderr || e.message)) || "";
     console.log("AUDIO DOWNLOAD ERROR:", errText);
 
-    // Give the user (and whoever is watching logs) a precise, actionable
-    // message instead of a generic failure when this looks like a
-    // cookies problem — this is the #1 cause of download failures.
     if (isCookiesRelatedError(errText)) {
       const cookies = cookiesStatus();
       if (!cookies.exists) {
