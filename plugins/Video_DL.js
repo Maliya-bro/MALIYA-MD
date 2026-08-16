@@ -19,6 +19,24 @@ if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 // Cookies path - one level up from commands folder
 const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
 
+// Channel branding (same as alive.js) - only shown when btns_enabled
+// is OFF (number-reply mode). When ON, the interactive button menu is
+// sent clean, with no forwarded/channel branding.
+const CHANNEL_JID = "120363427174988449@newsletter";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
+
+function channelContextInfo() {
+  return {
+    forwardingScore: 999,
+    isForwarded: true,
+    forwardedNewsletterMessageInfo: {
+      newsletterJid: CHANNEL_JID,
+      newsletterName: CHANNEL_NAME,
+      serverMessageId: -1,
+    },
+  };
+}
+
 // Re-checked fresh each download (not just once at startup) so that
 // adding/replacing cookies.txt while the bot is running is picked up
 // immediately, without needing a restart.
@@ -66,7 +84,7 @@ function formatSeconds(seconds) {
 }
 
 function generateProgressBar(duration = "0:00") {
-  return `▰▰▰▰▰▰▰▰ *${duration}*`;
+  return `▰▰▰▰▰▰▰ *${duration}*`;
 }
 
 function getFileSizeMB(filePath) {
@@ -245,7 +263,7 @@ function buildVideoDetails(video) {
 }
 
 function buildFinalCaption(video, qualityLabel, sizeMB) {
-  return `┌───❮ ✅ *𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻 ℂ𝕆𝕄ℙ𝕃𝔼𝕋𝔼* ❯───
+  return `┌─❮ ✅ *𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻𝔼𝔻* ❯─
 │
 ├─► 🎬 *ᴛɪᴛʟᴇ:* ${video.title || "Unknown Title"}
 ├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${video.author?.name || "Unknown Channel"}
@@ -254,7 +272,7 @@ function buildFinalCaption(video, qualityLabel, sizeMB) {
 ├─► 👀 *ᴠɪᴇᴡs:* ${formatViews(video.views)}
 ├─► 📦 *sɪᴢᴇ:* ${sizeMB.toFixed(2)} MB
 │
-└─❮ 💾 *sᴀᴠᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ* ❯─`;
+└─❮ 💾 *MALIYA-〽️D* ❯─`;
 }
 
 async function getYoutube(query) {
@@ -313,8 +331,6 @@ async function downloadVideoWithYtdl(videoUrl, quality, outPath) {
     ytArgs.cookies = COOKIES_PATH;
     console.log(`🍪 Using cookies.txt for YouTube download (${cookies.sizeBytes} bytes)`);
   } else if (cookies.exists && cookies.sizeBytes === 0) {
-    // File exists but is empty — almost always means the export was
-    // done wrong or the browser session had no YouTube cookies yet.
     console.log("⚠️ cookies.txt exists but is EMPTY (0 bytes) - re-export it from a logged-in YouTube session");
   } else {
     console.log("⚠️ cookies.txt not found at " + COOKIES_PATH + " - download may fail with a bot-check error");
@@ -347,12 +363,12 @@ async function reencodeForWhatsApp(inputPath, outputPath) {
   });
 }
 
-// ----- Build styled video menu -----
+// ----- Build styled video menu (number-reply mode) -----
 function buildStyledVideoMenu(video) {
   const details = buildVideoDetails(video);
   return details + `
 
-┌─❮ 🎥 *𝕍𝕀𝔻𝔼𝕆 ℚ𝕌𝔸𝕃𝕀𝕋𝕐 𝕆ℙ𝕋𝕀𝕆ℕ𝕊* ❯─
+┌─❮ 🎥 *𝕍𝕀𝔻𝔼𝕆 ℚ𝕌𝔸𝕃𝕀𝕋𝕐* ❯─
 │
 ├─► 📱 *[ 01 ]* ➔ 360p
 ├─► 📱 *[ 02 ]* ➔ 480p
@@ -362,6 +378,8 @@ function buildStyledVideoMenu(video) {
 └─❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1, 2, 3, ᴏʀ 4* ❯─`;
 }
 
+// Number-reply mode (btns_enabled = OFF): plain sendMessage with the
+// channel forward branding, same pattern as alive.js.
 async function sendNumberedVideoMenu(sock, from, mek, video) {
   const caption = buildStyledVideoMenu(video);
   return sock.sendMessage(
@@ -369,6 +387,7 @@ async function sendNumberedVideoMenu(sock, from, mek, video) {
     {
       image: { url: video.thumbnail },
       caption: caption,
+      contextInfo: channelContextInfo(),
     },
     { quoted: mek }
   );
@@ -380,13 +399,15 @@ async function sendQualityInteractiveMenu(sock, from, mek, video) {
 
   if (btnsOn && sendInteractiveMessage) {
     try {
+      // Interactive buttons mode: no channel forward branding, clean
+      // single_select menu only.
       return await sendInteractiveMessage(
         sock,
         from,
         {
           image: { url: video.thumbnail },
           text: buildVideoDetails(video),
-          footer: "𝕍𝕀𝔻𝔼𝕆 𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻𝔼ℝ",
+          footer: "𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻 | 𝕍𝕀𝔻𝔼𝕆 𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻𝔼ℝ",
           interactiveButtons: [
             {
               name: "single_select",
@@ -490,9 +511,6 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
     const errText = (e && (e.stderr || e.message)) || "";
     console.log("VIDEO QUALITY ERROR:", errText, e && e.stack);
 
-    // Give the user a precise, actionable message instead of a generic
-    // failure when this looks like a cookies problem — this is the #1
-    // cause of download failures.
     if (isCookiesRelatedError(errText)) {
       const cookies = cookiesStatus();
       if (!cookies.exists) {
