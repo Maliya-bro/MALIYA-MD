@@ -16,13 +16,28 @@ ffmpeg.setFfprobePath(ffprobePath);
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
+// Cookies path - one level up from commands folder
 const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
-const HAS_COOKIES = fs.existsSync(COOKIES_PATH);
 
-const VIDEO_LIMIT_MB = 45;
-const pendingVideoQuality = Object.create(null);
+// Re-checked fresh each download (not just once at startup) so that
+// adding/replacing cookies.txt while the bot is running is picked up
+// immediately, without needing a restart.
+function cookiesStatus() {
+  if (!fs.existsSync(COOKIES_PATH)) {
+    return { exists: false, sizeBytes: 0 };
+  }
+  try {
+    const stat = fs.statSync(COOKIES_PATH);
+    return { exists: true, sizeBytes: stat.size };
+  } catch {
+    return { exists: false, sizeBytes: 0 };
+  }
+}
 
-function makeTempFile(ext = ".mp4") {
+const MEDIA_LIMIT_MB = 45;
+const pendingMediaChoice = Object.create(null);
+
+function makeTempFile(ext = ".mp3") {
   const id = crypto.randomBytes(6).toString("hex");
   return path.join(TEMP_DIR, `${Date.now()}_${id}${ext}`);
 }
@@ -51,7 +66,7 @@ function formatSeconds(seconds) {
 }
 
 function generateProgressBar(duration = "0:00") {
-  return `00:00 ───🔘──────── ${duration}`;
+  return `▰▰▰▰▰▰▰▰▰▰ *${duration}*`;
 }
 
 function getFileSizeMB(filePath) {
@@ -59,62 +74,17 @@ function getFileSizeMB(filePath) {
   return stats.size / (1024 * 1024);
 }
 
-function sanitizeFileName(name = "youtube_video") {
-  return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_video";
+function sanitizeFileName(name = "youtube_download") {
+  return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_download";
 }
 
-function getQualityFromChoice(choice) {
-  switch (String(choice).trim().toLowerCase()) {
-    case "1":
-    case "360":
-    case "360p":
-    case "quality:360":
-      return "360";
-    case "2":
-    case "480":
-    case "480p":
-    case "quality:480":
-      return "480";
-    case "3":
-    case "720":
-    case "720p":
-    case "quality:720":
-      return "720";
-    case "4":
-    case "1080":
-    case "1080p":
-    case "quality:1080":
-      return "1080";
-    default:
-      return null;
-  }
-}
-
-function getQualityLabel(choice) {
-  switch (String(choice).trim().toLowerCase()) {
-    case "1":
-    case "360":
-    case "360p":
-    case "quality:360":
-      return "360p";
-    case "2":
-    case "480":
-    case "480p":
-    case "quality:480":
-      return "480p";
-    case "3":
-    case "720":
-    case "720p":
-    case "quality:720":
-      return "720p HD";
-    case "4":
-    case "1080":
-    case "1080p":
-    case "quality:1080":
-      return "1080p FHD";
-    default:
-      return "Unknown";
-  }
+function normalizeText(s = "") {
+  return String(s)
+    .replace(/\r/g, "")
+    .replace(/\n+/g, "\n")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
 }
 
 function tryParseJsonString(s) {
@@ -125,74 +95,100 @@ function makePendingKey(sender, from) {
   return `${from || ""}::${(sender || "").split(":")[0]}`;
 }
 
-// පරිශීලකයාගේ නවතම Response එකෙන් පමණක් Quality එක Extract කරගැනීමට සකස් කරන ලදී
-function extractQualityFromMessage(body, mek, m) {
-  const candidates = [];
-
-  if (body) candidates.push(String(body).trim());
-  if (m?.body) candidates.push(String(m.body).trim());
-  if (m?.text) candidates.push(String(m.text).trim());
-
-  // Interactive Single Select List responses
-  const listId = m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
-                 mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId;
-  if (listId) candidates.push(String(listId).trim());
-
-  // Buttons responses
-  const btnId = m?.message?.buttonsResponseMessage?.selectedButtonId ||
-                mek?.message?.buttonsResponseMessage?.selectedButtonId;
-  if (btnId) candidates.push(String(btnId).trim());
-
-  // Native flow responses (Interactive menu)
-  const paramsRaw = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
-                    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  if (paramsRaw) {
-    const parsed = tryParseJsonString(paramsRaw);
-    if (parsed) {
-      if (parsed.id) candidates.push(String(parsed.id).trim());
-      if (parsed.selectedId) candidates.push(String(parsed.selectedId).trim());
-      if (parsed.selectedRowId) candidates.push(String(parsed.selectedRowId).trim());
+function extractTexts(body, mek, m) {
+  const texts = [];
+  const direct = [
+    body,
+    m?.body,
+    m?.text,
+    m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text,
+    m?.message?.buttonsResponseMessage?.selectedButtonId,
+    m?.message?.buttonsResponseMessage?.selectedDisplayText,
+    m?.message?.templateButtonReplyMessage?.selectedId,
+    m?.message?.templateButtonReplyMessage?.selectedDisplayText,
+    m?.message?.listResponseMessage?.title,
+    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.interactiveResponseMessage?.body?.text,
+    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
+    mek?.message?.conversation,
+    mek?.message?.extendedTextMessage?.text,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.buttonsResponseMessage?.selectedDisplayText,
+    mek?.message?.templateButtonReplyMessage?.selectedId,
+    mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
+    mek?.message?.listResponseMessage?.title,
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    mek?.message?.interactiveResponseMessage?.body?.text,
+    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
+  ];
+  for (const item of direct) {
+    if (item) texts.push(String(item).trim());
+  }
+  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  for (const raw of [p1, p2]) {
+    if (!raw) continue;
+    const parsed = tryParseJsonString(raw);
+    if (!parsed) continue;
+    const vals = [
+      parsed.id,
+      parsed.selectedId,
+      parsed.selectedRowId,
+      parsed.title,
+      parsed.display_text,
+      parsed.text,
+      parsed.name,
+    ];
+    for (const v of vals) {
+      if (v) texts.push(String(v).trim());
     }
   }
+  return [...new Set(texts.filter(Boolean))];
+}
 
-  for (const str of candidates) {
-    const cleaned = str.toLowerCase();
-    if (cleaned === "1" || cleaned === "360" || cleaned === "360p" || cleaned === "quality:360") return "360";
-    if (cleaned === "2" || cleaned === "480" || cleaned === "480p" || cleaned === "quality:480") return "480";
-    if (cleaned === "3" || cleaned === "720" || cleaned === "720p" || cleaned === "quality:720") return "720";
-    if (cleaned === "4" || cleaned === "1080" || cleaned === "1080p" || cleaned === "quality:1080") return "1080";
+function extractOptionFromTexts(texts) {
+  const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
+  for (const text of normalized) {
+    if (text.includes("TYPE:AUDIO") || text === "AUDIO" || text === "1") return "audio";
+    if (text.includes("TYPE:DOC") || text === "DOCUMENT" || text === "2") return "doc";
   }
-
   return null;
 }
 
-function buildVideoDetails(video) {
+function buildSongDetails(video) {
   const title = video.title || "Unknown Title";
   const channel = video.author?.name || "Unknown Channel";
   const duration = video.timestamp || formatSeconds(video.seconds) || "0:00";
   const views = formatViews(video.views);
   const uploaded = video.ago || "Unknown";
+  const videoId = video.videoId || "Unknown";
+  const url = video.url || "Unavailable";
 
-  return `🎥 *${title}*
-
-╔════ VIDEO DETAILS ════╗
-  👤 Channel  : ${channel}
-  ⏱️ Duration : ${duration}
-  👀 Views    : ${views}
-  📅 Date     : ${uploaded}
-╚════════════════════╝
-
-${generateProgressBar(duration)}`;
+  return `┌❮ 🎵 *𝕊𝕆ℕ𝔾 𝔻𝔼𝕋𝔸𝕀𝕃𝕊* ❯─
+│
+├─► 🎶 *ᴛɪᴛʟᴇ:* ${title}
+├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${channel}
+├─► 🆔 *ᴠɪᴅᴇᴏ ɪᴅ:* ${videoId}
+├─► ⏱️ *ᴅᴜʀᴀᴛɪᴏɴ:* ${duration}
+├─► 👀 *ᴠɪᴇᴡs:* ${views}
+├─► 📅 *ᴜᴘʟᴏᴀᴅᴇᴅ:* ${uploaded}
+├─► 🔗 *ʟɪɴᴋ:* ${url}
+│
+└❮ ${generateProgressBar(duration)} ❯─`;
 }
 
-function buildFinalCaption(video, qualityLabel, sizeMB) {
-  return `╔════ VIDEO READY ════╗
-  🎥 Title   : ${video.title || "Unknown"}
-  👤 Channel : ${video.author?.name || "Unknown"}
-  🎞️ Quality : ${qualityLabel}
-  ⏱️ Time    : ${video.timestamp || formatSeconds(video.seconds) || "0:00"}
-  📦 Size    : ${sizeMB.toFixed(2)} MB
-╚═════════════════════╝`;
+function buildFinalCaption(video, typeLabel, sizeMB) {
+  return `┌❮ ✅ *𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻 ℂ𝕆𝕄ℙ𝕃𝔼𝕋𝔼* ❯─
+│
+├─► 🎵 *ᴛɪᴛʟᴇ:* ${video.title || "Unknown Title"}
+├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${video.author?.name || "Unknown Channel"}
+├─► 🎧 *ᴛʏᴘᴇ:* ${typeLabel}
+├─► ⏱️ *ᴅᴜʀᴀᴛɪᴏɴ:* ${video.timestamp || formatSeconds(video.seconds) || "0:00"}
+├─► 👀 *ᴠɪᴇᴡs:* ${formatViews(video.views)}
+├─► 📦 *sɪᴢᴇ:* ${sizeMB.toFixed(2)} MB
+│
+└❮ 💾 *sᴀᴠᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ* ❯─`;
 }
 
 async function getYoutube(query) {
@@ -211,67 +207,21 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-async function downloadVideoWithYtdl(videoUrl, quality, outPath) {
-  const formatStr = `bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}][ext=mp4]/best`;
+// ----- Build styled audio menu -----
+function buildStyledAudioMenu(video) {
+  const details = buildSongDetails(video);
+  return details + `
 
-  await ytDlp(videoUrl, {
-    format: formatStr,
-    output: outPath,
-    ffmpegLocation: ffmpegPath,
-    noWarnings: true,
-    noCheckCertificates: true,
-    noPlaylist: true,
-    extractorArgs: "youtube:player_client=android,web",
-    ...(HAS_COOKIES ? { cookies: COOKIES_PATH } : {}),
-    addHeader: [
-      "referer:youtube.com",
-    ],
-  });
-
-  return outPath;
+┌❮ 🎵 *𝔸𝕌𝔻𝕀𝕆 𝕆ℙ𝕋𝕀𝕆ℕ𝕊* ❯─
+│
+├─► 📱 *[ 01 ]* ➔ 🎶 ᴀᴜᴅɪᴏ ғɪʟᴇ (ᴍᴘ3)
+├─► 📱 *[ 02 ]* ➔ 📁 ᴅᴏᴄᴜᴍᴇɴᴛ ғɪʟᴇ
+│
+└❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2* ❯─`;
 }
 
-async function reencodeForWhatsApp(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
-      .videoCodec("libx264")
-      .audioCodec("aac")
-      .outputOptions([
-        "-movflags +faststart",
-        "-pix_fmt yuv420p",
-        "-profile:v main",
-        "-level 3.1",
-        "-preset veryfast",
-        "-crf 28",
-        "-maxrate 1200k",
-        "-bufsize 2400k",
-        "-vf scale='min(854,iw)':-2",
-      ])
-      .format("mp4")
-      .on("end", () => resolve(outputPath))
-      .on("error", reject)
-      .save(outputPath);
-  });
-}
-
-function buildStyledVideoMenu(video) {
-  const details = buildVideoDetails(video);
-  let msg = `=====================\n`;
-  msg += `   🎬 VIDEO DOWNLOADER   \n`;
-  msg += `=====================\n\n`;
-  msg += details + "\n\n";
-  msg += `╔══ SELECT QUALITY ══╗\n`;
-  msg += `  [1] 360p (Fast)\n`;
-  msg += `  [2] 480p (Standard)\n`;
-  msg += `  [3] 720p (HD)\n`;
-  msg += `  [4] 1080p (FHD)\n`;
-  msg += `╚══════════════════╝\n\n`;
-  msg += `📌 *Reply with 1, 2, 3, or 4.*`;
-  return msg;
-}
-
-async function sendNumberedVideoMenu(sock, from, mek, video) {
-  const caption = buildStyledVideoMenu(video);
+async function sendNumberedAudioMenu(sock, from, mek, video) {
+  const caption = buildStyledAudioMenu(video);
   return sock.sendMessage(
     from,
     {
@@ -282,8 +232,8 @@ async function sendNumberedVideoMenu(sock, from, mek, video) {
   );
 }
 
-async function sendQualityInteractiveMenu(sock, from, mek, video) {
-  const settings = readSettings();
+async function sendInteractiveAudioMenu(sock, from, mek, video) {
+  const settings = await readSettings();
   const btnsOn = !!settings.btns_enabled;
 
   if (btnsOn && sendInteractiveMessage) {
@@ -293,21 +243,19 @@ async function sendQualityInteractiveMenu(sock, from, mek, video) {
         from,
         {
           image: { url: video.thumbnail },
-          text: buildVideoDetails(video),
-          footer: "MALIYA-MD | Quality Selector",
+          text: buildSongDetails(video),
+          footer: "𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻 | 𝔸𝕌𝔻𝕀𝕆 𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻𝔼ℝ",
           interactiveButtons: [
             {
               name: "single_select",
               buttonParamsJson: JSON.stringify({
-                title: "Select Quality ↯",
+                title: "Select Format ↯",
                 sections: [
                   {
-                    title: "Video Qualities",
+                    title: "Audio Options",
                     rows: [
-                      { title: "📹 360p", description: "Fast & smaller size", id: "quality:360" },
-                      { title: "📺 480p", description: "Better standard quality", id: "quality:480" },
-                      { title: "✨ 720p HD", description: "HD quality video", id: "quality:720" },
-                      { title: "🔥 1080p FHD", description: "Full HD quality video", id: "quality:1080" },
+                      { title: "🎶 Audio File (MP3)", description: "Listen directly in WhatsApp", id: "type:audio" },
+                      { title: "📁 Document File", description: "Download as MP3 Document", id: "type:doc" },
                     ],
                   },
                 ],
@@ -318,64 +266,94 @@ async function sendQualityInteractiveMenu(sock, from, mek, video) {
         { quoted: mek }
       );
     } catch (e) {
-      console.log("VIDEO BUTTON ERROR:", e);
+      console.log("AUDIO BUTTON ERROR:", e);
     }
   }
 
-  return sendNumberedVideoMenu(sock, from, mek, video);
+  return sendNumberedAudioMenu(sock, from, mek, video);
 }
 
-function isDuplicateQualityAction(state, quality) {
-  const now = Date.now();
-  const sig = `quality:${quality}`;
-  if (state.lastActionSig === sig && now - (state.lastActionAt || 0) < 5000) {
-    return true;
-  }
-  state.lastActionSig = sig;
-  state.lastActionAt = now;
-  return false;
+// Detects whether a yt-dlp failure is caused by missing/invalid/expired
+// cookies (the "Sign in to confirm you're not a bot" family of errors),
+// so we can tell the user exactly what's wrong instead of a generic
+// "error while downloading" message.
+function isCookiesRelatedError(errText = "") {
+  const t = String(errText).toLowerCase();
+  return (
+    t.includes("sign in to confirm") ||
+    t.includes("not a bot") ||
+    t.includes("cookies") ||
+    t.includes("login required") ||
+    t.includes("private video") && t.includes("sign in")
+  );
 }
 
-async function handleVideoQualityDownload(sock, mek, from, sender, reply, choiceRaw) {
+async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice) {
   const key = makePendingKey(sender, from);
-  const pending = pendingVideoQuality[key];
+  const pending = pendingMediaChoice[key];
   if (!pending) return;
 
-  const quality = getQualityFromChoice(choiceRaw);
-  const qualityLabel = getQualityLabel(choiceRaw);
-
-  if (!quality) return;
-
   if (pending.isProcessing) return;
-  if (isDuplicateQualityAction(pending, quality)) return;
-
   pending.isProcessing = true;
 
-  let rawFile = null;
-  let fixedFile = null;
+  let audioFile = null;
 
   try {
-    await reply(`⬇️ Downloading *${qualityLabel}* video...`);
+    const isDoc = optionChoice === "doc";
+    const label = isDoc ? "Document" : "Audio";
 
-    rawFile = makeTempFile(".mp4");
-    fixedFile = makeTempFile(".mp4");
+    await reply(`⬇️ *ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ* ${label}...`);
 
-    await downloadVideoWithYtdl(pending.video.url, quality, rawFile);
+    audioFile = makeTempFile(".mp3");
 
-    await reply("🛠 Converting video for phone support...");
-    await reencodeForWhatsApp(rawFile, fixedFile);
+    // Cookies are checked fresh right before each download attempt, so a
+    // cookies.txt added/replaced while the bot is already running is
+    // picked up immediately without a restart.
+    const cookies = cookiesStatus();
 
-    const sizeMB = getFileSizeMB(fixedFile);
+    // Build yt-dlp args with cookies if available
+    const ytArgs = {
+      extractAudio: true,
+      audioFormat: "mp3",
+      audioQuality: "0",
+      output: audioFile,
+      noWarnings: true,
+      noCheckCertificates: true,
+      noPlaylist: true,
+      extractorArgs: "youtube:player_client=android,web",
+      addHeader: [
+        "referer:youtube.com",
+      ],
+    };
+
+    if (cookies.exists && cookies.sizeBytes > 0) {
+      ytArgs.cookies = COOKIES_PATH;
+      console.log(`🍪 Using cookies.txt for YouTube download (${cookies.sizeBytes} bytes)`);
+    } else if (cookies.exists && cookies.sizeBytes === 0) {
+      // File exists but is empty — almost always means the export was
+      // done wrong or the browser session had no YouTube cookies yet.
+      console.log("⚠️ cookies.txt exists but is EMPTY (0 bytes) - re-export it from a logged-in YouTube session");
+    } else {
+      console.log("⚠️ cookies.txt not found at " + COOKIES_PATH + " - download may fail with a bot-check error");
+    }
+
+    await ytDlp(pending.video.url, ytArgs);
+
+    if (!fs.existsSync(audioFile) || fs.statSync(audioFile).size === 0) {
+      throw new Error("Downloaded file is missing or empty.");
+    }
+
+    const sizeMB = getFileSizeMB(audioFile);
     const cleanTitle = sanitizeFileName(pending.video.title);
 
-    if (sizeMB > VIDEO_LIMIT_MB) {
+    if (isDoc || sizeMB > MEDIA_LIMIT_MB) {
       await sock.sendMessage(
         from,
         {
-          document: fs.readFileSync(fixedFile),
-          mimetype: "video/mp4",
-          fileName: `${cleanTitle}_${quality}p.mp4`,
-          caption: buildFinalCaption(pending.video, qualityLabel, sizeMB),
+          document: fs.readFileSync(audioFile),
+          mimetype: "audio/mpeg",
+          fileName: `${cleanTitle}.mp3`,
+          caption: buildFinalCaption(pending.video, "Document MP3", sizeMB),
         },
         { quoted: mek }
       );
@@ -383,63 +361,87 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
       await sock.sendMessage(
         from,
         {
-          video: fs.readFileSync(fixedFile),
-          mimetype: "video/mp4",
-          fileName: `${cleanTitle}_${quality}p.mp4`,
-          caption: buildFinalCaption(pending.video, qualityLabel, sizeMB),
-          gifPlayback: false,
+          audio: fs.readFileSync(audioFile),
+          mimetype: "audio/mpeg",
+          fileName: `${cleanTitle}.mp3`,
+          caption: buildFinalCaption(pending.video, "Audio MP3", sizeMB),
+          ptt: false,
         },
         { quoted: mek }
       );
     }
 
-    delete pendingVideoQuality[key];
+    delete pendingMediaChoice[key];
   } catch (e) {
-    console.log("VIDEO QUALITY ERROR:", e && (e.stderr || e.message), e && e.stack);
-    reply("❌ Error while downloading/converting selected quality video.");
-    delete pendingVideoQuality[key];
+    const errText = (e && (e.stderr || e.message)) || "";
+    console.log("AUDIO DOWNLOAD ERROR:", errText);
+
+    // Give the user (and whoever is watching logs) a precise, actionable
+    // message instead of a generic failure when this looks like a
+    // cookies problem — this is the #1 cause of download failures.
+    if (isCookiesRelatedError(errText)) {
+      const cookies = cookiesStatus();
+      if (!cookies.exists) {
+        reply(
+          "❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴍɪssɪɴɢ.*\n\n" +
+          "YouTube is blocking this download with a bot-check.\n" +
+          "Export a fresh `cookies.txt` from a logged-in YouTube session and place it in the bot's root folder."
+        );
+      } else if (cookies.sizeBytes === 0) {
+        reply(
+          "❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs.ᴛxᴛ ɪs ᴇᴍᴘᴛʏ.*\n\n" +
+          "Re-export cookies.txt from a logged-in YouTube session (make sure you're actually signed in when exporting)."
+        );
+      } else {
+        reply(
+          "❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴇxᴘɪʀᴇᴅ ᴏʀ ɪɴᴠᴀʟɪᴅ.*\n\n" +
+          "Your saved cookies.txt is no longer valid. Export a fresh one from a logged-in YouTube session and replace the old file."
+        );
+      }
+    } else {
+      reply("❌ *ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ/sᴇɴᴅɪɴɢ ᴀᴜᴅɪᴏ.*");
+    }
+
+    delete pendingMediaChoice[key];
   } finally {
-    safeUnlink(rawFile);
-    safeUnlink(fixedFile);
-    if (pendingVideoQuality[key]) {
-      pendingVideoQuality[key].isProcessing = false;
+    safeUnlink(audioFile);
+    if (pendingMediaChoice[key]) {
+      pendingMediaChoice[key].isProcessing = false;
     }
   }
 }
 
 cmd(
   {
-    pattern: "video",
-    alias: ["ytmp4", "ytv", "vdl"],
-    react: "🎥",
-    desc: "Download YouTube video with quality selection",
+    pattern: "song",
+    alias: ["play", "ytmp3", "yta"],
+    react: "🎵",
+    desc: "Download YouTube audio with options",
     category: "download",
     filename: __filename,
   },
   async (sock, mek, m, { from, q, sender, reply }) => {
     try {
-      if (!q) return reply("🎬 Please provide a YouTube link or video name.");
+      if (!q) return reply("🎵 *ᴘʟᴇᴀsᴇ ᴘʀᴏᴠɪᴅᴇ ᴀ sᴏɴɢ ɴᴀᴍᴇ ᴏʀ ʏᴏᴜᴛᴜʙᴇ ʟɪɴᴋ.*");
 
-      await reply("🔍 Searching Video...");
+      await reply("🔍 *sᴇᴀʀᴄʜɪɴɢ ᴀᴜᴅɪᴏ...*");
 
       const video = await getYoutube(q);
-      if (!video) return reply("❌ No results found.");
+      if (!video) return reply("❌ *ɴᴏ ʀᴇsᴜʟᴛs ғᴏᴜɴᴅ.*");
 
       const key = makePendingKey(sender, from);
 
-      pendingVideoQuality[key] = {
+      pendingMediaChoice[key] = {
         video,
         from,
         createdAt: Date.now(),
         isProcessing: false,
-        lastActionSig: "",
-        lastActionAt: 0,
       };
 
-      await sendQualityInteractiveMenu(sock, from, mek, video);
+      await sendInteractiveAudioMenu(sock, from, mek, video);
     } catch (e) {
-      console.log("VIDEO MENU ERROR:", e && e.message, e && e.stack);
-      reply("❌ Error while preparing video menu.");
+      console.log("SONG MENU ERROR:", e && e.message);
+      reply("❌ *ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴘʀᴇᴘᴀʀɪɴɢ ᴀᴜᴅɪᴏ ᴍᴇɴᴜ.*");
     }
   }
 );
@@ -447,33 +449,33 @@ cmd(
 replyHandlers.push({
   filter: (_body, { sender, from }) => {
     const key = makePendingKey(sender, from);
-    const pending = pendingVideoQuality[key];
-    if (!pending) return false;
-
-    // Menu එක යවා තත්පර 1.5ක් යනතුරු ස්වයංක්‍රීය Trigger වීම වැළැක්වීමට Cooldown එකක්
-    if (Date.now() - pending.createdAt < 1500) return false;
-
-    return true;
+    return !!pendingMediaChoice[key];
   },
 
   function: async (sock, mek, m, { from, body, sender, reply }) => {
     const key = makePendingKey(sender, from);
-    const pending = pendingVideoQuality[key];
+    const pending = pendingMediaChoice[key];
     if (!pending || pending.isProcessing) return;
 
-    const quality = extractQualityFromMessage(body, mek, m);
-    if (!quality) return;
+    const texts = extractTexts(body, mek, m);
+    let choice = extractOptionFromTexts(texts);
 
-    return handleVideoQualityDownload(sock, mek, from, sender, reply, quality);
+    if (!choice && /^[1-2]$/.test(String(body || "").trim())) {
+      choice = body.trim() === "1" ? "audio" : "doc";
+    }
+
+    if (!choice) return;
+
+    return handleAudioDownload(sock, mek, from, sender, reply, choice);
   },
 });
 
 setInterval(() => {
   const now = Date.now();
   const timeout = 2 * 60 * 1000;
-  for (const key of Object.keys(pendingVideoQuality)) {
-    if (now - pendingVideoQuality[key].createdAt > timeout) {
-      delete pendingVideoQuality[key];
+  for (const key of Object.keys(pendingMediaChoice)) {
+    if (now - pendingMediaChoice[key].createdAt > timeout) {
+      delete pendingMediaChoice[key];
     }
   }
 }, 30000);
