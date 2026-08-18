@@ -1,18 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
 //  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
-//  Integrated: auto_msg plugin with per-user Gemini key support
-//  FIX 1: startSessionBot now has a starting-lock to prevent the
-//         watcher tick from starting the SAME session twice while
-//         the first start() is still awaiting (this caused two
-//         live sockets for one number -> WhatsApp "conflict" close)
-//  FIX 2: creds are now synced BACK to MongoDB on every creds.update,
-//         so on Railway (ephemeral disk) a reconnect/restart always
-//         restores the LATEST session state instead of a stale one
-//  FIX 3: restore-from-Mongo now skipped if local creds.json already
-//         exists on disk (avoids clobbering a live, already-valid
-//         session with older Mongo data mid-run).
-//  FIX 4: Settings now saved to MongoDB (botSettings.js) - async/await everywhere
-//  FIX 5: Work scope check added (private/group/all)
+//  FIX: sessionId now passed to all commands and reply handlers
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -69,7 +57,7 @@ const { MongoClient } = require("mongodb");
 const cors              = require("cors");
 const os               = require("os");
 const config            = require("./config");
-const { readSettings, isWorkAllowed } = require("./lib/botSettings"); // ✅ FIX: added isWorkAllowed
+const { readSettings, isWorkAllowed } = require("./lib/botSettings");
 const { sms }           = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 
@@ -405,7 +393,6 @@ async function startSessionBot(sessionId) {
             month: "2-digit", day: "2-digit",
           }).format(now);
 
-          // ✅ FIX: await readSettings()
           const settings = await readSettings(sessionId);
           const BOT_VERSION = "v4.0.0";
           const up = `
@@ -417,6 +404,7 @@ async function startSessionBot(sessionId) {
 ⚡🧬 System     : STABLE | FAST | SECURE
 🛡️🔐 Mode      : ${String(settings.mode || "public").toUpperCase()}
 🎯🧩 Prefix    : ${prefix}
+📍 Work Scope  : ${String(settings.work_scope || "private").toUpperCase()}
 
 🧑‍💻👑 Owner    : ${BOT_OWNER_NAME}
 🚀📦 Version  : ${BOT_VERSION}
@@ -541,7 +529,6 @@ function attachSessionHandlers(sock, sessionCtx) {
 
   sock.ev.on("call", async (calls) => {
     try {
-      // ✅ FIX: await readSettings()
       const settings = await readSettings(sessionCtx.sessionId);
       if (!settings.auto_reject_calls) return;
 
@@ -584,7 +571,7 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
 
         // ============================================================
-        //  STATUS @broadcast HANDLER (fully async with sessionId)
+        //  STATUS @broadcast HANDLER
         // ============================================================
         if (
           mek.key &&
@@ -597,7 +584,6 @@ function attachSessionHandlers(sock, sessionCtx) {
           const participant = participantRaw;
           if (mek.key.fromMe) continue messageLoop;
 
-          // ✅ FIX: await readSettings with sessionId
           const statusSettings = await readSettings(sessionCtx.sessionId);
 
           if (statusSettings.auto_status_seen === true) {
@@ -737,14 +723,12 @@ function attachSessionHandlers(sock, sessionCtx) {
 
         // ── PRESENCE ────────────────────────────────────────────
         try {
-          // ✅ FIX: await readSettings()
           const presenceMode = (await readSettings(sessionCtx.sessionId)).always_presence;
           if (presenceMode === "typing")         await sock.sendPresenceUpdate("composing",  from);
           else if (presenceMode === "recording") await sock.sendPresenceUpdate("recording",  from);
         } catch (_) {}
 
         // ── WORK SCOPE CHECK ────────────────────────────────────
-        // ✅ FIX: added work scope check using isWorkAllowed
         if (!(await isWorkAllowed(sessionCtx.sessionId, isGroup))) {
           console.log(`⏭️ Skipping message: work_scope disallows ${isGroup ? "group" : "private"} chat for ${sessionCtx.sessionId}`);
           continue messageLoop;
@@ -763,7 +747,6 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
 
         // ── BOT MODE CHECK ─────────────────────────────────────
-        // ✅ FIX: await readSettings()
         const botSettings = await readSettings(sessionCtx.sessionId);
         if (botSettings.mode === "private" && !isOwner) {
           if (isCmd) continue messageLoop;
@@ -822,6 +805,7 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
 
         // ── REPLY HANDLERS ─────────────────────────────────────
+        // ✅ FIX: sessionId passed to reply handlers
         if (!isCmd && replyHandlers && replyHandlers.length) {
           for (const h of replyHandlers) {
             if (typeof h.filter !== "function") continue;
@@ -831,6 +815,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               if (h.react) sock.sendMessage(from, { react: { text: h.react, key: mek.key } });
               await h.function(sock, mek, m, {
                 from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
+                sessionId: sessionCtx.sessionId, // ✅ ADDED: sessionId passed
               });
               break;
             }
@@ -838,6 +823,7 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
 
         // ── COMMANDS ───────────────────────────────────────────
+        // ✅ FIX: sessionId passed to commands
         if (isCmd) {
           if (botSettings.mode === "private" && !isOwner) continue messageLoop;
 
@@ -851,6 +837,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
               sessionOwnerPhone: sessionCtx.ownerNumber[0] || "",
               sessionOwnerName:  BOT_OWNER_NAME,
+              sessionId: sessionCtx.sessionId, // ✅ ADDED: sessionId passed
             });
           }
         }
@@ -926,7 +913,6 @@ app.get("/sessions", async (req, res) => {
 });
 
 app.get("/health", (_req, res) => res.status(200).send("OK"));
-
 
 // ─────────────────────────────────────────────────────────────
 //  CORS — allow pair site (Vercel) to call this server
