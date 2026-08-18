@@ -1,5 +1,10 @@
 const { cmd, replyHandlers } = require("../command");
-const ytDlp = require("yt-dlp-exec");
+// Switched from yt-dlp-exec (unmaintained, last published ~5 years ago,
+// bundled a stale yt-dlp binary that YouTube's bot-check now rejects
+// even with valid cookies) to youtube-dl-exec (actively maintained,
+// auto-downloads a current yt-dlp binary on install). Same API shape —
+// ytDlp(url, options) — so no other code below needed to change.
+const ytDlp = require("youtube-dl-exec");
 const yts = require("yt-search");
 const fs = require("fs");
 const path = require("path");
@@ -232,8 +237,8 @@ function buildStyledAudioMenu(video) {
 
 ┌─❮ 🎵 *𝔸𝕌𝔻𝕀𝕆 𝕆ℙ𝕋𝕀𝕆ℕ𝕊* ❯─
 │
-├─► *[ 01 ]* ➔ 🎶 ᴀᴜᴅɪᴏ ғɪʟᴇ (ᴍᴘ3)
-├─► *[ 02 ]* ➔ 📁 ᴅᴏᴄᴜᴍᴇɴᴛ ғɪʟᴇ
+├─► 📱 *[ 01 ]* ➔ 🎶 ᴀᴜᴅɪᴏ ғɪʟᴇ (ᴍᴘ3)
+├─► 📱 *[ 02 ]* ➔ 📁 ᴅᴏᴄᴜᴍᴇɴᴛ ғɪʟᴇ
 │
 └─❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2* ❯─`;
 }
@@ -432,7 +437,7 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
 cmd(
   {
     pattern: "song",
-    alias: ["play", "ytmp3", "yta"],
+    alias: ["play", "ytmp3", "yta", "music", "sindu", "sinduwak", "mp3", "audio"],
     react: "🎵",
     desc: "Download YouTube audio with options",
     category: "download",
