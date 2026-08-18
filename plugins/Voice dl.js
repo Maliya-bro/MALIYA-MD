@@ -237,8 +237,8 @@ function buildStyledAudioMenu(video) {
 
 ┌─❮ 🎵 *𝔸𝕌𝔻𝕀𝕆 𝕆ℙ𝕋𝕀𝕆ℕ𝕊* ❯─
 │
-├─► 📱 *[ 01 ]* ➔ 🎶 ᴀᴜᴅɪᴏ ғɪʟᴇ (ᴍᴘ3)
-├─► 📱 *[ 02 ]* ➔ 📁 ᴅᴏᴄᴜᴍᴇɴᴛ ғɪʟᴇ
+├─► *[ 01 ]* ➔ 🎶 ᴀᴜᴅɪᴏ ғɪʟᴇ (ᴍᴘ3)
+├─► *[ 02 ]* ➔ 📁 ᴅᴏᴄᴜᴍᴇɴᴛ ғɪʟᴇ
 │
 └─❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2* ❯─`;
 }
@@ -437,7 +437,7 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
 cmd(
   {
     pattern: "song",
-    alias: ["play", "ytmp3", "yta", "music", "sindu", "sinduwak", "mp3", "audio"],
+    alias: ["play", "ytmp3", "yta"],
     react: "🎵",
     desc: "Download YouTube audio with options",
     category: "download",
