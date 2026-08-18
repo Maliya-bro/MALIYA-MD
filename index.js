@@ -11,6 +11,8 @@
 //  FIX 3: restore-from-Mongo now skipped if local creds.json already
 //         exists on disk (avoids clobbering a live, already-valid
 //         session with older Mongo data mid-run).
+//  FIX 4: Settings now saved to MongoDB (botSettings.js) - async/await everywhere
+//  FIX 5: Work scope check added (private/group/all)
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -67,7 +69,7 @@ const { MongoClient } = require("mongodb");
 const cors              = require("cors");
 const os               = require("os");
 const config            = require("./config");
-const { readSettings }  = require("./lib/botSettings");
+const { readSettings, isWorkAllowed } = require("./lib/botSettings"); // ✅ FIX: added isWorkAllowed
 const { sms }           = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 
@@ -175,9 +177,6 @@ async function restoreCredsToFile(sessionId, targetFilePath) {
 }
 
 // ── FIX 2: push local creds.json back into MongoDB ────────────
-// Railway's filesystem is ephemeral, so MongoDB must always hold
-// the LATEST creds, not just the one captured at pairing time.
-// Debounced so we don't hammer Mongo on every key-update event.
 const credsSyncTimers = new Map();
 
 function scheduleCredsSync(sessionId, credsPath, delayMs = 2000) {
@@ -282,11 +281,6 @@ function getBodyFromMessage(message) {
 /* ==================== MULTI-SESSION MANAGER ==================== */
 const activeSessions  = new Map();
 const reconnectTimers = new Map();
-// FIX 1: lock for sessions currently in the process of starting
-// (i.e. between the activeSessions.has() check and the socket
-// actually being registered). Prevents the 5s watcher tick from
-// starting a duplicate socket for the same sessionId while the
-// first start is still awaiting mkdir/restore/useMultiFileAuthState.
 const startingSessions = new Set();
 let   watcherStarted   = false;
 
@@ -330,10 +324,6 @@ async function startSessionBot(sessionId) {
 
   if (activeSessions.has(sessionId)) return activeSessions.get(sessionId);
 
-  // FIX 1: bail out if this session is already mid-start elsewhere
-  // (e.g. a watcher tick fired again before the previous start()
-  // finished its awaits). This is what was causing two live sockets
-  // for the same number -> WhatsApp closing one as a conflict.
   if (startingSessions.has(sessionId)) {
     console.log(`⏳ Session ${sessionId} is already starting — skipping duplicate start`);
     return null;
@@ -351,10 +341,6 @@ async function startSessionBot(sessionId) {
   try {
     fs.mkdirSync(authDir, { recursive: true });
 
-    // FIX 3: only pull from Mongo if we don't already have local
-    // creds for this session (cold start / fresh container). If
-    // creds.json already exists on disk, it's newer than or equal
-    // to what's in Mongo (thanks to FIX 2), so don't clobber it.
     if (!fs.existsSync(credsPath)) {
       await restoreCredsToFile(sessionId, credsPath);
     }
@@ -385,15 +371,10 @@ async function startSessionBot(sessionId) {
 
     sessionCtx.sock = sock;
     activeSessions.set(sessionId, sessionCtx);
-    // We've registered the socket in activeSessions now, so it's
-    // safe to release the starting-lock — any future watcher tick
-    // will correctly find it via activeSessions.has() instead.
     startingSessions.delete(sessionId);
 
     sock.ev.on("creds.update", async () => {
       await saveCreds();
-      // FIX 2: keep Mongo in sync with the latest local creds so a
-      // Railway restart/redeploy restores current state, not stale.
       scheduleCredsSync(sessionId, credsPath);
     });
 
@@ -424,6 +405,8 @@ async function startSessionBot(sessionId) {
             month: "2-digit", day: "2-digit",
           }).format(now);
 
+          // ✅ FIX: await readSettings()
+          const settings = await readSettings(sessionId);
           const BOT_VERSION = "v4.0.0";
           const up = `
 🌈━━━━━━━━━━━━━🌈
@@ -432,7 +415,7 @@ async function startSessionBot(sessionId) {
 
 ✅✨ Connection : CONNECTED & ONLINE
 ⚡🧬 System     : STABLE | FAST | SECURE
-🛡️🔐 Mode      : ${String(readSettings().mode || "public").toUpperCase()}
+🛡️🔐 Mode      : ${String(settings.mode || "public").toUpperCase()}
 🎯🧩 Prefix    : ${prefix}
 
 🧑‍💻👑 Owner    : ${BOT_OWNER_NAME}
@@ -519,8 +502,6 @@ function startSessionWatcher() {
   let tickRunning = false;
 
   const tick = async () => {
-    // Extra guard: don't let overlapping ticks run concurrently if
-    // a previous tick's DB query/loop is still in flight.
     if (tickRunning) return;
     tickRunning = true;
     try {
@@ -560,7 +541,8 @@ function attachSessionHandlers(sock, sessionCtx) {
 
   sock.ev.on("call", async (calls) => {
     try {
-      const settings = readSettings();
+      // ✅ FIX: await readSettings()
+      const settings = await readSettings(sessionCtx.sessionId);
       if (!settings.auto_reject_calls) return;
 
       for (const call of calls) {
@@ -601,6 +583,9 @@ function attachSessionHandlers(sock, sessionCtx) {
           }
         }
 
+        // ============================================================
+        //  STATUS @broadcast HANDLER (fully async with sessionId)
+        // ============================================================
         if (
           mek.key &&
           mek.key.remoteJid === "status@broadcast" &&
@@ -612,9 +597,7 @@ function attachSessionHandlers(sock, sessionCtx) {
           const participant = participantRaw;
           if (mek.key.fromMe) continue messageLoop;
 
-          // ============================== 
-          // FIXED: Use await with sessionId
-          // ============================== 
+          // ✅ FIX: await readSettings with sessionId
           const statusSettings = await readSettings(sessionCtx.sessionId);
 
           if (statusSettings.auto_status_seen === true) {
@@ -684,26 +667,16 @@ function attachSessionHandlers(sock, sessionCtx) {
               
               const mimetype =
                 mediaMsg.mimetype ||
-                (
-                  msgType === "imageMessage"
-                    ? "image/jpeg"
-                    : "video/mp4"
-                );
+                (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
 
-              const captionText =
-                mediaMsg.caption || "";
+              const captionText = mediaMsg.caption || "";
 
-              const ownerNumber =
-                sessionCtx.ownerNumber?.[0] || "";
-
+              const ownerNumber = sessionCtx.ownerNumber?.[0] || "";
               if (!ownerNumber) {
-                throw new Error(
-                  "Owner number not available"
-                );
+                throw new Error("Owner number not available");
               }
 
-              const ownerJid =
-                ownerNumber + "@s.whatsapp.net";
+              const ownerJid = ownerNumber + "@s.whatsapp.net";
 
               if (msgType === "imageMessage") {
                 await sock.sendMessage(
@@ -711,10 +684,7 @@ function attachSessionHandlers(sock, sessionCtx) {
                   {
                     image: buffer,
                     mimetype,
-                    caption:
-                      `📥 *Status Downloaded*\n` +
-                      `👤 From: ${participant.split("@")[0]}\n\n` +
-                      `${captionText}`
+                    caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
                   }
                 );
               } else {
@@ -723,29 +693,23 @@ function attachSessionHandlers(sock, sessionCtx) {
                   {
                     video: buffer,
                     mimetype,
-                    caption:
-                      `📥 *Status Downloaded*\n` +
-                      `👤 From: ${participant.split("@")[0]}\n\n` +
-                      `${captionText}`
+                    caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
                   }
                 );
               }
 
-              console.log(
-                `✅ Status downloaded and sent to owner: ${participant}`
-              );
-
+              console.log(`✅ Status downloaded and sent to owner: ${participant}`);
             } catch (e) {
-              console.error(
-                "❌ Download/forward error:",
-                e?.message || e
-              );
+              console.error("❌ Download/forward error:", e?.message || e);
             }
           }
 
           continue messageLoop;
         }
 
+        // ============================================================
+        //  NORMAL MESSAGE HANDLING
+        // ============================================================
         const m    = sms(sock, mek);
         let   body = String(getBodyFromMessage(mek.message) || "").trim();
 
@@ -771,12 +735,22 @@ function attachSessionHandlers(sock, sessionCtx) {
         const reply = (text) =>
           sock.sendMessage(from, { text }, { quoted: mek });
 
+        // ── PRESENCE ────────────────────────────────────────────
         try {
-          const presenceMode = readSettings().always_presence;
+          // ✅ FIX: await readSettings()
+          const presenceMode = (await readSettings(sessionCtx.sessionId)).always_presence;
           if (presenceMode === "typing")         await sock.sendPresenceUpdate("composing",  from);
           else if (presenceMode === "recording") await sock.sendPresenceUpdate("recording",  from);
         } catch (_) {}
 
+        // ── WORK SCOPE CHECK ────────────────────────────────────
+        // ✅ FIX: added work scope check using isWorkAllowed
+        if (!(await isWorkAllowed(sessionCtx.sessionId, isGroup))) {
+          console.log(`⏭️ Skipping message: work_scope disallows ${isGroup ? "group" : "private"} chat for ${sessionCtx.sessionId}`);
+          continue messageLoop;
+        }
+
+        // ── AUTO REACT PLUGIN ──────────────────────────────────
         try {
           if (autoReactPlugin && typeof autoReactPlugin.onMessage === "function") {
             await autoReactPlugin.onMessage(sock, mek, m, {
@@ -788,15 +762,14 @@ function attachSessionHandlers(sock, sessionCtx) {
           console.log("AutoReact hook error:", e?.message || e);
         }
 
-        const botSettings = readSettings();
+        // ── BOT MODE CHECK ─────────────────────────────────────
+        // ✅ FIX: await readSettings()
+        const botSettings = await readSettings(sessionCtx.sessionId);
         if (botSettings.mode === "private" && !isOwner) {
           if (isCmd) continue messageLoop;
         }
 
-        // ── AUTO MSG PLUGIN ───────────────────────────────────
-        //    ✅ FIX: removed !isGroup condition
-        //    handleAutoMsg() handles group/private logic internally
-        //    based on global mode (.msg on all sets includeGroups)
+        // ── AUTO MSG PLUGIN ────────────────────────────────────
         if (!isCmd) {
           try {
             const handled = await handleAutoMsg({
@@ -816,6 +789,7 @@ function attachSessionHandlers(sock, sessionCtx) {
           }
         }
 
+        // ── CMD FIX PLUGIN ─────────────────────────────────────
         try {
           if (cmdFixPlugin && typeof cmdFixPlugin.onMessage === "function") {
             const res = await cmdFixPlugin.onMessage(sock, mek, m, {
@@ -835,6 +809,7 @@ function attachSessionHandlers(sock, sessionCtx) {
           console.log("cmdFixPlugin error:", e?.message || e);
         }
 
+        // ── PDF SCANNER PLUGIN ─────────────────────────────────
         try {
           if (pdfScannerPlugin && typeof pdfScannerPlugin.onMessage === "function") {
             await pdfScannerPlugin.onMessage(sock, mek, m, {
@@ -846,6 +821,7 @@ function attachSessionHandlers(sock, sessionCtx) {
           console.log("pdfScannerPlugin error:", e?.message || e);
         }
 
+        // ── REPLY HANDLERS ─────────────────────────────────────
         if (!isCmd && replyHandlers && replyHandlers.length) {
           for (const h of replyHandlers) {
             if (typeof h.filter !== "function") continue;
@@ -861,6 +837,7 @@ function attachSessionHandlers(sock, sessionCtx) {
           }
         }
 
+        // ── COMMANDS ───────────────────────────────────────────
         if (isCmd) {
           if (botSettings.mode === "private" && !isOwner) continue messageLoop;
 
