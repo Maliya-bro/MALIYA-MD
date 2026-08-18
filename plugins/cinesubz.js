@@ -32,7 +32,7 @@ async function askAI(prompt) {
 
 cmd(
   {
-    pattern: "film",
+    pattern: "m365",
     alias: ["films365", "f365", "movie365"],
     desc: "Search movies using AI & download directly from Films365",
     category: "download",
