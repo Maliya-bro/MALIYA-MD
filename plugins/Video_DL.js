@@ -1,5 +1,10 @@
 const { cmd, replyHandlers } = require("../command");
-const ytDlp = require("yt-dlp-exec");
+// Switched from yt-dlp-exec (unmaintained, last published ~5 years ago,
+// bundled a stale yt-dlp binary that YouTube's bot-check now rejects
+// even with valid cookies) to youtube-dl-exec (actively maintained,
+// auto-downloads a current yt-dlp binary on install). Same API shape —
+// ytDlp(url, options) — so no other code below needed to change.
+const ytDlp = require("youtube-dl-exec");
 const yts = require("yt-search");
 const fs = require("fs");
 const path = require("path");
