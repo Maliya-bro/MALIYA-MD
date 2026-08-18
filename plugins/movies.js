@@ -1,7 +1,7 @@
 /**
  * ╔══════════════════════════════════════════════════════════════╗
- *    MALIYA-MD — CINESUBZ DIRECT SCRAPER MOVIE PLUGIN
- *    Direct Scraping + URL Mapping + API /dl Resolver
+ *   MALIYA-MD — CINESUBZ DIRECT SCRAPER MOVIE PLUGIN
+ *   Direct Scraping + URL Mapping + API /dl Resolver
  * ╚══════════════════════════════════════════════════════════════╝
  */
 
@@ -34,12 +34,12 @@ const pendingQuality = {};
 // ================================================================
 
 const URL_MAPPINGS = [
-    { search: ["https://google.com/server11/1:/", "https://google.com/server12/1:/", "https://google.com/server13/1:/"], replace: "https://bot3.sonic-cloud.online/server1/" },
-    { search: ["https://google.com/server21/1:/", "https://google.com/server22/1:/", "https://google.com/server23/1:/"], replace: "https://bot3.sonic-cloud.online/server2/" },
-    { search: ["https://google.com/server3/1:/"], replace: "https://bot3.sonic-cloud.online/server3/" },
-    { search: ["https://google.com/server4/1:/"], replace: "https://bot3.sonic-cloud.online/server4/" },
-    { search: ["https://google.com/server5/1:/"], replace: "https://bot3.sonic-cloud.online/server5/" },
-    { search: ["https://google.com/server6/"], replace: "https://bot3.sonic-cloud.online/server6/" }
+    { search: ["https://google.com/server11/1:/", "https://google.com/server12/1:/", "https://google.com/server13/1:/", "/server11/1:/", "/server12/1:/", "/server13/1:/"], replace: "https://bot3.sonic-cloud.online/server1/" },
+    { search: ["https://google.com/server21/1:/", "https://google.com/server22/1:/", "https://google.com/server23/1:/", "/server21/1:/", "/server22/1:/", "/server23/1:/"], replace: "https://bot3.sonic-cloud.online/server2/" },
+    { search: ["https://google.com/server3/1:/", "/server3/1:/"], replace: "https://bot3.sonic-cloud.online/server3/" },
+    { search: ["https://google.com/server4/1:/", "/server4/1:/"], replace: "https://bot3.sonic-cloud.online/server4/" },
+    { search: ["https://google.com/server5/1:/", "/server5/1:/"], replace: "https://bot3.sonic-cloud.online/server5/" },
+    { search: ["https://google.com/server6/", "/server6/"], replace: "https://bot3.sonic-cloud.online/server6/" }
 ];
 
 // ================================================================
@@ -150,7 +150,7 @@ async function getBotSonicLink(ztUrl) {
     const { data } = await axios.get(ztUrl, { headers: HEADERS });
     const $ = cheerio.load(data);
 
-    const rawHref = $("#link").attr("href") || "";
+    const rawHref = $("#link").attr("href") || $("a#link").attr("href") || "";
     if (!rawHref) return null;
 
     let sonicUrl = rawHref;
@@ -182,17 +182,51 @@ async function resolveDirectUrlFromApi(sonicUrl) {
 
         const resData = response.data;
 
-        // Structured or Recursive lookup for direct link
-        if (resData && resData.data && Array.isArray(resData.data.links)) {
-            const avatarZoneLink = resData.data.links.find(url => typeof url === "string" && url.startsWith("http") && !url.includes("telegram.me") && !url.includes("t.me"));
-            if (avatarZoneLink) return avatarZoneLink;
+        // 1. Recursive Link Finder
+        function extractUrl(obj) {
+            if (!obj) return null;
+
+            if (typeof obj === "string") {
+                const clean = obj.replace(/\\/g, "").trim();
+                if (/^https?:\/\//i.test(clean) && !clean.includes("telegram.me") && !clean.includes("t.me")) {
+                    return clean;
+                }
+                return null;
+            }
+
+            if (Array.isArray(obj)) {
+                for (const item of obj) {
+                    const found = extractUrl(item);
+                    if (found) return found;
+                }
+            }
+
+            if (typeof obj === "object") {
+                const keys = ["url", "link", "download", "downloadUrl", "dl_link", "direct_link", "file"];
+                for (const k of keys) {
+                    if (obj[k]) {
+                        const found = extractUrl(obj[k]);
+                        if (found) return found;
+                    }
+                }
+
+                for (const k in obj) {
+                    const found = extractUrl(obj[k]);
+                    if (found) return found;
+                }
+            }
+
+            return null;
         }
 
-        // Deep Search fallback
+        const directUrl = extractUrl(resData);
+        if (directUrl) return directUrl;
+
+        // Fallback: Deep JSON regex match
         const strJson = JSON.stringify(resData);
-        const urlMatches = strJson.match(/https?:\/\/[^\s"'\\]+/g);
-        if (urlMatches) {
-            const valid = urlMatches.find(u => !u.includes("telegram.me") && !u.includes("t.me"));
+        const matches = strJson.match(/https?:\/\/[^\s"'\\]+/g);
+        if (matches) {
+            const valid = matches.find(u => !u.includes("telegram.me") && !u.includes("t.me"));
             if (valid) return valid;
         }
 
@@ -234,17 +268,17 @@ cmd({
             timestamp: Date.now()
         };
 
-        let text = `╭━〔 🎬 *ᴄɪɴᴇsᴜʙᴢ sᴇᴀʀᴄʜ* 〕━►\n┃\n`;
+        let text = `╭━━━〔 🎬 *ᴄɪɴᴇsᴜʙᴢ sᴇᴀʀᴄʜ* 〕━━━\n┃\n`;
         text += `┃ 🔎 *sᴇᴀʀᴄʜ:* ${toSmallCaps(q)}\n`;
         text += `┃ 📊 *ʀᴇsᴜʟᴛs:* ${searchResults.length}\n┃\n`;
-        text += `╰━━━───────━━► ❥\n\n`;
+        text += `╰━━━───────━━━━► ❥\n\n`;
 
         searchResults.forEach((movie, i) => {
             const numStr = String(i + 1).padStart(2, "0");
             text += `*[ ${numStr} ]* 🎬 *${toSmallCaps(movie.title)}*\n`;
         });
 
-        text += `\n────────────────► ❥\n`;
+        text += `\n───────────────────\n`;
         text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴀ ɴᴜᴍʙᴇʀ (1-${searchResults.length})*`;
 
         await danuwa.sendMessage(from, { text }, { quoted: mek });
@@ -291,9 +325,9 @@ cmd({
             timestamp: Date.now()
         };
 
-        let qualityMsg = `╭━〔 📥 *ᴀᴠᴀɪʟᴀʙʟᴇ ǫᴜᴀʟɪᴛɪᴇs* 〕━❥\n┃\n`;
+        let qualityMsg = `╭━━━〔 📥 *ᴀᴠᴀɪʟᴀʙʟᴇ ǫᴜᴀʟɪᴛɪᴇs* 〕━━━\n┃\n`;
         qualityMsg += `┃ 🎬 *${toSmallCaps(selected.title)}*\n┃\n`;
-        qualityMsg += `╰━━━───────━━► ❥\n\n`;
+        qualityMsg += `╰━━━───────━━━━► ❥\n\n`;
 
         meta.links.forEach((item, i) => {
             const numStr = String(i + 1).padStart(2, "0");
@@ -302,7 +336,7 @@ cmd({
             qualityMsg += "\n";
         });
 
-        qualityMsg += `\n─────────────────\n`;
+        qualityMsg += `\n───────────────────\n`;
         qualityMsg += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ǫᴜᴀʟɪᴛʏ ɴᴜᴍʙᴇʀ (1-${meta.links.length})*`;
 
         if (meta.poster) {
@@ -357,7 +391,7 @@ cmd({
         const directDlUrl = await resolveDirectUrlFromApi(sonicUrl);
 
         if (!directDlUrl) {
-            return reply("❌ *ғᴀɪʟᴇᴅ ᴛᴏ ғᴇᴛᴄʜ ᴅɪʀᴇᴄᴛ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋ ғʀᴏᴍ ᴀᴘɪ!*");
+            return reply("❌ *ғᴀɪʟᴇᴅ ᴛᴏ ғᴇᴛᴄʜ ᴅɪʀᴇᴄᴛ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋ ғᴏʀ ᴛʜɪs ǫᴜᴀʟɪᴛʏ!*");
         }
 
         // Dynamic Document Name: "MALIYA-MD-MINI <film name>.mp4"
