@@ -113,25 +113,55 @@ function extractThumbnail(obj) {
 }
 
 /**
- * Filter direct video link (avatarzone) from API returned array
+ * Filter direct video link (avatarzone) from API returned response
  */
 function extractDirectDlUrl(data) {
     if (!data) return null;
 
-    let arrayToSearch = [];
+    let itemsToSearch = [];
+
     if (Array.isArray(data)) {
-        arrayToSearch = data;
-    } else if (data.data && Array.isArray(data.data.links)) {
-        arrayToSearch = data.data.links;
-    } else if (Array.isArray(data.links)) {
-        arrayToSearch = data.links;
+        itemsToSearch = data;
+    } else if (typeof data === "object") {
+        if (Array.isArray(data.data)) itemsToSearch = data.data;
+        else if (data.data && Array.isArray(data.data.links)) itemsToSearch = data.data.links;
+        else if (Array.isArray(data.links)) itemsToSearch = data.links;
+        else if (Array.isArray(data.result)) itemsToSearch = data.result;
+        else itemsToSearch = [data, data.data, data.result].filter(Boolean);
     }
 
-    for (const item of arrayToSearch) {
-        const link = typeof item === "string" ? item : item.link || item.url;
-        if (link && /^https?:\/\//i.test(link) && !link.includes("telegram.me") && !link.includes("t.me")) {
-            return link;
+    function findUrl(obj) {
+        if (!obj) return null;
+
+        if (typeof obj === "string") {
+            if (/^https?:\/\//i.test(obj) && !obj.includes("telegram.me") && !obj.includes("t.me")) {
+                return obj;
+            }
+            return null;
         }
+
+        if (typeof obj === "object") {
+            const keys = ["url", "link", "download", "downloadUrl", "dl_link", "direct_link", "file"];
+            for (const key of keys) {
+                if (obj[key] && typeof obj[key] === "string") {
+                    const l = obj[key].trim();
+                    if (/^https?:\/\//i.test(l) && !l.includes("telegram.me") && !l.includes("t.me")) {
+                        return l;
+                    }
+                }
+            }
+
+            for (const k in obj) {
+                const res = findUrl(obj[k]);
+                if (res) return res;
+            }
+        }
+        return null;
+    }
+
+    for (const item of itemsToSearch) {
+        const url = findUrl(item);
+        if (url) return url;
     }
 
     return null;
@@ -241,18 +271,18 @@ async function getDownload(botSonicUrl) {
 }
 
 // ================================================================
-// PARSE DOWNLOAD LINKS (For Quality List)
+// PARSE DOWNLOAD LINKS (Fixed Duplicate Quality Issue)
 // ================================================================
 
 function parseDownloadLinks(data) {
-    const links = [];
+    const rawLinks = [];
 
     function scan(value, inheritedQuality = "") {
         if (!value) return;
 
         if (typeof value === "string") {
             if (/^https?:\/\//i.test(value)) {
-                links.push({
+                rawLinks.push({
                     link: value,
                     quality: normalizeQuality(inheritedQuality),
                     size: ""
@@ -272,7 +302,7 @@ function parseDownloadLinks(data) {
             const directUrl = firstValue(value.url, value.link, value.download, value.downloadUrl, value.file);
 
             if (directUrl && typeof directUrl === "string" && /^https?:\/\//i.test(directUrl)) {
-                links.push({
+                rawLinks.push({
                     link: directUrl,
                     quality: normalizeQuality(quality),
                     size: cleanText(size)
@@ -288,11 +318,20 @@ function parseDownloadLinks(data) {
 
     scan(data);
 
+    // Filter duplicates by Link & Quality
     const unique = [];
-    const seen = new Set();
-    for (const item of links) {
-        if (!item.link || seen.has(item.link)) continue;
-        seen.add(item.link);
+    const seenLinks = new Set();
+    const seenQualities = new Set();
+
+    for (const item of rawLinks) {
+        if (!item.link || seenLinks.has(item.link)) continue;
+
+        // Duplicate Quality Filter (E.g. Filter duplicate 1080p, 720p, 480p)
+        const qKey = item.quality.toLowerCase();
+        if (seenQualities.has(qKey)) continue;
+
+        seenLinks.add(item.link);
+        seenQualities.add(qKey);
         unique.push(item);
     }
 
@@ -474,19 +513,14 @@ cmd({
 
         await reply(`*⚡ Resolving Direct Link via API...*\n\n🎬 *${title}*\n📊 *Quality:* ${quality}\n\n*Please wait (30-60s)...*`);
 
-        // Send sonic link to API /dl endpoint
         const dlResponse = await getDownload(rawSonicUrl);
-
-        // Extract AvatarZone direct download URL
         const finalDirectUrl = extractDirectDlUrl(dlResponse);
 
         if (!finalDirectUrl) {
             return reply(`*❌ Failed to fetch direct AvatarZone download link from API!*`);
         }
 
-        // Get File Size from response if available
         const fileSize = dlResponse?.data?.size || selectedLink.size || "";
-
         const cleanName = `${title} - ${quality}.mp4`.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").trim();
 
         await reply(`*⬇️ Sending Movie Document...*\n\n🎬 *${title}*\n📊 *Quality:* ${quality}\n💾 *Size:* ${fileSize || "Unknown"}`);
