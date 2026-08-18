@@ -1,375 +1,219 @@
 /**
  * ╔══════════════════════════════════════════════════════════════╗
- *   MALIYA-MD — CINESUBZ API MOVIE PLUGIN
- *   API Based Movie Search / Info / Download
- *
- *   API:
- *   GET /api/v1/movie/cinesubz/search?q=
- *   GET /api/v1/movie/cinesubz/info?q=
- *   GET /api/v1/movie/cinesubz/dl?q=
- *
- *   Header:
- *   x-api-key: YOUR_API_KEY
+ *   MALIYA-MD — CINESUBZ DIRECT SCRAPER MOVIE PLUGIN
+ *   Direct Scraping + URL Mapping + API /dl Resolver
  * ╚══════════════════════════════════════════════════════════════╝
  */
 
 const { cmd } = require("../command");
 const axios = require("axios");
+const cheerio = require("cheerio");
 
 // ================================================================
 // CONFIG
 // ================================================================
 
+const CINESUBZ_BASE = "https://cinesubz.net";
 const API_BASE = "https://sadaslk.com";
 const API_KEY = "9d4eecd724daa198d662e23767bd7977";
 
+const HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Referer": CINESUBZ_BASE
+};
+
 // ================================================================
-// PENDING DATA
+// PENDING DATA (STATE MANAGEMENT)
 // ================================================================
 
 const pendingSearch = {};
 const pendingQuality = {};
 
 // ================================================================
-// API CLIENT
+// URL MAPPING SETUP
 // ================================================================
 
-const api = axios.create({
-    baseURL: API_BASE,
-    timeout: 120000, // 2 minutes for /dl response
-    headers: {
-        "x-api-key": API_KEY,
-        "Accept": "application/json",
-        "User-Agent": "MALIYA-MD/1.0"
-    }
-});
+const URL_MAPPINGS = [
+    { search: ["https://google.com/server11/1:/", "https://google.com/server12/1:/", "https://google.com/server13/1:/"], replace: "https://bot3.sonic-cloud.online/server1/" },
+    { search: ["https://google.com/server21/1:/", "https://google.com/server22/1:/", "https://google.com/server23/1:/"], replace: "https://bot3.sonic-cloud.online/server2/" },
+    { search: ["https://google.com/server3/1:/"], replace: "https://bot3.sonic-cloud.online/server3/" },
+    { search: ["https://google.com/server4/1:/"], replace: "https://bot3.sonic-cloud.online/server4/" },
+    { search: ["https://google.com/server5/1:/"], replace: "https://bot3.sonic-cloud.online/server5/" },
+    { search: ["https://google.com/server6/"], replace: "https://bot3.sonic-cloud.online/server6/" }
+];
 
 // ================================================================
-// HELPERS
+// HELPER FUNCTIONS
 // ================================================================
 
-function normalizeQuality(text) {
-    if (!text) return "Unknown";
-    const value = String(text).toUpperCase();
-
-    if (/2160|4K/.test(value)) return "2160p";
-    if (/1440/.test(value)) return "1440p";
-    if (/1080|FHD/.test(value)) return "1080p";
-    if (/720|HD/.test(value)) return "720p";
-    if (/480|SD/.test(value)) return "480p";
-    if (/360/.test(value)) return "360p";
-
-    return String(text).trim();
+function cleanTitle(t = "") {
+    return t
+        .replace(/Direct\s*(&|and)\s*Telegram\s*Download\s*Links?/gi, "")
+        .replace(/sinhala subtitles?.*/i, "")
+        .replace(/සිංහල.*/i, "")
+        .replace(/\|.*/i, "")
+        .replace(/[-–]\s*$/, "")
+        .trim();
 }
 
-function cleanText(value) {
-    if (value === null || value === undefined) return "";
-    return String(value).trim();
-}
-
-function firstValue(...values) {
-    for (const value of values) {
-        if (
-            value !== undefined &&
-            value !== null &&
-            value !== "" &&
-            !(Array.isArray(value) && value.length === 0)
-        ) {
-            return value;
-        }
-    }
-    return "";
-}
-
-function getArray(data) {
-    if (Array.isArray(data)) return data;
-    if (!data || typeof data !== "object") return [];
-
-    const possibleKeys = ["data", "results", "movies", "items", "result", "response"];
-    for (const key of possibleKeys) {
-        if (Array.isArray(data[key])) return data[key];
-    }
-    return [];
-}
-
-function getObject(data) {
-    if (!data || typeof data !== "object") return {};
-    if (Array.isArray(data)) return data[0] || {};
-
-    const possibleKeys = ["data", "result", "movie", "info", "response"];
-    for (const key of possibleKeys) {
-        if (data[key] && typeof data[key] === "object" && !Array.isArray(data[key])) {
-            return data[key];
-        }
-    }
-    return data;
-}
-
-function extractThumbnail(obj) {
-    return firstValue(
-        obj.thumbnail, obj.thumb, obj.image, obj.poster,
-        obj.posterUrl, obj.poster_url, obj.cover, obj.coverUrl, obj.cover_url
-    );
-}
-
-/**
- * Filter direct video link (avatarzone) from API returned response
- */
-function extractDirectDlUrl(data) {
-    if (!data) return null;
-
-    let itemsToSearch = [];
-
-    if (Array.isArray(data)) {
-        itemsToSearch = data;
-    } else if (typeof data === "object") {
-        if (Array.isArray(data.data)) itemsToSearch = data.data;
-        else if (data.data && Array.isArray(data.data.links)) itemsToSearch = data.data.links;
-        else if (Array.isArray(data.links)) itemsToSearch = data.links;
-        else if (Array.isArray(data.result)) itemsToSearch = data.result;
-        else itemsToSearch = [data, data.data, data.result].filter(Boolean);
-    }
-
-    function findUrl(obj) {
-        if (!obj) return null;
-
-        if (typeof obj === "string") {
-            if (/^https?:\/\//i.test(obj) && !obj.includes("telegram.me") && !obj.includes("t.me")) {
-                return obj;
-            }
-            return null;
-        }
-
-        if (typeof obj === "object") {
-            const keys = ["url", "link", "download", "downloadUrl", "dl_link", "direct_link", "file"];
-            for (const key of keys) {
-                if (obj[key] && typeof obj[key] === "string") {
-                    const l = obj[key].trim();
-                    if (/^https?:\/\//i.test(l) && !l.includes("telegram.me") && !l.includes("t.me")) {
-                        return l;
-                    }
-                }
-            }
-
-            for (const k in obj) {
-                const res = findUrl(obj[k]);
-                if (res) return res;
-            }
-        }
-        return null;
-    }
-
-    for (const item of itemsToSearch) {
-        const url = findUrl(item);
-        if (url) return url;
-    }
-
-    return null;
+function applyExtSuffix(url) {
+    if (url.includes(".mp4?bot=cscloud2bot&code=")) return url.replace(".mp4?bot=cscloud2bot&code=", "?ext=mp4&bot=cscloud2bot&code=");
+    if (url.includes(".mp4")) return url.replace(".mp4", "?ext=mp4");
+    if (url.includes(".mkv?bot=cscloud2bot&code=")) return url.replace(".mkv?bot=cscloud2bot&code=", "?ext=mkv&bot=cscloud2bot&code=");
+    if (url.includes(".mkv")) return url.replace(".mkv", "?ext=mkv");
+    return url;
 }
 
 // ================================================================
-// API REQUEST
+// SCRAPING & RESOLVING FUNCTIONS
 // ================================================================
 
-async function apiRequest(endpoint, query) {
-    try {
-        const response = await api.get(endpoint, {
-            params: { q: query }
-        });
-        return response.data;
-    } catch (error) {
-        if (error.response) {
-            console.error("Cinesubz API Error:", error.response.status, error.response.data);
-            const status = error.response.status;
-            if (status === 401 || status === 403) throw new Error("API key invalid or expired.");
-            if (status === 429) throw new Error("API rate limit / coins limit reached.");
-            if (status === 404) throw new Error("API endpoint or movie not found.");
-        }
-        console.error("Cinesubz API Request Error:", error.message);
-        throw new Error(error.message || "API request failed");
-    }
-}
-
-// ================================================================
-// SEARCH CINESUBZ
-// ================================================================
-
+// 1. CineSubz Search
 async function searchMovies(query) {
-    const data = await apiRequest("/api/v1/movie/cinesubz/search", query);
-    const results = getArray(data);
+    const { data } = await axios.get(`${CINESUBZ_BASE}/?s=${encodeURIComponent(query)}`, { headers: HEADERS });
+    const $ = cheerio.load(data);
+    const results = [];
+    const seen = new Set();
 
-    return results
-        .slice(0, 10)
-        .map((movie, index) => {
-            const title = firstValue(movie.title, movie.name, movie.movie, movie.movieName, movie.movie_name);
-            const movieUrl = firstValue(movie.url, movie.link, movie.movieUrl, movie.movie_url, movie.href);
-            const thumbnail = extractThumbnail(movie);
-            const language = firstValue(movie.language, movie.lang);
-            const quality = firstValue(movie.quality, movie.resolution);
+    $(".display-item .item-box, article, .post").each((_, el) => {
+        const a = $(el).find("a[href*='/movies/'], a[href*='/tvshows/']").first();
+        const href = a.attr("href") || "";
+        const title = (a.attr("title") || a.text()).trim();
+        if (!href || !title || seen.has(href)) return;
+        seen.add(href);
+        results.push({ title: cleanTitle(title), url: href });
+    });
 
-            return {
-                id: index + 1,
-                title: cleanText(title),
-                movieUrl: cleanText(movieUrl),
-                thumb: cleanText(thumbnail),
-                language: cleanText(language),
-                quality: cleanText(quality),
-                raw: movie
-            };
-        })
-        .filter(movie => movie.title && movie.movieUrl);
+    return results.slice(0, 10);
 }
 
-// ================================================================
-// GET MOVIE INFORMATION
-// ================================================================
-
-async function getMovieInfo(movieUrl) {
-    const data = await apiRequest("/api/v1/movie/cinesubz/info", movieUrl);
-    const obj = getObject(data);
-
-    const title = firstValue(obj.title, obj.name, obj.movie, obj.movieName, obj.movie_name);
-    const language = firstValue(obj.language, obj.lang);
-    const duration = firstValue(obj.duration, obj.runtime, obj.time);
-    const imdb = firstValue(obj.imdb, obj.imdbRating, obj.imdb_rating, obj.rating);
-
-    let genres = firstValue(obj.genres, obj.genre);
-    if (!Array.isArray(genres)) genres = genres ? [String(genres)] : [];
-
-    let directors = firstValue(obj.directors, obj.director);
-    if (!Array.isArray(directors)) directors = directors ? [String(directors)] : [];
-
-    let stars = firstValue(obj.stars, obj.cast, obj.actors, obj.actor);
-    if (!Array.isArray(stars)) stars = stars ? [String(stars)] : [];
-
-    const thumbnail = extractThumbnail(obj);
-    let downloads = [];
-    const possibleDownloads = firstValue(obj.downloads, obj.downloadLinks, obj.download_links, obj.links, obj.files);
-    if (Array.isArray(possibleDownloads)) downloads = possibleDownloads;
-
-    return {
-        title: cleanText(title),
-        language: cleanText(language),
-        duration: cleanText(duration),
-        imdb: cleanText(imdb),
-        genres: genres.map(cleanText).filter(Boolean),
-        directors: directors.map(cleanText).filter(Boolean),
-        stars: stars.map(cleanText).filter(Boolean),
-        thumbnail: cleanText(thumbnail),
-        downloads,
-        raw: obj
-    };
-}
-
-// ================================================================
-// DOWNLOAD API (/dl)
-// ================================================================
-
-async function getDownload(botSonicUrl) {
-    const data = await apiRequest("/api/v1/movie/cinesubz/dl", botSonicUrl);
-    return data;
-}
-
-// ================================================================
-// PARSE DOWNLOAD LINKS (Fixed Duplicate Quality Issue)
-// ================================================================
-
-function parseDownloadLinks(data) {
+// 2. Movie Details & Quality Meta Extraction
+async function getMovieMeta(movieUrl) {
+    const { data } = await axios.get(movieUrl, { headers: HEADERS });
+    const $ = cheerio.load(data);
     const rawLinks = [];
 
-    function scan(value, inheritedQuality = "") {
-        if (!value) return;
+    // Extract Poster
+    const poster = $(".poster img, .entry-content img").first().attr("src") || "";
 
-        if (typeof value === "string") {
-            if (/^https?:\/\//i.test(value)) {
-                rawLinks.push({
-                    link: value,
-                    quality: normalizeQuality(inheritedQuality),
-                    size: ""
-                });
-            }
-            return;
-        }
+    $("a[href*='/zt-links/'], a[href*='/api-']").each((_, el) => {
+        const href = $(el).attr("href") || "";
+        if (!href) return;
 
-        if (Array.isArray(value)) {
-            for (const item of value) scan(item, inheritedQuality);
-            return;
-        }
+        const raw = $(el).text().replace(/Direct\s*(&|and)\s*Telegram\s*Download\s*Links?/gi, "").trim();
+        const qualM = raw.match(/(4K|2160[Pp]|1080[Pp]|FHD|720[Pp]|HD|480[Pp]|SD|360[Pp])/i);
+        const sizeM = raw.match(/(\d+\.?\d*)\s*(GB|MB)/i);
 
-        if (typeof value === "object") {
-            const quality = firstValue(value.quality, value.resolution, value.videoQuality, value.video_quality, inheritedQuality);
-            const size = firstValue(value.size, value.fileSize, value.file_size);
-            const directUrl = firstValue(value.url, value.link, value.download, value.downloadUrl, value.file);
+        const qualityStr = qualM ? qualM[1].toUpperCase() : "Unknown Quality";
 
-            if (directUrl && typeof directUrl === "string" && /^https?:\/\//i.test(directUrl)) {
-                rawLinks.push({
-                    link: directUrl,
-                    quality: normalizeQuality(quality),
-                    size: cleanText(size)
-                });
-            }
+        rawLinks.push({
+            label: raw,
+            quality: qualityStr,
+            size: sizeM ? sizeM[0] : "",
+            ztUrl: href
+        });
+    });
 
-            for (const [key, child] of Object.entries(value)) {
-                if (["url", "link", "download", "downloadUrl", "file"].includes(key)) continue;
-                scan(child, quality || key);
-            }
-        }
-    }
-
-    scan(data);
-
-    // Filter duplicates by Link & Quality
-    const unique = [];
-    const seenLinks = new Set();
+    // Filter Duplicate Qualities
+    const uniqueLinks = [];
     const seenQualities = new Set();
 
     for (const item of rawLinks) {
-        if (!item.link || seenLinks.has(item.link)) continue;
-
-        // Duplicate Quality Filter (E.g. Filter duplicate 1080p, 720p, 480p)
         const qKey = item.quality.toLowerCase();
         if (seenQualities.has(qKey)) continue;
 
-        seenLinks.add(item.link);
         seenQualities.add(qKey);
-        unique.push(item);
+        uniqueLinks.push(item);
     }
 
-    unique.sort((a, b) => {
-        const getNumber = q => {
-            const match = String(q).match(/\d+/);
-            return match ? parseInt(match[0]) : 0;
-        };
-        return getNumber(b.quality) - getNumber(a.quality);
-    });
+    return {
+        poster,
+        links: uniqueLinks
+    };
+}
 
-    return unique;
+// 3. Extract Sonic Cloud Link
+async function getBotSonicLink(ztUrl) {
+    const { data } = await axios.get(ztUrl, { headers: HEADERS });
+    const $ = cheerio.load(data);
+
+    const rawHref = $("#link").attr("href") || "";
+    if (!rawHref) return null;
+
+    let sonicUrl = rawHref;
+    let matched = false;
+
+    for (const mapping of URL_MAPPINGS) {
+        if (matched) break;
+        for (const searchStr of mapping.search) {
+            if (rawHref.includes(searchStr)) {
+                sonicUrl = rawHref.replace(searchStr, mapping.replace);
+                sonicUrl = applyExtSuffix(sonicUrl);
+                matched = true;
+                break;
+            }
+        }
+    }
+
+    return sonicUrl;
+}
+
+// 4. Resolve Direct Download Link via API
+async function resolveDirectUrlFromApi(sonicUrl) {
+    try {
+        const response = await axios.get(`${API_BASE}/api/v1/movie/cinesubz/dl`, {
+            headers: { "x-api-key": API_KEY },
+            params: { q: sonicUrl },
+            timeout: 120000
+        });
+
+        const resData = response.data;
+
+        // Structured or Recursive lookup for direct link
+        if (resData && resData.data && Array.isArray(resData.data.links)) {
+            const avatarZoneLink = resData.data.links.find(url => typeof url === "string" && url.startsWith("http") && !url.includes("telegram.me") && !url.includes("t.me"));
+            if (avatarZoneLink) return avatarZoneLink;
+        }
+
+        // Deep Search fallback
+        const strJson = JSON.stringify(resData);
+        const urlMatches = strJson.match(/https?:\/\/[^\s"'\\]+/g);
+        if (urlMatches) {
+            const valid = urlMatches.find(u => !u.includes("telegram.me") && !u.includes("t.me"));
+            if (valid) return valid;
+        }
+
+        return null;
+    } catch (error) {
+        console.error("API /dl Error:", error.message);
+        return null;
+    }
 }
 
 // ================================================================
-// MOVIE SEARCH COMMAND
+// COMMAND 1: MOVIE SEARCH
 // ================================================================
 
 cmd({
     pattern: "movie",
     alias: ["sinhalasub", "films", "film", "cinema", "cinesubz"],
     react: "🎬",
-    desc: "Search movies using Cinesubz API",
+    desc: "Search movies using CineSubz",
     category: "download",
     filename: __filename
 }, async (danuwa, mek, m, { from, q, sender, reply }) => {
     try {
         if (!q) {
-            return reply(`*🎬 Cinesubz Movie Search*\n\nUsage:\n*.movie movie name*\n\nExample:\n*.movie Avengers*`);
+            return reply(`*🎬 Cinesubz Movie Search*\nUsage:\n*.movie movie name*\nExample:\n*.movie Minions*`);
         }
 
         await danuwa.sendMessage(from, { react: { text: "🔍", key: m.key } });
-        await reply("*🔍 Searching Cinesubz movies...*\n\nPlease wait...");
+        await reply("*🔍 Searching Cinesubz movies...*\nPlease wait...");
 
         const searchResults = await searchMovies(q);
 
         if (!searchResults.length) {
-            return reply(`*❌ No movies found!*\n\nSearch:\n${q}`);
+            return reply(`*❌ No movies found for:* ${q}`);
         }
 
         pendingSearch[sender] = {
@@ -377,30 +221,27 @@ cmd({
             timestamp: Date.now()
         };
 
-        let text = `*🎬 CINESUBZ SEARCH RESULTS*\n\n`;
+        let text = `*🎬 CINESUBZ SEARCH RESULTS*\n`;
         text += `🔎 *Search:* ${q}\n`;
         text += `📊 *Results:* ${searchResults.length}\n\n`;
 
         searchResults.forEach((movie, i) => {
             text += `*${i + 1}.* ${movie.title}\n`;
-            if (movie.language) text += `   📝 Language: ${movie.language}\n`;
-            if (movie.quality) text += `   📊 Quality: ${movie.quality}\n`;
-            text += "\n";
         });
 
-        text += `*━━━━━━━━━━━━━━━━━━*\n`;
+        text += `\n*━━━━━━━━━━━━━*\n`;
         text += `Reply with a number *1-${searchResults.length}*`;
 
         await danuwa.sendMessage(from, { text }, { quoted: mek });
 
     } catch (error) {
         console.error("Movie Search Error:", error);
-        return reply(`*❌ Movie Search Failed!*\n\n${error.message || "Unknown API error"}`);
+        return reply(`*❌ Search Error:* ${error.message}`);
     }
 });
 
 // ================================================================
-// MOVIE NUMBER SELECTION
+// COMMAND 2: MOVIE SELECTION & QUALITY DISPLAY
 // ================================================================
 
 cmd({
@@ -417,121 +258,103 @@ cmd({
         const selected = pendingSearch[sender].results[index];
         delete pendingSearch[sender];
 
-        if (!selected) return reply("*❌ Invalid movie selection!*");
+        if (!selected) return reply("*❌ Invalid selection!*");
 
-        await reply(`*🎬 ${selected.title}*\n\n⏳ Fetching movie details & quality links...`);
+        await reply(`*🎬 ${selected.title}*\n\n⏳ Fetching available qualities...`);
 
-        const metadata = await getMovieInfo(selected.movieUrl);
-        const title = metadata.title || selected.title;
+        const meta = await getMovieMeta(selected.url);
 
-        let msg = `*🎬 ${title}*\n\n`;
-        if (metadata.language) msg += `*📝 Language:* ${metadata.language}\n`;
-        if (metadata.duration) msg += `*⏱️ Duration:* ${metadata.duration}\n`;
-        if (metadata.imdb) msg += `*⭐ IMDb:* ${metadata.imdb}\n`;
-        if (metadata.genres.length) msg += `*🎭 Genres:* ${metadata.genres.join(", ")}\n`;
-        if (metadata.directors.length) msg += `*🎥 Directors:* ${metadata.directors.join(", ")}\n`;
-
-        if (metadata.stars.length) {
-            const stars = metadata.stars.slice(0, 5).join(", ");
-            msg += `*🌟 Stars:* ${stars}${metadata.stars.length > 5 ? "..." : ""}\n`;
-        }
-
-        if (metadata.thumbnail) {
-            try {
-                await danuwa.sendMessage(from, { image: { url: metadata.thumbnail }, caption: msg }, { quoted: mek });
-            } catch (err) {
-                await danuwa.sendMessage(from, { text: msg }, { quoted: mek });
-            }
-        } else {
-            await danuwa.sendMessage(from, { text: msg }, { quoted: mek });
-        }
-
-        let downloadLinks = parseDownloadLinks(metadata.downloads);
-
-        if (!downloadLinks.length) {
-            return reply("*❌ No download options/qualities found for this movie!*");
+        if (!meta.links || !meta.links.length) {
+            return reply("*❌ No download links found for this movie!*");
         }
 
         pendingQuality[sender] = {
             movie: {
-                metadata: { ...metadata, title },
-                downloadLinks
+                title: selected.title,
+                links: meta.links
             },
             timestamp: Date.now()
         };
 
-        let qualityMsg = `*📥 AVAILABLE DOWNLOAD QUALITIES*\n\n`;
-        qualityMsg += `🎬 *${title}*\n\n`;
+        let qualityMsg = `📥 *AVAILABLE DOWNLOAD QUALITIES*\n\n`;
+        qualityMsg += `🎬 *${selected.title}*\n\n`;
 
-        downloadLinks.forEach((item, i) => {
+        meta.links.forEach((item, i) => {
             qualityMsg += `*${i + 1}.* ${item.quality}`;
-            if (item.size) qualityMsg += ` — ${item.size}`;
+            if (item.size) qualityMsg += ` (${item.size})`;
             qualityMsg += "\n";
         });
 
-        qualityMsg += `\n*━━━━━━━━━━━━━━━━━━*\n`;
-        qualityMsg += `Reply with quality number (1-${downloadLinks.length}).`;
+        qualityMsg += `\n━━━━━━━━━━━━━\n`;
+        qualityMsg += `Reply with quality number (1-${meta.links.length}).`;
 
-        await danuwa.sendMessage(from, { text: qualityMsg }, { quoted: mek });
+        if (meta.poster) {
+            try {
+                await danuwa.sendMessage(from, { image: { url: meta.poster }, caption: qualityMsg }, { quoted: mek });
+            } catch (err) {
+                await danuwa.sendMessage(from, { text: qualityMsg }, { quoted: mek });
+            }
+        } else {
+            await danuwa.sendMessage(from, { text: qualityMsg }, { quoted: mek });
+        }
 
     } catch (error) {
-        console.error("Movie Info Error:", error);
-        return reply(`*❌ Failed to get movie information!*\n\n${error.message || "Unknown API error"}`);
+        console.error("Quality Fetch Error:", error);
+        return reply(`*❌ Failed to fetch qualities:* ${error.message}`);
     }
 });
 
 // ================================================================
-// QUALITY SELECTION + RESOLVE VIA /dl + SEND MOVIE
+// COMMAND 3: QUALITY SELECTION & DOWNLOAD
 // ================================================================
 
 cmd({
     filter: (text, { sender }) => {
         if (!pendingQuality[sender] || !text) return false;
         const number = parseInt(String(text).trim());
-        return !isNaN(number) && number > 0 && number <= pendingQuality[sender].movie.downloadLinks.length;
+        return !isNaN(number) && number > 0 && number <= pendingQuality[sender].movie.links.length;
     }
 }, async (danuwa, mek, m, { body, sender, reply, from }) => {
     try {
-        await danuwa.sendMessage(from, { react: { text: "⏳", key: m.key } });
+        await danuwa.sendMessage(from, { react: { text: "⚡", key: m.key } });
 
         const index = parseInt(body.trim()) - 1;
         const data = pendingQuality[sender];
 
         if (!data) return reply("*❌ Session expired! Please search again.*");
 
-        const movie = data.movie;
-        const selectedLink = movie.downloadLinks[index];
+        const selectedLink = data.movie.links[index];
+        const title = data.movie.title;
         delete pendingQuality[sender];
 
-        if (!selectedLink || !selectedLink.link) {
-            return reply("*❌ Invalid link selection!*");
+        await reply(`⚡ *Resolving Direct Link via API...*\n\n🎬 *${title}*\n📊 *Quality:* ${selectedLink.quality}\n\nPlease wait (30-60s)...`);
+
+        // Step 1: Get Sonic Cloud Link
+        const sonicUrl = await getBotSonicLink(selectedLink.ztUrl);
+
+        if (!sonicUrl) {
+            return reply("*❌ Failed to extract Sonic Cloud URL!*");
         }
 
-        const title = movie.metadata.title || "Cinesubz Movie";
-        const quality = selectedLink.quality || "Movie";
-        const rawSonicUrl = selectedLink.link;
+        // Step 2: Resolve Direct Download Link via API
+        const directDlUrl = await resolveDirectUrlFromApi(sonicUrl);
 
-        await reply(`*⚡ Resolving Direct Link via API...*\n\n🎬 *${title}*\n📊 *Quality:* ${quality}\n\n*Please wait (30-60s)...*`);
-
-        const dlResponse = await getDownload(rawSonicUrl);
-        const finalDirectUrl = extractDirectDlUrl(dlResponse);
-
-        if (!finalDirectUrl) {
-            return reply(`*❌ Failed to fetch direct AvatarZone download link from API!*`);
+        if (!directDlUrl) {
+            return reply("*❌ Failed to fetch direct AvatarZone download link from API!*");
         }
 
-        const fileSize = dlResponse?.data?.size || selectedLink.size || "";
-        const cleanName = `${title} - ${quality}.mp4`.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").trim();
+        const cleanFileName = `${title} - ${selectedLink.quality}.mp4`.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").trim();
 
-        await reply(`*⬇️ Sending Movie Document...*\n\n🎬 *${title}*\n📊 *Quality:* ${quality}\n💾 *Size:* ${fileSize || "Unknown"}`);
+        await reply(`*⬇️ Sending Movie Document...*\n\n🎬 *${title}*\n📊 *Quality:* ${selectedLink.quality}\n💾 *Size:* ${selectedLink.size || "Unknown"}`);
 
+        // Step 3: Send Video Document
         await danuwa.sendMessage(
             from,
             {
-                document: { url: finalDirectUrl },
+                document: { url: directDlUrl },
                 mimetype: "video/mp4",
-                fileName: cleanName,
-                caption: `*🎬 ${title}*\n\n*📊 Quality:* ${quality}\n${fileSize ? `*💾 Size:* ${fileSize}\n` : ""}\n*🍿 Enjoy the movie!*`
+                fileName: cleanFileName,
+                caption: `🎬 *${title}*\n\n📊 *Quality:* ${selectedLink.quality}\n${selectedLink.size ? `💾 *Size:* ${selectedLink.size}\n` : ""}\n🍿 *Enjoy the movie!*`
             },
             { quoted: mek }
         );
@@ -540,12 +363,12 @@ cmd({
 
     } catch (error) {
         console.error("Movie Download Error:", error);
-        return reply(`*❌ Failed to send movie!*\n\n${error.message || "Unknown error"}`);
+        return reply(`*❌ Failed to send movie:* ${error.message}`);
     }
 });
 
 // ================================================================
-// CLEANUP TIMEOUT
+// TIMEOUT CLEANUP
 // ================================================================
 
 setInterval(() => {
@@ -559,15 +382,3 @@ setInterval(() => {
         if (now - pendingQuality[sender].timestamp > timeout) delete pendingQuality[sender];
     }
 }, 5 * 60 * 1000);
-
-// ================================================================
-// EXPORT
-// ================================================================
-
-module.exports = {
-    pendingSearch,
-    pendingQuality,
-    searchMovies,
-    getMovieInfo,
-    getDownload
-};
