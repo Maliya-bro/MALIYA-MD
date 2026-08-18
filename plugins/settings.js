@@ -199,7 +199,6 @@ async function applySettingAction(sessionId, action, value) {
     await setSetting(sessionId, "auto_react_mode", value);
     return `✨ *\`[ ✅ ʀᴇᴀᴄᴛ ᴍᴏᴅᴇ: ${reactModeText(value)} ]\`*`;
   }
-  // ✅ WORK SCOPE - හරියට වැඩ කරනවා
   if (action === "workscope") {
     if (!["private", "group", "all"].includes(value)) {
       return "❌ *`[ ɪɴᴠᴀʟɪᴅ ᴡᴏʀᴋ sᴄᴏᴘᴇ ]`*";
@@ -266,7 +265,6 @@ function resolveSettingsActionFromText(text = "") {
   if (t === ".setting presence off" || t === "presence off") {
     return { action: "presence", value: "off" };
   }
-  // ✅ WORK SCOPE - හරියට match වෙනවා
   if (t === ".setting workscope private" || t === "work scope private" || t === "private chat only") {
     return { action: "workscope", value: "private" };
   }
@@ -622,7 +620,6 @@ cmd(
         await setSetting(sessionId, "auto_react_mode", value);
         return reply(`✨ *\`[ ✅ ʀᴇᴀᴄᴛ ᴍᴏᴅᴇ: ${reactModeText(value)} ]\`*`);
       }
-      // ✅ WORK SCOPE - command eken wada
       if (action === "workscope") {
         if (!["private", "group", "all"].includes(value)) {
           return reply(
