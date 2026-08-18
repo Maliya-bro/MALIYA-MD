@@ -23,11 +23,6 @@ const HEADERS = {
 };
 
 // ================================================================
-// DECORATIVE LINE (අලුත් ස්ටයිල් එක)
-// ================================================================
-const DECO_LINE = "⋆｡°✩｡⋆｡°✩｡⋆｡°✩｡⋆｡°✩｡⋆｡°✩｡⋆｡°✩｡⋆";
-
-// ================================================================
 // PENDING DATA (STATE MANAGEMENT)
 // ================================================================
 
@@ -60,32 +55,6 @@ function toSmallCaps(str = "") {
         .map((char) => {
             const idx = normal.indexOf(char);
             return idx !== -1 ? small[idx] : char;
-        })
-        .join("");
-}
-
-// 🆕 Ultimate Bold Sans-Serif Font Effect (𝗔, 𝗕, 𝗖...)
-function toBoldSans(str = "") {
-    const normal = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    const boldSans = "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟵";
-    return String(str)
-        .split("")
-        .map((char) => {
-            const idx = normal.indexOf(char);
-            return idx !== -1 ? boldSans[idx] : char;
-        })
-        .join("");
-}
-
-// 🆕 Fancy Script Font Effect (𝓐, 𝓑, 𝓒...)
-function toScript(str = "") {
-    const normal = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    const script = "𝓐𝓑𝓒𝓓𝓔𝓕𝓖𝓗𝓘𝓙𝓚𝓛𝓜𝓝𝓞𝓟𝓠𝓡𝓢𝓣𝓤𝓥𝓦𝓧𝓨𝓩𝓪𝓫𝓬𝓭𝓮𝓯𝓰𝓱𝓲𝓳𝓴𝓵𝓶𝓷𝓸𝓹𝓺𝓻𝓼𝓽𝓾𝓿𝔀𝔁𝔂𝔃";
-    return String(str)
-        .split("")
-        .map((char) => {
-            const idx = normal.indexOf(char);
-            return idx !== -1 ? script[idx] : char;
         })
         .join("");
 }
@@ -248,22 +217,16 @@ cmd({
 }, async (danuwa, mek, m, { from, q, sender, reply }) => {
     try {
         if (!q) {
-            return reply(`✧･ﾟ: *✧･ﾟ:* ${toBoldSans("𝗖𝗜𝗡𝗘𝗦𝗨𝗕𝗭 𝗠𝗢𝗩𝗜𝗘 𝗦𝗘𝗔𝗥𝗖𝗛")} *:･ﾟ✧*:･ﾟ✧
-${DECO_LINE}
-✦ ${toBoldSans("𝗨𝘀𝗮𝗴𝗲")} : \`.movie movie name\`
-✦ ${toBoldSans("𝗘𝘅𝗮𝗺𝗽𝗹𝗲")} : \`.movie Minions\`
-${DECO_LINE}
-✨ ${toScript("Find movies with Sinhala subtitles!")}`);
+            return reply(`🎬 *ᴄɪɴᴇsᴜʙᴢ ᴍᴏᴠɪᴇ sᴇᴀʀᴄʜ*\n\n📌 *ᴜsᴀɢᴇ:* \`.movie movie name\`\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`.movie Minions\``);
         }
 
         await danuwa.sendMessage(from, { react: { text: "🔍", key: m.key } });
-        await reply(`✧･ﾟ: *✧･ﾟ:* ${toBoldSans("𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚")} *:･ﾟ✧*:･ﾟ✧
-⏳ ${toScript("Please wait while I find the best matches...")}`);
+        await reply(`🔍 *sᴇᴀʀᴄʜɪɴɢ ᴄɪɴᴇsᴜʙᴢ ᴍᴏᴠɪᴇs...*\n\n⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...*`);
 
         const searchResults = await searchMovies(q);
 
         if (!searchResults.length) {
-            return reply(`❌ ${toBoldSans("No movies found for")} : _${q}_`);
+            return reply(`❌ *ɴᴏ ᴍᴏᴠɪᴇs ғᴏᴜɴᴅ ғᴏʀ:* _${q}_`);
         }
 
         pendingSearch[sender] = {
@@ -271,26 +234,24 @@ ${DECO_LINE}
             timestamp: Date.now()
         };
 
-        let listText = "";
+        let text = `╭━〔 🎬 *ᴄɪɴᴇsᴜʙᴢ sᴇᴀʀᴄʜ* 〕━►\n┃\n`;
+        text += `┃ 🔎 *sᴇᴀʀᴄʜ:* ${toSmallCaps(q)}\n`;
+        text += `┃ 📊 *ʀᴇsᴜʟᴛs:* ${searchResults.length}\n┃\n`;
+        text += `╰━━━───────━━► ❥\n\n`;
+
         searchResults.forEach((movie, i) => {
             const numStr = String(i + 1).padStart(2, "0");
-            listText += `${toBoldSans(numStr)}. 🎬 ${toBoldSans(movie.title)}\n`;
+            text += `*[ ${numStr} ]* 🎬 *${toSmallCaps(movie.title)}*\n`;
         });
 
-        let text = `✧･ﾟ: *✧･ﾟ:* ${toBoldSans("𝗦𝗘𝗔𝗥𝗖𝗛 𝗥𝗘𝗦𝗨𝗟𝗧𝗦")} *:･ﾟ✧*:･ﾟ✧
-${DECO_LINE}
-🔍 ${toBoldSans("𝗤𝘂𝗲𝗿𝘆")} : ${toBoldSans(q)}
-📊 ${toBoldSans("𝗙𝗼𝘂𝗻𝗱")} : ${searchResults.length} ${toBoldSans("movies")}
-──── ${toBoldSans("𝗟𝗜𝗦𝗧")} ────
-${listText}
-${DECO_LINE}
-📌 ${toBoldSans(`Reply with a number (1-${searchResults.length}) to select.`)}`;
+        text += `\n────────────────► ❥\n`;
+        text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴀ ɴᴜᴍʙᴇʀ (1-${searchResults.length})*`;
 
         await danuwa.sendMessage(from, { text }, { quoted: mek });
 
     } catch (error) {
         console.error("Movie Search Error:", error);
-        return reply(`❌ ${toBoldSans("Search error")} : ${error.message}`);
+        return reply(`❌ *sᴇᴀʀᴄʜ ᴇʀʀᴏʀ:* ${error.message}`);
     }
 });
 
@@ -312,15 +273,14 @@ cmd({
         const selected = pendingSearch[sender].results[index];
         delete pendingSearch[sender];
 
-        if (!selected) return reply(`❌ ${toBoldSans("Invalid selection!")}`);
+        if (!selected) return reply("❌ *ɪɴᴠᴀʟɪᴅ sᴇʟᴇᴄᴛɪᴏɴ!*");
 
-        await reply(`🎬 ${toBoldSans(selected.title)}
-⏳ ${toScript("Fetching available qualities...")}`);
+        await reply(`🎬 *${toSmallCaps(selected.title)}*\n\n⏳ *ғᴇᴛᴄʜɪɴɢ ᴀᴠᴀɪʟᴀʙʟᴇ ǫᴜᴀʟɪᴛɪᴇs...*`);
 
         const meta = await getMovieMeta(selected.url);
 
         if (!meta.links || !meta.links.length) {
-            return reply(`❌ ${toBoldSans("No download links found for this movie!")}`);
+            return reply("❌ *ɴᴏ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋs ғᴏᴜɴᴅ ғᴏʀ ᴛʜɪs ᴍᴏᴠɪᴇ!*");
         }
 
         pendingQuality[sender] = {
@@ -331,21 +291,19 @@ cmd({
             timestamp: Date.now()
         };
 
-        let qualityMsg = `✧･ﾟ: *✧･ﾟ:* ${toBoldSans("𝗔𝗩𝗔𝗜𝗟𝗔𝗕𝗟𝗘 𝗤𝗨𝗔𝗟𝗜𝗧𝗜𝗘𝗦")} *:･ﾟ✧*:･ﾟ✧
-${DECO_LINE}
-🎬 ${toBoldSans("𝗧𝗶𝘁𝗹𝗲")} : ${toBoldSans(selected.title)}
-──── ${toBoldSans("𝗤𝗨𝗔𝗟𝗜𝗧𝗬 𝗟𝗜𝗦𝗧")} ────
-`;
+        let qualityMsg = `╭━〔 📥 *ᴀᴠᴀɪʟᴀʙʟᴇ ǫᴜᴀʟɪᴛɪᴇs* 〕━❥\n┃\n`;
+        qualityMsg += `┃ 🎬 *${toSmallCaps(selected.title)}*\n┃\n`;
+        qualityMsg += `╰━━━───────━━► ❥\n\n`;
 
         meta.links.forEach((item, i) => {
             const numStr = String(i + 1).padStart(2, "0");
-            qualityMsg += `${toBoldSans(numStr)}. 📊 ${toBoldSans(item.quality)}`;
-            if (item.size) qualityMsg += ` ${toScript("("+item.size+")")}`;
+            qualityMsg += `*[ ${numStr} ]* 📊 *${item.quality}*`;
+            if (item.size) qualityMsg += ` _(${item.size})_`;
             qualityMsg += "\n";
         });
 
-        qualityMsg += `${DECO_LINE}
-📌 ${toBoldSans(`Reply with quality number (1-${meta.links.length})`)}`;
+        qualityMsg += `\n─────────────────\n`;
+        qualityMsg += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ǫᴜᴀʟɪᴛʏ ɴᴜᴍʙᴇʀ (1-${meta.links.length})*`;
 
         if (meta.poster) {
             try {
@@ -359,7 +317,7 @@ ${DECO_LINE}
 
     } catch (error) {
         console.error("Quality Fetch Error:", error);
-        return reply(`❌ ${toBoldSans("Failed to fetch qualities")} : ${error.message}`);
+        return reply(`❌ *ғᴀɪʟᴇᴅ ᴛᴏ ғᴇᴛᴄʜ ǫᴜᴀʟɪᴛɪᴇs:* ${error.message}`);
     }
 });
 
@@ -380,41 +338,33 @@ cmd({
         const index = parseInt(body.trim()) - 1;
         const data = pendingQuality[sender];
 
-        if (!data) return reply(`❌ ${toBoldSans("Session expired! Please search again.")}`);
+        if (!data) return reply("❌ *sᴇssɪᴏɴ ᴇxᴘɪʀᴇᴅ! ᴘʟᴇᴀsᴇ sᴇᴀʀᴄʜ ᴀɢᴀɪɴ.*");
 
         const selectedLink = data.movie.links[index];
         const title = data.movie.title;
         delete pendingQuality[sender];
 
-        await reply(`✧･ﾟ: *✧･ﾟ:* ${toBoldSans("𝗣𝗥𝗢𝗖𝗘𝗦𝗦𝗜𝗡𝗚 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗")} *:･ﾟ✧*:･ﾟ✧
-${DECO_LINE}
-🎬 ${toBoldSans("𝗧𝗶𝘁𝗹𝗲")} : ${toBoldSans(title)}
-📊 ${toBoldSans("𝗤𝘂𝗮𝗹𝗶𝘁𝘆")} : ${toBoldSans(selectedLink.quality)}
-💾 ${toBoldSans("𝗦𝗶𝘇𝗲")} : ${selectedLink.size || toScript("Unknown")}
-⏳ ${toScript("Resolving link, please wait (30-60s)...")}`);
+        await reply(`⚡ *ʀᴇsᴏʟᴠɪɴɢ ᴅɪʀᴇᴄᴛ ʟɪɴᴋ...*\n\n🎬 *${toSmallCaps(title)}*\n📊 *ǫᴜᴀʟɪᴛʏ:* ${selectedLink.quality}\n\n⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ (30-60s)...*`);
 
         // Step 1: Get Sonic Cloud Link
         const sonicUrl = await getBotSonicLink(selectedLink.ztUrl);
 
         if (!sonicUrl) {
-            return reply(`❌ ${toBoldSans("Failed to extract Sonic Cloud URL!")}`);
+            return reply("❌ *ғᴀɪʟᴇᴅ ᴛᴏ ᴇxᴛʀᴀᴄᴛ sᴏɴɪᴄ ᴄʟᴏᴜᴅ ᴜʀʟ!*");
         }
 
         // Step 2: Resolve Direct Download Link via API
         const directDlUrl = await resolveDirectUrlFromApi(sonicUrl);
 
         if (!directDlUrl) {
-            return reply(`❌ ${toBoldSans("Failed to fetch direct download link from API!")}`);
+            return reply("❌ *ғᴀɪʟᴇᴅ ᴛᴏ ғᴇᴛᴄʜ ᴅɪʀᴇᴄᴛ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋ ғʀᴏᴍ ᴀᴘɪ!*");
         }
 
-        // Fixed Document Title to "MALIYA-MD MINI" as requested
-        const cleanFileName = `MALIYA-MD MINI.mp4`;
+        // Dynamic Document Name: "MALIYA-MD-MINI <film name>.mp4"
+        const safeMovieTitle = title.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").trim();
+        const cleanFileName = `MALIYA-MD-MINI ${safeMovieTitle}.mp4`;
 
-        await reply(`📤 ${toBoldSans("Sending Movie...")}
-${DECO_LINE}
-🎬 ${toBoldSans("Title")} : ${toBoldSans(title)}
-📊 ${toBoldSans("Quality")} : ${toBoldSans(selectedLink.quality)}
-💾 ${toBoldSans("Size")} : ${selectedLink.size || toScript("Unknown")}`);
+        await reply(`⬇️ *sᴇɴᴅɪɴɢ ᴍᴏᴠɪᴇ ᴅᴏᴄᴜᴍᴇɴᴛ...*\n\n🎬 *${toSmallCaps(title)}*\n📊 *ǫᴜᴀʟɪᴛʏ:* ${selectedLink.quality}\n💾 *sɪᴢᴇ:* ${selectedLink.size || "Unknown"}`);
 
         // Step 3: Send Video Document
         await danuwa.sendMessage(
@@ -423,14 +373,7 @@ ${DECO_LINE}
                 document: { url: directDlUrl },
                 mimetype: "video/mp4",
                 fileName: cleanFileName,
-                caption: `✧･ﾟ: *✧･ﾟ:* ${toBoldSans("𝗠𝗢𝗩𝗜𝗘 𝗗𝗘𝗟𝗜𝗩𝗘𝗥𝗘𝗗")} *:･ﾟ✧*:･ﾟ✧
-${DECO_LINE}
-🎬 ${toBoldSans("𝗧𝗶𝘁𝗹𝗲")} : ${toBoldSans(title)}
-📊 ${toBoldSans("𝗤𝘂𝗮𝗹𝗶𝘁𝘆")} : ${toBoldSans(selectedLink.quality)}
-${selectedLink.size ? `💾 ${toBoldSans("𝗦𝗶𝘇𝗲")} : ${toBoldSans(selectedLink.size)}\n` : ""}
-${DECO_LINE}
-🍿 ${toScript("Enjoy the movie!")}
-✦ ${toScript("Powered by MALIYA-MD")} ✦`
+                caption: `🎬 *${toSmallCaps(title)}*\n\n📊 *ǫᴜᴀʟɪᴛʏ:* ${selectedLink.quality}\n${selectedLink.size ? `💾 *sɪᴢᴇ:* ${selectedLink.size}\n` : ""}\n🍿 *ᴇɴᴊᴏʏ ᴛʜᴇ ᴍᴏᴠɪᴇ!*\n\n👑 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*`
             },
             { quoted: mek }
         );
@@ -439,7 +382,7 @@ ${DECO_LINE}
 
     } catch (error) {
         console.error("Movie Download Error:", error);
-        return reply(`❌ ${toBoldSans("Failed to send movie")} : ${error.message}`);
+        return reply(`❌ *ғᴀɪʟᴇᴅ ᴛᴏ sᴇɴᴅ ᴍᴏᴠɪᴇ:* ${error.message}`);
     }
 });
 
