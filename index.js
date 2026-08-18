@@ -11,6 +11,13 @@
 //  FIX 3: restore-from-Mongo now skipped if local creds.json already
 //         exists on disk (avoids clobbering a live, already-valid
 //         session with older Mongo data mid-run).
+//  FIX 4: readSettings() is async and session-scoped — all call
+//         sites now correctly `await readSettings(sessionCtx.sessionId)`
+//         instead of calling it sync with no args (which silently
+//         broke private-mode gating and presence mode).
+//  REMOVED: auto status download/forward-to-owner feature. Status
+//           seen + status react remain; media is no longer fetched
+//           or copied anywhere.
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -53,7 +60,6 @@ const {
   DisconnectReason,
   jidNormalizedUser,
   getContentType,
-  downloadContentFromMessage,
   fetchLatestBaileysVersion,
   Browsers,
 } = require("@whiskeysockets/baileys");
@@ -64,17 +70,17 @@ const express = require("express");
 const path    = require("path");
 const { MongoClient } = require("mongodb");
 
-const cors              = require("cors");
-const os               = require("os");
-const config            = require("./config");
-const { readSettings }  = require("./lib/botSettings");
-const { sms }           = require("./lib/msg");
+const cors  = require("cors");
+const os    = require("os");
+const config           = require("./config");
+const { readSettings } = require("./lib/botSettings");
+const { sms }          = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 
 // ── Plugins ──────────────────────────────────────────────────
 const { handleAutoMsg } = require("./plugins/auto_msg.js");
 
-const autoReactPlugin   = require("./plugins/auto-react.js");
+const autoReactPlugin = require("./plugins/auto-react.js");
 
 let pdfScannerPlugin = null;
 try {
@@ -93,8 +99,8 @@ try {
 const app  = express();
 const port = process.env.PORT || 8000;
 
-const prefix         = ".";
-const BOT_OWNER_NAME = config.OWNER_NAME || "Malindu Nadith";
+const prefix          = ".";
+const BOT_OWNER_NAME  = config.OWNER_NAME || "Malindu Nadith";
 const baseOwnerNumber = [String(config.BOT_OWNER || "").replace(/\D/g, "")].filter(Boolean);
 const sessionsBaseDir = path.join(__dirname, "multi_auth_sessions");
 const MAX_ACTIVE_SESSIONS = Number(process.env.MAX_ACTIVE_SESSIONS || 50);
@@ -414,6 +420,8 @@ async function startSessionBot(sessionId) {
 
           console.log(`✅ Session connected: ${sessionId}`);
 
+          const settingsForBanner = await readSettings(sessionId);
+
           const now  = new Date();
           const time = new Intl.DateTimeFormat("en-GB", {
             timeZone: "Asia/Colombo", hour: "2-digit", minute: "2-digit",
@@ -432,7 +440,7 @@ async function startSessionBot(sessionId) {
 
 ✅✨ Connection : CONNECTED & ONLINE
 ⚡🧬 System     : STABLE | FAST | SECURE
-🛡️🔐 Mode      : ${String(readSettings().mode || "public").toUpperCase()}
+🛡️🔐 Mode      : ${String(settingsForBanner.mode || "public").toUpperCase()}
 🎯🧩 Prefix    : ${prefix}
 
 🧑‍💻👑 Owner    : ${BOT_OWNER_NAME}
@@ -560,7 +568,7 @@ function attachSessionHandlers(sock, sessionCtx) {
 
   sock.ev.on("call", async (calls) => {
     try {
-      const settings = readSettings();
+      const settings = await readSettings(sessionCtx.sessionId);
       if (!settings.auto_reject_calls) return;
 
       for (const call of calls) {
@@ -601,6 +609,9 @@ function attachSessionHandlers(sock, sessionCtx) {
           }
         }
 
+        // ==================== STATUS UPDATES ====================
+        // Handles only: mark-as-seen + emoji react. No media is
+        // downloaded or forwarded anywhere.
         if (
           mek.key &&
           mek.key.remoteJid === "status@broadcast" &&
@@ -608,11 +619,29 @@ function attachSessionHandlers(sock, sessionCtx) {
         ) {
           const participantRaw = mek.key.participant;
           const id             = mek.key.id;
+
           if (!participantRaw || !id) continue messageLoop;
           const participant = participantRaw;
           if (mek.key.fromMe) continue messageLoop;
 
-          if (readSettings().auto_status_seen === true) {
+          // Dedupe check first, before doing any seen/react work,
+          // so a duplicate delivery can't double-fire either action.
+          const processedStatuses = global.processedStatuses || new Map();
+          global.processedStatuses = processedStatuses;
+          const uniqueStatusId = `${participant}:${id}`;
+          const now = Date.now();
+          if (processedStatuses.has(uniqueStatusId)) {
+            if (now - processedStatuses.get(uniqueStatusId) < 300000) {
+              continue messageLoop;
+            }
+          }
+          processedStatuses.set(uniqueStatusId, now);
+          setTimeout(() => processedStatuses.delete(uniqueStatusId), 300000);
+
+          const statusSettings = await readSettings(sessionCtx.sessionId);
+
+          // ── AUTO STATUS SEEN ──
+          if (statusSettings.auto_status_seen === true) {
             try {
               await sock.readMessages([mek.key]);
               console.log(`[✓] Status seen: ${id} (${participant})`);
@@ -621,28 +650,18 @@ function attachSessionHandlers(sock, sessionCtx) {
             }
           }
 
-          const processedStatuses = global.processedStatuses || new Map();
-          global.processedStatuses = processedStatuses;
-          const uniqueStatusId = `${participant}:${id}`;
-          const now = Date.now();
-          if (processedStatuses.has(uniqueStatusId)) {
-            if (now - processedStatuses.get(uniqueStatusId) < 300000)
-              continue messageLoop;
-          }
-          processedStatuses.set(uniqueStatusId, now);
-          setTimeout(() => processedStatuses.delete(uniqueStatusId), 300000);
-
-          if (readSettings().auto_status_react === true) {
+          // ── AUTO STATUS REACT ──
+          if (statusSettings.auto_status_react === true) {
             try {
               const emojis = [
-   "😂", "🤣", "😍", "🥰", "😎", "🤔", "😭", "😱", "🔥", "💀",
-  "🥺", "😊", "😈", "👻", "🤖", "😤", "🥳", "🤯", "😨", "🥶",
-  "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💕", "💞", "💓",
-  "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤞", "🤙", "💪", "🖕",
-  "🙏", "💅", "✨", "⭐", "🌟", "💫", "⚡", "🎉", "🎊", "🥳",
-  "🎈", "🎯", "🏆", "💯", "🔞", "❓", "❗", "💢", "🐱", "🐶",
-  "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐸", "🍿", "🍕",
-  "🍔", "🌮", "🍩", "🍪", "☕", "🍺", "👀", "👁️", "💩", "👽"
+                "😂", "🤣", "😍", "🥰", "😎", "🤔", "😭", "😱", "🔥", "💀",
+                "🥺", "😊", "😈", "👻", "🤖", "😤", "🥳", "🤯", "😨", "🥶",
+                "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💕", "💞", "💓",
+                "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤞", "🤙", "💪", "🖕",
+                "🙏", "💅", "✨", "⭐", "🌟", "💫", "⚡", "🎉", "🎊", "🥳",
+                "🎈", "🎯", "🏆", "💯", "🔞", "❓", "❗", "💢", "🐱", "🐶",
+                "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐸", "🍿", "🍕",
+                "🍔", "🌮", "🍩", "🍪", "☕", "🍺", "👀", "👁️", "💩", "👽"
               ];
               const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
               await new Promise((r) => setTimeout(r, 1500));
@@ -661,33 +680,6 @@ function attachSessionHandlers(sock, sessionCtx) {
               }
             } catch (e) {
               console.error("❌ React error:", e?.message || e);
-            }
-          }
-
-          if (
-            readSettings().auto_download_status === true &&
-            (mek.message?.imageMessage || mek.message?.videoMessage)
-          ) {
-            try {
-              const msgType  = mek.message.imageMessage ? "imageMessage" : "videoMessage";
-              const mediaMsg = mek.message[msgType];
-              const stream   = await downloadContentFromMessage(
-                mediaMsg, msgType === "imageMessage" ? "image" : "video"
-              );
-              let buffer = Buffer.from([]);
-              for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-              const mimetype    = mediaMsg.mimetype || (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
-              const captionText = mediaMsg.caption || "";
-              const ownerJid    = sessionCtx.ownerNumber[0] + "@s.whatsapp.net";
-              if (ownerJid && ownerJid !== "@s.whatsapp.net") {
-                await sock.sendMessage(ownerJid, {
-                  [msgType === "imageMessage" ? "image" : "video"]: buffer,
-                  mimetype,
-                  caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`,
-                });
-              }
-            } catch (e) {
-              console.log("Download/forward error:", e?.message);
             }
           }
 
@@ -719,8 +711,21 @@ function attachSessionHandlers(sock, sessionCtx) {
         const reply = (text) =>
           sock.sendMessage(from, { text }, { quoted: mek });
 
+        // FIX 4: readSettings is async + session-scoped. Fetch once
+        // here and reuse for both the presence check and the
+        // private-mode gate below (previously each caller invoked
+        // readSettings() synchronously with no args, which returned
+        // an unawaited Promise and silently broke both features).
+        let botSettings;
         try {
-          const presenceMode = readSettings().always_presence;
+          botSettings = await readSettings(sessionCtx.sessionId);
+        } catch (e) {
+          console.log("readSettings error:", e?.message || e);
+          botSettings = {};
+        }
+
+        try {
+          const presenceMode = botSettings.always_presence;
           if (presenceMode === "typing")         await sock.sendPresenceUpdate("composing",  from);
           else if (presenceMode === "recording") await sock.sendPresenceUpdate("recording",  from);
         } catch (_) {}
@@ -736,7 +741,6 @@ function attachSessionHandlers(sock, sessionCtx) {
           console.log("AutoReact hook error:", e?.message || e);
         }
 
-        const botSettings = readSettings();
         if (botSettings.mode === "private" && !isOwner) {
           if (isCmd) continue messageLoop;
         }
@@ -803,6 +807,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               if (h.react) sock.sendMessage(from, { react: { text: h.react, key: mek.key } });
               await h.function(sock, mek, m, {
                 from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
+                sessionId: sessionCtx.sessionId,
               });
               break;
             }
@@ -822,6 +827,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
               sessionOwnerPhone: sessionCtx.ownerNumber[0] || "",
               sessionOwnerName:  BOT_OWNER_NAME,
+              sessionId:         sessionCtx.sessionId,
             });
           }
         }
