@@ -1,7 +1,7 @@
 /**
  * ╔══════════════════════════════════════════════════════════════╗
- *   MALIYA-MD — CINESUBZ DIRECT SCRAPER MOVIE PLUGIN
- *   Direct Scraping + URL Mapping + API /dl Resolver
+ *    MALIYA-MD — CINESUBZ DIRECT SCRAPER MOVIE PLUGIN
+ *    Direct Scraping + URL Mapping + API /dl Resolver
  * ╚══════════════════════════════════════════════════════════════╝
  */
 
@@ -21,6 +21,11 @@ const HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Referer": CINESUBZ_BASE
 };
+
+// ================================================================
+// DECORATIVE LINE (අලුත් ස්ටයිල් එක)
+// ================================================================
+const DECO_LINE = "⋆｡°✩｡⋆｡°✩｡⋆｡°✩｡⋆｡°✩｡⋆｡°✩｡⋆｡°✩｡⋆";
 
 // ================================================================
 // PENDING DATA (STATE MANAGEMENT)
@@ -45,6 +50,45 @@ const URL_MAPPINGS = [
 // ================================================================
 // HELPER FUNCTIONS
 // ================================================================
+
+// 100% Universal Small Caps Font Converter
+function toSmallCaps(str = "") {
+    const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+    return String(str)
+        .split("")
+        .map((char) => {
+            const idx = normal.indexOf(char);
+            return idx !== -1 ? small[idx] : char;
+        })
+        .join("");
+}
+
+// 🆕 Ultimate Bold Sans-Serif Font Effect (𝗔, 𝗕, 𝗖...)
+function toBoldSans(str = "") {
+    const normal = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    const boldSans = "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟵";
+    return String(str)
+        .split("")
+        .map((char) => {
+            const idx = normal.indexOf(char);
+            return idx !== -1 ? boldSans[idx] : char;
+        })
+        .join("");
+}
+
+// 🆕 Fancy Script Font Effect (𝓐, 𝓑, 𝓒...)
+function toScript(str = "") {
+    const normal = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    const script = "𝓐𝓑𝓒𝓓𝓔𝓕𝓖𝓗𝓘𝓙𝓚𝓛𝓜𝓝𝓞𝓟𝓠𝓡𝓢𝓣𝓤𝓥𝓦𝓧𝓨𝓩𝓪𝓫𝓬𝓭𝓮𝓯𝓰𝓱𝓲𝓳𝓴𝓵𝓶𝓷𝓸𝓹𝓺𝓻𝓼𝓽𝓾𝓿𝔀𝔁𝔂𝔃";
+    return String(str)
+        .split("")
+        .map((char) => {
+            const idx = normal.indexOf(char);
+            return idx !== -1 ? script[idx] : char;
+        })
+        .join("");
+}
 
 function cleanTitle(t = "") {
     return t
@@ -204,16 +248,22 @@ cmd({
 }, async (danuwa, mek, m, { from, q, sender, reply }) => {
     try {
         if (!q) {
-            return reply(`*🎬 Cinesubz Movie Search*\nUsage:\n*.movie movie name*\nExample:\n*.movie Minions*`);
+            return reply(`✧･ﾟ: *✧･ﾟ:* ${toBoldSans("𝗖𝗜𝗡𝗘𝗦𝗨𝗕𝗭 𝗠𝗢𝗩𝗜𝗘 𝗦𝗘𝗔𝗥𝗖𝗛")} *:･ﾟ✧*:･ﾟ✧
+${DECO_LINE}
+✦ ${toBoldSans("𝗨𝘀𝗮𝗴𝗲")} : \`.movie movie name\`
+✦ ${toBoldSans("𝗘𝘅𝗮𝗺𝗽𝗹𝗲")} : \`.movie Minions\`
+${DECO_LINE}
+✨ ${toScript("Find movies with Sinhala subtitles!")}`);
         }
 
         await danuwa.sendMessage(from, { react: { text: "🔍", key: m.key } });
-        await reply("*🔍 Searching Cinesubz movies...*\nPlease wait...");
+        await reply(`✧･ﾟ: *✧･ﾟ:* ${toBoldSans("𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚")} *:･ﾟ✧*:･ﾟ✧
+⏳ ${toScript("Please wait while I find the best matches...")}`);
 
         const searchResults = await searchMovies(q);
 
         if (!searchResults.length) {
-            return reply(`*❌ No movies found for:* ${q}`);
+            return reply(`❌ ${toBoldSans("No movies found for")} : _${q}_`);
         }
 
         pendingSearch[sender] = {
@@ -221,22 +271,26 @@ cmd({
             timestamp: Date.now()
         };
 
-        let text = `*🎬 CINESUBZ SEARCH RESULTS*\n`;
-        text += `🔎 *Search:* ${q}\n`;
-        text += `📊 *Results:* ${searchResults.length}\n\n`;
-
+        let listText = "";
         searchResults.forEach((movie, i) => {
-            text += `*${i + 1}.* ${movie.title}\n`;
+            const numStr = String(i + 1).padStart(2, "0");
+            listText += `${toBoldSans(numStr)}. 🎬 ${toBoldSans(movie.title)}\n`;
         });
 
-        text += `\n*━━━━━━━━━━━━━*\n`;
-        text += `Reply with a number *1-${searchResults.length}*`;
+        let text = `✧･ﾟ: *✧･ﾟ:* ${toBoldSans("𝗦𝗘𝗔𝗥𝗖𝗛 𝗥𝗘𝗦𝗨𝗟𝗧𝗦")} *:･ﾟ✧*:･ﾟ✧
+${DECO_LINE}
+🔍 ${toBoldSans("𝗤𝘂𝗲𝗿𝘆")} : ${toBoldSans(q)}
+📊 ${toBoldSans("𝗙𝗼𝘂𝗻𝗱")} : ${searchResults.length} ${toBoldSans("movies")}
+──── ${toBoldSans("𝗟𝗜𝗦𝗧")} ────
+${listText}
+${DECO_LINE}
+📌 ${toBoldSans(`Reply with a number (1-${searchResults.length}) to select.`)}`;
 
         await danuwa.sendMessage(from, { text }, { quoted: mek });
 
     } catch (error) {
         console.error("Movie Search Error:", error);
-        return reply(`*❌ Search Error:* ${error.message}`);
+        return reply(`❌ ${toBoldSans("Search error")} : ${error.message}`);
     }
 });
 
@@ -258,14 +312,15 @@ cmd({
         const selected = pendingSearch[sender].results[index];
         delete pendingSearch[sender];
 
-        if (!selected) return reply("*❌ Invalid selection!*");
+        if (!selected) return reply(`❌ ${toBoldSans("Invalid selection!")}`);
 
-        await reply(`*🎬 ${selected.title}*\n\n⏳ Fetching available qualities...`);
+        await reply(`🎬 ${toBoldSans(selected.title)}
+⏳ ${toScript("Fetching available qualities...")}`);
 
         const meta = await getMovieMeta(selected.url);
 
         if (!meta.links || !meta.links.length) {
-            return reply("*❌ No download links found for this movie!*");
+            return reply(`❌ ${toBoldSans("No download links found for this movie!")}`);
         }
 
         pendingQuality[sender] = {
@@ -276,17 +331,21 @@ cmd({
             timestamp: Date.now()
         };
 
-        let qualityMsg = `📥 *AVAILABLE DOWNLOAD QUALITIES*\n\n`;
-        qualityMsg += `🎬 *${selected.title}*\n\n`;
+        let qualityMsg = `✧･ﾟ: *✧･ﾟ:* ${toBoldSans("𝗔𝗩𝗔𝗜𝗟𝗔𝗕𝗟𝗘 𝗤𝗨𝗔𝗟𝗜𝗧𝗜𝗘𝗦")} *:･ﾟ✧*:･ﾟ✧
+${DECO_LINE}
+🎬 ${toBoldSans("𝗧𝗶𝘁𝗹𝗲")} : ${toBoldSans(selected.title)}
+──── ${toBoldSans("𝗤𝗨𝗔𝗟𝗜𝗧𝗬 𝗟𝗜𝗦𝗧")} ────
+`;
 
         meta.links.forEach((item, i) => {
-            qualityMsg += `*${i + 1}.* ${item.quality}`;
-            if (item.size) qualityMsg += ` (${item.size})`;
+            const numStr = String(i + 1).padStart(2, "0");
+            qualityMsg += `${toBoldSans(numStr)}. 📊 ${toBoldSans(item.quality)}`;
+            if (item.size) qualityMsg += ` ${toScript("("+item.size+")")}`;
             qualityMsg += "\n";
         });
 
-        qualityMsg += `\n━━━━━━━━━━━━━\n`;
-        qualityMsg += `Reply with quality number (1-${meta.links.length}).`;
+        qualityMsg += `${DECO_LINE}
+📌 ${toBoldSans(`Reply with quality number (1-${meta.links.length})`)}`;
 
         if (meta.poster) {
             try {
@@ -300,7 +359,7 @@ cmd({
 
     } catch (error) {
         console.error("Quality Fetch Error:", error);
-        return reply(`*❌ Failed to fetch qualities:* ${error.message}`);
+        return reply(`❌ ${toBoldSans("Failed to fetch qualities")} : ${error.message}`);
     }
 });
 
@@ -321,31 +380,41 @@ cmd({
         const index = parseInt(body.trim()) - 1;
         const data = pendingQuality[sender];
 
-        if (!data) return reply("*❌ Session expired! Please search again.*");
+        if (!data) return reply(`❌ ${toBoldSans("Session expired! Please search again.")}`);
 
         const selectedLink = data.movie.links[index];
         const title = data.movie.title;
         delete pendingQuality[sender];
 
-        await reply(`⚡ *Resolving Direct Link via API...*\n\n🎬 *${title}*\n📊 *Quality:* ${selectedLink.quality}\n\nPlease wait (30-60s)...`);
+        await reply(`✧･ﾟ: *✧･ﾟ:* ${toBoldSans("𝗣𝗥𝗢𝗖𝗘𝗦𝗦𝗜𝗡𝗚 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗")} *:･ﾟ✧*:･ﾟ✧
+${DECO_LINE}
+🎬 ${toBoldSans("𝗧𝗶𝘁𝗹𝗲")} : ${toBoldSans(title)}
+📊 ${toBoldSans("𝗤𝘂𝗮𝗹𝗶𝘁𝘆")} : ${toBoldSans(selectedLink.quality)}
+💾 ${toBoldSans("𝗦𝗶𝘇𝗲")} : ${selectedLink.size || toScript("Unknown")}
+⏳ ${toScript("Resolving link, please wait (30-60s)...")}`);
 
         // Step 1: Get Sonic Cloud Link
         const sonicUrl = await getBotSonicLink(selectedLink.ztUrl);
 
         if (!sonicUrl) {
-            return reply("*❌ Failed to extract Sonic Cloud URL!*");
+            return reply(`❌ ${toBoldSans("Failed to extract Sonic Cloud URL!")}`);
         }
 
         // Step 2: Resolve Direct Download Link via API
         const directDlUrl = await resolveDirectUrlFromApi(sonicUrl);
 
         if (!directDlUrl) {
-            return reply("*❌ Failed to fetch direct AvatarZone download link from API!*");
+            return reply(`❌ ${toBoldSans("Failed to fetch direct download link from API!")}`);
         }
 
-        const cleanFileName = `${title} - ${selectedLink.quality}.mp4`.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").trim();
+        // Fixed Document Title to "MALIYA-MD MINI" as requested
+        const cleanFileName = `MALIYA-MD MINI.mp4`;
 
-        await reply(`*⬇️ Sending Movie Document...*\n\n🎬 *${title}*\n📊 *Quality:* ${selectedLink.quality}\n💾 *Size:* ${selectedLink.size || "Unknown"}`);
+        await reply(`📤 ${toBoldSans("Sending Movie...")}
+${DECO_LINE}
+🎬 ${toBoldSans("Title")} : ${toBoldSans(title)}
+📊 ${toBoldSans("Quality")} : ${toBoldSans(selectedLink.quality)}
+💾 ${toBoldSans("Size")} : ${selectedLink.size || toScript("Unknown")}`);
 
         // Step 3: Send Video Document
         await danuwa.sendMessage(
@@ -354,7 +423,14 @@ cmd({
                 document: { url: directDlUrl },
                 mimetype: "video/mp4",
                 fileName: cleanFileName,
-                caption: `🎬 *${title}*\n\n📊 *Quality:* ${selectedLink.quality}\n${selectedLink.size ? `💾 *Size:* ${selectedLink.size}\n` : ""}\n🍿 *Enjoy the movie!*`
+                caption: `✧･ﾟ: *✧･ﾟ:* ${toBoldSans("𝗠𝗢𝗩𝗜𝗘 𝗗𝗘𝗟𝗜𝗩𝗘𝗥𝗘𝗗")} *:･ﾟ✧*:･ﾟ✧
+${DECO_LINE}
+🎬 ${toBoldSans("𝗧𝗶𝘁𝗹𝗲")} : ${toBoldSans(title)}
+📊 ${toBoldSans("𝗤𝘂𝗮𝗹𝗶𝘁𝘆")} : ${toBoldSans(selectedLink.quality)}
+${selectedLink.size ? `💾 ${toBoldSans("𝗦𝗶𝘇𝗲")} : ${toBoldSans(selectedLink.size)}\n` : ""}
+${DECO_LINE}
+🍿 ${toScript("Enjoy the movie!")}
+✦ ${toScript("Powered by MALIYA-MD")} ✦`
             },
             { quoted: mek }
         );
@@ -363,7 +439,7 @@ cmd({
 
     } catch (error) {
         console.error("Movie Download Error:", error);
-        return reply(`*❌ Failed to send movie:* ${error.message}`);
+        return reply(`❌ ${toBoldSans("Failed to send movie")} : ${error.message}`);
     }
 });
 
