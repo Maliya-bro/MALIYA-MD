@@ -1,149 +1,188 @@
 const { cmd } = require("../command");
-const { scrapeMovieData } = require("films365-scraper");
-const axios = require("axios");
+const puppeteer = require("puppeteer");
 
-// MALIYA-MD AI API Configs
-const AI_API_KEY = "MALIYA-MD-1F8F414EDA13073B9B6B3E0BF503AA4B022AEBF4";
-const AI_API_URL = "https://maliya--md-pro.replit.app/api/chat/v1";
+const pendingSearch = {};
+const pendingQuality = {};
 
-// Helper function to call MALIYA-MD AI
-async function askAI(prompt) {
-  try {
-    const res = await axios.post(
-      AI_API_URL,
-      {
-        message: prompt,
-        sessionId: "films365-search-session",
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": AI_API_KEY,
-        },
-        timeout: 10000,
-      }
-    );
-    return res.data?.reply || null;
-  } catch (err) {
-    console.error("AI API Error:", err.message);
-    return null;
-  }
+function normalizeQuality(text) {
+  if (!text) return null;
+  text = text.toUpperCase();
+  if (/1080|FHD/.test(text)) return "1080p";
+  if (/720|HD/.test(text)) return "720p";
+  if (/480|SD/.test(text)) return "480p";
+  return text;
 }
 
-cmd(
-  {
-    pattern: "m365",
-    alias: ["films365", "f365", "movie365"],
-    desc: "Search movies using AI & download directly from Films365",
-    category: "download",
-    react: "🎬",
-    filename: __filename,
-  },
-  async (conn, mek, m, { reply, q }) => {
+function getDirectPixeldrainUrl(url) {
+  const match = url.match(/pixeldrain\.com\/u\/(\w+)/);
+  if (!match) return null;
+  return `https://pixeldrain.com/api/file/${match[1]}?download`;
+}
+
+async function searchMovies(query) {
+  const searchUrl = `https://sinhalasub.lk/?s=${encodeURIComponent(query)}&post_type=movies`;
+  const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
+  const page = await browser.newPage();
+  await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 30000 });
+  const results = await page.$$eval(".display-item .item-box", boxes =>
+    boxes.slice(0, 10).map((box, index) => {
+      const a = box.querySelector("a");
+      const img = box.querySelector(".thumb");
+      const lang = box.querySelector(".item-desc-giha .language")?.textContent || "";
+      const quality = box.querySelector(".item-desc-giha .quality")?.textContent || "";
+      const qty = box.querySelector(".item-desc-giha .qty")?.textContent || "";
+      return {
+        id: index + 1,
+        title: a?.title?.trim() || "",
+        movieUrl: a?.href || "",
+        thumb: img?.src || "",
+        language: lang.trim(),
+        quality: quality.trim(),
+        qty: qty.trim(),
+      };
+    }).filter(m => m.title && m.movieUrl)
+  );
+  await browser.close();
+  return results;
+}
+
+async function getMovieMetadata(url) {
+  const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
+  const page = await browser.newPage();
+  await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+  const metadata = await page.evaluate(() => {
+    const getText = el => el?.textContent.trim() || "";
+    const getList = selector => Array.from(document.querySelectorAll(selector)).map(el => el.textContent.trim());
+    const title = getText(document.querySelector(".info-details .details-title h3"));
+    let language = "", directors = [], stars = [];
+    document.querySelectorAll(".info-col p").forEach(p => {
+      const strong = p.querySelector("strong");
+      if (!strong) return;
+      const txt = strong.textContent.trim();
+      if (txt.includes("Language:")) language = strong.nextSibling?.textContent?.trim() || "";
+      if (txt.includes("Director:")) directors = Array.from(p.querySelectorAll("a")).map(a => a.textContent.trim());
+      if (txt.includes("Stars:")) stars = Array.from(p.querySelectorAll("a")).map(a => a.textContent.trim());
+    });
+    const duration = getText(document.querySelector(".info-details .data-views[itemprop='duration']"));
+    const imdb = getText(document.querySelector(".info-details .data-imdb"))?.replace("IMDb:", "").trim();
+    const genres = getList(".details-genre a");
+    const thumbnail = document.querySelector(".splash-bg img")?.src || "";
+    return { title, language, duration, imdb, genres, directors, stars, thumbnail };
+  });
+  await browser.close();
+  return metadata;
+}
+
+async function getPixeldrainLinks(movieUrl) {
+  const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
+  const page = await browser.newPage();
+  await page.goto(movieUrl, { waitUntil: "networkidle2", timeout: 30000 });
+  const linksData = await page.$$eval(".link-pixeldrain tbody tr", rows =>
+    rows.map(row => {
+      const a = row.querySelector(".link-opt a");
+      const quality = row.querySelector(".quality")?.textContent.trim() || "";
+      const size = row.querySelector("td:nth-child(3) span")?.textContent.trim() || "";
+      return { pageLink: a?.href || "", quality, size };
+    })
+  );
+  const directLinks = [];
+  for (const l of linksData) {
     try {
-      if (!q) {
-        return await reply(
-          "❌ කරුණාකර චිත්‍රපටයේ නම හෝ Link එක ලබාදෙන්න.\n\n*උදාහරණ:* .film spider man"
-        );
-      }
-
-      let movieUrl = q.trim();
-
-      // Direct Link එකක් නොවේ නම් AI Support එකෙන් Movie Query එක Resolve කරගැනීම
-      if (!q.startsWith("http://") && !q.startsWith("https://")) {
-        await reply(`🔎 *Searching for "${q}" on Films365 via AI...*`);
-
-        // 1. AI එකෙන් Exact Title එක සහ Search Formatting සකසා ගැනීම
-        const aiPrompt = `You are a helper for a movie downloader bot. Fix and format this movie search query into the official movie title. Return ONLY the clean official movie name, nothing else. Query: "${q}"`;
-        const formattedTitle = (await askAI(aiPrompt)) || q;
-
-        const cleanQuery = formattedTitle.replace(/[^a-zA-Z0-9 ]/g, "").trim();
-
-        // 2. Films365 Search Endpoint එක පරීක්ෂා කිරීම
-        const searchApi = `https://www.films365.org/api/search?q=${encodeURIComponent(cleanQuery)}`;
-        
-        try {
-          const searchRes = await axios.get(searchApi, {
-            headers: {
-              "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-              Accept: "application/json, text/plain, */*",
-            },
-            timeout: 8000,
-          });
-
-          const results = searchRes.data?.results || searchRes.data;
-
-          if (Array.isArray(results) && results.length > 0) {
-            const item = results[0];
-            const movieId = item.id || item._id || item.uuid || item.slug;
-            const mediaType = item.type === "tv" ? "tvshows" : "movie";
-            
-            if (movieId) {
-              movieUrl = `https://www.films365.org/${mediaType}/${movieId}`;
-            }
-          }
-        } catch (e) {
-          console.error("Direct Search API Error:", e.message);
-        }
-
-        // 3. Search API අසාර්ථක වුවහොත් AI එකෙන් Films365 URL Structure එක / Slug එක Predict කරගැනීම
-        if (!movieUrl.startsWith("http://") && !movieUrl.startsWith("https://")) {
-          const fallbackPrompt = `Give me only the Films365 URL format or movie UUID/slug for "${cleanQuery}" if known, or write "UNKNOWN".`;
-          const aiResponse = await askAI(fallbackPrompt);
-
-          if (aiResponse && aiResponse.includes("films365.org")) {
-            const urlMatch = aiResponse.match(/https?:\/\/[^\s]+/);
-            if (urlMatch) movieUrl = urlMatch[0];
-          }
-        }
-
-        // තවමත් Link එක නැත්නම් Error එක යැවීම
-        if (!movieUrl.startsWith("http://") && !movieUrl.startsWith("https://")) {
-          return await reply(
-            `❌ "*${q}*" චිත්‍රපටය සොයා ගැනීමට නොහැකි විය.\n\n💡 *Tip:* Films365 Direct Movie Link එක ලබා දී උත්සාහ කරන්න.`
-          );
+      const subPage = await browser.newPage();
+      await subPage.goto(l.pageLink, { waitUntil: "networkidle2", timeout: 30000 });
+      await new Promise(r => setTimeout(r, 12000));
+      const finalUrl = await subPage.$eval(".wait-done a[href^='https://pixeldrain.com/']", el => el.href).catch(() => null);
+      if (finalUrl) {
+        let sizeMB = 0;
+        const sizeText = l.size.toUpperCase();
+        if (sizeText.includes("GB")) sizeMB = parseFloat(sizeText) * 1024;
+        else if (sizeText.includes("MB")) sizeMB = parseFloat(sizeText);
+        if (sizeMB <= 2048) {
+          directLinks.push({ link: finalUrl, quality: normalizeQuality(l.quality), size: l.size });
         }
       }
-
-      await reply("⏳ *Extracting movie details and download links...*");
-
-      // films365-scraper මගින් Meta Data & Download URL එක ලබා ගැනීම
-      const metadata = await scrapeMovieData(movieUrl);
-
-      if (!metadata || !metadata.downloadUrl) {
-        return await reply("❌ චිත්‍රපටයේ Download Link එක ලබා ගැනීමට නොහැකි විය.");
-      }
-
-      const caption =
-        `🎬 *${metadata.title || "Films365 Movie"}*\n\n` +
-        `📅 *Release Date:* ${metadata.date || "N/A"}\n` +
-        `⏱️ *Duration:* ${metadata.duration || "N/A"}\n` +
-        `⭐ *Rating:* ${metadata.rate || "N/A"}/10\n\n` +
-        `📝 *Description:* ${metadata.desc || "N/A"}\n\n` +
-        `📥 *Uploading movie file... Please wait!*`;
-
-      // 1. Details Message එක යැවීම
-      await conn.sendMessage(m.chat, { text: caption }, { quoted: mek });
-
-      // 2. Direct Video File එක WhatsApp Document එකක් ලෙස Upload කිරීම
-      const cleanFileName = (metadata.title || "Movie")
-        .replace(/[^a-zA-Z0-9 space]/g, "")
-        .trim();
-
-      await conn.sendMessage(
-        m.chat,
-        {
-          document: { url: metadata.downloadUrl },
-          mimetype: "video/mp4",
-          fileName: `${cleanFileName}.mp4`,
-          caption: `✨ *${metadata.title}*\n\nDownloaded successfully!`,
-        },
-        { quoted: mek }
-      );
-    } catch (e) {
-      console.error("Films365 Plugin Error:", e);
-      await reply("❌ Error occurred: " + (e?.message || e));
-    }
+      await subPage.close();
+    } catch (e) { continue; }
   }
-);
+  await browser.close();
+  return directLinks;
+}
+
+cmd({
+  pattern: "movie",
+  alias: ["sinhalasub","film","cinema"],
+  react: "🎬",
+  desc: "Search and send movies from Sinhalasub.lk",
+  category: "download",
+  filename: __filename
+}, async (danuwa, mek, m, { from, q, sender, reply }) => {
+  if (!q) return reply(`*🎬 Movie Search Plugin*\nUsage: movie_name\nExample: movie avengers`);
+  reply("*🔍 Searching for movies...*");
+  const searchResults = await searchMovies(q);
+  if (!searchResults.length) return reply("*❌ No movies found!*");
+  pendingSearch[sender] = { results: searchResults, timestamp: Date.now() };
+  let text = "*🎬 Search Results:*\n";
+  searchResults.forEach((m, i) => {
+    text += `*${i+1}.* ${m.title}\n   📝 Language: ${m.language}\n   📊 Quality: ${m.quality}\n   🎞️ Format: ${m.qty}\n`;
+  });
+  text += `\n*Reply with movie number (1-${searchResults.length})*`;
+  reply(text);
+});
+
+cmd({
+  filter: (text, { sender }) => pendingSearch[sender] && !isNaN(text) && parseInt(text) > 0 && parseInt(text) <= pendingSearch[sender].results.length
+}, async (danuwa, mek, m, { body, sender, reply, from }) => {
+  await danuwa.sendMessage(from, { react: { text: "✅", key: m.key } });
+  const index = parseInt(body.trim()) - 1;
+  const selected = pendingSearch[sender].results[index];
+  delete pendingSearch[sender];
+  const metadata = await getMovieMetadata(selected.movieUrl);
+  let msg = `*🎬 ${metadata.title}*\n`;
+  msg += `*📝 Language:* ${metadata.language}\n*⏱️ Duration:* ${metadata.duration}\n*⭐ IMDb:* ${metadata.imdb}\n`;
+  msg += `*🎭 Genres:* ${metadata.genres.join(", ")}\n*🎥 Directors:* ${metadata.directors.join(", ")}\n*🌟 Stars:* ${metadata.stars.slice(0,5).join(", ")}${metadata.stars.length>5?"...":""}\n\n`;
+  msg += "*🔗 Fetching download links, please wait...*";
+  if (metadata.thumbnail) {
+    await danuwa.sendMessage(from, { image: { url: metadata.thumbnail }, caption: msg }, { quoted: mek });
+  } else {
+    await danuwa.sendMessage(from, { text: msg }, { quoted: mek });
+  }
+  const downloadLinks = await getPixeldrainLinks(selected.movieUrl);
+  if (!downloadLinks.length) return reply("*❌ No download links found (<2GB)!*");
+  pendingQuality[sender] = { movie: { metadata, downloadLinks }, timestamp: Date.now() };
+  let qualityMsg = "*📥 Available Qualities (Max 2GB):*\n";
+  downloadLinks.forEach((d,i) => qualityMsg += `*${i+1}.* ${d.quality} - ${d.size}\n`);
+  qualityMsg += `\n*Reply with quality number to receive the movie as a document.*`;
+  await danuwa.sendMessage(from, { text: qualityMsg }, { quoted: mek });
+});
+
+cmd({
+  filter: (text, { sender }) => pendingQuality[sender] && !isNaN(text) && parseInt(text) > 0 && parseInt(text) <= pendingQuality[sender].movie.downloadLinks.length
+}, async (danuwa, mek, m, { body, sender, reply, from }) => {
+  await danuwa.sendMessage(from, { react: { text: "✅", key: m.key } });
+  const index = parseInt(body.trim()) - 1;
+  const { movie } = pendingQuality[sender];
+  delete pendingQuality[sender];
+  const selectedLink = movie.downloadLinks[index];
+  reply(`*⬇️ Sending ${selectedLink.quality} movie as document...*\nPlease wait.`);
+  try {
+    const directUrl = getDirectPixeldrainUrl(selectedLink.link);
+    await danuwa.sendMessage(from, {
+      document: { url: directUrl },
+      mimetype: "video/mp4",
+      fileName: `${movie.metadata.title.substring(0,50)} - ${selectedLink.quality}.mp4`.replace(/[^\w\s.-]/gi,''),
+      caption: `*🎬 ${movie.metadata.title}*\n*📊 Quality:* ${selectedLink.quality}\n*💾 Size:* ${selectedLink.size}\n\n*Enjoy your movie! 🍿*`
+    }, { quoted: mek });
+  } catch (error) {
+    console.error("Send document error:", error);
+    reply(`*❌ Failed to send movie:* ${error.message || "Unknown error"}`);
+  }
+});
+
+setInterval(() => {
+  const now = Date.now();
+  const timeout = 10*60*1000;
+  for (const s in pendingSearch) if (now - pendingSearch[s].timestamp > timeout) delete pendingSearch[s];
+  for (const s in pendingQuality) if (now - pendingQuality[s].timestamp > timeout) delete pendingQuality[s];
+}, 5*60*1000);
+
+module.exports = { pendingSearch, pendingQuality };
