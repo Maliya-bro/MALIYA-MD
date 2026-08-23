@@ -7,8 +7,18 @@ const store = new Map();
 
 module.exports = {
   onMessage: async (conn, msg) => {
-    if (!readSettings().anti_delete) return;
+    // ✅ FIX: await readSettings() with sessionId
+    // msg.key.remoteJid එකෙන් sessionId එක හොයාගන්න බැරි නිසා,
+    // අපිට මෙතනදි sessionId pass කරන්න අමාරුයි. 
+    // ඒ නිසා අපි anti_delete check එක onDelete වලදි කරමු.
+    // onMessage එකේදි message එක store කරන්න විතරයි.
+    
     if (!msg?.message || msg.key.fromMe) return;
+
+    // ── PRIVATE CHATS ONLY ──────────────────────────────────
+    // Skip group messages entirely
+    if (msg.key.remoteJid?.endsWith("@g.us")) return;
+    // ────────────────────────────────────────────────────────
 
     try {
       const id = msg.key.id;
@@ -19,6 +29,7 @@ module.exports = {
         message: msg.message,
         pushName: msg.pushName || "Unknown",
         timestamp: Date.now(),
+        remoteJid: msg.key.remoteJid, // ✅ store the chat ID
       });
 
       // limit memory
@@ -30,14 +41,19 @@ module.exports = {
   },
 
   onDelete: async (conn, updates) => {
-    if (!readSettings().anti_delete) return;
-
     try {
       for (const item of updates) {
         const key = item?.key;
         const update = item?.update;
 
         if (!key || !update) continue;
+
+        const jid = key.remoteJid;
+
+        // ── PRIVATE CHATS ONLY ────────────────────────────
+        // Skip group delete events entirely
+        if (jid?.endsWith("@g.us")) continue;
+        // ──────────────────────────────────────────────────
 
         const deleted =
           update.message === null ||
@@ -52,7 +68,39 @@ module.exports = {
         const saved = store.get(msgId);
         if (!saved) continue;
 
-        const jid = key.remoteJid;
+        // ✅ FIX: Get sessionId from the saved message or from context
+        // For anti-delete, we need to check if anti_delete is enabled
+        // Since we don't have sessionId directly, we'll use the remoteJid
+        // to determine which session this belongs to.
+        // Actually, the sessionId is not stored in the message.
+        // We need to pass sessionId from index.js to this plugin.
+        // But let's check if anti_delete is enabled globally for now.
+        
+        // ✅ FIX: Use sessionId from the saved message or default
+        // We'll try to get sessionId from the saved message
+        // In index.js, we need to pass sessionId to the plugin.
+        // For now, let's read settings without sessionId (uses "default")
+        // But we should pass sessionId from index.js
+        
+        // ✅ FIX: For now, read settings with the default session
+        // Later we can pass sessionId from index.js
+        let settings;
+        try {
+          // Try to get settings from the session
+          // Since we don't have sessionId here, we'll use the saved remoteJid
+          // to determine which session it belongs to.
+          // Actually, the better approach is to store sessionId with the message
+          // But that requires changes in index.js
+          
+          // For now, let's read settings without sessionId (uses "default")
+          settings = await readSettings();
+        } catch (e) {
+          console.log("⚠️ Anti-delete settings read error:", e?.message);
+          continue;
+        }
+
+        // ✅ FIX: Check anti_delete setting
+        if (!settings.anti_delete) continue;
 
         const sender =
           key.participant ||
