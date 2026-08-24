@@ -76,8 +76,7 @@
     "@distube/ytdl-core": "latest",
     "yt-dlp-exec": "latest",
     "youtube-dl-exec": "latest",
-    "@danonino/starlyn-scraper": "latest",
-    "fs/promises": "latest"
+    "@danonino/starlyn-scraper": "latest"
 
   }
 }
