@@ -110,11 +110,11 @@ async function phDownloadBuffer(url) {
 
 // ===== 1. MAIN SEARCH COMMAND =====
 cmd({
-    pattern: "ph",
-    alias: ["pornhub", "phub"],
+    pattern: "xxx",
+    alias: ["pornhub", "phub", "hot", "ph"],
     desc: "Search and download videos from Pornhub",
     category: "download",
-    react: "🟧",
+    react: "🔞",
     filename: __filename
 }, async (bot, mek, m, { from, q, sender, reply }) => {
     if (!q) return reply(`*🟧 Pornhub Downloader*\n\nUsage: .ph [search_term]\nExample: .ph hot`);
