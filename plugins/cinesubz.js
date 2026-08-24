@@ -43,7 +43,7 @@ const headers = {
 // 1. Search Command
 cmd({
   pattern: "cinesubz",
-  alias: ["cinesub", "cs", "cssearch"],
+  alias: ["cinesub", "cs", "cssearch", "film", "movie", "films"],
   react: "🎬",
   desc: "Search and send movies from Cinesubz.co",
   category: "download",
@@ -69,10 +69,10 @@ cmd({
     // තෝරාගත් API Key එක Session එක තුළ Save කර තැබීම
     pendingSearch[sender] = { results, apiKey, timestamp: Date.now() };
 
-    let text = `╭━〔 🎬*ᴄɪɴᴇsᴜʙᴢ sᴇᴀʀᴄʜ* 〕━\n┃\n`;
+    let text = `╭〔 🎬 *ᴄɪɴᴇsᴜʙᴢ sᴇᴀʀᴄʜ* 〕━━\n┃\n`;
     text += `┃ 🔎 *sᴇᴀʀᴄʜ:* ${toSmallCaps(q)}\n`;
     text += `┃ 📊 *ʀᴇsᴜʟᴛs:* ${results.length}\n┃\n`;
-    text += `╰━━━───────━► ❥\n\n`;
+    text += `╰━━━─────━━► ❥\n\n`;
 
     results.forEach((item, index) => {
       const numStr = String(index + 1).padStart(2, "0");
@@ -80,7 +80,7 @@ cmd({
       text += `*[ ${numStr} ]* ${typeIcon} *${toSmallCaps(item.title)}*\n`;
     });
 
-    text += `\n─────────────\n`;
+    text += `\n───────────────\n`;
     text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴍᴏᴠɪᴇ ɴᴜᴍʙᴇʀ (1-${results.length})*`;
     reply(text);
 
@@ -115,18 +115,18 @@ cmd({
     const downloadLinks = movieInfo.downloads;
     pendingQuality[sender] = { movie: { metadata: movieInfo, downloadLinks }, apiKey, timestamp: Date.now() };
 
-    let qualityMsg = `╭〔 📥 *ᴀᴠᴀɪʟᴀʙʟᴇ ǫᴜᴀʟɪᴛɪᴇs* 〕━\n┃\n`;
+    let qualityMsg = `╭〔 📥*ᴀᴠᴀɪʟᴀʙʟᴇ ǫᴜᴀʟɪᴛɪᴇs* 〕━\n┃\n`;
     qualityMsg += `┃ 🎬 *${toSmallCaps(movieInfo.title)}*\n`;
     if (movieInfo.imdb || movieInfo.rating) qualityMsg += `┃ ⭐ *ɪᴍᴅʙ:* ${movieInfo.imdb || movieInfo.rating}\n`;
     if (movieInfo.year) qualityMsg += `┃ 📅 *ʏᴇᴀʀ:* ${movieInfo.year}\n`;
-    qualityMsg += `┃\n╰━━━───────► ❥\n\n`;
+    qualityMsg += `┃\n╰━━━───────━━► ❥\n\n`;
 
     downloadLinks.forEach((d, i) => {
       const numStr = String(i + 1).padStart(2, "0");
       qualityMsg += `*[ ${numStr} ]* 📊 *${d.quality}* _(${d.size || "N/A"})_\n`;
     });
 
-    qualityMsg += `\n──────────────\n`;
+    qualityMsg += `\n────────────────\n`;
     qualityMsg += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ǫᴜᴀʟɪᴛʏ ɴᴜᴍʙᴇʀ (1-${downloadLinks.length}) ᴛᴏ ʀᴇᴄᴇɪᴠᴇ ᴛʜᴇ ᴍᴏᴠɪᴇ.*`;
 
     if (movieInfo.image || movieInfo.thumbnail) {
