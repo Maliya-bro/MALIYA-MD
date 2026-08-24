@@ -321,8 +321,9 @@ async function sendNumberedMainMenu(sock, from, mek, state, userName) {
   );
 }
 
-async function sendMainMenu(sock, from, mek, state, userName) {
-  const settings = await readSettings();
+async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
+  // ✅ FIX: readSettings with sessionId
+  const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
   if (btnsOn && sendInteractiveMessage) {
@@ -394,7 +395,7 @@ cmd(
     category: "main",
     filename: __filename,
   },
-  async (sock, mek, m, { from, sender, pushname, reply }) => {
+  async (sock, mek, m, { from, sender, pushname, reply, sessionId }) => {
     try {
       await sock.sendMessage(from, { react: { text: "📜", key: mek.key } });
 
@@ -413,7 +414,8 @@ cmd(
         lastActionAt: 0,
       };
 
-      await sendMainMenu(sock, from, mek, pendingMenu[k], userName);
+      // ✅ FIX: pass sessionId
+      await sendMainMenu(sock, from, mek, pendingMenu[k], userName, sessionId);
     } catch (e) {
       console.log("MENU ERROR:", e?.message || e);
       reply("❌ Menu eka send karanna බැරි වුණා.");
@@ -431,7 +433,7 @@ cmd(
     dontAddCommandList: true,
     filename: __filename,
   },
-  async (sock, mek, m, { body, from, sender, pushname, reply }) => {
+  async (sock, mek, m, { body, from, sender, pushname, reply, sessionId }) => {
     try {
       const k = keyFor(sender, from);
       const state = pendingMenu[k];
