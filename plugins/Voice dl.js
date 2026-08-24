@@ -222,12 +222,12 @@ function buildStyledAudioMenu(video) {
   const details = buildSongDetails(video);
   return details + `
 
-┌─❮ 🎵 *𝐀𝐔𝐃𝐈𝐎 𝐎𝐏𝐓𝐈𝐎𝐍𝐒* ❯─
+┌❮ 🎵 *𝐀𝐔𝐃𝐈𝐎 𝐎𝐏𝐓𝐈𝐎𝐍𝐒* ❯─
 │
-├─► *[ 01 ]* ➔ 🎶 Audio File (MP3)
-├─► *[ 02 ]* ➔ 📁 Document File
+├►*[ 01 ]*➔ 🎶 Audio File (MP3)
+├►*[ 02 ]*➔ 📁 Document File
 │
-└─❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2* ❯─`;
+└❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2* ❯─`;
 }
 
 async function sendNumberedAudioMenu(sock, from, mek, video) {
