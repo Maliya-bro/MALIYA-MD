@@ -1,9 +1,4 @@
 const { cmd, replyHandlers } = require("../command");
-// Switched from yt-dlp-exec (unmaintained, last published ~5 years ago,
-// bundled a stale yt-dlp binary that YouTube's bot-check now rejects
-// even with valid cookies) to youtube-dl-exec (actively maintained,
-// auto-downloads a current yt-dlp binary on install). Same API shape —
-// ytDlp(url, options) — so no other code below needed to change.
 const ytDlp = require("youtube-dl-exec");
 const yts = require("yt-search");
 const fs = require("fs");
@@ -21,14 +16,10 @@ ffmpeg.setFfprobePath(ffprobePath);
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-// Cookies path - one level up from commands folder
 const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
 
-// Channel branding (same as alive.js) - only shown when btns_enabled
-// is OFF (number-reply mode). When ON, the interactive button menu is
-// sent clean, with no forwarded/channel branding.
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -42,9 +33,6 @@ function channelContextInfo() {
   };
 }
 
-// Re-checked fresh each download (not just once at startup) so that
-// adding/replacing cookies.txt while the bot is running is picked up
-// immediately, without needing a restart.
 function cookiesStatus() {
   if (!fs.existsSync(COOKIES_PATH)) {
     return { exists: false, sizeBytes: 0 };
@@ -188,7 +176,7 @@ function buildSongDetails(video) {
   const videoId = video.videoId || "Unknown";
   const url = video.url || "Unavailable";
 
-  return `┌─❮ 🎵 *𝕊𝕆ℕ𝔾 𝔻𝔼𝕋𝔸𝕀𝕃𝕊* ❯─
+  return `┌─❮ 🎵 *𝐒𝐎𝐍𝐆 𝐃𝐄𝐓𝐀𝐈𝐋𝐒* ❯─
 │
 ├─► 🎶 *ᴛɪᴛʟᴇ:* ${title}
 ├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${channel}
@@ -202,7 +190,7 @@ function buildSongDetails(video) {
 }
 
 function buildFinalCaption(video, typeLabel, sizeMB) {
-  return `┌─❮ ✅ *𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻 ℂ𝕆𝕄ℙ𝕃𝔼𝕋𝔼* ❯─
+  return `┌─❮ ✅ *𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐂𝐎𝐌𝐏𝐋𝐄𝐓𝐄* ❯─
 │
 ├─► 🎵 *ᴛɪᴛʟᴇ:* ${video.title || "Unknown Title"}
 ├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${video.author?.name || "Unknown Channel"}
@@ -211,7 +199,7 @@ function buildFinalCaption(video, typeLabel, sizeMB) {
 ├─► 👀 *ᴠɪᴇᴡs:* ${formatViews(video.views)}
 ├─► 📦 *sɪᴢᴇ:* ${sizeMB.toFixed(2)} MB
 │
-└─❮ 💾 *sᴀᴠᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ* ❯─`;
+└─❮ 💾 *MALIYA-〽️D* ❯─`;
 }
 
 async function getYoutube(query) {
@@ -230,21 +218,18 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// ----- Build styled audio menu (number-reply mode) -----
 function buildStyledAudioMenu(video) {
   const details = buildSongDetails(video);
   return details + `
 
-┌─❮ 🎵 *𝔸𝕌𝔻𝕀𝕆 𝕆ℙ𝕋𝕀𝕆ℕ𝕊* ❯─
+┌─❮ 🎵 *𝐀𝐔𝐃𝐈𝐎 𝐎𝐏𝐓𝐈𝐎𝐍𝐒* ❯─
 │
-├─► *[ 01 ]* ➔ 🎶 ᴀᴜᴅɪᴏ ғɪʟᴇ (ᴍᴘ3)
-├─► *[ 02 ]* ➔ 📁 ᴅᴏᴄᴜᴍᴇɴᴛ ғɪʟᴇ
+├─► *[ 01 ]* ➔ 🎶 Audio File (MP3)
+├─► *[ 02 ]* ➔ 📁 Document File
 │
 └─❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2* ❯─`;
 }
 
-// Number-reply mode (btns_enabled = OFF): plain sendMessage with the
-// channel forward branding, same pattern as alive.js.
 async function sendNumberedAudioMenu(sock, from, mek, video) {
   const caption = buildStyledAudioMenu(video);
   return sock.sendMessage(
@@ -258,21 +243,20 @@ async function sendNumberedAudioMenu(sock, from, mek, video) {
   );
 }
 
-async function sendInteractiveAudioMenu(sock, from, mek, video) {
-  const settings = await readSettings();
+async function sendInteractiveAudioMenu(sock, from, mek, video, sessionId) {
+  // ✅ FIX: readSettings with sessionId
+  const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
   if (btnsOn && sendInteractiveMessage) {
     try {
-      // Interactive buttons mode: no channel forward branding, clean
-      // single_select menu only.
       return await sendInteractiveMessage(
         sock,
         from,
         {
           image: { url: video.thumbnail },
           text: buildSongDetails(video),
-          footer: "𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻 | 𝔸𝕌𝔻𝕀𝕆 𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻𝔼ℝ",
+          footer: "𝐌𝐀𝐋𝐈𝐘𝐀-𝐌𝐃 | 𝐀𝐔𝐃𝐈𝐎 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐑",
           interactiveButtons: [
             {
               name: "single_select",
@@ -301,10 +285,6 @@ async function sendInteractiveAudioMenu(sock, from, mek, video) {
   return sendNumberedAudioMenu(sock, from, mek, video);
 }
 
-// Detects whether a yt-dlp failure is caused by missing/invalid/expired
-// cookies (the "Sign in to confirm you're not a bot" family of errors),
-// so we can tell the user exactly what's wrong instead of a generic
-// "error while downloading" message.
 function isCookiesRelatedError(errText = "") {
   const t = String(errText).toLowerCase();
   return (
@@ -334,12 +314,7 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
 
     audioFile = makeTempFile(".mp3");
 
-    // Cookies are checked fresh right before each download attempt, so a
-    // cookies.txt added/replaced while the bot is already running is
-    // picked up immediately without a restart.
     const cookies = cookiesStatus();
-
-    // Build yt-dlp args with cookies if available
     const ytArgs = {
       extractAudio: true,
       audioFormat: "mp3",
@@ -349,18 +324,11 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
       noCheckCertificates: true,
       noPlaylist: true,
       extractorArgs: "youtube:player_client=android,web",
-      addHeader: [
-        "referer:youtube.com",
-      ],
+      addHeader: ["referer:youtube.com"],
     };
 
     if (cookies.exists && cookies.sizeBytes > 0) {
       ytArgs.cookies = COOKIES_PATH;
-      console.log(`🍪 Using cookies.txt for YouTube download (${cookies.sizeBytes} bytes)`);
-    } else if (cookies.exists && cookies.sizeBytes === 0) {
-      console.log("⚠️ cookies.txt exists but is EMPTY (0 bytes) - re-export it from a logged-in YouTube session");
-    } else {
-      console.log("⚠️ cookies.txt not found at " + COOKIES_PATH + " - download may fail with a bot-check error");
     }
 
     await ytDlp(pending.video.url, ytArgs);
@@ -405,21 +373,11 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
     if (isCookiesRelatedError(errText)) {
       const cookies = cookiesStatus();
       if (!cookies.exists) {
-        reply(
-          "❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴍɪssɪɴɢ.*\n\n" +
-          "YouTube is blocking this download with a bot-check.\n" +
-          "Export a fresh `cookies.txt` from a logged-in YouTube session and place it in the bot's root folder."
-        );
+        reply("❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴍɪssɪɴɢ.*\n\nYouTube is blocking this download with a bot-check.\nExport a fresh `cookies.txt` from a logged-in YouTube session and place it in the bot's root folder.");
       } else if (cookies.sizeBytes === 0) {
-        reply(
-          "❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs.ᴛxᴛ ɪs ᴇᴍᴘᴛʏ.*\n\n" +
-          "Re-export cookies.txt from a logged-in YouTube session (make sure you're actually signed in when exporting)."
-        );
+        reply("❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs.ᴛxᴛ ɪs ᴇᴍᴘᴛʏ.*\n\nRe-export cookies.txt from a logged-in YouTube session (make sure you're actually signed in when exporting).");
       } else {
-        reply(
-          "❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴇxᴘɪʀᴇᴅ ᴏʀ ɪɴᴠᴀʟɪᴅ.*\n\n" +
-          "Your saved cookies.txt is no longer valid. Export a fresh one from a logged-in YouTube session and replace the old file."
-        );
+        reply("❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴇxᴘɪʀᴇᴅ ᴏʀ ɪɴᴠᴀʟɪᴅ.*\n\nYour saved cookies.txt is no longer valid. Export a fresh one from a logged-in YouTube session and replace the old file.");
       }
     } else {
       reply("❌ *ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ/sᴇɴᴅɪɴɢ ᴀᴜᴅɪᴏ.*");
@@ -443,7 +401,7 @@ cmd(
     category: "download",
     filename: __filename,
   },
-  async (sock, mek, m, { from, q, sender, reply }) => {
+  async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
     try {
       if (!q) return reply("🎵 *ᴘʟᴇᴀsᴇ ᴘʀᴏᴠɪᴅᴇ ᴀ sᴏɴɢ ɴᴀᴍᴇ ᴏʀ ʏᴏᴜᴛᴜʙᴇ ʟɪɴᴋ.*");
 
@@ -461,7 +419,8 @@ cmd(
         isProcessing: false,
       };
 
-      await sendInteractiveAudioMenu(sock, from, mek, video);
+      // ✅ FIX: pass sessionId
+      await sendInteractiveAudioMenu(sock, from, mek, video, sessionId);
     } catch (e) {
       console.log("SONG MENU ERROR:", e && e.message);
       reply("❌ *ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴘʀᴇᴘᴀʀɪɴɢ ᴀᴜᴅɪᴏ ᴍᴇɴᴜ.*");
