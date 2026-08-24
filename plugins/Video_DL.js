@@ -1,9 +1,4 @@
 const { cmd, replyHandlers } = require("../command");
-// Switched from yt-dlp-exec (unmaintained, last published ~5 years ago,
-// bundled a stale yt-dlp binary that YouTube's bot-check now rejects
-// even with valid cookies) to youtube-dl-exec (actively maintained,
-// auto-downloads a current yt-dlp binary on install). Same API shape —
-// ytDlp(url, options) — so no other code below needed to change.
 const ytDlp = require("youtube-dl-exec");
 const yts = require("yt-search");
 const fs = require("fs");
@@ -21,14 +16,10 @@ ffmpeg.setFfprobePath(ffprobePath);
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-// Cookies path - one level up from commands folder
 const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
 
-// Channel branding (same as alive.js) - only shown when btns_enabled
-// is OFF (number-reply mode). When ON, the interactive button menu is
-// sent clean, with no forwarded/channel branding.
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -42,9 +33,6 @@ function channelContextInfo() {
   };
 }
 
-// Re-checked fresh each download (not just once at startup) so that
-// adding/replacing cookies.txt while the bot is running is picked up
-// immediately, without needing a restart.
 function cookiesStatus() {
   if (!fs.existsSync(COOKIES_PATH)) {
     return { exists: false, sizeBytes: 0 };
@@ -253,7 +241,7 @@ function buildVideoDetails(video) {
   const url = video.url || "Unavailable";
   const live = video.live ? "Yes" : "No";
 
-  return `┌─❮ 🎥 *𝕍𝕀𝔻𝔼𝕆 𝔻𝔼𝕋𝔸𝕀𝕃𝕊* ❯─
+  return `┌─❮ 🎥 *𝐕𝐈𝐃𝐄𝐎 𝐃𝐄𝐓𝐀𝐈𝐋𝐒* ❯─
 │
 ├─► 🎬 *ᴛɪᴛʟᴇ:* ${title}
 ├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${channel}
@@ -268,7 +256,7 @@ function buildVideoDetails(video) {
 }
 
 function buildFinalCaption(video, qualityLabel, sizeMB) {
-  return `┌─❮ ✅ *𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻𝔼𝔻* ❯─
+  return `┌─❮ ✅ *𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐂𝐎𝐌𝐏𝐋𝐄𝐓𝐄* ❯─
 │
 ├─► 🎬 *ᴛɪᴛʟᴇ:* ${video.title || "Unknown Title"}
 ├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${video.author?.name || "Unknown Channel"}
@@ -296,29 +284,10 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// Detects whether a yt-dlp failure is caused by missing/invalid/expired
-// cookies (the "Sign in to confirm you're not a bot" family of errors),
-// so we can tell the user exactly what's wrong instead of a generic
-// "error while downloading" message.
-function isCookiesRelatedError(errText = "") {
-  const t = String(errText).toLowerCase();
-  return (
-    t.includes("sign in to confirm") ||
-    t.includes("not a bot") ||
-    t.includes("cookies") ||
-    t.includes("login required") ||
-    (t.includes("private video") && t.includes("sign in"))
-  );
-}
-
 async function downloadVideoWithYtdl(videoUrl, quality, outPath) {
   const formatStr = `bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}][ext=mp4]/best`;
 
-  // Cookies are checked fresh right before each download attempt, so a
-  // cookies.txt added/replaced while the bot is already running is
-  // picked up immediately without a restart.
   const cookies = cookiesStatus();
-
   const ytArgs = {
     format: formatStr,
     output: outPath,
@@ -327,18 +296,11 @@ async function downloadVideoWithYtdl(videoUrl, quality, outPath) {
     noCheckCertificates: true,
     noPlaylist: true,
     extractorArgs: "youtube:player_client=android,web",
-    addHeader: [
-      "referer:youtube.com",
-    ],
+    addHeader: ["referer:youtube.com"],
   };
 
   if (cookies.exists && cookies.sizeBytes > 0) {
     ytArgs.cookies = COOKIES_PATH;
-    console.log(`🍪 Using cookies.txt for YouTube download (${cookies.sizeBytes} bytes)`);
-  } else if (cookies.exists && cookies.sizeBytes === 0) {
-    console.log("⚠️ cookies.txt exists but is EMPTY (0 bytes) - re-export it from a logged-in YouTube session");
-  } else {
-    console.log("⚠️ cookies.txt not found at " + COOKIES_PATH + " - download may fail with a bot-check error");
   }
 
   await ytDlp(videoUrl, ytArgs);
@@ -368,23 +330,20 @@ async function reencodeForWhatsApp(inputPath, outputPath) {
   });
 }
 
-// ----- Build styled video menu (number-reply mode) -----
 function buildStyledVideoMenu(video) {
   const details = buildVideoDetails(video);
   return details + `
 
-┌─❮ 🎥 *𝕍𝕀𝔻𝔼𝕆 ℚ𝕌𝔸𝕃𝕀𝕋𝕐* ❯─
+┌─❮ 🎥 *𝐕𝐈𝐃𝐄𝐎 𝐐𝐔𝐀𝐋𝐈𝐓𝐘* ❯─
 │
-├─► 📱 *[ 01 ]* ➔ 360p
-├─► 📱 *[ 02 ]* ➔ 480p
-├─► 📱 *[ 03 ]* ➔ 720p HD
-├─► 📱 *[ 04 ]* ➔ 1080p FHD
+├─► *[ 01 ]* ➔ 360p
+├─► *[ 02 ]* ➔ 480p
+├─► *[ 03 ]* ➔ 720p HD
+├─► *[ 04 ]* ➔ 1080p FHD
 │
 └─❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1, 2, 3, ᴏʀ 4* ❯─`;
 }
 
-// Number-reply mode (btns_enabled = OFF): plain sendMessage with the
-// channel forward branding, same pattern as alive.js.
 async function sendNumberedVideoMenu(sock, from, mek, video) {
   const caption = buildStyledVideoMenu(video);
   return sock.sendMessage(
@@ -398,21 +357,20 @@ async function sendNumberedVideoMenu(sock, from, mek, video) {
   );
 }
 
-async function sendQualityInteractiveMenu(sock, from, mek, video) {
-  const settings = await readSettings();
+async function sendQualityInteractiveMenu(sock, from, mek, video, sessionId) {
+  // ✅ FIX: readSettings with sessionId
+  const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
   if (btnsOn && sendInteractiveMessage) {
     try {
-      // Interactive buttons mode: no channel forward branding, clean
-      // single_select menu only.
       return await sendInteractiveMessage(
         sock,
         from,
         {
           image: { url: video.thumbnail },
           text: buildVideoDetails(video),
-          footer: "𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻 | 𝕍𝕀𝔻𝔼𝕆 𝔻𝕆𝕎ℕ𝕃𝕆𝔸𝔻𝔼ℝ",
+          footer: "𝐌𝐀𝐋𝐈𝐘𝐀-𝐌𝐃 | 𝐕𝐈𝐃𝐄𝐎 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐑",
           interactiveButtons: [
             {
               name: "single_select",
@@ -452,6 +410,17 @@ function isDuplicateQualityAction(state, quality) {
   state.lastActionSig = sig;
   state.lastActionAt = now;
   return false;
+}
+
+function isCookiesRelatedError(errText = "") {
+  const t = String(errText).toLowerCase();
+  return (
+    t.includes("sign in to confirm") ||
+    t.includes("not a bot") ||
+    t.includes("cookies") ||
+    t.includes("login required") ||
+    (t.includes("private video") && t.includes("sign in"))
+  );
 }
 
 async function handleVideoQualityDownload(sock, mek, from, sender, reply, choiceRaw) {
@@ -519,24 +488,14 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
     if (isCookiesRelatedError(errText)) {
       const cookies = cookiesStatus();
       if (!cookies.exists) {
-        reply(
-          "❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴍɪssɪɴɢ.*\n\n" +
-          "YouTube is blocking this download with a bot-check.\n" +
-          "Export a fresh `cookies.txt` from a logged-in YouTube session and place it in the bot's root folder."
-        );
+        reply("❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴍɪssɪɴɢ.*\n\nYouTube is blocking this download with a bot-check.\nExport a fresh `cookies.txt` from a logged-in YouTube session and place it in the bot's root folder.");
       } else if (cookies.sizeBytes === 0) {
-        reply(
-          "❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs.ᴛxᴛ ɪs ᴇᴍᴘᴛʏ.*\n\n" +
-          "Re-export cookies.txt from a logged-in YouTube session (make sure you're actually signed in when exporting)."
-        );
+        reply("❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs.ᴛxᴛ ɪs ᴇᴍᴘᴛʏ.*\n\nRe-export cookies.txt from a logged-in YouTube session (make sure you're actually signed in when exporting).");
       } else {
-        reply(
-          "❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴇxᴘɪʀᴇᴅ ᴏʀ ɪɴᴠᴀʟɪᴅ.*\n\n" +
-          "Your saved cookies.txt is no longer valid. Export a fresh one from a logged-in YouTube session and replace the old file."
-        );
+        reply("❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴇxᴘɪʀᴇᴅ ᴏʀ ɪɴᴠᴀʟɪᴅ.*\n\nYour saved cookies.txt is no longer valid. Export a fresh one from a logged-in YouTube session and replace the old file.");
       }
     } else {
-      reply("❌ *ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ/ᴄᴏɴᴠᴇʀᴛɪɴɢ ᴠɪᴅᴇᴏ.*");
+      reply("❌ *ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ/ᴄᴏɴᴠᴇʀᴛɪɴɢ sᴇʟᴇᴄᴛᴇᴅ ǫᴜᴀʟɪᴛʏ ᴠɪᴅᴇᴏ.*");
     }
 
     delete pendingVideoQuality[key];
@@ -558,7 +517,7 @@ cmd(
     category: "download",
     filename: __filename,
   },
-  async (sock, mek, m, { from, q, sender, reply }) => {
+  async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
     try {
       if (!q) return reply("🎬 *ᴘʟᴇᴀsᴇ ᴘʀᴏᴠɪᴅᴇ ᴀ ʏᴏᴜᴛᴜʙᴇ ʟɪɴᴋ ᴏʀ ᴠɪᴅᴇᴏ ɴᴀᴍᴇ.*");
 
@@ -578,7 +537,8 @@ cmd(
         lastActionAt: 0,
       };
 
-      await sendQualityInteractiveMenu(sock, from, mek, video);
+      // ✅ FIX: pass sessionId
+      await sendQualityInteractiveMenu(sock, from, mek, video, sessionId);
     } catch (e) {
       console.log("VIDEO MENU ERROR:", e && e.message, e && e.stack);
       reply("❌ *ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴘʀᴇᴘᴀʀɪɴɢ ᴠɪᴅᴇᴏ ᴍᴇɴᴜ.*");
