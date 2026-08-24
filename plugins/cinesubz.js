@@ -5,7 +5,36 @@ const pendingSearch = {};
 const pendingQuality = {};
 
 const API_BASE = "https://chama-movie-api.koyeb.app";
-const API_KEY = "chama_api_c18d54f734c23ea0c333d33b7494b3b2";
+
+// API Keys ලැයිස්තුව
+const API_KEYS = [
+  "chama_api_430e2c6fba9381049992c8b23378d092",
+  "chama_api_b1f489dd1a70d495e36b866f1d357d31",
+  "chama_api_e6c8ddab785ade7c84793d6014a72356",
+  "chama_api_70cc983cf9e9e3ad0ff254df6b9c134d"
+];
+
+let currentKeyIndex = 0;
+
+// 100% Universal Small Caps Font Converter
+function toSmallCaps(str = "") {
+  const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+  return String(str)
+    .split("")
+    .map((char) => {
+      const idx = normal.indexOf(char);
+      return idx !== -1 ? small[idx] : char;
+    })
+    .join("");
+}
+
+// මාරුවෙන් මාරුවට API Key එක ලබාදෙන Function එක (Round-Robin Rotation)
+function getNextApiKey() {
+  const apiKey = API_KEYS[currentKeyIndex];
+  currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length;
+  return apiKey;
+}
 
 const headers = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -14,39 +43,50 @@ const headers = {
 // 1. Search Command
 cmd({
   pattern: "cinesubz",
-  alias: ["cinesub", "cs", "cssearch", "film", "movie"],
+  alias: ["cinesub", "cs", "cssearch"],
   react: "🎬",
   desc: "Search and send movies from Cinesubz.co",
   category: "download",
   filename: __filename
 }, async (danuwa, mek, m, { from, q, sender, reply }) => {
-  if (!q) return reply("*🎬 Cinesubz Movie Downloader*\n\n*Usage:* .cinesubz <movie_name>\n*Example:* .cinesubz avengers");
+  if (!q) {
+    return reply(`🎬 *ᴄɪɴᴇsᴜʙᴢ ᴍᴏᴠɪᴇ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ*\n\n📌 *ᴜsᴀɢᴇ:* \`.cinesubz <movie_name>\`\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`.cinesubz avengers\``);
+  }
 
-  reply("*🔍 Searching Cinesubz for movies...*");
+  await reply(`🔍 *sᴇᴀʀᴄʜɪɴɢ ᴄɪɴᴇsᴜʙᴢ ғᴏʀ ᴍᴏᴠɪᴇs...*\n\n⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...*`);
 
   try {
-    const searchUrl = `${API_BASE}/api/v1/movie/cinesubz/search?q=${encodeURIComponent(q.trim())}&api_key=${API_KEY}`;
+    // මේ සෙවුම් වටය සඳහා API Key එකක් තෝරාගැනීම
+    const apiKey = getNextApiKey();
+    const searchUrl = `${API_BASE}/api/v1/movie/cinesubz/search?q=${encodeURIComponent(q.trim())}&api_key=${apiKey}`;
     const res = await axios.get(searchUrl, { headers, timeout: 60000 });
 
     if (!res.data || !res.data.status || !res.data.data || res.data.data.length === 0) {
-      return reply("*❌ No movies found on Cinesubz!*");
+      return reply(`❌ *ɴᴏ ᴍᴏᴠɪᴇs ғᴏᴜɴᴅ ᴏɴ ᴄɪɴᴇsᴜʙᴢ!*`);
     }
 
     const results = res.data.data.slice(0, 10);
-    pendingSearch[sender] = { results, timestamp: Date.now() };
+    // තෝරාගත් API Key එක Session එක තුළ Save කර තැබීම
+    pendingSearch[sender] = { results, apiKey, timestamp: Date.now() };
 
-    let text = "*🎬 Cinesubz Search Results:*\n\n";
+    let text = `╭━━━〔 🎬 *ᴄɪɴᴇsᴜʙᴢ sᴇᴀʀᴄʜ* 〕━━━\n┃\n`;
+    text += `┃ 🔎 *sᴇᴀʀᴄʜ:* ${toSmallCaps(q)}\n`;
+    text += `┃ 📊 *ʀᴇsᴜʟᴛs:* ${results.length}\n┃\n`;
+    text += `╰━━━───────━━━━► ❥\n\n`;
+
     results.forEach((item, index) => {
+      const numStr = String(index + 1).padStart(2, "0");
       const typeIcon = item.type === "tvshows" ? "📺" : "🎥";
-      text += `*${index + 1}.* ${typeIcon} ${item.title}\n`;
+      text += `*[ ${numStr} ]* ${typeIcon} *${toSmallCaps(item.title)}*\n`;
     });
 
-    text += `\n*Reply with movie number (1-${results.length})*`;
+    text += `\n───────────────────\n`;
+    text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴍᴏᴠɪᴇ ɴᴜᴍʙᴇʀ (1-${results.length})*`;
     reply(text);
 
   } catch (error) {
     console.error("Cinesubz Search Error:", error.message);
-    reply("*❌ Error searching movies. Please try again later.*");
+    reply(`❌ *ᴇʀʀᴏʀ sᴇᴀʀᴄʜɪɴɢ ᴍᴏᴠɪᴇs. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ.*`);
   }
 });
 
@@ -58,31 +98,36 @@ cmd({
 
   const index = parseInt(body.trim()) - 1;
   const selected = pendingSearch[sender].results[index];
+  const apiKey = pendingSearch[sender].apiKey; // Search එකට භාවිත කළ Key එකම ලබා ගැනීම
   delete pendingSearch[sender];
 
-  reply("*🔗 Fetching movie details and download links...*");
+  reply(`🔗 *ғᴇᴛᴄʜɪɴɢ ᴍᴏᴠɪᴇ ᴅᴇᴛᴀɪʟs ᴀɴᴅ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋs...*`);
 
   try {
-    const movieUrl = `${API_BASE}/api/v1/movie/cinesubz/infodl?q=${encodeURIComponent(selected.link)}&api_key=${API_KEY}`;
+    const movieUrl = `${API_BASE}/api/v1/movie/cinesubz/infodl?q=${encodeURIComponent(selected.link)}&api_key=${apiKey}`;
     const res = await axios.get(movieUrl, { headers, timeout: 60000 });
     const movieInfo = res.data?.data;
 
     if (!movieInfo || !movieInfo.downloads || movieInfo.downloads.length === 0) {
-      return reply("*❌ No download links available for this movie!*");
+      return reply(`❌ *ɴᴏ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋs ᴀᴠᴀɪʟᴀʙʟᴇ ғᴏʀ ᴛʜɪs ᴍᴏᴠɪᴇ!*`);
     }
 
-    let msg = `*🎬 ${movieInfo.title}*\n\n`;
-    if (movieInfo.imdb || movieInfo.rating) msg += `*⭐ IMDb:* ${movieInfo.imdb || movieInfo.rating}\n`;
-    if (movieInfo.year) msg += `*📅 Year:* ${movieInfo.year}\n`;
-
     const downloadLinks = movieInfo.downloads;
-    pendingQuality[sender] = { movie: { metadata: movieInfo, downloadLinks }, timestamp: Date.now() };
+    pendingQuality[sender] = { movie: { metadata: movieInfo, downloadLinks }, apiKey, timestamp: Date.now() };
 
-    let qualityMsg = msg + "\n*📥 Available Qualities:*\n";
+    let qualityMsg = `╭━━━〔 📥 *ᴀᴠᴀɪʟᴀʙʟᴇ ǫᴜᴀʟɪᴛɪᴇs* 〕━━━\n┃\n`;
+    qualityMsg += `┃ 🎬 *${toSmallCaps(movieInfo.title)}*\n`;
+    if (movieInfo.imdb || movieInfo.rating) qualityMsg += `┃ ⭐ *ɪᴍᴅʙ:* ${movieInfo.imdb || movieInfo.rating}\n`;
+    if (movieInfo.year) qualityMsg += `┃ 📅 *ʏᴇᴀʀ:* ${movieInfo.year}\n`;
+    qualityMsg += `┃\n╰━━━───────━━━━► ❥\n\n`;
+
     downloadLinks.forEach((d, i) => {
-      qualityMsg += `*${i + 1}.* ${d.quality} - ${d.size || "N/A"}\n`;
+      const numStr = String(i + 1).padStart(2, "0");
+      qualityMsg += `*[ ${numStr} ]* 📊 *${d.quality}* _(${d.size || "N/A"})_\n`;
     });
-    qualityMsg += `\n*Reply with quality number (1-${downloadLinks.length}) to receive the movie.*`;
+
+    qualityMsg += `\n───────────────────\n`;
+    qualityMsg += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ǫᴜᴀʟɪᴛʏ ɴᴜᴍʙᴇʀ (1-${downloadLinks.length}) ᴛᴏ ʀᴇᴄᴇɪᴠᴇ ᴛʜᴇ ᴍᴏᴠɪᴇ.*`;
 
     if (movieInfo.image || movieInfo.thumbnail) {
       await danuwa.sendMessage(from, { image: { url: movieInfo.image || movieInfo.thumbnail }, caption: qualityMsg }, { quoted: mek });
@@ -92,7 +137,7 @@ cmd({
 
   } catch (error) {
     console.error("Fetch Movie Details Error:", error.message);
-    reply("*❌ Failed to load download links.*");
+    reply(`❌ *ғᴀɪʟᴇᴅ ᴛᴏ ʟᴏᴀᴅ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋs.*`);
   }
 });
 
@@ -107,7 +152,7 @@ cmd({
   delete pendingQuality[sender];
 
   const selectedLink = movie.downloadLinks[index];
-  reply(`*⬇️ Uploading ${selectedLink.quality} movie as a document...*\nPlease wait a moment.`);
+  reply(`⬇️ *ᴜᴘʟᴏᴀᴅɪɴɢ ${selectedLink.quality} ᴍᴏᴠɪᴇ ᴀs ᴀ ᴅᴏᴄᴜᴍᴇɴᴛ...*\n\n⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ ᴀ ᴍᴏᴍᴇɴᴛ.*`);
 
   try {
     const cleanTitle = movie.metadata.title.replace(/[^\w\s.-]/gi, "").substring(0, 50);
@@ -116,12 +161,12 @@ cmd({
       document: { url: selectedLink.link },
       mimetype: "video/mp4",
       fileName: `${cleanTitle} - ${selectedLink.quality}.mp4`,
-      caption: `*🎬 ${movie.metadata.title}*\n*📊 Quality:* ${selectedLink.quality}\n*💾 Size:* ${selectedLink.size || "N/A"}\n\n*Enjoy your movie! 🍿*`
+      caption: `🎬 *${toSmallCaps(movie.metadata.title)}*\n\n📊 *ǫᴜᴀʟɪᴛʏ:* ${selectedLink.quality}\n💾 *sɪᴢᴇ:* ${selectedLink.size || "N/A"}\n\n🍿 *ᴇɴᴊᴏʏ ʏᴏᴜʀ ᴍᴏᴠɪᴇ!*`
     }, { quoted: mek });
 
   } catch (error) {
     console.error("Send Document Error:", error.message);
-    reply(`*❌ Failed to send movie document:* ${error.message || "Unknown error"}`);
+    reply(`❌ *ғᴀɪʟᴇᴅ ᴛᴏ sᴇɴᴅ ᴍᴏᴠɪᴇ ᴅᴏᴄᴜᴍᴇɴᴛ:* ${error.message || "Unknown error"}`);
   }
 });
 
