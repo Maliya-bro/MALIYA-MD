@@ -9,12 +9,12 @@ const { tmpdir } = require('os');
 
 const execFileAsync = promisify(execFile);
 
-// User Session Tracking Maps
+// User State Management
 const pendingXhamSearch = {};
 const pendingXhamOption = {};
 const pendingXhamCustomTime = {};
 
-const SESSION_TIMEOUT = 5 * 60 * 1000; // විනාඩි 5යි
+const SESSION_TIMEOUT = 5 * 60 * 1000;
 const UA = 'Mozilla/5.0 (Linux; Android 11; Redmi Note 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
 
 function secsToTime(s) {
@@ -26,7 +26,6 @@ function secsToTime(s) {
     return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
-// 100ක් වෙනකම් Results Scrape කරන Function එක
 async function xhamsterSearch(query, limit = 100) {
     let allResults = [];
     let page = 1;
@@ -64,7 +63,6 @@ async function xhamsterSearch(query, limit = 100) {
     return allResults;
 }
 
-// FFmpeg Trim Options සහිත Buffer Downloader එක
 async function xhamsterDownloadBuffer(url, quality = '720p', timeOptions = {}) {
     const { data } = await axios.get(url, {
         headers: { 'User-Agent': UA },
@@ -153,7 +151,6 @@ async function xhamsterDownloadBuffer(url, quality = '720p', timeOptions = {}) {
     }
 }
 
-// 10 බැගින් Result Text එක හදන Helper Function එක
 function generateResultText(results, startIndex = 0) {
     const endIndex = Math.min(startIndex + 10, results.length);
     let text = `*🐹 xHAMSTER RESULTS (${startIndex + 1} - ${endIndex} of ${results.length}):*\n\n`;
@@ -170,7 +167,6 @@ function generateResultText(results, startIndex = 0) {
     return text;
 }
 
-// Processing Download Function
 async function processDownload(bot, mek, m, reply, from, selected, timeOptions = {}, customMsg = "") {
     reply(`*⚙️ Processing stream & rendering video, please wait...*`);
 
@@ -237,7 +233,6 @@ cmd({
             return reply(`*❌ No results found on xHamster for "${q}".*`);
         }
 
-        // Active Session Reset
         delete pendingXhamOption[sender];
         delete pendingXhamCustomTime[sender];
 
@@ -255,16 +250,16 @@ cmd({
     }
 });
 
-// ===== 2. STRICT RESPONSE LISTENER =====
+// ===== 2. NUMBER & TIME REPLY LISTENER =====
 cmd({
-    on: "text"
+    filter: (text, { sender }) => Boolean(pendingXhamSearch[sender] || pendingXhamOption[sender] || pendingXhamCustomTime[sender])
 }, async (bot, mek, m, { body, sender, reply, from }) => {
     const input = body ? body.trim() : "";
     if (!input) return;
 
-    // A. TIME CUT SELECTION INPUT (e.g. 5:10)
+    // 1. Custom Time Handling (e.g. 5:10)
     if (pendingXhamCustomTime[sender]) {
-        if (!input.includes(':')) return; // ignore non-time inputs silently
+        if (!input.includes(':')) return;
 
         const selected = pendingXhamCustomTime[sender].selected;
         const parts = input.split(':').map(n => parseInt(n.trim()));
@@ -285,9 +280,9 @@ cmd({
         return processDownload(bot, mek, m, reply, from, selected, { startTimeInSec, durationInSec }, `${startMin} Min to ${endMin} Min`);
     }
 
-    // B. OPTION 1 OR 2 SELECTION
+    // 2. Option 1 or 2 Handling
     if (pendingXhamOption[sender]) {
-        if (input !== '1' && input !== '2') return; // ignore other inputs silently
+        if (input !== '1' && input !== '2') return;
 
         const selected = pendingXhamOption[sender].selected;
         delete pendingXhamOption[sender];
@@ -303,15 +298,15 @@ cmd({
         }
     }
 
-    // C. VIDEO NUMBER SELECTION (1-100 & 11, 21, ..., 91 Pagination)
+    // 3. Search Result Number Selection (1-100 & Next Pages: 11, 21, 31, 41, 51, 61, 71, 81, 91)
     if (pendingXhamSearch[sender]) {
         const num = parseInt(input);
-        if (isNaN(num)) return; // 숫자가 아닌 일반 텍스트는 무시 (Spam 방지)
+        if (isNaN(num)) return;
 
         const session = pendingXhamSearch[sender];
         if (num <= 0 || num > session.results.length) return;
 
-        // Next Page Pagination (11, 21, 31, 41, 51, 61, 71, 81, 91)
+        // Check Pagination Next Page
         if ([11, 21, 31, 41, 51, 61, 71, 81, 91].includes(num)) {
             session.timestamp = Date.now();
             return reply(generateResultText(session.results, num - 1));
@@ -333,7 +328,7 @@ cmd({
     }
 });
 
-// Auto Cleanup (විනාඩි 5 Timeout)
+// Auto Cleanup
 setInterval(() => {
     const now = Date.now();
     for (const s in pendingXhamSearch) {
