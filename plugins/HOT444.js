@@ -21,26 +21,42 @@ function secsToTime(s) {
     return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
-async function xhamsterSearch(query, limit = 10) {
-    const { data } = await axios.get(`https://xhamster.com/search/${encodeURIComponent(query)}`, {
-        headers: { 'User-Agent': UA },
-        timeout: 12000
-    });
-    const $ = cheerio.load(data);
-    const results = [];
-    $('[class*="video-thumb"]').each((_, el) => {
-        if (results.length >= limit) return false;
-        const anchor = $(el).find('a.thumb-image-container').first();
-        const img = $(el).find('img').first();
-        const title = anchor.attr('aria-label') || $(el).find('[class*="name"]').first().text().trim();
-        const href = anchor.attr('href') || '';
-        const thumb = img.attr('src') || img.attr('srcset')?.split(' ')[0] || '';
-        const duration = $(el).find('time').first().attr('datetime') || '';
-        const views = $(el).find('[class*="views"]').first().text().trim();
-        if (!title || !href) return;
-        results.push({ title, url: href, thumb, duration, views });
-    });
-    return results;
+// 100ක් වෙනකම් Results Scrape කරන විදිහට වෙනස් කර ඇත
+async function xhamsterSearch(query, limit = 100) {
+    let allResults = [];
+    let page = 1;
+
+    while (allResults.length < limit && page <= 5) { // Pages 5ක් දක්වා Scraping සිදුකරයි
+        const url = page === 1 
+            ? `https://xhamster.com/search/${encodeURIComponent(query)}` 
+            : `https://xhamster.com/search/${encodeURIComponent(query)}?page=${page}`;
+
+        try {
+            const { data } = await axios.get(url, {
+                headers: { 'User-Agent': UA },
+                timeout: 12000
+            });
+            const $ = cheerio.load(data);
+            
+            $('[class*="video-thumb"]').each((_, el) => {
+                if (allResults.length >= limit) return false;
+                const anchor = $(el).find('a.thumb-image-container').first();
+                const img = $(el).find('img').first();
+                const title = anchor.attr('aria-label') || $(el).find('[class*="name"]').first().text().trim();
+                const href = anchor.attr('href') || '';
+                const thumb = img.attr('src') || img.attr('srcset')?.split(' ')[0] || '';
+                const duration = $(el).find('time').first().attr('datetime') || '';
+                const views = $(el).find('[class*="views"]').first().text().trim();
+                if (title && href) {
+                    allResults.push({ title, url: href, thumb, duration, views });
+                }
+            });
+            page++;
+        } catch (err) {
+            break;
+        }
+    }
+    return allResults;
 }
 
 async function xhamsterDownloadBuffer(url, quality = '720p') {
@@ -95,7 +111,6 @@ async function xhamsterDownloadBuffer(url, quality = '720p') {
     const tmpDir = await mkdtemp(join(tmpdir(), 'xhdl-'));
     const outPath = join(tmpDir, 'video.mp4');
     try {
-        // WhatsApp සදහා Codec පරිවර්තනය (Fix)
         await execFileAsync('ffmpeg', [
             '-v', 'quiet',
             '-y',
@@ -119,6 +134,23 @@ async function xhamsterDownloadBuffer(url, quality = '720p') {
     }
 }
 
+// 10 බැගින් Result Text එක හදන Helper Function එක
+function generateResultText(results, startIndex = 0) {
+    const endIndex = Math.min(startIndex + 10, results.length);
+    let text = `*🐹 xHAMSTER RESULTS (${startIndex + 1} - ${endIndex} of ${results.length}):*\n\n`;
+    
+    for (let i = startIndex; i < endIndex; i++) {
+        const v = results[i];
+        text += `*${i + 1}.* ${v.title.slice(0, 50)} ${v.duration ? `(${v.duration})` : ''}\n`;
+    }
+    
+    text += `\n📌 *Reply with video number to download.*`;
+    if (endIndex < results.length && endIndex <= 90) {
+        text += `\n➡️ *Reply with "${endIndex + 1}" to see next 10 results.*`;
+    }
+    return text;
+}
+
 // ===== 1. MAIN SEARCH COMMAND =====
 cmd({
     pattern: "xhamster",
@@ -133,22 +165,21 @@ cmd({
     reply("*🔍 Searching xHamster for videos...*");
 
     try {
-        const results = await xhamsterSearch(q.trim(), 10);
+        const results = await xhamsterSearch(q.trim(), 100);
 
         if (!results || !Array.isArray(results) || results.length === 0) {
             await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
             return reply(`*❌ No results found on xHamster for "${q}".*`);
         }
 
-        pendingXhamSearch[sender] = { results, timestamp: Date.now() };
+        // Search Data එක Save කරගැනීම
+        pendingXhamSearch[sender] = { 
+            results, 
+            timestamp: Date.now() 
+        };
 
-        let text = "*🐹 xHAMSTER SEARCH RESULTS:*\n\n";
-        results.forEach((v, i) => {
-            text += `*${i + 1}.* ${v.title.slice(0, 60)} ${v.duration ? `(${v.duration})` : ''}\n`;
-        });
-        text += `\n*Reply with video number (1-${results.length}) within 5 minutes.*`;
-
-        reply(text);
+        // මුල් 10 පෙන්වීම (Index 0 සිට 9 දක්වා)
+        reply(generateResultText(results, 0));
 
     } catch (error) {
         console.error("xHamster Search Error:", error);
@@ -157,18 +188,27 @@ cmd({
     }
 });
 
-// ===== 2. NUMBER REPLY LISTENER =====
+// ===== 2. NUMBER REPLY & NEXT PAGE LISTENER =====
 cmd({
     filter: (text, { sender }) => pendingXhamSearch[sender] && !isNaN(text) && parseInt(text) > 0 && parseInt(text) <= pendingXhamSearch[sender].results.length
 }, async (bot, mek, m, { body, sender, reply, from }) => {
 
+    const num = parseInt(body.trim());
+    const session = pendingXhamSearch[sender];
+
+    // Check if the user entered 11, 21, 31, 41 ... 91 to load NEXT page
+    if ([11, 21, 31, 41, 51, 61, 71, 81, 91].includes(num)) {
+        session.timestamp = Date.now(); // Reset timeout on page change
+        return reply(generateResultText(session.results, num - 1));
+    }
+
+    // වීඩියෝවක් තෝරාගත් විට:
     await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
 
-    const index = parseInt(body.trim()) - 1;
-    const selected = pendingXhamSearch[sender].results[index];
-    delete pendingXhamSearch[sender];
+    const selected = session.results[num - 1];
+    delete pendingXhamSearch[sender]; // Download එක පටන් ගත් පසු Session එක clear කරයි
 
-    reply(`*⚙️ Converting video format for WhatsApp compatibility, please wait...*`);
+    reply(`*⚙️ Processing video #${num}, please wait...*`);
 
     try {
         const videoData = await xhamsterDownloadBuffer(selected.url, '720p');
@@ -210,7 +250,7 @@ cmd({
     }
 });
 
-// Auto Cleanup
+// Auto Cleanup (විනාඩි 5 Timeout)
 setInterval(() => {
     const now = Date.now();
     for (const s in pendingXhamSearch) {
