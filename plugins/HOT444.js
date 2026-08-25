@@ -12,7 +12,6 @@ const pendingXhamSearch = {};
 const SESSION_TIMEOUT = 5 * 60 * 1000; // විනාඩි 5යි
 const UA = 'Mozilla/5.0 (Linux; Android 11; Redmi Note 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
 
-// ===== HELPER FUNCTIONS & SCRAPERS =====
 function secsToTime(s) {
     if (!s) return null;
     const h = Math.floor(s / 3600);
@@ -96,15 +95,23 @@ async function xhamsterDownloadBuffer(url, quality = '720p') {
     const tmpDir = await mkdtemp(join(tmpdir(), 'xhdl-'));
     const outPath = join(tmpDir, 'video.mp4');
     try {
+        // WhatsApp සදහා Codec පරිවර්තනය (Fix)
         await execFileAsync('ffmpeg', [
             '-v', 'quiet',
             '-y',
             '-user_agent', UA,
             '-headers', 'Referer: https://xhamster.com/\r\n',
             '-i', streamUrl,
-            '-c', 'copy',
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',
+            '-crf', '26',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',
             outPath
-        ], { timeout: 120000 });
+        ], { timeout: 180000 });
+
         const buffer = await readFile(outPath);
         return { title, thumb, duration, views, buffer, quality };
     } finally {
@@ -133,7 +140,6 @@ cmd({
             return reply(`*❌ No results found on xHamster for "${q}".*`);
         }
 
-        // Pending Storage එකට එකතු කිරීම
         pendingXhamSearch[sender] = { results, timestamp: Date.now() };
 
         let text = "*🐹 xHAMSTER SEARCH RESULTS:*\n\n";
@@ -162,7 +168,7 @@ cmd({
     const selected = pendingXhamSearch[sender].results[index];
     delete pendingXhamSearch[sender];
 
-    reply(`*⚙️ Processing stream & downloading buffer, please wait...*`);
+    reply(`*⚙️ Converting video format for WhatsApp compatibility, please wait...*`);
 
     try {
         const videoData = await xhamsterDownloadBuffer(selected.url, '720p');
@@ -204,7 +210,7 @@ cmd({
     }
 });
 
-// ===== 3. AUTO CLEANUP (විනාඩි 5 Timeout එක සදහා) =====
+// Auto Cleanup
 setInterval(() => {
     const now = Date.now();
     for (const s in pendingXhamSearch) {
