@@ -16,7 +16,7 @@ const pendingXhamCustomTime = {};
 const lastProcessedMsg = {}; // Loop Protection State
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
-const LOOP_COOLDOWN = 3000; // 3 Seconds Cooldown for Loop Prevention
+const LOOP_COOLDOWN = 3000;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 // ===== HELPER FUNCTIONS =====
@@ -89,7 +89,6 @@ async function xhamDownloadBuffer(url, timeOptions = {}) {
     const $ = cheerio.load(data);
     let hlsUrl = null;
 
-    // Extract HLS Master Playlist / mp4 URL from initial state scripts
     const windowStateMatch = data.match(/window\.initials\s*=\s*({.*?});/s);
     if (windowStateMatch) {
         try {
@@ -153,9 +152,9 @@ async function xhamDownloadBuffer(url, timeOptions = {}) {
 
 function generateResultText(results, startIndex = 0) {
     const endIndex = Math.min(startIndex + 10, results.length);
-    let text = `╭〔 🔞 *xʜᴀᴍsᴛᴇʀ sᴇᴀʀᴄʜ* 〕━\n┃\n`;
+    let text = `╭━━━〔 🔞 *xʜᴀᴍsᴛᴇʀ sᴇᴀʀᴄʜ* 〕━━━\n┃\n`;
     text += `┃ 📊 *ʀᴇsᴜʟᴛs:* ${startIndex + 1} - ${endIndex} of ${results.length}\n┃\n`;
-    text += `╰━━━───────━━━► ❥\n\n`;
+    text += `╰━━━───────━━━━► ❥\n\n`;
 
     for (let i = startIndex; i < endIndex; i++) {
         const v = results[i];
@@ -163,7 +162,7 @@ function generateResultText(results, startIndex = 0) {
         text += `*[ ${numStr} ]* 🎬 *${toSmallCaps(v.title.slice(0, 42))}* ${v.duration ? `_(${v.duration})_` : ''}\n`;
     }
 
-    text += `\n──────────────\n`;
+    text += `\n───────────────────\n`;
     text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴠɪᴅᴇᴏ ɴᴜᴍʙᴇʀ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ*\n`;
     if (endIndex < results.length && endIndex <= 90) {
         text += `➡️ *ʀᴇᴘʟʏ ᴡɪᴛʜ "${endIndex + 1}" ᴛᴏ sᴇᴇ ɴᴇxᴛ 10 ʀᴇsᴜʟᴛs*`;
@@ -258,10 +257,17 @@ cmd({
     }
 });
 
-// ===== 2. NUMBER & TIME REPLY LISTENER =====
+// ===== 2. NUMBER & TIME REPLY LISTENER (FIXED STRICT LISTENER) =====
 cmd({
     filter: (text, { sender, key }) => {
-        if (!sender || (key && key.fromMe)) return false; // Prevent Bot Self-Loop
+        if (!sender || (key && key.fromMe)) return false;
+        
+        // Strict pattern check: Message must ONLY be numbers (e.g. 1, 2, 11) or time format (e.g. 5:10)
+        const isNumber = /^\d+$/.test(text ? text.trim() : "");
+        const isTimeFormat = /^\d+:\d+$/.test(text ? text.trim() : "");
+
+        if (!isNumber && !isTimeFormat) return false;
+
         return Boolean(pendingXhamSearch[sender] || pendingXhamOption[sender] || pendingXhamCustomTime[sender]);
     }
 }, async (bot, mek, m, { body, sender, reply, from }) => {
@@ -272,15 +278,15 @@ cmd({
     const now = Date.now();
     const lastMsg = lastProcessedMsg[sender];
     if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
-        console.warn(`[LOOP PREVENTED] Ignored duplicate input '${input}' from ${sender}`);
         return;
     }
     lastProcessedMsg[sender] = { text: input, time: now };
 
-    // 1. Custom Time Handling (e.g. 5:10)
+    // 1. Custom Time Handling (Strict `min:min` format required)
     if (pendingXhamCustomTime[sender]) {
-        if (!input.includes(':')) {
-            return reply(`❌ *ɪɴᴠᴀʟɪᴅ ᴛɪᴍᴇ ғᴏʀᴍᴀᴛ!*\n\n📌 *ᴘʟᴇᴀsᴇ sᴇɴᴅ ɪɴ StartMinute:EndMinute ғᴏʀᴍᴀᴛ.*\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`5:10\` _(From 5th minute to 10th minute)_`);
+        if (!/^\d+:\d+$/.test(input)) {
+            clearUserSession(sender);
+            return reply(`❌ *ɪɴᴠᴀʟɪᴅ ᴛɪᴍᴇ ғᴏʀᴍᴀᴛ!*\n\n📌 *sᴇsssɪᴏɴ ᴄᴀɴᴄᴇʟʟᴇᴅ. ᴘʟᴇᴀsᴇ sᴇᴀʀᴄʜ ᴀɢᴀɪɴ.*`);
         }
 
         const selected = pendingXhamCustomTime[sender].selected;
@@ -290,7 +296,8 @@ cmd({
         let endMin = parts[1];
 
         if (isNaN(startMin) || isNaN(endMin) || startMin < 0 || endMin <= startMin) {
-            return reply(`❌ *ɪɴᴠᴀʟɪᴅ ᴛɪᴍᴇ ᴠᴀʟᴜᴇs!*\n\n📌 *sᴛᴀʀᴛ ᴍɪɴᴜᴛᴇ ᴍᴜsᴛ ʙᴇ sᴍᴀʟʟᴇʀ ᴛʜᴀɴ ᴇɴᴅ ᴍɪɴᴜᴛᴇ.*\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`5:10\` _(From 5th minute to 10th minute)_`);
+            clearUserSession(sender);
+            return reply(`❌ *ɪɴᴠᴀʟɪᴅ ᴛɪᴍᴇ ᴠᴀʟᴜᴇs!*\n\n📌 *sᴛᴀʀᴛ ᴍɪɴᴜᴛᴇ ᴍᴜsᴛ ʙᴇ sᴍᴀʟʟᴇʀ ᴛʜᴀɴ ᴇɴᴅ ᴍɪɴᴜᴛᴇ. sᴇssɪᴏɴ ᴄᴀɴᴄᴇʟʟᴇᴅ.*`);
         }
 
         delete pendingXhamCustomTime[sender];
@@ -338,13 +345,13 @@ cmd({
 
         pendingXhamOption[sender] = { selected, timestamp: Date.now() };
 
-        let optMsg = `╭〔 🎬 *sᴇʟᴇᴄᴛᴇᴅ ᴠɪᴅᴇᴏ* 〕━\n┃\n`;
+        let optMsg = `╭━━━〔 🎬 *sᴇʟᴇᴄᴛᴇᴅ ᴠɪᴅᴇᴏ* 〕━━━\n┃\n`;
         optMsg += `┃ 📌 *${toSmallCaps(selected.title.slice(0, 42))}*\n┃\n`;
-        optMsg += `╰━━━──────━► ❥\n\n`;
+        optMsg += `╰━━━───────━━━━► ❥\n\n`;
         optMsg += `📌 *sᴇʟᴇᴄᴛ ᴅᴏᴡɴʟᴏᴀᴅ ᴍᴏᴅᴇ:*\n\n`;
         optMsg += `*[ 01 ]* 🎬 *Full Video Download*\n`;
         optMsg += `*[ 02 ]* ✂️ *Custom Time Range*\n\n`;
-        optMsg += `───────────────\n`;
+        optMsg += `───────────────────\n`;
         optMsg += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2*`;
 
         return reply(optMsg);
