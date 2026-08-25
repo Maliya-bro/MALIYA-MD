@@ -252,14 +252,25 @@ cmd({
 
 // ===== 2. NUMBER & TIME REPLY LISTENER =====
 cmd({
-    filter: (text, { sender }) => Boolean(pendingXhamSearch[sender] || pendingXhamOption[sender] || pendingXhamCustomTime[sender])
+    filter: (text, { sender, key, isGroup }) => {
+        // Bot යවන Message නැවත Process වීම වැලැක්වීම (Loop Fix)
+        if (key && key.fromMe) return false;
+        return Boolean(pendingXhamSearch[sender] || pendingXhamOption[sender] || pendingXhamCustomTime[sender]);
+    }
 }, async (bot, mek, m, { body, sender, reply, from }) => {
     const input = body ? body.trim() : "";
     if (!input) return;
 
     // 1. Custom Time Handling (e.g. 5:10)
     if (pendingXhamCustomTime[sender]) {
-        if (!input.includes(':')) return;
+        // "Invalid time format!" වැනි පරණ System message නැවත Input එකක් ලෙස යාම වැලැක්වීම
+        if (input.toLowerCase().includes('invalid') || input.toLowerCase().includes('please reply') || input.toLowerCase().includes('custom time')) {
+            return;
+        }
+
+        if (!input.includes(':')) {
+            return reply(`*❌ Invalid time format!*\n\nPlease send in *StartMinute:EndMinute* format.\n*Example:* \`5:10\` _(From 5th minute to 10th minute)_`);
+        }
 
         const selected = pendingXhamCustomTime[sender].selected;
         const parts = input.split(':').map(n => parseInt(n.trim()));
@@ -267,8 +278,8 @@ cmd({
         let startMin = parts[0];
         let endMin = parts[1];
 
-        if (isNaN(startMin) || isNaN(endMin) || startMin >= endMin) {
-            return reply(`*❌ Invalid time format!*\n\nPlease send in *StartMinute:EndMinute* format.\n*Example:* \`5:10\` _(From 5th minute to 10th minute)_`);
+        if (isNaN(startMin) || isNaN(endMin) || startMin < 0 || endMin <= startMin) {
+            return reply(`*❌ Invalid time values!*\n\nStart minute must be smaller than end minute.\n*Example:* \`5:10\` _(From 5th minute to 10th minute)_`);
         }
 
         delete pendingXhamCustomTime[sender];
