@@ -9,24 +9,37 @@ const { tmpdir } = require('os');
 
 const execFileAsync = promisify(execFile);
 
-// User State Management
+// State Management
 const pendingXhamSearch = {};
 const pendingXhamOption = {};
 const pendingXhamCustomTime = {};
+const lastProcessedMsg = {}; // Loop Protection State
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
-const UA = 'Mozilla/5.0 (Linux; Android 11; Redmi Note 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+const LOOP_COOLDOWN = 3000; // 3 Seconds Cooldown for Loop Prevention
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-function secsToTime(s) {
-    if (!s) return null;
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-    return `${m}:${String(sec).padStart(2, '0')}`;
+// ===== HELPER FUNCTIONS =====
+
+function toSmallCaps(str = "") {
+    const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+    return String(str)
+        .split("")
+        .map((char) => {
+            const idx = normal.indexOf(char);
+            return idx !== -1 ? small[idx] : char;
+        })
+        .join("");
 }
 
-async function xhamsterSearch(query, limit = 100) {
+function clearUserSession(sender) {
+    delete pendingXhamSearch[sender];
+    delete pendingXhamOption[sender];
+    delete pendingXhamCustomTime[sender];
+}
+
+async function xhamSearch(query, limit = 100) {
     let allResults = [];
     let page = 1;
 
@@ -37,22 +50,26 @@ async function xhamsterSearch(query, limit = 100) {
 
         try {
             const { data } = await axios.get(url, {
-                headers: { 'User-Agent': UA },
+                headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' },
                 timeout: 12000
             });
             const $ = cheerio.load(data);
             
-            $('[class*="video-thumb"]').each((_, el) => {
+            $('.video-thumb').each((_, el) => {
                 if (allResults.length >= limit) return false;
-                const anchor = $(el).find('a.thumb-image-container').first();
-                const img = $(el).find('img').first();
-                const title = anchor.attr('aria-label') || $(el).find('[class*="name"]').first().text().trim();
+                const anchor = $(el).find('a.video-thumb__image-container').first();
+                const img = $(el).find('img.thumb-image-container__image').first();
                 const href = anchor.attr('href') || '';
-                const thumb = img.attr('src') || img.attr('srcset')?.split(' ')[0] || '';
-                const duration = $(el).find('time').first().attr('datetime') || '';
-                const views = $(el).find('[class*="views"]').first().text().trim();
+                const title = $(el).find('.video-thumb-info__name').first().text().trim() || anchor.attr('title') || '';
+                const duration = $(el).find('.video-thumb-views-box__item--duration, [data-role="video-duration"]').first().text().trim();
+
                 if (title && href) {
-                    allResults.push({ title, url: href, thumb, duration, views });
+                    allResults.push({
+                        title,
+                        url: href.startsWith('http') ? href : `https://xhamster.com${href}`,
+                        thumb: img.attr('src') || '',
+                        duration
+                    });
                 }
             });
             page++;
@@ -63,65 +80,46 @@ async function xhamsterSearch(query, limit = 100) {
     return allResults;
 }
 
-async function xhamsterDownloadBuffer(url, quality = '720p', timeOptions = {}) {
+async function xhamDownloadBuffer(url, timeOptions = {}) {
     const { data } = await axios.get(url, {
-        headers: { 'User-Agent': UA },
+        headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' },
         timeout: 12000
     });
+    
     const $ = cheerio.load(data);
-    const scripts = $('script').map((_, el) => $(el).html()).get();
-    let title = null, thumb = null, duration = null, views = null;
-    for (const s of scripts) {
-        if (!s || !s.includes('"title"') || !s.includes('"duration"')) continue;
+    let hlsUrl = null;
+
+    // Extract HLS Master Playlist / mp4 URL from initial state scripts
+    const windowStateMatch = data.match(/window\.initials\s*=\s*({.*?});/s);
+    if (windowStateMatch) {
         try {
-            const match = s.match(/"title":"([^"]+)","thumbUrl":"([^"]+)","duration":(\d+),"views":(\d+)/);
-            if (match) {
-                title = match[1].replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
-                thumb = match[2].replace(/\\\//g, '/');
-                duration = secsToTime(parseInt(match[3]));
-                views = parseInt(match[4]);
-                break;
+            const initialState = JSON.parse(windowStateMatch[1]);
+            const videoModel = initialState.videoModel || initialState.video;
+            if (videoModel && videoModel.sources) {
+                hlsUrl = videoModel.sources.hls || videoModel.sources.mp4?.h264?.[0]?.url || videoModel.sources.standard?.h264?.[0]?.url;
             }
         } catch {}
     }
-    if (!title) title = $('meta[property="og:title"]').attr('content') || null;
-    if (!thumb) thumb = $('meta[property="og:image"]').attr('content') || null;
-    
-    const mp4Matches = [...new Set(data.match(/https?:\/\/[^\s"'\\]+\.mp4[^\s"'\\]*/g) || [])];
-    const masterUrl = mp4Matches.find(u => u.includes('480p') || u.includes('hls4'));
-    if (!masterUrl) throw new Error('No video stream found.');
-    
-    const baseUrl = masterUrl.substring(0, masterUrl.lastIndexOf('/') + 1);
-    const { data: m3u8 } = await axios.get(masterUrl, {
-        headers: { 'User-Agent': UA, 'Referer': 'https://xhamster.com/' },
-        timeout: 10000
-    });
-    
-    const lines = m3u8.split('\n');
-    let streamUrl = null;
-    for (let i = 0; i < lines.length; i++) {
-        if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
-            const qualMatch = lines[i + 1]?.trim().match(/(\d+p)/);
-            const q = qualMatch ? qualMatch[1] : null;
-            if (q === quality || (!streamUrl && q)) {
-                const next = lines[i + 1]?.trim();
-                streamUrl = next.startsWith('http') ? next : baseUrl + next;
-                if (q === quality) break;
-            }
-        }
+
+    if (!hlsUrl) {
+        const m3u8Match = data.match(/(https?:\\?\/\\?\/[^"]+\.m3u8[^"]*)/i);
+        if (m3u8Match) hlsUrl = m3u8Match[1].replace(/\\/g, '');
     }
-    if (!streamUrl) throw new Error('Requested quality stream not found.');
-    
-    const tmpDir = await mkdtemp(join(tmpdir(), 'xhdl-'));
+
+    if (!hlsUrl) throw new Error('No video stream URL found for this video.');
+
+    let title = $('h1').first().text().trim() || 'xHamster Video';
+    const duration = $('[data-role="video-duration"]').first().text().trim();
+
+    const tmpDir = await mkdtemp(join(tmpdir(), 'xhamdl-'));
     const outPath = join(tmpDir, 'video.mp4');
 
-    // FIX: Optimized FFmpeg command to handle custom stream trimming accurately
     const ffmpegArgs = [
         '-v', 'quiet',
         '-y',
         '-user_agent', UA,
         '-headers', 'Referer: https://xhamster.com/\r\n',
-        '-i', streamUrl
+        '-i', hlsUrl
     ];
 
     if (timeOptions.startTimeInSec !== undefined) {
@@ -143,11 +141,11 @@ async function xhamsterDownloadBuffer(url, quality = '720p', timeOptions = {}) {
         await execFileAsync('ffmpeg', ffmpegArgs, { timeout: 180000 });
         const buffer = await readFile(outPath);
         
-        if (buffer.length < 5000) { // Check if empty/corrupted buffer
+        if (buffer.length < 5000) {
             throw new Error('Downloaded stream returned empty file.');
         }
 
-        return { title, thumb, duration, views, buffer, quality };
+        return { title, duration, buffer, quality: '720p' };
     } finally {
         await rm(tmpDir, { recursive: true, force: true });
     }
@@ -155,52 +153,58 @@ async function xhamsterDownloadBuffer(url, quality = '720p', timeOptions = {}) {
 
 function generateResultText(results, startIndex = 0) {
     const endIndex = Math.min(startIndex + 10, results.length);
-    let text = `*🐹 xHAMSTER RESULTS (${startIndex + 1} - ${endIndex} of ${results.length}):*\n\n`;
-    
+    let text = `╭〔 🔞 *xʜᴀᴍsᴛᴇʀ sᴇᴀʀᴄʜ* 〕━\n┃\n`;
+    text += `┃ 📊 *ʀᴇsᴜʟᴛs:* ${startIndex + 1} - ${endIndex} of ${results.length}\n┃\n`;
+    text += `╰━━━───────━━━► ❥\n\n`;
+
     for (let i = startIndex; i < endIndex; i++) {
         const v = results[i];
-        text += `*${i + 1}.* ${v.title.slice(0, 50)} ${v.duration ? `(${v.duration})` : ''}\n`;
+        const numStr = String(i + 1).padStart(2, "0");
+        text += `*[ ${numStr} ]* 🎬 *${toSmallCaps(v.title.slice(0, 42))}* ${v.duration ? `_(${v.duration})_` : ''}\n`;
     }
-    
-    text += `\n📌 *Reply with video number to download.*`;
+
+    text += `\n──────────────\n`;
+    text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴠɪᴅᴇᴏ ɴᴜᴍʙᴇʀ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ*\n`;
     if (endIndex < results.length && endIndex <= 90) {
-        text += `\n➡️ *Reply with "${endIndex + 1}" to see next 10 results.*`;
+        text += `➡️ *ʀᴇᴘʟʏ ᴡɪᴛʜ "${endIndex + 1}" ᴛᴏ sᴇᴇ ɴᴇxᴛ 10 ʀᴇsᴜʟᴛs*`;
     }
     return text;
 }
 
 async function processDownload(bot, mek, m, reply, from, selected, timeOptions = {}, customMsg = "") {
-    reply(`*⚙️ Processing stream & rendering video, please wait...*`);
+    await reply(`⚙️ *ᴘʀᴏᴄᴇssɪɴɢ sᴛʀᴇᴀᴍ & ʀᴇɴᴅᴇʀɪɴɢ ᴠɪᴅᴇᴏ...*\n\n⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...*`);
 
     try {
-        const videoData = await xhamsterDownloadBuffer(selected.url, '720p', timeOptions);
+        const videoData = await xhamDownloadBuffer(selected.url, timeOptions);
 
         if (!videoData || !videoData.buffer || videoData.buffer.length < 5000) {
-            return reply(`*❌ Could not process video stream or invalid segment range.*`);
+            return reply(`❌ *ᴄᴏᴜʟᴅ ɴᴏᴛ ᴘʀᴏᴄᴇss ᴠɪᴅᴇᴏ sᴛʀᴇᴀᴍ ᴏʀ ɪɴᴠᴀʟɪᴅ sᴇɢᴍᴇɴᴛ ʀᴀɴɢᴇ!*`);
         }
 
         const sizeMB = videoData.buffer.length / (1024 * 1024);
         const title = videoData.title || selected.title || "xHamster Video";
         const cleanTitle = title.replace(/[^\w\s.-]/gi, '_').substring(0, 50);
 
-        let captionText = `*🐹 ${title}*\n*📊 Quality:* ${videoData.quality || '720p'}\n*⏱️ Original Duration:* ${videoData.duration || selected.duration || 'N/A'}\n*💾 Size:* ${sizeMB.toFixed(2)} MB`;
-        if (customMsg) captionText += `\n*✂️ Custom Range:* ${customMsg}`;
-        captionText += `\n\n*Enjoy your video! 🍿*`;
+        let captionText = `🎬 *${toSmallCaps(title)}*\n\n📊 *ǫᴜᴀʟɪᴛʏ:* ${videoData.quality || '720p'}\n⏱️ *ᴅᴜʀᴀᴛɪᴏɴ:* ${videoData.duration || selected.duration || 'N/A'}\n💾 *sɪᴢᴇ:* ${sizeMB.toFixed(2)} MB`;
+        if (customMsg) captionText += `\n✂️ *ᴄᴜsᴛᴏᴍ ʀᴀɴɢᴇ:* ${customMsg}`;
+        captionText += `\n\n🍿 *ᴇɴᴊᴏʏ ʏᴏᴜʀ ᴠɪᴅᴇᴏ!*\n\n👑 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*`;
 
         await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
+
+        const fileName = `MALIYA-MD ${cleanTitle}.mp4`;
 
         if (sizeMB > 60) {
             await bot.sendMessage(from, {
                 document: videoData.buffer,
                 mimetype: "video/mp4",
-                fileName: `${cleanTitle}.mp4`,
-                caption: captionText + `\n\n_📄 File is larger than 60MB, sent as document._`
+                fileName: fileName,
+                caption: captionText + `\n\n_📄 Video size is ${sizeMB.toFixed(1)}MB (>60MB limit), sent as document format._`
             }, { quoted: mek });
         } else {
             await bot.sendMessage(from, {
                 video: videoData.buffer,
                 mimetype: "video/mp4",
-                fileName: `${cleanTitle}.mp4`,
+                fileName: fileName,
                 caption: captionText
             }, { quoted: mek });
         }
@@ -208,68 +212,75 @@ async function processDownload(bot, mek, m, reply, from, selected, timeOptions =
         await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
 
     } catch (e) {
-        console.error("xHamster Download Error Details:", e);
+        console.error("xHamster Download Error:", e);
         await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-        reply(`*❌ Download process failed:* ${e.message || "Unknown Error"}`);
+        reply(`❌ *ᴅᴏᴡɴʟᴏᴀᴅ ᴘʀᴏᴄᴇss ғᴀɪʟᴇᴅ:* ${e.message || "Unknown Error"}`);
     }
 }
 
 // ===== 1. MAIN SEARCH COMMAND =====
 cmd({
-    pattern: "xhamster",
-    alias: ["xham", "hamster"],
+    pattern: "xham",
+    alias: ["xh", "xhamster"],
     desc: "Search and download videos from xHamster",
     category: "download",
-    react: "🐹",
+    react: "🔞",
     filename: __filename
 }, async (bot, mek, m, { from, q, sender, reply }) => {
-    if (!q) return reply(`*🐹 xHamster Downloader*\n\nUsage: .xhamster [search_term]\nExample: .xhamster hot`);
+    if (!q) {
+        return reply(`🔞 *xʜᴀᴍsᴛᴇʀ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ*\n\n📌 *ᴜsᴀɢᴇ:* \`.xham [search_term]\`\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`.xham hot\``);
+    }
 
-    reply("*🔍 Searching xHamster for videos...*");
+    await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
+    await reply("🔍 *sᴇᴀʀᴄʜɪɴɢ xʜᴀᴍsᴛᴇʀ ғᴏʀ ᴠɪᴅᴇᴏs...*");
 
     try {
-        const results = await xhamsterSearch(q.trim(), 100);
+        const results = await xhamSearch(q.trim(), 100);
 
         if (!results || !Array.isArray(results) || results.length === 0) {
             await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-            return reply(`*❌ No results found on xHamster for "${q}".*`);
+            return reply(`❌ *ɴᴏ ʀᴇsᴜʟᴛs ғᴏᴜɴᴅ ᴏɴ xʜᴀᴍsᴛᴇʀ ғᴏʀ:* _${q}_`);
         }
 
-        delete pendingXhamOption[sender];
-        delete pendingXhamCustomTime[sender];
+        clearUserSession(sender);
 
         pendingXhamSearch[sender] = { 
             results, 
             timestamp: Date.now() 
         };
 
-        reply(generateResultText(results, 0));
+        await bot.sendMessage(from, { text: generateResultText(results, 0) }, { quoted: mek });
 
     } catch (error) {
         console.error("xHamster Search Error:", error);
         await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-        reply(`*❌ Error occurred while searching xHamster!*`);
+        reply(`❌ *ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ ᴡʜɪʟᴇ sᴇᴀʀᴄʜɪɴɢ xʜᴀᴍsᴛᴇʀ!*`);
     }
 });
 
 // ===== 2. NUMBER & TIME REPLY LISTENER =====
 cmd({
     filter: (text, { sender, key }) => {
-        if (key && key.fromMe) return false;
+        if (!sender || (key && key.fromMe)) return false; // Prevent Bot Self-Loop
         return Boolean(pendingXhamSearch[sender] || pendingXhamOption[sender] || pendingXhamCustomTime[sender]);
     }
 }, async (bot, mek, m, { body, sender, reply, from }) => {
     const input = body ? body.trim() : "";
     if (!input) return;
 
+    // === LOOP PROTECTION SYSTEM ===
+    const now = Date.now();
+    const lastMsg = lastProcessedMsg[sender];
+    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
+        console.warn(`[LOOP PREVENTED] Ignored duplicate input '${input}' from ${sender}`);
+        return;
+    }
+    lastProcessedMsg[sender] = { text: input, time: now };
+
     // 1. Custom Time Handling (e.g. 5:10)
     if (pendingXhamCustomTime[sender]) {
-        if (input.toLowerCase().includes('invalid') || input.toLowerCase().includes('please reply') || input.toLowerCase().includes('custom time')) {
-            return;
-        }
-
         if (!input.includes(':')) {
-            return reply(`*❌ Invalid time format!*\n\nPlease send in *StartMinute:EndMinute* format.\n*Example:* \`5:10\` _(From 5th minute to 10th minute)_`);
+            return reply(`❌ *ɪɴᴠᴀʟɪᴅ ᴛɪᴍᴇ ғᴏʀᴍᴀᴛ!*\n\n📌 *ᴘʟᴇᴀsᴇ sᴇɴᴅ ɪɴ StartMinute:EndMinute ғᴏʀᴍᴀᴛ.*\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`5:10\` _(From 5th minute to 10th minute)_`);
         }
 
         const selected = pendingXhamCustomTime[sender].selected;
@@ -279,7 +290,7 @@ cmd({
         let endMin = parts[1];
 
         if (isNaN(startMin) || isNaN(endMin) || startMin < 0 || endMin <= startMin) {
-            return reply(`*❌ Invalid time values!*\n\nStart minute must be smaller than end minute.\n*Example:* \`5:10\` _(From 5th minute to 10th minute)_`);
+            return reply(`❌ *ɪɴᴠᴀʟɪᴅ ᴛɪᴍᴇ ᴠᴀʟᴜᴇs!*\n\n📌 *sᴛᴀʀᴛ ᴍɪɴᴜᴛᴇ ᴍᴜsᴛ ʙᴇ sᴍᴀʟʟᴇʀ ᴛʜᴀɴ ᴇɴᴅ ᴍɪɴᴜᴛᴇ.*\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`5:10\` _(From 5th minute to 10th minute)_`);
         }
 
         delete pendingXhamCustomTime[sender];
@@ -305,7 +316,7 @@ cmd({
         
         if (input === '2') {
             pendingXhamCustomTime[sender] = { selected, timestamp: Date.now() };
-            return reply(`*✂️ Custom Time Download (in Minutes)*\n\nPlease reply with start minute and end minute:\n\n*Example:* \`5:10\`\n_(This will download from **5th minute** to **10th minute**)_`);
+            return reply(`✂️ *ᴄᴜsᴛᴏᴍ ᴛɪᴍᴇ ᴅᴏᴡɴʟᴏᴀᴅ (ɪɴ ᴍɪɴᴜᴛᴇs)*\n\n📌 *ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ sᴛᴀʀᴛ ᴍɪɴᴜᴛᴇ ᴀɴᴅ ᴇɴᴅ ᴍɪɴᴜᴛᴇ:*\n\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`5:10\`\n_(This will download from **5th minute** to **10th minute**)_`);
         }
     }
 
@@ -327,17 +338,20 @@ cmd({
 
         pendingXhamOption[sender] = { selected, timestamp: Date.now() };
 
-        let optMsg = `*🎬 Selected Video:* ${selected.title.slice(0, 50)}\n\n`;
-        optMsg += `Select download mode:\n`;
-        optMsg += `*1.* Real-time Download (Full Video)\n`;
-        optMsg += `*2.* Custom Time Download (Minutes Range)\n\n`;
-        optMsg += `*Reply with 1 or 2*`;
+        let optMsg = `╭〔 🎬 *sᴇʟᴇᴄᴛᴇᴅ ᴠɪᴅᴇᴏ* 〕━\n┃\n`;
+        optMsg += `┃ 📌 *${toSmallCaps(selected.title.slice(0, 42))}*\n┃\n`;
+        optMsg += `╰━━━──────━► ❥\n\n`;
+        optMsg += `📌 *sᴇʟᴇᴄᴛ ᴅᴏᴡɴʟᴏᴀᴅ ᴍᴏᴅᴇ:*\n\n`;
+        optMsg += `*[ 01 ]* 🎬 *Full Video Download*\n`;
+        optMsg += `*[ 02 ]* ✂️ *Custom Time Range*\n\n`;
+        optMsg += `───────────────\n`;
+        optMsg += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2*`;
 
         return reply(optMsg);
     }
 });
 
-// Auto Cleanup
+// Auto Cleanup & Loop Reset Interval
 setInterval(() => {
     const now = Date.now();
     for (const s in pendingXhamSearch) {
@@ -348,6 +362,9 @@ setInterval(() => {
     }
     for (const s in pendingXhamCustomTime) {
         if (now - pendingXhamCustomTime[s].timestamp > SESSION_TIMEOUT) delete pendingXhamCustomTime[s];
+    }
+    for (const s in lastProcessedMsg) {
+        if (now - lastProcessedMsg[s].time > LOOP_COOLDOWN) delete lastProcessedMsg[s];
     }
 }, 2.5 * 60 * 1000);
 
