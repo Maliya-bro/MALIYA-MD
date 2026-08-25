@@ -115,29 +115,26 @@ async function xhamsterDownloadBuffer(url, quality = '720p', timeOptions = {}) {
     const tmpDir = await mkdtemp(join(tmpdir(), 'xhdl-'));
     const outPath = join(tmpDir, 'video.mp4');
 
-    const ffmpegArgs = ['-v', 'quiet', '-y'];
+    // FIX: Optimized FFmpeg command to handle custom stream trimming accurately
+    const ffmpegArgs = [
+        '-v', 'quiet',
+        '-y',
+        '-user_agent', UA,
+        '-headers', 'Referer: https://xhamster.com/\r\n',
+        '-i', streamUrl
+    ];
 
     if (timeOptions.startTimeInSec !== undefined) {
         ffmpegArgs.push('-ss', String(timeOptions.startTimeInSec));
     }
-
-    ffmpegArgs.push(
-        '-user_agent', UA,
-        '-headers', 'Referer: https://xhamster.com/\r\n',
-        '-i', streamUrl
-    );
 
     if (timeOptions.durationInSec !== undefined) {
         ffmpegArgs.push('-t', String(timeOptions.durationInSec));
     }
 
     ffmpegArgs.push(
-        '-c:v', 'libx264',
-        '-preset', 'ultrafast',
-        '-crf', '26',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-pix_fmt', 'yuv420p',
+        '-c', 'copy',
+        '-bsf:a', 'aac_adtstoasc',
         '-movflags', '+faststart',
         outPath
     );
@@ -145,6 +142,11 @@ async function xhamsterDownloadBuffer(url, quality = '720p', timeOptions = {}) {
     try {
         await execFileAsync('ffmpeg', ffmpegArgs, { timeout: 180000 });
         const buffer = await readFile(outPath);
+        
+        if (buffer.length < 5000) { // Check if empty/corrupted buffer
+            throw new Error('Downloaded stream returned empty file.');
+        }
+
         return { title, thumb, duration, views, buffer, quality };
     } finally {
         await rm(tmpDir, { recursive: true, force: true });
@@ -173,8 +175,8 @@ async function processDownload(bot, mek, m, reply, from, selected, timeOptions =
     try {
         const videoData = await xhamsterDownloadBuffer(selected.url, '720p', timeOptions);
 
-        if (!videoData || !videoData.buffer) {
-            return reply(`*❌ Could not process video stream.*`);
+        if (!videoData || !videoData.buffer || videoData.buffer.length < 5000) {
+            return reply(`*❌ Could not process video stream or invalid segment range.*`);
         }
 
         const sizeMB = videoData.buffer.length / (1024 * 1024);
@@ -252,8 +254,7 @@ cmd({
 
 // ===== 2. NUMBER & TIME REPLY LISTENER =====
 cmd({
-    filter: (text, { sender, key, isGroup }) => {
-        // Bot යවන Message නැවත Process වීම වැලැක්වීම (Loop Fix)
+    filter: (text, { sender, key }) => {
         if (key && key.fromMe) return false;
         return Boolean(pendingXhamSearch[sender] || pendingXhamOption[sender] || pendingXhamCustomTime[sender]);
     }
@@ -263,7 +264,6 @@ cmd({
 
     // 1. Custom Time Handling (e.g. 5:10)
     if (pendingXhamCustomTime[sender]) {
-        // "Invalid time format!" වැනි පරණ System message නැවත Input එකක් ලෙස යාම වැලැක්වීම
         if (input.toLowerCase().includes('invalid') || input.toLowerCase().includes('please reply') || input.toLowerCase().includes('custom time')) {
             return;
         }
@@ -309,7 +309,7 @@ cmd({
         }
     }
 
-    // 3. Search Result Number Selection (1-100 & Next Pages: 11, 21, 31, 41, 51, 61, 71, 81, 91)
+    // 3. Search Result Number Selection
     if (pendingXhamSearch[sender]) {
         const num = parseInt(input);
         if (isNaN(num)) return;
@@ -317,13 +317,11 @@ cmd({
         const session = pendingXhamSearch[sender];
         if (num <= 0 || num > session.results.length) return;
 
-        // Check Pagination Next Page
         if ([11, 21, 31, 41, 51, 61, 71, 81, 91].includes(num)) {
             session.timestamp = Date.now();
             return reply(generateResultText(session.results, num - 1));
         }
 
-        // Selected Video
         const selected = session.results[num - 1];
         delete pendingXhamSearch[sender];
 
