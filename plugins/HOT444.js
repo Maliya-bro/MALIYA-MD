@@ -8,9 +8,12 @@ const { join } = require('path');
 const { tmpdir } = require('os');
 
 const execFileAsync = promisify(execFile);
+
+// User Session Tracking Maps
 const pendingXhamSearch = {};
 const pendingXhamOption = {};
 const pendingXhamCustomTime = {};
+
 const SESSION_TIMEOUT = 5 * 60 * 1000; // විනාඩි 5යි
 const UA = 'Mozilla/5.0 (Linux; Android 11; Redmi Note 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
 
@@ -61,7 +64,7 @@ async function xhamsterSearch(query, limit = 100) {
     return allResults;
 }
 
-// FFmpeg trim options සහිත Buffer Downloader එක
+// FFmpeg Trim Options සහිත Buffer Downloader එක
 async function xhamsterDownloadBuffer(url, quality = '720p', timeOptions = {}) {
     const { data } = await axios.get(url, {
         headers: { 'User-Agent': UA },
@@ -114,11 +117,7 @@ async function xhamsterDownloadBuffer(url, quality = '720p', timeOptions = {}) {
     const tmpDir = await mkdtemp(join(tmpdir(), 'xhdl-'));
     const outPath = join(tmpDir, 'video.mp4');
 
-    // FFmpeg Flags සකස් කිරීම
-    const ffmpegArgs = [
-        '-v', 'quiet',
-        '-y'
-    ];
+    const ffmpegArgs = ['-v', 'quiet', '-y'];
 
     if (timeOptions.startTimeInSec !== undefined) {
         ffmpegArgs.push('-ss', String(timeOptions.startTimeInSec));
@@ -171,8 +170,8 @@ function generateResultText(results, startIndex = 0) {
     return text;
 }
 
-// Common Download Function එක
-async function processDownload(bot, mek, m, from, selected, timeOptions = {}, customMsg = "") {
+// Processing Download Function
+async function processDownload(bot, mek, m, reply, from, selected, timeOptions = {}, customMsg = "") {
     reply(`*⚙️ Processing stream & rendering video, please wait...*`);
 
     try {
@@ -217,10 +216,6 @@ async function processDownload(bot, mek, m, from, selected, timeOptions = {}, cu
     }
 }
 
-function reply(text) {
-    // Reply context
-}
-
 // ===== 1. MAIN SEARCH COMMAND =====
 cmd({
     pattern: "xhamster",
@@ -242,6 +237,10 @@ cmd({
             return reply(`*❌ No results found on xHamster for "${q}".*`);
         }
 
+        // Active Session Reset
+        delete pendingXhamOption[sender];
+        delete pendingXhamCustomTime[sender];
+
         pendingXhamSearch[sender] = { 
             results, 
             timestamp: Date.now() 
@@ -256,18 +255,18 @@ cmd({
     }
 });
 
-// ===== 2. NUMBER SELECTION & OPTIONS LISTENER =====
+// ===== 2. STRICT RESPONSE LISTENER =====
 cmd({
-    filter: (text, { sender }) => pendingXhamSearch[sender] || pendingXhamOption[sender] || pendingXhamCustomTime[sender]
+    on: "text"
 }, async (bot, mek, m, { body, sender, reply, from }) => {
-    const input = body.trim();
+    const input = body ? body.trim() : "";
+    if (!input) return;
 
-    // STEP A: CUSTOM TIME MINUTES ENTERED (e.g. 5:10 -> 5 minutes to 10 minutes)
+    // A. TIME CUT SELECTION INPUT (e.g. 5:10)
     if (pendingXhamCustomTime[sender]) {
-        const selected = pendingXhamCustomTime[sender].selected;
-        delete pendingXhamCustomTime[sender];
+        if (!input.includes(':')) return; // ignore non-time inputs silently
 
-        // 5:10 වැනි Input එකක් මිනිත්තු බවට හැරවීම
+        const selected = pendingXhamCustomTime[sender].selected;
         const parts = input.split(':').map(n => parseInt(n.trim()));
         
         let startMin = parts[0];
@@ -277,40 +276,42 @@ cmd({
             return reply(`*❌ Invalid time format!*\n\nPlease send in *StartMinute:EndMinute* format.\n*Example:* \`5:10\` _(From 5th minute to 10th minute)_`);
         }
 
-        const startTimeInSec = startMin * 60; // මිනිත්තු තත්පර බවට
-        const durationInSec = (endMin - startMin) * 60; // ධාවන කාලය තත්පර බවට
+        delete pendingXhamCustomTime[sender];
+
+        const startTimeInSec = startMin * 60;
+        const durationInSec = (endMin - startMin) * 60;
 
         await bot.sendMessage(from, { react: { text: "✂️", key: m.key } });
-        return processDownload(bot, mek, m, from, selected, { startTimeInSec, durationInSec }, `${startMin} Min to ${endMin} Min`);
+        return processDownload(bot, mek, m, reply, from, selected, { startTimeInSec, durationInSec }, `${startMin} Min to ${endMin} Min`);
     }
 
-    // STEP B: OPTION 1 OR 2 SELECTED
+    // B. OPTION 1 OR 2 SELECTION
     if (pendingXhamOption[sender]) {
+        if (input !== '1' && input !== '2') return; // ignore other inputs silently
+
         const selected = pendingXhamOption[sender].selected;
+        delete pendingXhamOption[sender];
 
         if (input === '1') {
-            delete pendingXhamOption[sender];
             await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-            return processDownload(bot, mek, m, from, selected, {});
+            return processDownload(bot, mek, m, reply, from, selected, {});
         } 
         
         if (input === '2') {
-            delete pendingXhamOption[sender];
             pendingXhamCustomTime[sender] = { selected, timestamp: Date.now() };
             return reply(`*✂️ Custom Time Download (in Minutes)*\n\nPlease reply with start minute and end minute:\n\n*Example:* \`5:10\`\n_(This will download from **5th minute** to **10th minute**)_`);
         }
-
-        return reply(`*❌ Invalid choice!* Please reply with *1* (Full Video) or *2* (Custom Time).`);
     }
 
-    // STEP C: VIDEO NUMBER SELECTED FROM SEARCH LIST
+    // C. VIDEO NUMBER SELECTION (1-100 & 11, 21, ..., 91 Pagination)
     if (pendingXhamSearch[sender]) {
         const num = parseInt(input);
+        if (isNaN(num)) return; // 숫자가 아닌 일반 텍스트는 무시 (Spam 방지)
+
         const session = pendingXhamSearch[sender];
+        if (num <= 0 || num > session.results.length) return;
 
-        if (isNaN(num) || num <= 0 || num > session.results.length) return;
-
-        // Next Page Clicked (11, 21, ..., 91)
+        // Next Page Pagination (11, 21, 31, 41, 51, 61, 71, 81, 91)
         if ([11, 21, 31, 41, 51, 61, 71, 81, 91].includes(num)) {
             session.timestamp = Date.now();
             return reply(generateResultText(session.results, num - 1));
