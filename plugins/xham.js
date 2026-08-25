@@ -1,27 +1,112 @@
 const { cmd } = require('../command');
-const { xhamsterSearch, xhamsterDownload } = require('xhamster-scraper');
-const { exec } = require('child_process');
+const axios = require('axios');
+const cheerio = require('cheerio');
+const { execFile } = require('child_process');
 const { promisify } = require('util');
-const { mkdtemp, rm, readFile } = require('fs/promises');
+const { mkdtemp, readFile, rm } = require('fs/promises');
 const { join } = require('path');
 const { tmpdir } = require('os');
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const pendingXhamSearch = {};
-const SESSION_TIMEOUT = 5 * 60 * 1000; // විනාඩි 10යි
+const SESSION_TIMEOUT = 5 * 60 * 1000; // විනාඩි 5යි
 const UA = 'Mozilla/5.0 (Linux; Android 11; Redmi Note 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
 
-// HLS Stream එක MP4 Buffer එකකට Convert කිරීමේ Function එක
-async function getXhamsterBuffer(hlsUrl) {
-    const tmpDir = await mkdtemp(join(tmpdir(), 'xham-'));
+// ===== HELPER FUNCTIONS & SCRAPERS =====
+function secsToTime(s) {
+    if (!s) return null;
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
+async function xhamsterSearch(query, limit = 10) {
+    const { data } = await axios.get(`https://xhamster.com/search/${encodeURIComponent(query)}`, {
+        headers: { 'User-Agent': UA },
+        timeout: 12000
+    });
+    const $ = cheerio.load(data);
+    const results = [];
+    $('[class*="video-thumb"]').each((_, el) => {
+        if (results.length >= limit) return false;
+        const anchor = $(el).find('a.thumb-image-container').first();
+        const img = $(el).find('img').first();
+        const title = anchor.attr('aria-label') || $(el).find('[class*="name"]').first().text().trim();
+        const href = anchor.attr('href') || '';
+        const thumb = img.attr('src') || img.attr('srcset')?.split(' ')[0] || '';
+        const duration = $(el).find('time').first().attr('datetime') || '';
+        const views = $(el).find('[class*="views"]').first().text().trim();
+        if (!title || !href) return;
+        results.push({ title, url: href, thumb, duration, views });
+    });
+    return results;
+}
+
+async function xhamsterDownloadBuffer(url, quality = '720p') {
+    const { data } = await axios.get(url, {
+        headers: { 'User-Agent': UA },
+        timeout: 12000
+    });
+    const $ = cheerio.load(data);
+    const scripts = $('script').map((_, el) => $(el).html()).get();
+    let title = null, thumb = null, duration = null, views = null;
+    for (const s of scripts) {
+        if (!s || !s.includes('"title"') || !s.includes('"duration"')) continue;
+        try {
+            const match = s.match(/"title":"([^"]+)","thumbUrl":"([^"]+)","duration":(\d+),"views":(\d+)/);
+            if (match) {
+                title = match[1].replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+                thumb = match[2].replace(/\\\//g, '/');
+                duration = secsToTime(parseInt(match[3]));
+                views = parseInt(match[4]);
+                break;
+            }
+        } catch {}
+    }
+    if (!title) title = $('meta[property="og:title"]').attr('content') || null;
+    if (!thumb) thumb = $('meta[property="og:image"]').attr('content') || null;
+    
+    const mp4Matches = [...new Set(data.match(/https?:\/\/[^\s"'\\]+\.mp4[^\s"'\\]*/g) || [])];
+    const masterUrl = mp4Matches.find(u => u.includes('480p') || u.includes('hls4'));
+    if (!masterUrl) throw new Error('No video stream found.');
+    
+    const baseUrl = masterUrl.substring(0, masterUrl.lastIndexOf('/') + 1);
+    const { data: m3u8 } = await axios.get(masterUrl, {
+        headers: { 'User-Agent': UA, 'Referer': 'https://xhamster.com/' },
+        timeout: 10000
+    });
+    
+    const lines = m3u8.split('\n');
+    let streamUrl = null;
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
+            const qualMatch = lines[i + 1]?.trim().match(/(\d+p)/);
+            const q = qualMatch ? qualMatch[1] : null;
+            if (q === quality || (!streamUrl && q)) {
+                const next = lines[i + 1]?.trim();
+                streamUrl = next.startsWith('http') ? next : baseUrl + next;
+                if (q === quality) break;
+            }
+        }
+    }
+    if (!streamUrl) throw new Error('Requested quality stream not found.');
+    
+    const tmpDir = await mkdtemp(join(tmpdir(), 'xhdl-'));
     const outPath = join(tmpDir, 'video.mp4');
     try {
-        await execAsync(
-            `ffmpeg -v quiet -y -user_agent "${UA}" -headers "Referer: https://xhamster.com/\r\n" -i "${hlsUrl}" -t 300 -c copy -bsf:a aac_adtstoasc "${outPath}"`,
-            { timeout: 120000 }
-        );
+        await execFileAsync('ffmpeg', [
+            '-v', 'quiet',
+            '-y',
+            '-user_agent', UA,
+            '-headers', 'Referer: https://xhamster.com/\r\n',
+            '-i', streamUrl,
+            '-c', 'copy',
+            outPath
+        ], { timeout: 120000 });
         const buffer = await readFile(outPath);
-        return buffer;
+        return { title, thumb, duration, views, buffer, quality };
     } finally {
         await rm(tmpDir, { recursive: true, force: true });
     }
@@ -55,7 +140,7 @@ cmd({
         results.forEach((v, i) => {
             text += `*${i + 1}.* ${v.title.slice(0, 60)} ${v.duration ? `(${v.duration})` : ''}\n`;
         });
-        text += `\n*Reply with video number (1-${results.length})*`;
+        text += `\n*Reply with video number (1-${results.length}) within 5 minutes.*`;
 
         reply(text);
 
@@ -75,52 +160,35 @@ cmd({
 
     const index = parseInt(body.trim()) - 1;
     const selected = pendingXhamSearch[sender].results[index];
-    delete pendingXhamSearch[sender]; // Clean Session
+    delete pendingXhamSearch[sender];
 
-    reply(`*🔗 Fetching media details and converting stream (FFmpeg)...*`);
+    reply(`*⚙️ Processing stream & downloading buffer, please wait...*`);
 
     try {
-        const metadata = await xhamsterDownload(selected.url);
+        const videoData = await xhamsterDownloadBuffer(selected.url, '720p');
 
-        if (!metadata || !metadata.download) {
-            return reply(`*❌ Could not fetch download stream for this video.*`);
+        if (!videoData || !videoData.buffer) {
+            return reply(`*❌ Could not process video stream.*`);
         }
 
-        // Qualities අතුරින් තිබෙන හොඳම Quality Link එක තෝරා ගැනීම
-        const qualities = Object.keys(metadata.download); // e.g., ["720p", "480p", "360p"]
-        if (qualities.length === 0) {
-            return reply(`*❌ No streaming links available.*`);
-        }
-
-        const bestQualityKey = qualities[0]; // උඩින්ම තියෙන quality එක
-        const streamUrl = metadata.download[bestQualityKey].url;
-
-        // FFmpeg මගින් Stream එක Video Buffer එකක් බවට හැරවීම
-        const videoBuffer = await getXhamsterBuffer(streamUrl);
-
-        if (!videoBuffer) {
-            return reply(`*❌ Failed to render video file.*`);
-        }
-
-        const sizeMB = videoBuffer.length / (1024 * 1024);
-        const title = metadata.title || selected.title || "xHamster Video";
+        const sizeMB = videoData.buffer.length / (1024 * 1024);
+        const title = videoData.title || selected.title || "xHamster Video";
         const cleanTitle = title.replace(/[^\w\s.-]/gi, '_').substring(0, 50);
 
-        const captionText = `*🐹 ${title}*\n*📊 Quality:* ${bestQualityKey}\n*⏱️ Duration:* ${metadata.duration || selected.duration || 'N/A'}\n*💾 Size:* ${sizeMB.toFixed(2)} MB\n\n*Enjoy your video! 🍿*`;
+        const captionText = `*🐹 ${title}*\n*📊 Quality:* ${videoData.quality || '720p'}\n*⏱️ Duration:* ${videoData.duration || selected.duration || 'N/A'}\n*💾 Size:* ${sizeMB.toFixed(2)} MB\n\n*Enjoy your video! 🍿*`;
 
         await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
 
-        // Size එක 60MB ට වැඩි නම් Document එකක් ලෙස යැවීම
         if (sizeMB > 60) {
             await bot.sendMessage(from, {
-                document: videoBuffer,
+                document: videoData.buffer,
                 mimetype: "video/mp4",
                 fileName: `${cleanTitle}.mp4`,
                 caption: captionText + `\n\n_📄 File is larger than 60MB, sent as document._`
             }, { quoted: mek });
         } else {
             await bot.sendMessage(from, {
-                video: videoBuffer,
+                video: videoData.buffer,
                 mimetype: "video/mp4",
                 fileName: `${cleanTitle}.mp4`,
                 caption: captionText
@@ -136,12 +204,14 @@ cmd({
     }
 });
 
-// Auto Cleanup
+// ===== 3. AUTO CLEANUP (විනාඩි 5 Timeout එක සදහා) =====
 setInterval(() => {
     const now = Date.now();
     for (const s in pendingXhamSearch) {
-        if (now - pendingXhamSearch[s].timestamp > SESSION_TIMEOUT) delete pendingXhamSearch[s];
+        if (now - pendingXhamSearch[s].timestamp > SESSION_TIMEOUT) {
+            delete pendingXhamSearch[s];
+        }
     }
-}, 5 * 60 * 1000);
+}, 2.5 * 60 * 1000);
 
 module.exports = { pendingXhamSearch };
