@@ -1,7 +1,7 @@
 // ╔══════════════════════════════════════════════════════════════╗
 //  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
 //  FIX: sessionId now passed to all commands and reply handlers
-//  ADDED: /api/settings routes for website integration
+//  ADDED: /api/settings routes for website integration (Heroku)
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -920,19 +920,18 @@ app.get("/sessions", async (req, res) => {
 app.get("/health", (_req, res) => res.status(200).send("OK"));
 
 // ─────────────────────────────────────────────────────────────
-//  CORS — allow website (Vercel + Railway) to call this server
+//  CORS — allow Vercel to call this server (Settings API)
 // ─────────────────────────────────────────────────────────────
 app.use(cors({
   origin: (origin, cb) => {
-    // Allow Vercel (frontend), Railway (backend), Replit, and localhost
     if (
       !origin ||
       /\.vercel\.app$/.test(origin) ||
       /\.vercel\.dev$/.test(origin) ||
-      /\.railway\.app$/.test(origin) ||
-      /\.replit\.app$/.test(origin) ||
-      /\.repl\.co$/.test(origin) ||
-      /^http:\/\/localhost(:\d+)?$/.test(origin)
+      /^http:\/\/localhost(:\d+)?$/.test(origin) ||
+      /\.herokuapp\.com$/.test(origin) ||
+      /\.up\.railway\.app$/.test(origin) || // standard Railway apps (.up.railway.app)
+      /\.railway\.app$/.test(origin)       // legacy / internal Railway domains
     ) {
       cb(null, true);
     } else {
@@ -944,14 +943,10 @@ app.use(cors({
   credentials: true,
 }));
 
-// ─────────────────────────────────────────────────────────────
-//  🔥 SETTINGS API ROUTES (NEW)
-// ─────────────────────────────────────────────────────────────
+// ── Settings API Routes ──────────────────────────────────────
 app.use("/api/settings", settingsApiRouter);
 
-// ─────────────────────────────────────────────────────────────
-//  API Status endpoint
-// ─────────────────────────────────────────────────────────────
+// ── API Status ──────────────────────────────────────────────
 app.get("/api/status", (req, res) => {
   res.json({
     ok: true,
@@ -962,9 +957,8 @@ app.get("/api/status", (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`🚀 Bot Server listening on port ${port}`);
+  console.log(`🚀 Server listening on http://localhost:${port}`);
   console.log(`🔥 Multi-user mode ready | Max active sessions: ${MAX_ACTIVE_SESSIONS}`);
-  console.log(`⚙️ Settings API available at /api/settings`);
 });
 
 /* ==================== START ==================== */
