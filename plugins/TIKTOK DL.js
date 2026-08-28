@@ -13,7 +13,6 @@ const LOOP_COOLDOWN = 3000;
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
   'Accept': 'application/json, text/plain, */*',
-  'Accept-Language': 'en-US,en;q=0.9',
 };
 
 function clearUserSession(sender) {
@@ -34,12 +33,62 @@ function toSmallCaps(str = "") {
     .join("");
 }
 
-// ===== MULTI-API TIKTOK SEARCH HELPER =====
+function isTikTokLink(text) {
+  return /(https?:\/\/)?(www\.|vm\.|vt\.|t\.)?tiktok\.com\//i.test(text);
+}
+
+// ===== DIRECT LINK DOWNLOADER HELPER =====
+
+async function getTikTokFromLink(url) {
+  // 1. Try TikWM Direct API
+  try {
+    const res = await axios.get(`https://tikwm.com/api/?url=${encodeURIComponent(url)}`, {
+      headers: HEADERS,
+      timeout: 15000,
+    });
+    if (res.data?.code === 0 && res.data?.data) {
+      const d = res.data.data;
+      return {
+        title: d.title || "TikTok Video",
+        author: d.author?.nickname || d.author?.unique_id || "Unknown",
+        duration: d.duration || 0,
+        url: d.play || d.wmplay || d.hdplay || null,
+        images: Array.isArray(d.images) && d.images.length > 0 ? d.images : null
+      };
+    }
+  } catch (e) {
+    console.log("TikWM Direct Download Failed, Trying Alternative API...");
+  }
+
+  // 2. Try Dark-Yasiya / Sadas Fallback API
+  try {
+    const fallbackRes = await axios.get(`https://api.tiklydown.eu.org/api/download?url=${encodeURIComponent(url)}`, {
+      headers: HEADERS,
+      timeout: 15000
+    });
+    if (fallbackRes.data && (fallbackRes.data.video || fallbackRes.data.url)) {
+      const d = fallbackRes.data;
+      return {
+        title: d.title || "TikTok Video",
+        author: d.author || "Unknown",
+        duration: d.duration || 0,
+        url: d.video || d.url || d.no_watermark,
+        images: null
+      };
+    }
+  } catch (e) {
+    console.log("Fallback Direct DL Failed.");
+  }
+
+  return null;
+}
+
+// ===== MULTI-ENDPOINT SEARCH HELPER =====
 
 async function searchTikTokVideos(query) {
-  // 1. Try Primary TikWM API
+  // 1. Try Search Engine API 1
   try {
-    const res = await axios.get('https://www.tikwm.com/api/feed/search', {
+    const res = await axios.get('https://tikwm.com/api/feed/search', {
       params: { keywords: query, count: 30, cursor: 0, HD: 1 },
       headers: HEADERS,
       timeout: 15000,
@@ -56,17 +105,17 @@ async function searchTikTokVideos(query) {
       })).filter(v => v.url || v.images);
     }
   } catch (err) {
-    console.log("TikWM Search Failed, Trying Fallback API...");
+    console.log("TikWM Search Failed, Switching to Alternative API...");
   }
 
-  // 2. Try Fallback API (Tiklydown / Direct Endpoint)
+  // 2. Try Fallback Search Engine API 2
   try {
-    const fallbackRes = await axios.get(`https://api.tiklydown.eu.org/api/search?q=${encodeURIComponent(query)}`, {
+    const res2 = await axios.get(`https://api.tiklydown.eu.org/api/search?q=${encodeURIComponent(query)}`, {
       headers: HEADERS,
       timeout: 15000
     });
-    if (fallbackRes.data && Array.isArray(fallbackRes.data.data) && fallbackRes.data.data.length > 0) {
-      return fallbackRes.data.data.map((item) => ({
+    if (res2.data && Array.isArray(res2.data.data) && res2.data.data.length > 0) {
+      return res2.data.data.map((item) => ({
         id: item.id || '',
         title: item.title || 'TikTok Video',
         author: item.author?.unique_id || item.author?.nickname || 'Unknown',
@@ -85,7 +134,7 @@ async function searchTikTokVideos(query) {
 // Search Users
 async function searchTikTokUsers(username) {
   try {
-    const res = await axios.get('https://www.tikwm.com/api/feed/search', {
+    const res = await axios.get('https://tikwm.com/api/feed/search', {
       params: { keywords: username, count: 20, cursor: 0 },
       headers: HEADERS,
       timeout: 15000,
@@ -115,7 +164,7 @@ async function searchTikTokUsers(username) {
 // Get User Videos
 async function getUserVideos(username) {
   try {
-    const res = await axios.get('https://www.tikwm.com/api/user/posts', {
+    const res = await axios.get('https://tikwm.com/api/user/posts', {
       params: { unique_id: username, count: 30, cursor: 0 },
       headers: HEADERS,
       timeout: 15000,
@@ -134,7 +183,6 @@ async function getUserVideos(username) {
   } catch (e) {
     console.log("User posts fetch failed, falling back to query search...");
   }
-  
   return searchTikTokVideos(username);
 }
 
@@ -195,30 +243,46 @@ async function downloadAndSendVideo(bot, mek, m, reply, from, selectedVideo) {
   }
 }
 
-// ===== 1. TIKTOK VIDEO SEARCH COMMAND (.tiktok / .tt) =====
+// ===== 1. TIKTOK COMMAND (.tiktok / .tt) =====
 cmd(
   {
     pattern: "tiktok",
     alias: ["tt", "ttdl", "tdl", "tiktokdl"],
-    desc: "Search & download TikTok videos by name",
+    desc: "Download TikTok video via Link OR Search by Name",
     category: "download",
     react: "🎵",
     filename: __filename,
   },
   async (bot, mek, m, { from, q, sender, reply }) => {
     if (!q) {
-      return reply("📱 *ᴜsᴀɢᴇ:* `.tiktok [video name / query]`\n💡 *ᴇxᴀᴍᴘʟᴇ:* `.tiktok ex janiya`");
+      return reply("📱 *ᴜsᴀɢᴇ:* \n• `.tt [tiktok link]` (Direct DL)\n• `.tt [query]` (Search Videos)\n\n💡 *ᴇxᴀᴍᴘʟᴇ:* `.tt ex janiya`");
     }
 
+    const input = q.trim();
+
+    // Direct Download Mode if input is TikTok URL
+    if (isTikTokLink(input)) {
+      await bot.sendMessage(from, { react: { text: "⬇️", key: m.key } });
+      
+      const videoData = await getTikTokFromLink(input);
+      if (!videoData || (!videoData.url && !videoData.images)) {
+        await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
+        return reply("❌ *ғᴀɪʟᴇᴅ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ ᴛɪᴋᴛᴏᴋ ᴠɪᴅᴇᴏ ғʀᴏᴍ ʟɪɴᴋ!*");
+      }
+
+      return downloadAndSendVideo(bot, mek, m, reply, from, videoData);
+    }
+
+    // Video Search Mode if input is text query
     await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
     await reply("🔍 *sᴇᴀʀᴄʜɪɴɢ ᴛɪᴋᴛᴏᴋ ғᴏʀ ᴠɪᴅᴇᴏs...*");
 
     try {
-      const results = await searchTikTokVideos(q.trim());
+      const results = await searchTikTokVideos(input);
 
       if (!results || results.length === 0) {
         await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-        return reply(`❌ *ɴᴏ ᴠɪᴅᴇᴏs ғᴏᴜɴᴅ ғᴏʀ:* _${q}_`);
+        return reply(`❌ *ɴᴏ ᴠɪᴅᴇᴏs ғᴏᴜɴᴅ ғᴏʀ:* _${input}_`);
       }
 
       clearUserSession(sender);
