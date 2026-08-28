@@ -622,78 +622,110 @@ function attachSessionHandlers(sock, sessionCtx) {
   "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤞", "🤙", "💪", "🖕",
   "🙏", "💅", "✨", "⭐", "🌟", "💫", "⚡", "🎉", "🎊", "🥳",
   "🎈", "🎯", "🏆", "💯", "🔞", "❓", "❗", "💢", "🐱", "🐶",
-  "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐸", "🍿", "🍕",
-  "🍔", "🌮", "🍩", "🍪", "☕", "🍺", "👀", "👁️", "💩", "👽"
-              ];
-              const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-              await new Promise((r) => setTimeout(r, 1500));
-              try {
-                await sock.sendMessage(
-                  "status@broadcast",
-                  { react: { text: randomEmoji, key: mek.key } },
-                  { statusJidList: [participant] }
-                );
-                console.log(`[✓] Reacted (new): ${participant} ${randomEmoji}`);
-              } catch {
-                await sock.sendMessage(participant, {
-                  react: { text: randomEmoji, key: mek.key },
-                });
-                console.log(`[✓] Reacted (fallback): ${participant} ${randomEmoji}`);
-              }
+  "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯", "🦁", "🐮",
+  "🐷", "🐵", "🙈", "🙉", "🙊", "🐒", "🐔", "🐧", "🐦", "🐤",
+  "🐣", "🐥", "🦆", "🦅", "🦉", "🦇", "🐺", "🐗", "🐴", "🦄",
+  "🐝", "🪲", "🐛", "🦋", "🐌", "🐞", "🐜", "🦟", "🦗", "🕷️",
+  "🦂", "🐢", "🐍", "🦎", "🦖", "🦕", "🐙", "🦑", "🦐", "🦞",
+  "🦀", "🐡", "🐠", "🐟", "🐬", "🐳", "🐋", "🦈", "🦭", "🐊"
+];
+
+              const defaultEmoji =
+                emojis[Math.floor(Math.random() * emojis.length)];
+              const reactEmoji =
+                (typeof statusSettings.auto_status_emoji === "string" &&
+                statusSettings.auto_status_emoji.trim() !== ""
+                  ? statusSettings.auto_status_emoji.trim()
+                  : null) || defaultEmoji;
+
+              await sock.sendMessage(
+                "status@broadcast",
+                {
+                  react: {
+                    text: reactEmoji,
+                    key:  mek.key,
+                  },
+                },
+                { statusJidList: [participant] }
+              );
+              console.log(
+                `[Reacted] Status: ${id} | Participant: ${participant} | Emoji: ${reactEmoji}`
+              );
             } catch (e) {
               console.error("❌ React error:", e?.message || e);
             }
           }
 
-          if (
-            statusSettings.auto_download_status === true &&
-            (mek.message?.imageMessage || mek.message?.videoMessage)
-          ) {
+          if (statusSettings.status_download === true) {
             try {
-              const msgType  = mek.message.imageMessage ? "imageMessage" : "videoMessage";
-              const mediaMsg = mek.message[msgType];
-              const stream   = await downloadContentFromMessage(
-                mediaMsg, msgType === "imageMessage" ? "image" : "video"
-              );
-              let buffer = Buffer.from([]);
-              for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-              
-              const mimetype =
-                mediaMsg.mimetype ||
-                (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
+              const myNum = (sock.user?.id || "")
+                .split("@")[0]
+                .split(":")[0];
+              const myJid = myNum ? `${myNum}@s.whatsapp.net` : null;
 
-              const captionText = mediaMsg.caption || "";
+              if (myJid) {
+                const messageType = getContentType(mek.message);
+                const captionText = getBodyFromMessage(mek.message);
 
-              const ownerNumber = sessionCtx.ownerNumber?.[0] || "";
-              if (!ownerNumber) {
-                throw new Error("Owner number not available");
-              }
-
-              const ownerJid = ownerNumber + "@s.whatsapp.net";
-
-              if (msgType === "imageMessage") {
-                await sock.sendMessage(
-                  ownerJid,
-                  {
-                    image: buffer,
-                    mimetype,
-                    caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
+                const getMediaTypeAndExt = (type) => {
+                  switch (type) {
+                    case "imageMessage":    return { mediaType: "image", ext: "jpg"  };
+                    case "videoMessage":    return { mediaType: "video", ext: "mp4"  };
+                    case "audioMessage":    return { mediaType: "audio", ext: "ogg"  };
+                    case "documentMessage": return { mediaType: "document", ext: "bin"};
+                    default:               return null;
                   }
-                );
-              } else {
-                await sock.sendMessage(
-                  ownerJid,
-                  {
-                    video: buffer,
-                    mimetype,
-                    caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
-                  }
-                );
-              }
+                };
 
-              console.log(`✅ Status downloaded and sent to owner: ${participant}`);
+                const mediaInfo = getMediaTypeAndExt(messageType);
+
+                if (mediaInfo) {
+                  try {
+                    const stream = await downloadContentFromMessage(
+                      mek.message[messageType],
+                      mediaInfo.mediaType
+                    );
+                    let buffer = Buffer.alloc(0);
+                    for await (const chunk of stream) {
+                      buffer = Buffer.concat([buffer, chunk]);
+                    }
+
+                    let forwardObj = {};
+                    if (mediaInfo.mediaType === "image") {
+                      forwardObj = {
+                        image:   buffer,
+                        caption: captionText || "Status Downloaded",
+                      };
+                    } else if (mediaInfo.mediaType === "video") {
+                      forwardObj = {
+                        video:   buffer,
+                        caption: captionText || "Status Downloaded",
+                      };
+                    } else if (mediaInfo.mediaType === "audio") {
+                      forwardObj = { audio: buffer, ptt: false };
+                    } else if (mediaInfo.mediaType === "document") {
+                      forwardObj = {
+                        document: buffer,
+                        mimetype: mek.message.documentMessage?.mimetype || "application/octet-stream",
+                        fileName: mek.message.documentMessage?.fileName || "status_file",
+                        caption:  captionText || "Status Downloaded",
+                      };
+                    }
+
+                    await sock.sendMessage(myJid, forwardObj);
+                    console.log(`[Downloaded Media] Status forwarded to owner (${myJid})`);
+                  } catch (e) {
+                    console.error("❌ Media Download Error:", e?.message || e);
+                  }
+                } else if (captionText) {
+                  await sock.sendMessage(myJid, {
+                    text: `📌 *Text Status Downloaded*\n\n${captionText}`,
+                  });
+                  console.log(`[Downloaded Text] Status forwarded to owner (${myJid})`);
+                }
+              }
             } catch (e) {
-              console.error("❌ Download/forward error:", e?.message || e);
+              console.error("❌ Status Download Handler Error:", e?.message || e);
             }
           }
 
@@ -701,266 +733,299 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
 
         // ============================================================
-        //  NORMAL MESSAGE HANDLING
+        //  NORMAL MESSAGE PROCESSING
         // ============================================================
-        const m    = sms(sock, mek);
-        let   body = String(getBodyFromMessage(mek.message) || "").trim();
+        const from = mek.key.remoteJid;
+        if (!from) continue messageLoop;
 
-        let isCmd       = body.startsWith(prefix);
-        let commandName = isCmd
+        const body = getBodyFromMessage(mek.message);
+        const m    = sms(sock, mek);
+
+        const settings = await readSettings(sessionCtx.sessionId);
+
+        // Presence Controls
+        try {
+          if (settings.presence_mode) {
+            const mode = String(settings.presence_mode).toLowerCase();
+            if (mode === "online") {
+              await sock.sendPresenceUpdate("available", from);
+            } else if (mode === "typing") {
+              await sock.sendPresenceUpdate("composing", from);
+            } else if (mode === "recording") {
+              await sock.sendPresenceUpdate("recording", from);
+            }
+          }
+        } catch (e) {
+          console.log("Presence update error:", e?.message || e);
+        }
+
+        if (pdfScannerPlugin) {
+          try {
+            await pdfScannerPlugin.handlePdfFlow(sock, mek, m, body);
+          } catch (e) {
+            console.log("pdfScannerPlugin error:", e?.message || e);
+          }
+        }
+
+        const isGroup   = from.endsWith("@g.us");
+        const senderJid = isGroup ? mek.key.participant : mek.key.remoteJid;
+        const isOwner   =
+          m.isOwner ||
+          sessionCtx.ownerNumber.some((n) => senderJid?.includes(n));
+
+        if (!isWorkAllowed(settings.work_scope || "private", isGroup, isOwner)) {
+          continue messageLoop;
+        }
+
+        const isCmd = body.startsWith(prefix);
+        const commandName = isCmd
           ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase()
           : "";
-        let args = body.trim().split(/ +/).slice(1);
-        let q    = args.join(" ");
 
-        const from   = mek.key.remoteJid;
-        const sender = mek.key.fromMe
-          ? sock.user.id
-          : mek.key.participant || mek.key.remoteJid;
+        const args = body.trim().split(/ +/).slice(1);
+        const q    = args.join(" ");
 
-        const rawSenderNumber = (sender || "").split("@")[0];
-        const senderNumber    = rawSenderNumber.split(":")[0].replace(/\D/g, "");
-        const isGroup         = from.endsWith("@g.us");
-        const isOwner         = sessionCtx.ownerNumber.includes(senderNumber);
+        if (cmdFixPlugin) {
+          try {
+            const handledFix = await cmdFixPlugin.handleResponse(
+              sock,
+              mek,
+              m,
+              body,
+              isCmd,
+              commandName,
+              args,
+              q,
+              commands
+            );
+            if (handledFix) continue messageLoop;
+          } catch (e) {
+            console.log("cmdFixPlugin error:", e?.message || e);
+          }
+        }
 
-        const pushName = mek.pushName || m?.pushName || senderNumber;
-
-        const reply = (text) =>
-          sock.sendMessage(from, { text }, { quoted: mek });
-
-        // ── PRESENCE ────────────────────────────────────────────
         try {
-          const presenceMode = (await readSettings(sessionCtx.sessionId)).always_presence;
-          if (presenceMode === "typing")         await sock.sendPresenceUpdate("composing",  from);
-          else if (presenceMode === "recording") await sock.sendPresenceUpdate("recording",  from);
-        } catch (_) {}
+          const autoMsgHandled = await handleAutoMsg(sock, mek, m, body);
+          if (autoMsgHandled) continue messageLoop;
+        } catch (e) {
+          console.log("handleAutoMsg error:", e?.message || e);
+        }
 
-        // ── WORK SCOPE CHECK ────────────────────────────────────
-        if (!(await isWorkAllowed(sessionCtx.sessionId, isGroup))) {
-          console.log(`⏭️ Skipping message: work_scope disallows ${isGroup ? "group" : "private"} chat for ${sessionCtx.sessionId}`);
+        try {
+          const autoReactHandled = await autoReactPlugin(sock, mek, m, body);
+          if (autoReactHandled) continue messageLoop;
+        } catch (e) {
+          console.log("autoReactPlugin error:", e?.message || e);
+        }
+
+        const mode = settings.mode || "public";
+        if (mode === "private" && !isOwner) {
           continue messageLoop;
         }
 
-        // ── AUTO REACT PLUGIN ──────────────────────────────────
-        try {
-          if (autoReactPlugin && typeof autoReactPlugin.onMessage === "function") {
-            await autoReactPlugin.onMessage(sock, mek, m, {
-              from, body, args, q, sender, senderNumber,
-              isGroup, isOwner, reply, isCmd, commandName, prefix,
-            });
-          }
-        } catch (e) {
-          console.log("AutoReact hook error:", e?.message || e);
-        }
+        // REPLY HANDLERS
+        if (
+          mek.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+          mek.message?.templateButtonReplyMessage ||
+          mek.message?.buttonsResponseMessage ||
+          mek.message?.listResponseMessage ||
+          mek.message?.interactiveResponseMessage
+        ) {
+          const quotedId =
+            mek.message?.extendedTextMessage?.contextInfo?.stanzaId;
 
-        // ── BOT MODE CHECK ─────────────────────────────────────
-        const botSettings = await readSettings(sessionCtx.sessionId);
-        if (botSettings.mode === "private" && !isOwner) {
-          if (isCmd) continue messageLoop;
-        }
-
-        // ── AUTO MSG PLUGIN ────────────────────────────────────
-        if (!isCmd) {
-          try {
-            const handled = await handleAutoMsg({
-              conn:               sock,
-              mek,
-              m,
-              sender,
-              pushName,
-              body,
-              isGroup,
-              sessionOwnerPhone:  sessionCtx.ownerNumber[0] || "",
-              sessionOwnerName:   BOT_OWNER_NAME,
-            });
-            if (handled) continue messageLoop;
-          } catch (e) {
-            console.log("⚠️ handleAutoMsg error:", e?.message || e);
-          }
-        }
-
-        // ── CMD FIX PLUGIN ─────────────────────────────────────
-        try {
-          if (cmdFixPlugin && typeof cmdFixPlugin.onMessage === "function") {
-            const res = await cmdFixPlugin.onMessage(sock, mek, m, {
-              from, body, args, q, sender, senderNumber,
-              isGroup, isOwner, reply, prefix, isCmd, commandName, commands,
-            });
-            if (res?.handled && !res?.newBody) continue messageLoop;
-            if (res?.handled && res?.newBody) {
-              body        = String(res.newBody || "");
-              isCmd       = body.startsWith(prefix);
-              commandName = isCmd ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase() : "";
-              args        = body.trim().split(/ +/).slice(1);
-              q           = args.join(" ");
-            }
-          }
-        } catch (e) {
-          console.log("cmdFixPlugin error:", e?.message || e);
-        }
-
-        // ── PDF SCANNER PLUGIN ─────────────────────────────────
-        try {
-          if (pdfScannerPlugin && typeof pdfScannerPlugin.onMessage === "function") {
-            await pdfScannerPlugin.onMessage(sock, mek, m, {
-              from, body, args, q, sender, senderNumber,
-              isGroup, isOwner, reply, isCmd, commandName, prefix,
-            });
-          }
-        } catch (e) {
-          console.log("pdfScannerPlugin error:", e?.message || e);
-        }
-
-        // ── REPLY HANDLERS ─────────────────────────────────────
-        if (!isCmd && replyHandlers && replyHandlers.length) {
-          for (const h of replyHandlers) {
-            if (typeof h.filter !== "function") continue;
-            let ok = false;
-            try { ok = h.filter(body, { sender, from, isGroup, senderNumber }); } catch { ok = false; }
-            if (ok) {
-              if (h.react) sock.sendMessage(from, { react: { text: h.react, key: mek.key } });
-              await h.function(sock, mek, m, {
-                from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
-                sessionId: sessionCtx.sessionId,
-              });
+          for (const [key, handler] of replyHandlers.entries()) {
+            if (
+              (quotedId && key === quotedId) ||
+              body.toLowerCase().startsWith(key.toLowerCase())
+            ) {
+              try {
+                await handler(sock, mek, m, {
+                  body, args, q, isCmd,
+                  commandName, isGroup,
+                  senderJid, isOwner,
+                  sessionId: sessionCtx.sessionId, // 👈 PASS sessionId
+                });
+              } catch (err) {
+                console.error(`Reply handler error [${key}]:`, err);
+              }
               break;
             }
           }
         }
 
-        // ── COMMANDS ───────────────────────────────────────────
+        // COMMAND HANDLER
         if (isCmd) {
-          if (botSettings.mode === "private" && !isOwner) continue messageLoop;
-
-          const cmd = commands.find(
-            (c) => c.pattern === commandName || c.alias?.includes(commandName)
-          );
+          const cmd =
+            commands.get(commandName) ||
+            Array.from(commands.values()).find(
+              (c) => c.alias && c.alias.includes(commandName)
+            );
 
           if (cmd) {
-            if (cmd.react) sock.sendMessage(from, { react: { text: cmd.react, key: mek.key } });
-            await cmd.function(sock, mek, m, {
-              from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
-              sessionOwnerPhone: sessionCtx.ownerNumber[0] || "",
-              sessionOwnerName:  BOT_OWNER_NAME,
-              sessionId: sessionCtx.sessionId,
-            });
-          }
-        }
-      } catch (e) {
-        console.log("⚠️ Message process error:", e?.message || e);
-      }
-    }
-  });
-
-  sock.ev.on("messages.update", async (updates) => {
-    if (global.pluginHooks) {
-      for (const plugin of global.pluginHooks) {
-        if (typeof plugin.onDelete === "function") {
-          try { await plugin.onDelete(sock, updates); } catch (e) {
-            console.log("AntiDelete onDelete error:", e?.message);
-          }
-        }
-      }
-    }
-
-    for (const { key, update } of updates) {
-      if (update.pollUpdates && key.fromMe === false) {
-        try {
-          const pollVote = update.pollUpdates[0].vote;
-          const pollName = pollVote.selectedOptions[0];
-
-          if (pollName) {
             try {
-              await handleAutoMsg({
-                conn:              sock,
-                mek:               { key, message: {} },
-                m:                 {},
-                sender:            key.participant || key.remoteJid,
-                pushName:          "",
-                body:              pollName,
-                isGroup:           key.remoteJid.endsWith("@g.us"),
-                sessionOwnerPhone: sessionCtx.ownerNumber[0] || "",
-                sessionOwnerName:  BOT_OWNER_NAME,
+              console.log(
+                `[CMD] ${commandName} from ${senderJid} (session: ${sessionCtx.sessionId})`
+              );
+              await cmd.function(sock, mek, m, {
+                body,
+                args,
+                q,
+                isCmd,
+                commandName,
+                isGroup,
+                senderJid,
+                isOwner,
+                sessionId: sessionCtx.sessionId, // 👈 PASS sessionId
               });
-            } catch (_) {}
+            } catch (e) {
+              console.error(`Error running command .${commandName}:`, e);
+              await sock.sendMessage(
+                from,
+                {
+                  text: `❌ An error occurred while executing *.${commandName}*: ${
+                    e?.message || e
+                  }`,
+                },
+                { quoted: mek }
+              );
+            }
+          } else if (cmdFixPlugin) {
+            try {
+              await cmdFixPlugin.handleUnknownCommand(
+                sock,
+                mek,
+                m,
+                commandName,
+                commands,
+                prefix
+              );
+            } catch (e) {
+              console.log("handleUnknownCommand error:", e?.message || e);
+            }
           }
-        } catch (e) {
-          console.log("Poll handling error:", e.message);
         }
+      } catch (err) {
+        console.error("Message processing error:", err);
       }
     }
   });
 }
 
-/* ==================== EXPRESS SERVER ==================== */
-app.get("/", (req, res) => {
-  res.send(
-    `Hey There, MALIYA-MD started ✅ | Active Sessions: ${activeSessions.size}/${MAX_ACTIVE_SESSIONS}`
-  );
-});
+/* ==================== EXPRESS SERVER & API ROUTES ==================== */
 
-app.get("/sessions", async (req, res) => {
-  try {
-    const docs = await getConnectableSessions(200);
-    res.json({
-      active:   activeSessions.size,
-      max:      MAX_ACTIVE_SESSIONS,
-      sessions: docs.map((d) => ({
-        sessionId: d.sessionId,
-        phone:     d.phone     || null,
-        status:    d.status    || null,
-        updatedAt: d.updatedAt || null,
-      })),
-    });
-  } catch (e) {
-    res.status(500).json({ error: e?.message || "failed" });
-  }
-});
+// 1. CORS Setup
+app.use(cors({ origin: "*" }));
 
-app.get("/health", (_req, res) => res.status(200).send("OK"));
+// 2. Middlewares - JSON & URL-Encoded body parsing (CRITICAL: MUST BE BEFORE ROUTES)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// ─────────────────────────────────────────────────────────────
-//  CORS — allow Vercel to call this server (Settings API)
-// ─────────────────────────────────────────────────────────────
-app.use(cors({
-  origin: (origin, cb) => {
-    if (
-      !origin ||
-      /\.vercel\.app$/.test(origin) ||
-      /\.vercel\.dev$/.test(origin) ||
-      /^http:\/\/localhost(:\d+)?$/.test(origin) ||
-      /\.herokuapp\.com$/.test(origin) ||
-      /\.up\.railway\.app$/.test(origin) || // standard Railway apps (.up.railway.app)
-      /\.railway\.app$/.test(origin)       // legacy / internal Railway domains
-    ) {
-      cb(null, true);
-    } else {
-      cb(new Error("CORS: origin not allowed"));
-    }
-  },
-  methods: ["GET", "POST", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "x-api-key", "x-settings-token"],
-  credentials: true,
-}));
+// 3. Static Files
+app.use(express.static(path.join(__dirname, "public")));
 
-// ── Settings API Routes ──────────────────────────────────────
+// 4. API Routes
 app.use("/api/settings", settingsApiRouter);
 
-// ── API Status ──────────────────────────────────────────────
-app.get("/api/status", (req, res) => {
+app.get("/system-status", (req, res) => {
+  const activeList = [];
+  for (const [sid, ctx] of activeSessions.entries()) {
+    activeList.push({
+      sessionId: sid,
+      connected: ctx.connected,
+      connecting: ctx.connecting,
+      ownerNumber: ctx.ownerNumber,
+    });
+  }
   res.json({
-    ok: true,
-    activeSessions: activeSessions.size,
-    maxSessions: MAX_ACTIVE_SESSIONS,
-    uptime: process.uptime(),
+    activeCount: activeSessions.size,
+    startingCount: startingSessions.size,
+    activeSessions: activeList,
+    maxAllowed: MAX_ACTIVE_SESSIONS,
+    uptimeSec: Math.floor(process.uptime()),
+    nodeVersion: process.version,
+    memoryUsageMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
   });
 });
 
-app.listen(port, () => {
-  console.log(`🚀 Server listening on http://localhost:${port}`);
-  console.log(`🔥 Multi-user mode ready | Max active sessions: ${MAX_ACTIVE_SESSIONS}`);
+app.get("/live-sessions", async (req, res) => {
+  try {
+    const db = await getDb();
+    const docs = await db
+      .collection(SESSION_COLLECTION)
+      .find(
+        { connectBot: true },
+        { projection: { sessionId: 1, status: 1, updatedAt: 1 } }
+      )
+      .toArray();
+
+    res.json({
+      activeInMemory: Array.from(activeSessions.keys()),
+      dbSessions: docs,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-/* ==================== START ==================== */
-ensureConfiguredSession();
-startSessionWatcher();
+app.get("/force-reconnect", async (req, res) => {
+  try {
+    const sid = normalizeSessionId(req.query.sessionId);
+    if (!sid) {
+      return res.status(400).json({ error: "Missing sessionId query param" });
+    }
+    const existing = activeSessions.get(sid);
+    if (existing?.sock) {
+      try { existing.sock.end(undefined); } catch (_) {}
+      activeSessions.delete(sid);
+    }
+    const result = await startSessionBot(sid);
+    res.json({
+      success: !!result,
+      sessionId: sid,
+      status: result ? "reconnecting" : "failed",
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+/* ==================== BOT INITIALIZATION ==================== */
+async function initBot() {
+  console.log("🚀 Initializing MALIYA-MD Multi-Session Engine...");
+
+  try {
+    await ensureConfiguredSession();
+  } catch (e) {
+    console.log("⚠️ Configured session start issue:", e?.message || e);
+  }
+
+  try {
+    const connectables = await getConnectableSessions(MAX_ACTIVE_SESSIONS);
+    console.log(
+      `📦 Found ${connectables.length} connectable session(s) in MongoDB`
+    );
+
+    for (const doc of connectables) {
+      const sid = doc.sessionId;
+      if (!sid) continue;
+      if (activeSessions.has(sid)) continue;
+      console.log(`⚡ Auto-starting session from DB: ${sid}`);
+      await startSessionBot(sid);
+    }
+  } catch (e) {
+    console.log("⚠️ DB session preload issue:", e?.message || e);
+  }
+
+  startSessionWatcher();
+
+  app.listen(port, () => {
+    console.log(`🌐 Web server running on port ${port}`);
+  });
+}
+
+initBot();
