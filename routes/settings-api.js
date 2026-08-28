@@ -19,7 +19,7 @@ const {
 const router = express.Router();
 
 // ── In-memory code store (use Redis in production) ──────────
-const codeStore = new Map(); // key: sessionId, value: { code, phone, expires }
+const codeStore = new Map();
 
 // ── Generate 6-digit code ────────────────────────────────────
 function generateCode() {
