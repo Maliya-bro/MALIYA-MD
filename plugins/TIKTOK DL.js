@@ -10,6 +10,10 @@ const lastProcessedMsg = {};
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 3000;
 
+const HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+};
+
 function clearUserSession(sender) {
   delete pendingTtSearch[sender];
   delete pendingTtUserSearch[sender];
@@ -28,47 +32,79 @@ function toSmallCaps(str = "") {
     .join("");
 }
 
-// ===== API HELPERS =====
+// ===== TIKWM API HELPERS =====
 
-async function searchTikTokVideos(query) {
-  const url = `https://api.tiklydown.eu.org/api/search?q=${encodeURIComponent(query)}`;
-  const { data } = await axios.get(url, { timeout: 15000 });
-  if (data && Array.isArray(data.data)) {
-    return data.data.map((item) => ({
-      title: item.title || "TikTok Video",
-      author: item.author?.unique_id || item.author?.nickname || "Unknown",
-      duration: item.duration || 0,
-      url: item.play || item.wmplay || item.hdplay || item.url
-    })).filter(v => v.url);
+// TikWM Video Search
+async function searchTikTokVideos(query, count = 30) {
+  const res = await axios.get('https://tikwm.com/api/feed/search', {
+    params: { keywords: query, count: count, cursor: 0, HD: 1 },
+    headers: HEADERS,
+    timeout: 20000,
+  });
+  
+  const data = res.data;
+  if (data?.code === 0 && Array.isArray(data?.data?.videos)) {
+    return data.data.videos.map((d) => ({
+      id: d.id || '',
+      title: d.title || 'TikTok Video',
+      author: d.author?.nickname || d.author?.unique_id || 'Unknown',
+      duration: d.duration || 0,
+      url: d.play || d.wmplay || d.hdplay || null,
+      images: Array.isArray(d.images) && d.images.length > 0 ? d.images : null
+    })).filter(v => v.url || v.images);
   }
   return [];
 }
 
+// Search Users via TikWM User Feed / Search
 async function searchTikTokUsers(username) {
-  const url = `https://api.tiklydown.eu.org/api/search/user?q=${encodeURIComponent(username)}`;
-  const { data } = await axios.get(url, { timeout: 15000 });
-  if (data && Array.isArray(data.data)) {
-    return data.data.map((u) => ({
-      username: u.unique_id || u.uid,
-      nickname: u.nickname || u.unique_id,
-      avatar: u.avatar_thumb || u.avatar_medium
-    })).filter(u => u.username);
+  const res = await axios.get('https://tikwm.com/api/feed/search', {
+    params: { keywords: username, count: 20, cursor: 0 },
+    headers: HEADERS,
+    timeout: 20000,
+  });
+
+  const data = res.data;
+  if (data?.code === 0 && Array.isArray(data?.data?.videos)) {
+    const userMap = new Map();
+    data.data.videos.forEach((v) => {
+      if (v.author && v.author.unique_id) {
+        if (!userMap.has(v.author.unique_id)) {
+          userMap.set(v.author.unique_id, {
+            username: v.author.unique_id,
+            nickname: v.author.nickname || v.author.unique_id,
+            avatar: v.author.avatar || ''
+          });
+        }
+      }
+    });
+    return Array.from(userMap.values());
   }
   return [];
 }
 
+// Get User's Latest Videos
 async function getUserVideos(username) {
-  const url = `https://api.tiklydown.eu.org/api/user/posts?unique_id=${encodeURIComponent(username)}`;
-  const { data } = await axios.get(url, { timeout: 15000 });
-  if (data && Array.isArray(data.data)) {
-    return data.data.map((item) => ({
-      title: item.title || "TikTok Video",
+  const res = await axios.get('https://tikwm.com/api/user/posts', {
+    params: { unique_id: username, count: 30, cursor: 0 },
+    headers: HEADERS,
+    timeout: 20000,
+  });
+
+  const data = res.data;
+  if (data?.code === 0 && Array.isArray(data?.data?.videos)) {
+    return data.data.videos.map((d) => ({
+      id: d.id || '',
+      title: d.title || 'TikTok Video',
       author: username,
-      duration: item.duration || 0,
-      url: item.play || item.wmplay || item.hdplay
-    })).filter(v => v.url);
+      duration: d.duration || 0,
+      url: d.play || d.wmplay || d.hdplay || null,
+      images: Array.isArray(d.images) && d.images.length > 0 ? d.images : null
+    })).filter(v => v.url || v.images);
   }
-  return [];
+  
+  // Fallback if user posts endpoint fails: search user unique_id
+  return searchTikTokVideos(username, 30);
 }
 
 // Generate Search Results Text (10 items per page)
@@ -76,7 +112,7 @@ function generateVideoListText(results, startIndex = 0, titleHeader = "ᴛɪᴋ�
   const endIndex = Math.min(startIndex + 10, results.length);
   let text = `╭〔 🎵 *${titleHeader}* 〕━\n┃\n`;
   text += `┃ 📊 *ʀᴇsᴜʟᴛs:* ${startIndex + 1} - ${endIndex} of ${results.length}\n┃\n`;
-  text += `╰━━━───────━━► ❥\n\n`;
+  text += `╰━━━───━━━━► ❥\n\n`;
 
   for (let i = startIndex; i < endIndex; i++) {
     const v = results[i];
@@ -92,7 +128,7 @@ function generateVideoListText(results, startIndex = 0, titleHeader = "ᴛɪᴋ�
   return text;
 }
 
-// Download & Send Video
+// Download & Send Video/Images
 async function downloadAndSendVideo(bot, mek, m, reply, from, selectedVideo) {
   await reply("⚙️ *ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴛɪᴋᴛᴏᴋ ᴠɪᴅᴇᴏ...*\n⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...*");
   
@@ -105,15 +141,22 @@ async function downloadAndSendVideo(bot, mek, m, reply, from, selectedVideo) {
 
     await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
 
-    await bot.sendMessage(
-      from,
-      {
-        video: { url: selectedVideo.url },
-        mimetype: "video/mp4",
-        caption
-      },
-      { quoted: mek }
-    );
+    // Handle Image Slide TikToks
+    if (selectedVideo.images && selectedVideo.images.length > 0) {
+      for (const imgUrl of selectedVideo.images) {
+        await bot.sendMessage(from, { image: { url: imgUrl }, caption }, { quoted: mek });
+      }
+    } else {
+      await bot.sendMessage(
+        from,
+        {
+          video: { url: selectedVideo.url },
+          mimetype: "video/mp4",
+          caption
+        },
+        { quoted: mek }
+      );
+    }
 
     await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
   } catch (err) {
@@ -127,21 +170,21 @@ cmd(
   {
     pattern: "tiktok",
     alias: ["tt", "ttdl", "tdl", "tiktokdl"],
-    desc: "Search & download TikTok videos by name",
+    desc: "Search & download TikTok videos by name using TikWM API",
     category: "download",
     react: "🎵",
     filename: __filename,
   },
   async (bot, mek, m, { from, q, sender, reply }) => {
     if (!q) {
-      return reply("📱 *ᴜsᴀɢᴇ:* `.tiktok [video name / query]`\n💡 *ᴇxᴀᴍᴘʟᴇ:* `.tiktok sinhala song`");
+      return reply("📱 *ᴜsᴀɢᴇ:* `.tiktok [video name / query]`\n💡 *ᴇxᴀᴍᴘʟᴇ:* `.tiktok janiya`");
     }
 
     await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
     await reply("🔍 *sᴇᴀʀᴄʜɪɴɢ ᴛɪᴋᴛᴏᴋ ғᴏʀ ᴠɪᴅᴇᴏs...*");
 
     try {
-      const results = await searchTikTokVideos(q.trim());
+      const results = await searchTikTokVideos(q.trim(), 30);
 
       if (!results || results.length === 0) {
         return reply(`❌ *ɴᴏ ᴠɪᴅᴇᴏs ғᴏᴜɴᴅ ғᴏʀ:* _${q}_`);
@@ -167,14 +210,14 @@ cmd(
   {
     pattern: "ttuser",
     alias: ["tiktokuser", "ttu"],
-    desc: "Search TikTok users and view their videos",
+    desc: "Search TikTok users and view their videos using TikWM API",
     category: "download",
     react: "👤",
     filename: __filename,
   },
   async (bot, mek, m, { from, q, sender, reply }) => {
     if (!q) {
-      return reply("👤 *ᴜsᴀɢᴇ:* `.ttuser [username / name]`\n💡 *ᴇxᴀᴍᴘʟᴇ:* `.ttuser maliya`");
+      return reply("👤 *ᴜsᴀɢᴇ:* `.ttuser [username / name]`\n💡 *ᴇxᴀᴍᴘʟᴇ:* `.ttuser janiya`");
     }
 
     await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
@@ -196,14 +239,14 @@ cmd(
 
       let text = `╭〔 👤 *ᴛɪᴋᴛᴏᴋ ᴜsᴇʀ sᴇᴀʀᴄʜ* 〕━\n┃\n`;
       text += `┃ 📊 *ғᴏᴜɴᴅ:* ${users.length} Users\n┃\n`;
-      text += `╰━━━───────━► ❥\n\n`;
+      text += `╰──────━━━━► ❥\n\n`;
 
       users.slice(0, 10).forEach((u, i) => {
         const numStr = String(i + 1).padStart(2, "0");
         text += `*[ ${numStr} ]* 👤 *${toSmallCaps(u.nickname)}*\n🆔 @${u.username}\n\n`;
       });
 
-      text += `──────────────\n`;
+      text += `───────────────\n`;
       text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴜsᴇʀ ɴᴜᴍʙᴇʀ ᴛᴏ ᴠɪᴇᴡ ᴠɪᴅᴇᴏs*`;
 
       await reply(text);
@@ -214,13 +257,12 @@ cmd(
   }
 );
 
-// ===== 3. NUMBER REPLY LISTENER (STRICT VALIDATION) =====
+// ===== 3. NUMBER REPLY LISTENER =====
 cmd(
   {
     filter: (text, { sender, key }) => {
       if (!sender || (key && key.fromMe)) return false;
 
-      // Reply එක strictly Number එකක්ද කියලා බලයි
       const isNumber = /^\d+$/.test(text ? text.trim() : "");
       if (!isNumber) return false;
 
@@ -249,8 +291,7 @@ cmd(
       const session = pendingTtUserVideos[sender];
       if (num <= 0 || num > session.results.length) return;
 
-      // Pagination Triggers (11, 21, 31, etc.)
-      if ([11, 21, 31, 41, 51, 61, 71, 81, 91].includes(num)) {
+      if ([11, 21, 31, 41, 51].includes(num)) {
         session.timestamp = Date.now();
         return reply(generateVideoListText(session.results, num - 1, `@${session.username}'s ᴠɪᴅᴇᴏs`));
       }
@@ -295,8 +336,7 @@ cmd(
       const session = pendingTtSearch[sender];
       if (num <= 0 || num > session.results.length) return;
 
-      // Pagination Triggers (11, 21, 31, etc.)
-      if ([11, 21, 31, 41, 51, 61, 71, 81, 91].includes(num)) {
+      if ([11, 21, 31, 41, 51].includes(num)) {
         session.timestamp = Date.now();
         return reply(generateVideoListText(session.results, num - 1, "ᴛɪᴋᴛᴏᴋ sᴇᴀʀᴄʜ"));
       }
