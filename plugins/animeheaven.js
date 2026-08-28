@@ -1,6 +1,5 @@
 const { cmd } = require("../command");
 const scraper = require("liyanaarachchi-animeheavenme");
-const axios = require("axios");
 
 // State Management per Session & User
 const pendingAnimeSearch = {};
@@ -36,7 +35,7 @@ cmd(
   {
     pattern: "animedl",
     alias: ["anime", "animesearch"],
-    desc: "Search up to 10 anime and download 8 episodes per anime in Document format",
+    desc: "Search up to 10 anime and download 8 episodes per anime as document files",
     category: "download",
     react: "🎌",
     filename: __filename,
@@ -94,7 +93,7 @@ cmd(
 );
 
 // ============================================================
-// 2. NUMBER REPLIES SELECTION HANDLER (DOCUMENT DOWNLOAD)
+// 2. NUMBER REPLIES SELECTION HANDLER (URL STREAMING AS DOCUMENT)
 // ============================================================
 cmd(
   {
@@ -156,14 +155,14 @@ cmd(
           continue;
         }
 
-        // Limit to maximum 8 Episodes
+        // Strictly limit to maximum 8 Episodes
         const targetEpisodes = episodes.slice(0, 8);
 
         await reply(
           `📦 *Found ${episodes.length} Total Episodes.* Downloading first *${targetEpisodes.length} Episodes*...`
         );
 
-        // Send Episodes sequentially as Documents
+        // Send Episodes sequentially using direct URL Streaming (Cinesubz style)
         for (let epIndex = 0; epIndex < targetEpisodes.length; epIndex++) {
           const ep = targetEpisodes[epIndex];
           const epName = ep.name || `Episode ${epIndex + 1}`;
@@ -178,34 +177,27 @@ cmd(
             let videoUrl = await scraper.getVideoLink(ep.id, anime.link);
 
             if (!videoUrl) {
-              await reply(`⚠️ *Skipping ${epName}: Link extraction failed.*`);
+              await reply(`⚠️ *Skipping ${epName}: Extraction failed.*`);
               continue;
             }
 
             await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
 
-            // 1. Download Video Stream via Axios with Custom User-Agent
-            const response = await axios.get(videoUrl, {
-              responseType: "arraybuffer",
-              headers: {
-                "User-Agent":
-                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
-              },
-            });
-
-            const fileBuffer = Buffer.from(response.data);
-            const fileName = `${anime.title} - ${epName}.mp4`.replace(/[/\\?%*:|"<>]/g, "");
+            // File Name Formatting
+            const cleanTitle = anime.title.replace(/[^\w\s.-]/gi, "").substring(0, 50);
+            const cleanEpName = epName.replace(/[^\w\s.-]/gi, "");
+            const fileName = `MALIYA-MD ${cleanTitle} - ${cleanEpName}.mp4`;
 
             const caption =
               `🎌 *${toSmallCaps(anime.title)}*\n` +
               `🎬 *${toSmallCaps(epName)}*\n\n` +
               `👑 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*`;
 
-            // 2. Send as Document
+            // Direct URL Streaming Document Sending (No Axios Buffer to avoid RAM crash)
             await bot.sendMessage(
               from,
               {
-                document: fileBuffer,
+                document: { url: videoUrl },
                 mimetype: "video/mp4",
                 fileName: fileName,
                 caption: caption,
@@ -221,14 +213,14 @@ cmd(
             // Cooldown delay (4 seconds)
             await delay(4000);
           } catch (epErr) {
-            console.error(`Error sending ${epName}:`, epErr);
-            await reply(`❌ *Failed to send ${epName}. Continuing...*`);
+            console.error(`Error sending ${epName}:`, epErr.message);
+            await reply(`❌ *Failed to send ${epName}: ${epErr.message || "Unknown Error"}*`);
           }
         }
 
         episodes = null;
       } catch (animeErr) {
-        console.error(`Error processing anime ${anime.title}:`, animeErr);
+        console.error(`Error processing anime ${anime.title}:`, animeErr.message);
         await reply(`❌ *Failed to process ${anime.title}. Moving to next anime...*`);
       }
     }
