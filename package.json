@@ -13,6 +13,7 @@
     "@nexustechpro/baileys": "latest",
     "@whiskeysockets/baileys": "latest",
     "api-dylux": "latest",
+    "jsonwebtoken": "latest",
     "axios": "latest",
     "browser-id3-writer": "latest",
     "cheerio": "latest",
