@@ -1,7 +1,7 @@
 const { cmd, commands } = require("../command");
 const { sendInteractiveMessage } = require("gifted-btns");
 const config = require("../config");
-const { readSettings } = require("../lib/botSettings");
+const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const pendingMenu = Object.create(null);
 
@@ -20,7 +20,7 @@ const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
 const OWNER_NAME =
   String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
 
-const headerImage =
+const DEFAULT_HEADER_IMAGE =
   "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
 
 /* ============ CACHE ============ */
@@ -308,13 +308,25 @@ function buildStyledMainMenu(state, userName) {
   return msg;
 }
 
-// ----- Send numbered main menu with image and styled text -----
-async function sendNumberedMainMenu(sock, from, mek, state, userName) {
+// ----- Send numbered main menu with custom image and styled text -----
+async function sendNumberedMainMenu(sock, from, mek, state, userName, sessionId) {
+  let headerImg = DEFAULT_HEADER_IMAGE;
+  if (sessionId) {
+    try {
+      const custom = await getCustomImage(sessionId, "menu_header");
+      if (custom && custom.data) {
+        headerImg = custom.data;
+      }
+    } catch (e) {
+      console.log("⚠️ Failed to load custom menu image:", e.message);
+    }
+  }
+
   const caption = buildStyledMainMenu(state, userName);
   return sock.sendMessage(
     from,
     {
-      image: { url: headerImage },
+      image: { url: headerImg },
       caption: caption,
     },
     { quoted: mek }
@@ -322,7 +334,6 @@ async function sendNumberedMainMenu(sock, from, mek, state, userName) {
 }
 
 async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
-  // ✅ FIX: readSettings with sessionId
   const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
@@ -332,7 +343,7 @@ async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
         sock,
         from,
         {
-          image: { url: headerImage },
+          image: { url: DEFAULT_HEADER_IMAGE },
           text: menuHeader(userName),
           footer: `${BOT_NAME} | Interactive Menu`,
           interactiveButtons: [
@@ -372,14 +383,14 @@ async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
   }
 
   // Numbered menu fallback (always works)
-  return sendNumberedMainMenu(sock, from, mek, state, userName);
+  return sendNumberedMainMenu(sock, from, mek, state, userName, sessionId);
 }
 
 async function sendCommandsList(sock, from, mek, cat, list, userName) {
   return sock.sendMessage(
     from,
     {
-      image: { url: headerImage },
+      image: { url: DEFAULT_HEADER_IMAGE },
       caption: commandListCaption(cat, list, userName),
     },
     { quoted: mek }
@@ -414,7 +425,6 @@ cmd(
         lastActionAt: 0,
       };
 
-      // ✅ FIX: pass sessionId
       await sendMainMenu(sock, from, mek, pendingMenu[k], userName, sessionId);
     } catch (e) {
       console.log("MENU ERROR:", e?.message || e);
