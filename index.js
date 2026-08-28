@@ -93,7 +93,6 @@ const app  = express();
 const port = process.env.PORT || 8000;
 
 /* ==================== MIDDLEWARES (FIXED FOR req.body) ==================== */
-// Express එකේ req.body undefined වෙන එක නතර කිරීමට json සහ urlencoded body-parsers එක් කරන ලදී
 app.use(cors({ origin: "*", methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"] }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -288,7 +287,6 @@ const reconnectTimers = new Map();
 const startingSessions = new Set();
 let   watcherStarted   = false;
 
-// Expose activeSessions for external API / dashboard access
 global.__maliya_active_sessions = activeSessions;
 
 function getSessionPaths(sessionId) {
@@ -906,7 +904,6 @@ function attachSessionHandlers(sock, sessionCtx) {
 
 /* ==================== EXPRESS ROUTING & APIS ==================== */
 
-// Settings API Router mount කිරීම
 if (settingsApiRouter) {
   app.use("/api/settings", settingsApiRouter);
 }
@@ -939,8 +936,6 @@ app.get("/health", (_req, res) => res.status(200).send("OK"));
 
 // ─────────────────────────────────────────────────────────────
 //  /api/pair  — Pair Code Generator for external pair site
-//  GET /api/pair?number=94xxxxxxxxx
-//  Returns: { code: "XXXX-XXXX" }
 // ─────────────────────────────────────────────────────────────
 app.get("/api/pair", async (req, res) => {
   const rawNumber = String(req.query.number || "").replace(/[^0-9]/g, "");
@@ -1041,7 +1036,6 @@ app.get("/api/pair", async (req, res) => {
       }
     });
 
-    // Wait for noise handshake then request code
     await new Promise((r) => setTimeout(r, 5000));
 
     if (!sock.authState.creds.registered && !codeSent) {
@@ -1062,8 +1056,6 @@ app.get("/api/pair", async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────
 //  /api/qr  — QR Code Generator for external pair site
-//  GET /api/qr
-//  Returns: { qr: "data:image/png;base64,..." }
 // ─────────────────────────────────────────────────────────────
 const QRCode = require("qrcode");
 
