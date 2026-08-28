@@ -3,51 +3,52 @@ const config = require("../config");
 const os = require("os");
 const fs = require("fs");
 const path = require("path");
+const { getCustomImage } = require("../lib/botSettings");
 
-// ------------------ Helper: Uptime ------------------
+// ── Default images ────────────────────────────────────────────
+const DEFAULT_ALIVE_IMG =
+  "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_j34rhwj34rhwj34r.png?raw=true";
+
 const formatUptime = (seconds) => {
-    const pad = (s) => (s < 10 ? "0" + s : s);
-
-    const days = Math.floor(seconds / (24 * 3600));
-    const hrs = Math.floor((seconds % (24 * 3600)) / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-
-    return `${days > 0 ? `${days}d ` : ""}${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
+  const pad = (s) => (s < 10 ? "0" + s : s);
+  const days = Math.floor(seconds / (24 * 3600));
+  const hrs = Math.floor((seconds % (24 * 3600)) / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${days > 0 ? `${days}d ` : ""}${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
 };
 
-
-// ------------------ Alive Plugin ------------------
 cmd(
-{
+  {
     pattern: "alive",
     react: "🔥",
     desc: "Check if bot is online",
     category: "main",
-    filename: __filename
-},
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, reply, sessionId, sender, pushname }) => {
+    try {
+      const uptime = formatUptime(process.uptime());
+      const platform = os.platform();
+      const userName = pushname || m?.pushName || "User";
 
-async (MALIYA, mek, m, { from, reply }) => {
+      // ── Get custom image (if any) ──────────────────────────
+      let aliveImg = DEFAULT_ALIVE_IMG;
+      if (sessionId) {
+        try {
+          const custom = await getCustomImage(sessionId, "alive");
+          if (custom && custom.data) {
+            aliveImg = custom.data;
+          }
+        } catch (e) {
+          console.log("⚠️ Failed to load custom alive image:", e.message);
+        }
+      }
 
-try {
+      const channelJid = "120363427174988449@newsletter";
+      const channelName = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
 
-    const uptime = formatUptime(process.uptime());
-    const platform = os.platform();
-    const userName = m.pushName || "User";
-
-
-    const aliveImg =
-    "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_j34rhwj34rhwj34r.png?raw=true";
-
-
-    const videoPath = path.join(__dirname, "../media/0908.mp4");
-
-
-    const channelJid = "120363427174988449@newsletter";
-    const channelName = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
-
-
-    const aliveCaption = `
+      const aliveCaption = `
 ╭━〔 🧿 SYSTEM ONLINE 🧿 〕━╮
 ┃
 ┃ 👋 Hey ${userName}
@@ -63,93 +64,33 @@ try {
 ⚙️ Made with ❤️ by
 ╭───────────────⬣
 🔥 𝙈𝘼𝙇𝙄𝙉𝘿𝙐 𝙉𝘼𝘿𝙄𝙏𝙃 🔥
-╰───────────────⬣
-`;
+╰───────────────⬣`;
 
-
-
-    // Send video if exists
-    if (fs.existsSync(videoPath)) {
-
-        await MALIYA.sendMessage(
-            from,
-            {
-                video: fs.readFileSync(videoPath),
-                mimetype: "video/mp4",
-                ptv: true
-            },
-            {
-                quoted: mek
-            }
-        );
-
-    }
-
-
-
-    // Single Message Image + Buttons + Newsletter
-    await MALIYA.sendMessage(
+      await sock.sendMessage(
         from,
         {
-
-            image: {
-                url: aliveImg
+          image: { url: aliveImg },
+          caption: aliveCaption,
+          buttons: [
+            { buttonId: ".menu", buttonText: { displayText: "📜 Menu" }, type: 1 },
+            { buttonId: ".owner", buttonText: { displayText: "👤 Owner" }, type: 1 },
+          ],
+          headerType: 4,
+          contextInfo: {
+            forwardingScore: 999,
+            isForwarded: true,
+            forwardedNewsletterMessageInfo: {
+              newsletterJid: channelJid,
+              newsletterName: channelName,
+              serverMessageId: -1,
             },
-
-            caption: aliveCaption,
-
-
-            buttons: [
-                {
-                    buttonId: ".menu",
-                    buttonText: {
-                        displayText: "📜 Menu"
-                    },
-                    type: 1
-                },
-                {
-                    buttonId: ".owner",
-                    buttonText: {
-                        displayText: "👤 Owner"
-                    },
-                    type: 1
-                }
-            ],
-
-
-            headerType: 4,
-
-
-            contextInfo: {
-
-                forwardingScore: 999,
-                isForwarded: true,
-
-                forwardedNewsletterMessageInfo: {
-
-                    newsletterJid: channelJid,
-                    newsletterName: channelName,
-                    serverMessageId: -1
-
-                }
-
-            }
-
+          },
         },
-        {
-            quoted: mek
-        }
-    );
-
-
-} catch (err) {
-
-    console.log("ALIVE ERROR:", err);
-
-    reply(
-        `❌ Alive Error : ${err.message}`
-    );
-
-}
-
-});
+        { quoted: mek }
+      );
+    } catch (err) {
+      console.log("ALIVE ERROR:", err);
+      reply(`❌ Alive Error: ${err.message}`);
+    }
+  }
+);
