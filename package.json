@@ -79,7 +79,8 @@
     "youtube-dl-exec": "latest",
     "@danonino/starlyn-scraper": "latest",
     "liyanaarachchi-animeheavenme": "latest",
-    "nexora-tiktok-search": "latest"
+    "nexora-tiktok-search": "latest",
+    "tiktok-search-api": "latest"
 
   }
 }
