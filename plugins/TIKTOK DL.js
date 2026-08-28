@@ -1,7 +1,7 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 
-// State Management for Interactive Reply Logic
+// State Management
 const pendingTtSearch = {};
 const pendingTtUserSearch = {};
 const pendingTtUserVideos = {};
@@ -11,7 +11,9 @@ const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 3000;
 
 const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.9',
 };
 
 function clearUserSession(sender) {
@@ -32,87 +34,116 @@ function toSmallCaps(str = "") {
     .join("");
 }
 
-// ===== TIKWM API HELPERS =====
+// ===== MULTI-API TIKTOK SEARCH HELPER =====
 
-// TikWM Video Search
-async function searchTikTokVideos(query, count = 30) {
-  const res = await axios.get('https://tikwm.com/api/feed/search', {
-    params: { keywords: query, count: count, cursor: 0, HD: 1 },
-    headers: HEADERS,
-    timeout: 20000,
-  });
-  
-  const data = res.data;
-  if (data?.code === 0 && Array.isArray(data?.data?.videos)) {
-    return data.data.videos.map((d) => ({
-      id: d.id || '',
-      title: d.title || 'TikTok Video',
-      author: d.author?.nickname || d.author?.unique_id || 'Unknown',
-      duration: d.duration || 0,
-      url: d.play || d.wmplay || d.hdplay || null,
-      images: Array.isArray(d.images) && d.images.length > 0 ? d.images : null
-    })).filter(v => v.url || v.images);
-  }
-  return [];
-}
-
-// Search Users via TikWM User Feed / Search
-async function searchTikTokUsers(username) {
-  const res = await axios.get('https://tikwm.com/api/feed/search', {
-    params: { keywords: username, count: 20, cursor: 0 },
-    headers: HEADERS,
-    timeout: 20000,
-  });
-
-  const data = res.data;
-  if (data?.code === 0 && Array.isArray(data?.data?.videos)) {
-    const userMap = new Map();
-    data.data.videos.forEach((v) => {
-      if (v.author && v.author.unique_id) {
-        if (!userMap.has(v.author.unique_id)) {
-          userMap.set(v.author.unique_id, {
-            username: v.author.unique_id,
-            nickname: v.author.nickname || v.author.unique_id,
-            avatar: v.author.avatar || ''
-          });
-        }
-      }
+async function searchTikTokVideos(query) {
+  // 1. Try Primary TikWM API
+  try {
+    const res = await axios.get('https://www.tikwm.com/api/feed/search', {
+      params: { keywords: query, count: 30, cursor: 0, HD: 1 },
+      headers: HEADERS,
+      timeout: 15000,
     });
-    return Array.from(userMap.values());
+    
+    if (res.data?.code === 0 && Array.isArray(res.data?.data?.videos) && res.data.data.videos.length > 0) {
+      return res.data.data.videos.map((d) => ({
+        id: d.id || '',
+        title: d.title || 'TikTok Video',
+        author: d.author?.nickname || d.author?.unique_id || 'Unknown',
+        duration: d.duration || 0,
+        url: d.play || d.wmplay || d.hdplay || null,
+        images: Array.isArray(d.images) && d.images.length > 0 ? d.images : null
+      })).filter(v => v.url || v.images);
+    }
+  } catch (err) {
+    console.log("TikWM Search Failed, Trying Fallback API...");
+  }
+
+  // 2. Try Fallback API (Tiklydown / Direct Endpoint)
+  try {
+    const fallbackRes = await axios.get(`https://api.tiklydown.eu.org/api/search?q=${encodeURIComponent(query)}`, {
+      headers: HEADERS,
+      timeout: 15000
+    });
+    if (fallbackRes.data && Array.isArray(fallbackRes.data.data) && fallbackRes.data.data.length > 0) {
+      return fallbackRes.data.data.map((item) => ({
+        id: item.id || '',
+        title: item.title || 'TikTok Video',
+        author: item.author?.unique_id || item.author?.nickname || 'Unknown',
+        duration: item.duration || 0,
+        url: item.play || item.wmplay || item.hdplay || item.url,
+        images: null
+      })).filter(v => v.url);
+    }
+  } catch (err) {
+    console.log("Fallback Search API Failed.");
+  }
+
+  return [];
+}
+
+// Search Users
+async function searchTikTokUsers(username) {
+  try {
+    const res = await axios.get('https://www.tikwm.com/api/feed/search', {
+      params: { keywords: username, count: 20, cursor: 0 },
+      headers: HEADERS,
+      timeout: 15000,
+    });
+
+    if (res.data?.code === 0 && Array.isArray(res.data?.data?.videos)) {
+      const userMap = new Map();
+      res.data.data.videos.forEach((v) => {
+        if (v.author && v.author.unique_id) {
+          if (!userMap.has(v.author.unique_id)) {
+            userMap.set(v.author.unique_id, {
+              username: v.author.unique_id,
+              nickname: v.author.nickname || v.author.unique_id,
+              avatar: v.author.avatar || ''
+            });
+          }
+        }
+      });
+      return Array.from(userMap.values());
+    }
+  } catch (e) {
+    console.error("User Search Error:", e);
   }
   return [];
 }
 
-// Get User's Latest Videos
+// Get User Videos
 async function getUserVideos(username) {
-  const res = await axios.get('https://tikwm.com/api/user/posts', {
-    params: { unique_id: username, count: 30, cursor: 0 },
-    headers: HEADERS,
-    timeout: 20000,
-  });
+  try {
+    const res = await axios.get('https://www.tikwm.com/api/user/posts', {
+      params: { unique_id: username, count: 30, cursor: 0 },
+      headers: HEADERS,
+      timeout: 15000,
+    });
 
-  const data = res.data;
-  if (data?.code === 0 && Array.isArray(data?.data?.videos)) {
-    return data.data.videos.map((d) => ({
-      id: d.id || '',
-      title: d.title || 'TikTok Video',
-      author: username,
-      duration: d.duration || 0,
-      url: d.play || d.wmplay || d.hdplay || null,
-      images: Array.isArray(d.images) && d.images.length > 0 ? d.images : null
-    })).filter(v => v.url || v.images);
+    if (res.data?.code === 0 && Array.isArray(res.data?.data?.videos) && res.data.data.videos.length > 0) {
+      return res.data.data.videos.map((d) => ({
+        id: d.id || '',
+        title: d.title || 'TikTok Video',
+        author: username,
+        duration: d.duration || 0,
+        url: d.play || d.wmplay || d.hdplay || null,
+        images: Array.isArray(d.images) && d.images.length > 0 ? d.images : null
+      })).filter(v => v.url || v.images);
+    }
+  } catch (e) {
+    console.log("User posts fetch failed, falling back to query search...");
   }
   
-  // Fallback if user posts endpoint fails: search user unique_id
-  return searchTikTokVideos(username, 30);
+  return searchTikTokVideos(username);
 }
 
 // Generate Search Results Text (10 items per page)
 function generateVideoListText(results, startIndex = 0, titleHeader = "ᴛɪᴋᴛᴏᴋ sᴇᴀʀᴄʜ") {
   const endIndex = Math.min(startIndex + 10, results.length);
-  let text = `╭〔 🎵 *${titleHeader}* 〕━\n┃\n`;
+  let text = `╭━━━〔 🎵 *${titleHeader}* 〕━━━\n┃\n`;
   text += `┃ 📊 *ʀᴇsᴜʟᴛs:* ${startIndex + 1} - ${endIndex} of ${results.length}\n┃\n`;
-  text += `╰━━━───━━━━► ❥\n\n`;
+  text += `╰━━━───────━━━━► ❥\n\n`;
 
   for (let i = startIndex; i < endIndex; i++) {
     const v = results[i];
@@ -120,7 +151,7 @@ function generateVideoListText(results, startIndex = 0, titleHeader = "ᴛɪᴋ�
     text += `*[ ${numStr} ]* 🎬 *${toSmallCaps(v.title.slice(0, 45))}*\n👤 @${v.author}\n\n`;
   }
 
-  text += `──────────────\n`;
+  text += `───────────────────\n`;
   text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴠɪᴅᴇᴏ ɴᴜᴍʙᴇʀ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ*\n`;
   if (endIndex < results.length) {
     text += `➡️ *ʀᴇᴘʟʏ ᴡɪᴛʜ "${endIndex + 1}" ᴛᴏ sᴇᴇ ɴᴇxᴛ 10 ʀᴇsᴜʟᴛs*`;
@@ -128,7 +159,7 @@ function generateVideoListText(results, startIndex = 0, titleHeader = "ᴛɪᴋ�
   return text;
 }
 
-// Download & Send Video/Images
+// Download & Send Video
 async function downloadAndSendVideo(bot, mek, m, reply, from, selectedVideo) {
   await reply("⚙️ *ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴛɪᴋᴛᴏᴋ ᴠɪᴅᴇᴏ...*\n⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...*");
   
@@ -141,7 +172,6 @@ async function downloadAndSendVideo(bot, mek, m, reply, from, selectedVideo) {
 
     await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
 
-    // Handle Image Slide TikToks
     if (selectedVideo.images && selectedVideo.images.length > 0) {
       for (const imgUrl of selectedVideo.images) {
         await bot.sendMessage(from, { image: { url: imgUrl }, caption }, { quoted: mek });
@@ -170,23 +200,24 @@ cmd(
   {
     pattern: "tiktok",
     alias: ["tt", "ttdl", "tdl", "tiktokdl"],
-    desc: "Search & download TikTok videos by name using TikWM API",
+    desc: "Search & download TikTok videos by name",
     category: "download",
     react: "🎵",
     filename: __filename,
   },
   async (bot, mek, m, { from, q, sender, reply }) => {
     if (!q) {
-      return reply("📱 *ᴜsᴀɢᴇ:* `.tiktok [video name / query]`\n💡 *ᴇxᴀᴍᴘʟᴇ:* `.tiktok janiya`");
+      return reply("📱 *ᴜsᴀɢᴇ:* `.tiktok [video name / query]`\n💡 *ᴇxᴀᴍᴘʟᴇ:* `.tiktok ex janiya`");
     }
 
     await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
     await reply("🔍 *sᴇᴀʀᴄʜɪɴɢ ᴛɪᴋᴛᴏᴋ ғᴏʀ ᴠɪᴅᴇᴏs...*");
 
     try {
-      const results = await searchTikTokVideos(q.trim(), 30);
+      const results = await searchTikTokVideos(q.trim());
 
       if (!results || results.length === 0) {
+        await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
         return reply(`❌ *ɴᴏ ᴠɪᴅᴇᴏs ғᴏᴜɴᴅ ғᴏʀ:* _${q}_`);
       }
 
@@ -200,6 +231,7 @@ cmd(
       await reply(generateVideoListText(results, 0, "ᴛɪᴋᴛᴏᴋ sᴇᴀʀᴄʜ"));
     } catch (e) {
       console.log("TIKTOK SEARCH ERROR:", e);
+      await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
       reply("❌ *ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ ᴡʜɪʟᴇ sᴇᴀʀᴄʜɪɴɢ ᴛɪᴋᴛᴏᴋ!*");
     }
   }
@@ -210,7 +242,7 @@ cmd(
   {
     pattern: "ttuser",
     alias: ["tiktokuser", "ttu"],
-    desc: "Search TikTok users and view their videos using TikWM API",
+    desc: "Search TikTok users and view their videos",
     category: "download",
     react: "👤",
     filename: __filename,
@@ -227,6 +259,7 @@ cmd(
       const users = await searchTikTokUsers(q.trim());
 
       if (!users || users.length === 0) {
+        await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
         return reply(`❌ *ɴᴏ ᴜsᴇʀs ғᴏᴜɴᴅ ғᴏʀ:* _${q}_`);
       }
 
@@ -237,21 +270,22 @@ cmd(
         timestamp: Date.now()
       };
 
-      let text = `╭〔 👤 *ᴛɪᴋᴛᴏᴋ ᴜsᴇʀ sᴇᴀʀᴄʜ* 〕━\n┃\n`;
+      let text = `╭━━━〔 👤 *ᴛɪᴋᴛᴏᴋ ᴜsᴇʀ sᴇᴀʀᴄʜ* 〕━━━\n┃\n`;
       text += `┃ 📊 *ғᴏᴜɴᴅ:* ${users.length} Users\n┃\n`;
-      text += `╰──────━━━━► ❥\n\n`;
+      text += `╰━━━───────━━━━► ❥\n\n`;
 
       users.slice(0, 10).forEach((u, i) => {
         const numStr = String(i + 1).padStart(2, "0");
         text += `*[ ${numStr} ]* 👤 *${toSmallCaps(u.nickname)}*\n🆔 @${u.username}\n\n`;
       });
 
-      text += `───────────────\n`;
+      text += `───────────────────\n`;
       text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴜsᴇʀ ɴᴜᴍʙᴇʀ ᴛᴏ ᴠɪᴇᴡ ᴠɪᴅᴇᴏs*`;
 
       await reply(text);
     } catch (e) {
       console.log("TTUSER SEARCH ERROR:", e);
+      await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
       reply("❌ *ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ ᴡʜɪʟᴇ sᴇᴀʀᴄʜɪɴɢ ᴜsᴇʀs!*");
     }
   }
