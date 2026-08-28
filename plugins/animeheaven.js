@@ -1,5 +1,6 @@
 const { cmd } = require("../command");
 const scraper = require("liyanaarachchi-animeheavenme");
+const axios = require("axios");
 
 // State Management per Session & User
 const pendingAnimeSearch = {};
@@ -25,7 +26,7 @@ function toSmallCaps(str = "") {
     .join("");
 }
 
-// Sequential Delay Helper to prevent WhatsApp Rate-Limits
+// Sequential Delay Helper
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ============================================================
@@ -35,7 +36,7 @@ cmd(
   {
     pattern: "animedl",
     alias: ["anime", "animesearch"],
-    desc: "Search up to 10 anime and download 8 episodes per anime (Max 4 selection)",
+    desc: "Search up to 10 anime and download 8 episodes per anime in Document format",
     category: "download",
     react: "🎌",
     filename: __filename,
@@ -55,7 +56,7 @@ cmd(
 
       if (!searchResults || searchResults.length === 0) {
         await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-        return reply(`❌ *ɴᴏ ᴀɴɪᴍᴇ ғᴏᴜɴᴅ ғᴏᴜɴᴅ ғᴏʀ:* _${q}_`);
+        return reply(`❌ *ɴᴏ ᴀɴɪᴍᴇ ғᴏᴜɴᴅ ғᴏʀ:* _${q}_`);
       }
 
       const userSessionKey = `${sessionId}_${sender}`;
@@ -78,8 +79,8 @@ cmd(
       });
 
       text += `\n───────────────────\n`;
-      text += `📌 * Select up to 4 Anime by numbers (e.g. reply: "1,3,5" or "2,4")*\n`;
-      text += `⚠️ *Note:* Max 8 Episodes will be downloaded per selected anime.`;
+      text += `📌 *Select up to 4 Anime by numbers (e.g. reply: "1,3,5" or "2")*\n`;
+      text += `⚠️ *Note:* Max 8 Episodes will be downloaded per selected anime as Document Files.`;
 
       await reply(text);
 
@@ -93,24 +94,23 @@ cmd(
 );
 
 // ============================================================
-// 2. NUMBER REPLIES SELECTION HANDLER
+// 2. NUMBER REPLIES SELECTION HANDLER (DOCUMENT DOWNLOAD)
 // ============================================================
 cmd(
   {
     filter: (text, { sender, key }) => {
       if (!sender || (key && key.fromMe)) return false;
-      // Matches single numbers or comma/space separated numbers (e.g. "1", "1,2,3", "1 4 5")
       return /^[\d\s,]+$/.test(text ? text.trim() : "");
     },
   },
   async (bot, mek, m, { body, sender, reply, from, sessionId }) => {
     const userSessionKey = `${sessionId}_${sender}`;
     const session = pendingAnimeSearch[userSessionKey];
-    if (!session) return; // Ignore if user has no pending anime search context
+    if (!session) return;
 
     const input = body ? body.trim() : "";
     
-    // Parse selected indices (e.g., "1, 3, 5" -> [1, 3, 5])
+    // Parse selected indices
     const chosenIndices = input
       .split(/[\s,]+/)
       .map((n) => parseInt(n))
@@ -135,7 +135,7 @@ cmd(
     const selectedAnimeList = finalSelectionIndices.map((idx) => searchResults[idx - 1]);
 
     await reply(
-      `🚀 *sᴛᴀʀᴛɪɴɢ ʙᴀᴛᴄʜ ᴅᴏᴡɴʟᴏᴀᴅ:* ${selectedAnimeList.length} Anime selected. (Max 8 Episodes each)...`
+      `🚀 *sᴛᴀʀᴛɪɴɢ ʙᴀᴛᴄʜ ᴅᴏᴡɴʟᴏᴀᴅ:* ${selectedAnimeList.length} Anime selected. (Max 8 Episodes each in Document Format)...`
     );
 
     // Process each selected anime sequentially
@@ -156,14 +156,14 @@ cmd(
           continue;
         }
 
-        // Strictly limit to the FIRST 8 EPISODES ONLY
+        // Limit to maximum 8 Episodes
         const targetEpisodes = episodes.slice(0, 8);
 
         await reply(
           `📦 *Found ${episodes.length} Total Episodes.* Downloading first *${targetEpisodes.length} Episodes*...`
         );
 
-        // Send Episodes sequentially
+        // Send Episodes sequentially as Documents
         for (let epIndex = 0; epIndex < targetEpisodes.length; epIndex++) {
           const ep = targetEpisodes[epIndex];
           const epName = ep.name || `Episode ${epIndex + 1}`;
@@ -172,40 +172,53 @@ cmd(
             await reply(
               `⚙️ *[Anime ${aIndex + 1}/${selectedAnimeList.length}] [Ep ${
                 epIndex + 1
-              }/${targetEpisodes.length}] Extracting ${epName}...*`
+              }/${targetEpisodes.length}] Downloading ${epName}...*`
             );
 
             let videoUrl = await scraper.getVideoLink(ep.id, anime.link);
 
             if (!videoUrl) {
-              await reply(`⚠️ *Skipping ${epName}: Extraction failed.*`);
+              await reply(`⚠️ *Skipping ${epName}: Link extraction failed.*`);
               continue;
             }
+
+            await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
+
+            // 1. Download Video Stream via Axios with Custom User-Agent
+            const response = await axios.get(videoUrl, {
+              responseType: "arraybuffer",
+              headers: {
+                "User-Agent":
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
+              },
+            });
+
+            const fileBuffer = Buffer.from(response.data);
+            const fileName = `${anime.title} - ${epName}.mp4`.replace(/[/\\?%*:|"<>]/g, "");
 
             const caption =
               `🎌 *${toSmallCaps(anime.title)}*\n` +
               `🎬 *${toSmallCaps(epName)}*\n\n` +
               `👑 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*`;
 
-            await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
-
-            // Stream Video directly to chat
+            // 2. Send as Document
             await bot.sendMessage(
               from,
               {
-                video: { url: videoUrl },
+                document: fileBuffer,
                 mimetype: "video/mp4",
-                caption,
+                fileName: fileName,
+                caption: caption,
               },
               { quoted: mek }
             );
 
             await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
 
-            // Clear Video URL memory reference
+            // Garbage Collection
             videoUrl = null;
 
-            // Cooldown delay (4 seconds) to avoid WhatsApp ban
+            // Cooldown delay (4 seconds)
             await delay(4000);
           } catch (epErr) {
             console.error(`Error sending ${epName}:`, epErr);
@@ -220,7 +233,7 @@ cmd(
       }
     }
 
-    await reply(`🎉 *All Selected Anime Downloads Completed Successfully!*`);
+    await reply(`🎉 *All Selected Anime Document Downloads Completed Successfully!*`);
   }
 );
 
