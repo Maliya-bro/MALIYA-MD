@@ -1,15 +1,16 @@
 const { cmd } = require("../command");
 const scraper = require("liyanaarachchi-animeheavenme");
 
-// State Management for User Interactive Sessions
+// State Management per Session & User
 const pendingAnimeSearch = {};
 const lastProcessedMsg = {};
 
 const SESSION_TIMEOUT = 10 * 60 * 1000; // 10 Minutes
 const LOOP_COOLDOWN = 3000;
 
-function clearUserSession(sender) {
-  delete pendingAnimeSearch[sender];
+function clearUserSession(sessionId, sender) {
+  const key = `${sessionId}_${sender}`;
+  delete pendingAnimeSearch[key];
 }
 
 function toSmallCaps(str = "") {
@@ -24,58 +25,64 @@ function toSmallCaps(str = "") {
     .join("");
 }
 
-// Helper Function: Sequential Delay to prevent WhatsApp Rate-Limits
+// Sequential Delay Helper to prevent WhatsApp Rate-Limits
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// ===== 1. ANIME SEARCH COMMAND (.animedl) =====
+// ============================================================
+// 1. ANIME SEARCH COMMAND (.animedl)
+// ============================================================
 cmd(
   {
     pattern: "animedl",
-    alias: ["animedownload", "animesearch", "andl"],
-    desc: "Search Anime and download all episodes sequentially with memory optimization",
+    alias: ["anime", "animesearch"],
+    desc: "Search up to 10 anime and download 8 episodes per anime (Max 4 selection)",
     category: "download",
     react: "🎌",
     filename: __filename,
   },
-  async (bot, mek, m, { from, q, sender, reply }) => {
+  async (bot, mek, m, { from, q, sender, reply, sessionId }) => {
     if (!q) {
-      return reply("📱 *ᴜsᴀɢᴇ:* `.animedl [anime name]`\n💡 *ᴇxᴀᴍᴘʟᴇ:* `.animedl dandadan`");
+      return reply(
+        "📱 *ᴜsᴀɢᴇ:* `.animedl [anime name]`\n💡 *ᴇxᴀᴍᴘʟᴇ:* `.animedl naruto`"
+      );
     }
 
     await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
-    await reply("🔍 *sᴇᴀʀᴄʜɪɴɢ ᴀɴɪᴍᴇʜᴇᴀᴠᴇɴ ғᴏʀ ᴀɴɪᴍᴇ...*");
+    await reply("🔍 *sᴇᴀʀᴄʜɪɴɢ ᴀɴɪᴍᴇʜᴇᴀᴠᴇɴ...*");
 
     try {
       let searchResults = await scraper.searchAnime(q.trim());
 
       if (!searchResults || searchResults.length === 0) {
         await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-        return reply(`❌ *ɴᴏ ᴀɴɪᴍᴇ ғᴏᴜɴᴅ ғᴏʀ:* _${q}_`);
+        return reply(`❌ *ɴᴏ ᴀɴɪᴍᴇ ғᴏᴜɴᴅ ғᴏᴜɴᴅ ғᴏʀ:* _${q}_`);
       }
 
-      clearUserSession(sender);
+      const userSessionKey = `${sessionId}_${sender}`;
+      clearUserSession(sessionId, sender);
 
-      // Save top 10 search results to user session
-      pendingAnimeSearch[sender] = {
-        results: searchResults.slice(0, 10),
+      // Store up to 10 Search Results
+      const topResults = searchResults.slice(0, 10);
+      pendingAnimeSearch[userSessionKey] = {
+        results: topResults,
         timestamp: Date.now(),
       };
 
-      let text = `╭━━━〔 🎌 *ᴀɴɪᴍᴇ sᴇᴀʀᴄʜ* 〕━━━\n┃\n`;
-      text += `┃ 📊 *ғᴏᴜɴᴅ:* ${Math.min(searchResults.length, 10)} Results\n┃\n`;
+      let text = `╭━━━〔 🎌 *ᴀɴɪᴍᴇ sᴇᴀʀᴄʜ (ᴍᴀx 10 ʀᴇsᴜʟᴛs)* 〕━━━\n┃\n`;
+      text += `┃ 📊 *ғᴏᴜɴᴅ:* ${topResults.length} Anime(s)\n┃\n`;
       text += `╰━━━───────━━━━► ❥\n\n`;
 
-      searchResults.slice(0, 10).forEach((item, index) => {
+      topResults.forEach((item, index) => {
         const numStr = String(index + 1).padStart(2, "0");
-        text += `*[ ${numStr} ]* 🎬 *${toSmallCaps(item.title)}*\n\n`;
+        text += `*[ ${numStr} ]* 🎬 *${toSmallCaps(item.title)}*\n`;
       });
 
-      text += `───────────────────\n`;
-      text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ ᴛᴏ sᴛᴀʀᴛ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴀʟʟ ᴇᴘɪsᴏᴅᴇs*`;
+      text += `\n───────────────────\n`;
+      text += `📌 * Select up to 4 Anime by numbers (e.g. reply: "1,3,5" or "2,4")*\n`;
+      text += `⚠️ *Note:* Max 8 Episodes will be downloaded per selected anime.`;
 
       await reply(text);
 
-      // Clear memory variable
       searchResults = null;
     } catch (e) {
       console.error("ANIME SEARCH ERROR:", e);
@@ -85,120 +92,149 @@ cmd(
   }
 );
 
-// ===== 2. NUMBER REPLY LISTENER (MEMORY-CLEAN SEQUENTIAL DOWNLOAD) =====
+// ============================================================
+// 2. NUMBER REPLIES SELECTION HANDLER
+// ============================================================
 cmd(
   {
     filter: (text, { sender, key }) => {
       if (!sender || (key && key.fromMe)) return false;
-
-      const isNumber = /^\d+$/.test(text ? text.trim() : "");
-      if (!isNumber) return false;
-
-      return Boolean(pendingAnimeSearch[sender]);
+      // Matches single numbers or comma/space separated numbers (e.g. "1", "1,2,3", "1 4 5")
+      return /^[\d\s,]+$/.test(text ? text.trim() : "");
     },
   },
-  async (bot, mek, m, { body, sender, reply, from }) => {
-    const input = body ? body.trim() : "";
-    const num = parseInt(input);
-    if (isNaN(num)) return;
+  async (bot, mek, m, { body, sender, reply, from, sessionId }) => {
+    const userSessionKey = `${sessionId}_${sender}`;
+    const session = pendingAnimeSearch[userSessionKey];
+    if (!session) return; // Ignore if user has no pending anime search context
 
-    // Loop Protection
+    const input = body ? body.trim() : "";
+    
+    // Parse selected indices (e.g., "1, 3, 5" -> [1, 3, 5])
+    const chosenIndices = input
+      .split(/[\s,]+/)
+      .map((n) => parseInt(n))
+      .filter((n) => !isNaN(n) && n >= 1 && n <= session.results.length);
+
+    if (chosenIndices.length === 0) return;
+
+    // Limit selection to maximum 4 Anime
+    const finalSelectionIndices = [...new Set(chosenIndices)].slice(0, 4);
+
+    // Loop & Spam Guard
     const now = Date.now();
-    const lastMsg = lastProcessedMsg[sender];
+    const lastMsg = lastProcessedMsg[userSessionKey];
     if (lastMsg && lastMsg.text === input && now - lastMsg.time < LOOP_COOLDOWN) {
       return;
     }
-    lastProcessedMsg[sender] = { text: input, time: now };
+    lastProcessedMsg[userSessionKey] = { text: input, time: now };
 
-    const session = pendingAnimeSearch[sender];
-    if (num <= 0 || num > session.results.length) return;
+    const searchResults = session.results;
+    clearUserSession(sessionId, sender);
 
-    const selectedAnime = session.results[num - 1];
-    clearUserSession(sender);
+    const selectedAnimeList = finalSelectionIndices.map((idx) => searchResults[idx - 1]);
 
-    await reply(`⏳ *ғᴇᴛᴄʜɪɴɢ ᴇᴘɪsᴏᴅᴇs ғᴏʀ ${toSmallCaps(selectedAnime.title)}...*`);
+    await reply(
+      `🚀 *sᴛᴀʀᴛɪɴɢ ʙᴀᴛᴄʜ ᴅᴏᴡɴʟᴏᴀᴅ:* ${selectedAnimeList.length} Anime selected. (Max 8 Episodes each)...`
+    );
 
-    try {
-      // Get complete episode list
-      let episodes = await scraper.getEpisodes(selectedAnime.link);
+    // Process each selected anime sequentially
+    for (let aIndex = 0; aIndex < selectedAnimeList.length; aIndex++) {
+      const anime = selectedAnimeList[aIndex];
 
-      if (!episodes || episodes.length === 0) {
-        return reply(`❌ *ɴᴏ ᴇᴘɪsᴏᴅᴇs ғᴏᴜɴᴅ ғᴏʀ ${selectedAnime.title}!*`);
-      }
+      try {
+        await reply(
+          `📌 *[ANIME ${aIndex + 1}/${selectedAnimeList.length}]* Fetching episodes for *${toSmallCaps(
+            anime.title
+          )}*...`
+        );
 
-      await reply(
-        `📦 *ғᴏᴜɴᴅ ${episodes.length} ᴇᴘɪsᴏᴅᴇs!*\n🚀 *sᴛᴀʀᴛɪɴɢ ᴏɴᴇ-ʙʏ-ᴏɴᴇ ᴅᴏᴡɴʟᴏᴀᴅ...*`
-      );
+        let episodes = await scraper.getEpisodes(anime.link);
 
-      // Send Episodes One By One Sequentially with Memory Optimization
-      for (let i = 0; i < episodes.length; i++) {
-        const ep = episodes[i];
-        const epName = ep.name || `Episode ${i + 1}`;
-
-        try {
-          await reply(`⚙️ *[${i + 1}/${episodes.length}] ᴇxᴛʀᴀᴄᴛɪɴɢ ${epName}...*`);
-
-          // Fetch Direct .mp4 Video Link
-          let videoUrl = await scraper.getVideoLink(ep.id, selectedAnime.link);
-
-          if (!videoUrl) {
-            await reply(`⚠️ *Skipping ${epName}: Direct video link not found.*`);
-            continue;
-          }
-
-          const caption =
-            `🎌 *${toSmallCaps(selectedAnime.title)}*\n` +
-            `🎬 *${toSmallCaps(epName)}*\n\n` +
-            `👑 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*`;
-
-          await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
-
-          // Send Video
-          await bot.sendMessage(
-            from,
-            {
-              video: { url: videoUrl },
-              mimetype: "video/mp4",
-              caption,
-            },
-            { quoted: mek }
-          );
-
-          await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-
-          // ===== MEMORY CLEANUP PER EPISODE =====
-          videoUrl = null; // Garbage Collector එකට RAM එක Release කරයි
-
-          // 4 Seconds Delay - Prevents WhatsApp Spam Detection & System RAM Spikes
-          await delay(4000);
-        } catch (epErr) {
-          console.error(`Error downloading ${epName}:`, epErr);
-          await reply(`❌ *ғᴀɪʟᴇᴅ ᴛᴏ sᴇɴᴅ ${epName}. ᴍᴏᴠɪɴɢ ᴛᴏ ɴᴇxᴛ...*`);
+        if (!episodes || episodes.length === 0) {
+          await reply(`⚠️ *No episodes found for ${anime.title}. Moving to next anime...*`);
+          continue;
         }
-      }
 
-      await reply(`🎉 *ᴀʟʟ ᴇᴘɪsᴏᴅᴇs ᴏғ ${toSmallCaps(selectedAnime.title)} sᴇɴᴛ sᴜᴄᴄᴇssғᴜʟʟʏ!*`);
-      
-      // Clear main list memory
-      episodes = null;
-    } catch (e) {
-      console.error("ANIME EPISODES FETCH ERROR:", e);
-      reply("❌ *ғᴀɪʟᴇᴅ ᴛᴏ ʟᴏᴀᴅ ᴀɴɪᴍᴇ ᴇᴘɪsᴏᴅᴇs!*");
+        // Strictly limit to the FIRST 8 EPISODES ONLY
+        const targetEpisodes = episodes.slice(0, 8);
+
+        await reply(
+          `📦 *Found ${episodes.length} Total Episodes.* Downloading first *${targetEpisodes.length} Episodes*...`
+        );
+
+        // Send Episodes sequentially
+        for (let epIndex = 0; epIndex < targetEpisodes.length; epIndex++) {
+          const ep = targetEpisodes[epIndex];
+          const epName = ep.name || `Episode ${epIndex + 1}`;
+
+          try {
+            await reply(
+              `⚙️ *[Anime ${aIndex + 1}/${selectedAnimeList.length}] [Ep ${
+                epIndex + 1
+              }/${targetEpisodes.length}] Extracting ${epName}...*`
+            );
+
+            let videoUrl = await scraper.getVideoLink(ep.id, anime.link);
+
+            if (!videoUrl) {
+              await reply(`⚠️ *Skipping ${epName}: Extraction failed.*`);
+              continue;
+            }
+
+            const caption =
+              `🎌 *${toSmallCaps(anime.title)}*\n` +
+              `🎬 *${toSmallCaps(epName)}*\n\n` +
+              `👑 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*`;
+
+            await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
+
+            // Stream Video directly to chat
+            await bot.sendMessage(
+              from,
+              {
+                video: { url: videoUrl },
+                mimetype: "video/mp4",
+                caption,
+              },
+              { quoted: mek }
+            );
+
+            await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+
+            // Clear Video URL memory reference
+            videoUrl = null;
+
+            // Cooldown delay (4 seconds) to avoid WhatsApp ban
+            await delay(4000);
+          } catch (epErr) {
+            console.error(`Error sending ${epName}:`, epErr);
+            await reply(`❌ *Failed to send ${epName}. Continuing...*`);
+          }
+        }
+
+        episodes = null;
+      } catch (animeErr) {
+        console.error(`Error processing anime ${anime.title}:`, animeErr);
+        await reply(`❌ *Failed to process ${anime.title}. Moving to next anime...*`);
+      }
     }
+
+    await reply(`🎉 *All Selected Anime Downloads Completed Successfully!*`);
   }
 );
 
-// Automatic Session Cleanup Interval
+// Automatic Session Garbage Collector
 setInterval(() => {
   const now = Date.now();
-  for (const s in pendingAnimeSearch) {
-    if (now - pendingAnimeSearch[s].timestamp > SESSION_TIMEOUT) {
-      delete pendingAnimeSearch[s];
+  for (const key in pendingAnimeSearch) {
+    if (now - pendingAnimeSearch[key].timestamp > SESSION_TIMEOUT) {
+      delete pendingAnimeSearch[key];
     }
   }
-  for (const s in lastProcessedMsg) {
-    if (now - lastProcessedMsg[s].time > LOOP_COOLDOWN) {
-      delete lastProcessedMsg[s];
+  for (const key in lastProcessedMsg) {
+    if (now - lastProcessedMsg[key].time > LOOP_COOLDOWN) {
+      delete lastProcessedMsg[key];
     }
   }
 }, 2.5 * 60 * 1000);
