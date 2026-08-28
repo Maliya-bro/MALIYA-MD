@@ -62,7 +62,7 @@ const { readSettings, isWorkAllowed } = require("./lib/botSettings");
 const { sms }           = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 
-// ── Settings API Routes ──────────────────────────────────────
+// ── Settings API Routes (NEW) ──────────────────────────────
 const settingsApiRouter = require("./routes/settings-api.js");
 
 // ── Plugins ──────────────────────────────────────────────────
@@ -735,19 +735,6 @@ function attachSessionHandlers(sock, sessionCtx) {
           else if (presenceMode === "recording") await sock.sendPresenceUpdate("recording",  from);
         } catch (_) {}
 
-        // ── ANTI-SPAM PLUGIN ────────────────────────────────────
-        try {
-          const antiSpam = require("./plugins/anti-spam.js");
-          const allow = await antiSpam.handleAntiSpam(sock, mek, m, {
-            from, sender, senderNumber, isOwner, reply
-          });
-          if (!allow) {
-            continue messageLoop;
-          }
-        } catch (e) {
-          console.log("Anti-spam error:", e.message);
-        }
-
         // ── WORK SCOPE CHECK ────────────────────────────────────
         if (!(await isWorkAllowed(sessionCtx.sessionId, isGroup))) {
           console.log(`⏭️ Skipping message: work_scope disallows ${isGroup ? "group" : "private"} chat for ${sessionCtx.sessionId}`);
@@ -932,10 +919,39 @@ app.get("/sessions", async (req, res) => {
 
 app.get("/health", (_req, res) => res.status(200).send("OK"));
 
-// ── Settings API Routes ──────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  CORS — allow website (Vercel + Railway) to call this server
+// ─────────────────────────────────────────────────────────────
+app.use(cors({
+  origin: (origin, cb) => {
+    // Allow Vercel (frontend), Railway (backend), Replit, and localhost
+    if (
+      !origin ||
+      /\.vercel\.app$/.test(origin) ||
+      /\.vercel\.dev$/.test(origin) ||
+      /\.railway\.app$/.test(origin) ||
+      /\.replit\.app$/.test(origin) ||
+      /\.repl\.co$/.test(origin) ||
+      /^http:\/\/localhost(:\d+)?$/.test(origin)
+    ) {
+      cb(null, true);
+    } else {
+      cb(new Error("CORS: origin not allowed"));
+    }
+  },
+  methods: ["GET", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-api-key", "x-settings-token"],
+  credentials: true,
+}));
+
+// ─────────────────────────────────────────────────────────────
+//  🔥 SETTINGS API ROUTES (NEW)
+// ─────────────────────────────────────────────────────────────
 app.use("/api/settings", settingsApiRouter);
 
-// ── API Status ──────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  API Status endpoint
+// ─────────────────────────────────────────────────────────────
 app.get("/api/status", (req, res) => {
   res.json({
     ok: true,
@@ -946,8 +962,9 @@ app.get("/api/status", (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`🚀 Server listening on http://localhost:${port}`);
+  console.log(`🚀 Bot Server listening on port ${port}`);
   console.log(`🔥 Multi-user mode ready | Max active sessions: ${MAX_ACTIVE_SESSIONS}`);
+  console.log(`⚙️ Settings API available at /api/settings`);
 });
 
 /* ==================== START ==================== */
