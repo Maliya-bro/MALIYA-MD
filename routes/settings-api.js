@@ -54,8 +54,6 @@ function verifyToken(req, res, next) {
 }
 
 // ── POST /api/settings/request-code ──────────────────────────
-// Body: { sessionId, phone }
-// Sends 6-digit code to the owner's WhatsApp number
 router.post("/request-code", async (req, res) => {
   try {
     const { sessionId, phone } = req.body;
@@ -64,7 +62,6 @@ router.post("/request-code", async (req, res) => {
       return res.status(400).json({ ok: false, error: "sessionId or phone is required." });
     }
 
-    // If phone provided, find sessionId
     let targetSessionId = sessionId;
     if (phone && !sessionId) {
       targetSessionId = await getSessionIdByPhone(phone);
@@ -77,24 +74,20 @@ router.post("/request-code", async (req, res) => {
       return res.status(400).json({ ok: false, error: "sessionId is required." });
     }
 
-    // Get owner phone
     const ownerPhone = await getSessionOwnerPhone(targetSessionId);
     if (!ownerPhone) {
       return res.status(404).json({ ok: false, error: "Session owner phone not found." });
     }
 
-    // Generate and store code
     const code = generateCode();
     codeStore.set(targetSessionId, {
       code,
       phone: ownerPhone,
-      expires: Date.now() + 300000, // 5 minutes
+      expires: Date.now() + 300000,
     });
 
     console.log(`📱 Verification code for ${targetSessionId}: ${code}`);
 
-    // Send code via WhatsApp (requires bot instance)
-    // We'll use the global activeSessions from index.js
     const activeSessions = global.__maliya_active_sessions || new Map();
     const sessionCtx = activeSessions.get(targetSessionId);
     if (!sessionCtx || !sessionCtx.sock) {
@@ -111,7 +104,6 @@ router.post("/request-code", async (req, res) => {
       return res.status(503).json({ ok: false, error: "Failed to send verification code via WhatsApp." });
     }
 
-    // Store sessionId for later use (verify endpoint will use it)
     res.json({
       ok: true,
       message: "Verification code sent to your WhatsApp.",
@@ -125,8 +117,6 @@ router.post("/request-code", async (req, res) => {
 });
 
 // ── POST /api/settings/verify-code ───────────────────────────
-// Body: { sessionId, code }
-// Returns JWT token on success
 router.post("/verify-code", async (req, res) => {
   try {
     const { sessionId, code } = req.body;
@@ -149,11 +139,9 @@ router.post("/verify-code", async (req, res) => {
       return res.status(403).json({ ok: false, error: "Invalid code. Please try again." });
     }
 
-    // Success - generate JWT token
     const secret = process.env.UNBAN_CODE || process.env.SESSION_SECRET || "maliya-md-secret";
     const token = jwt.sign({ sessionId }, secret, { expiresIn: "1h" });
 
-    // Delete used code
     codeStore.delete(sessionId);
 
     res.json({
@@ -169,16 +157,10 @@ router.post("/verify-code", async (req, res) => {
 });
 
 // ── GET /api/settings ────────────────────────────────────────
-// Headers: { x-settings-token: <jwt> }
-// Returns all settings + images for the session
 router.get("/", verifyToken, async (req, res) => {
   try {
     const sessionId = req.sessionId;
-
-    // Get settings
     const settings = await readSettings(sessionId);
-
-    // Get custom images list
     const images = await listCustomImages(sessionId);
 
     res.json({
@@ -193,39 +175,29 @@ router.get("/", verifyToken, async (req, res) => {
 });
 
 // ── POST /api/settings ───────────────────────────────────────
-// Headers: { x-settings-token: <jwt> }
-// Body: { settings: { key: value }, images: { key: "data:image/..." } }
 router.post("/", verifyToken, async (req, res) => {
   try {
     const sessionId = req.sessionId;
     const { settings = {}, images = {} } = req.body;
 
-    // ── Update settings ──────────────────────────────────────
     for (const [key, value] of Object.entries(settings)) {
       if (key === "mode" || key === "work_scope" || key === "always_presence" || key === "auto_react_mode") {
-        // These need validation (handled by setSetting)
         await setSetting(sessionId, key, value);
       } else if (typeof value === "boolean") {
-        // Boolean settings: use setSetting
         await setSetting(sessionId, key, value);
       } else {
-        // Unknown setting - skip
         console.log(`⚠️ Unknown setting: ${key}=${value}`);
       }
     }
 
-    // ── Update images ────────────────────────────────────────
     for (const [key, dataUrl] of Object.entries(images)) {
       if (dataUrl === null || dataUrl === "") {
-        // Delete image
         await deleteCustomImage(sessionId, key);
       } else {
-        // Upload/update image
         await setCustomImage(sessionId, key, dataUrl);
       }
     }
 
-    // Get updated settings and images
     const updatedSettings = await readSettings(sessionId);
     const updatedImages = await listCustomImages(sessionId);
 
@@ -242,7 +214,6 @@ router.post("/", verifyToken, async (req, res) => {
 });
 
 // ── DELETE /api/settings/image/:key ──────────────────────────
-// Headers: { x-settings-token: <jwt> }
 router.delete("/image/:key", verifyToken, async (req, res) => {
   try {
     const sessionId = req.sessionId;
