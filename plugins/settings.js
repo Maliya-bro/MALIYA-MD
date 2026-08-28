@@ -61,7 +61,7 @@ function btnsModeText(val) {
 async function getStatusCard(sessionId) {
   const s = await readSettings(sessionId);
   return `
-┌───❮ 🌟 *ᴍᴀʟɪʏᴀ-ᴍᴅ sᴇᴛᴛɪɴɢs* 🌟 ❯───
+┌❮ 🌟 *ᴍᴀʟɪʏᴀ-ᴍᴅ sᴇᴛᴛɪɴɢs* 🌟 ❯─
 │
 ├─► ⚙️ *ᴡᴏʀᴋ ᴛʏᴘᴇ:* ${String(s.mode || "public").toUpperCase()}
 ├─► 🎯 *ᴡᴏʀᴋ sᴄᴏᴘᴇ:* ${workScopeText(String(s.work_scope || "private"))}
@@ -72,12 +72,13 @@ async function getStatusCard(sessionId) {
 ├─► 💖 *ᴀᴜᴛᴏ ᴍsɢ ʀᴇᴀᴄᴛ:* ${onOff(!!s.auto_react_msg)}
 ├─► 🔮 *ʀᴇᴀᴄᴛ ᴍᴏᴅᴇ:* ${reactModeText(String(s.auto_react_mode || "all"))}
 ├─► 🛡️ *ᴀɴᴛɪ ᴅᴇʟᴇᴛᴇ:* ${onOff(!!s.anti_delete)} _(Private Only)_
+├─► 🛡️ *ᴀɴᴛɪ sᴘᴀᴍ:* ${onOff(!!s.anti_spam)} 
 ├─► 🚫 *ᴀɴᴛɪ ᴄᴀʟʟ:* ${onOff(!!s.auto_reject_calls)}
 ├─► 👁️‍🗨️ *ᴀᴜᴛᴏ sᴛᴀᴛᴜs:* ${onOff(!!s.auto_status_seen)}
 ├─► ❤️ *sᴛᴀᴛᴜs ʀᴇᴀᴄᴛ:* ${onOff(!!s.auto_status_react)}
 ├─► 📥 *sᴛᴀᴛᴜs ᴅᴏᴡɴʟᴏᴀᴅ:* ${onOff(!!s.auto_download_status)}
 │
-└───❮ 📌 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ* ❯───
+└❮ 📌 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ* ❯─
 `.trim();
 }
 
@@ -103,6 +104,10 @@ function mapKey(name = "") {
   }
   if (["antidelete", "anti_delete", "delete"].includes(k)) {
     return "anti_delete";
+  }
+  // ✅ ANTI-SPAM ADDED
+  if (["antispam", "anti_spam", "spam"].includes(k)) {
+    return "anti_spam";
   }
   if (["rejectcalls", "auto_reject_calls", "calls", "anticall"].includes(k)) {
     return "auto_reject_calls";
@@ -229,6 +234,8 @@ async function applySettingAction(sessionId, action, value) {
       auto_msg: `✨ *\`[ ✅ ᴀɪ ᴄʜᴀᴛ: ${onOff(updated.auto_msg)} ]\`*`,
       seen_all_msg: `✨ *\`[ ✅ sᴇᴇɴ ᴀʟʟ ᴍsɢ: ${onOff(updated.seen_all_msg)} ]\`*`,
       anti_delete: `✨ *\`[ ✅ ᴀɴᴛɪ ᴅᴇʟᴇᴛᴇ: ${onOff(updated.anti_delete)} ]\`*`,
+      // ✅ ANTI-SPAM ADDED
+      anti_spam: `✨ *\`[ ✅ ᴀɴᴛɪ sᴘᴀᴍ: ${onOff(updated.anti_spam)} ]\`*`,
       auto_reject_calls: `✨ *\`[ ✅ ʀᴇᴊᴇᴄᴛ ᴄᴀʟʟs: ${onOff(updated.auto_reject_calls)} ]\`*`,
       auto_react_msg: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴍsɢ ʀᴇᴀᴄᴛ: ${onOff(updated.auto_react_msg)} ]\`*`,
       btns_enabled: `✨ *\`[ ✅ ᴍᴇɴᴜ ᴍᴏᴅᴇ: ${btnsModeText(!!updated.btns_enabled)} ]\`*`,
@@ -313,6 +320,16 @@ function resolveSettingsActionFromText(text = "") {
   if (t === ".setting off antidelete" || t === "disable anti delete") {
     return { action: "off", value: "antidelete" };
   }
+  // ✅ ANTI-SPAM COMMANDS
+  if (t === ".setting on antispam" || t === "enable anti spam" || t === "antispam on") {
+    return { action: "on", value: "antispam" };
+  }
+  if (t === ".setting off antispam" || t === "disable anti spam" || t === "antispam off") {
+    return { action: "off", value: "antispam" };
+  }
+  if (t === ".setting toggle antispam" || t === "toggle anti spam") {
+    return { action: "toggle", value: "antispam" };
+  }
   if (t === ".setting on rejectcalls" || t === "reject calls on") {
     return { action: "on", value: "rejectcalls" };
   }
@@ -342,14 +359,14 @@ function resolveSettingsActionFromText(text = "") {
 
 function buildStyledMenu(title, options, footer = "") {
   let msg = `\n`;
-  msg += `┌───❮ 👑 *${title.toUpperCase()}* 👑 ❯───\n`;
+  msg += `┌❮ 👑 *${title.toUpperCase()}* 👑 ❯─\n`;
   msg += `│\n`;
   options.forEach((opt, idx) => {
     const num = String(idx + 1).padStart(2, '0');
-    msg += `├─► 📱 *[ ${num} ]* ➔ \`${opt.label}\`\n`;
+    msg += `├► *[ ${num} ]* ➔ \`${opt.label}\`\n`;
   });
   msg += `│\n`;
-  msg += `└───❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ* ❯───\n`;
+  msg += `└❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ* ❯─\n`;
   if (footer) msg += `\n*${footer}*`;
 
   return msg;
@@ -492,6 +509,15 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
                       { title: "Presence OFF", description: "Turn presence off", id: ".setting presence off" },
                     ],
                   },
+                  // ✅ ANTI SPAM SECTION ADDED
+                  {
+                    title: "🛡️ ANTI SPAM PROTECTION",
+                    rows: [
+                      { title: "✅ Anti Spam ON", description: "Protect bot from spam messages", id: ".setting on antispam" },
+                      { title: "❌ Anti Spam OFF", description: "Disable spam protection", id: ".setting off antispam" },
+                      { title: "🔄 Toggle Anti Spam", description: "Switch anti-spam on/off", id: ".setting toggle antispam" },
+                    ],
+                  },
                   {
                     title: "🤖 AUTO REACT SETTINGS",
                     rows: [
@@ -550,6 +576,10 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
     { label: "⌨️ Presence: Typing", action: "presence", value: "typing" },
     { label: "🎙️ Presence: Recording", action: "presence", value: "recording" },
     { label: "⛔ Presence: OFF", action: "presence", value: "off" },
+    // ✅ ANTI-SPAM OPTIONS
+    { label: "🛡️ Anti Spam ON", action: "on", value: "antispam" },
+    { label: "🛡️ Anti Spam OFF", action: "off", value: "antispam" },
+    { label: "🔄 Toggle Anti Spam", action: "toggle", value: "antispam" },
     { label: "✅ Auto React Msg ON", action: "on", value: "autoreactmsg" },
     { label: "❌ Auto React Msg OFF", action: "off", value: "autoreactmsg" },
     { label: "🔒 React Mode: Private", action: "reactmode", value: "private" },
@@ -654,6 +684,8 @@ cmd(
           auto_msg: `✨ *\`[ ✅ ᴀɪ ᴄʜᴀᴛ: ${onOff(updated.auto_msg)} ]\`*`,
           seen_all_msg: `✨ *\`[ ✅ sᴇᴇɴ ᴀʟʟ ᴍsɢ: ${onOff(updated.seen_all_msg)} ]\`*`,
           anti_delete: `✨ *\`[ ✅ ᴀɴᴛɪ ᴅᴇʟᴇᴛᴇ: ${onOff(updated.anti_delete)} ]\`*`,
+          // ✅ ANTI-SPAM RESPONSE
+          anti_spam: `✨ *\`[ ✅ ᴀɴᴛɪ sᴘᴀᴍ: ${onOff(updated.anti_spam)} ]\`*`,
           auto_reject_calls: `✨ *\`[ ✅ ʀᴇᴊᴇᴄᴛ ᴄᴀʟʟs: ${onOff(updated.auto_reject_calls)} ]\`*`,
           auto_react_msg: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴍsɢ ʀᴇᴀᴄᴛ: ${onOff(updated.auto_react_msg)} ]\`*`,
           btns_enabled: `✨ *\`[ ✅ ᴍᴇɴᴜ ᴍᴏᴅᴇ: ${btnsModeText(!!updated.btns_enabled)} ]\`*`,
