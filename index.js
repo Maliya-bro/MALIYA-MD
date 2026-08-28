@@ -1,7 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
 //  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
 //  FIX: sessionId now passed to all commands and reply handlers
-//  ADDED: Body-parser middlewares & Settings API Routes
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -62,14 +61,6 @@ const { readSettings, isWorkAllowed } = require("./lib/botSettings");
 const { sms }           = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 
-// ── Settings API Router Import ──────────────────────────────
-let settingsApiRouter = null;
-try {
-  settingsApiRouter = require("./routes/settings-api.js");
-} catch (e) {
-  console.log("⚠️ Settings API Route not found or error loading:", e?.message || e);
-}
-
 // ── Plugins ──────────────────────────────────────────────────
 const { handleAutoMsg } = require("./plugins/auto_msg.js");
 
@@ -91,12 +82,6 @@ try {
 
 const app  = express();
 const port = process.env.PORT || 8000;
-
-/* ==================== MIDDLEWARES (FIXED FOR req.body) ==================== */
-app.use(cors({ origin: "*", methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"] }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, "public")));
 
 const prefix         = ".";
 const BOT_OWNER_NAME = config.OWNER_NAME || "Malindu Nadith";
@@ -286,8 +271,6 @@ const activeSessions  = new Map();
 const reconnectTimers = new Map();
 const startingSessions = new Set();
 let   watcherStarted   = false;
-
-global.__maliya_active_sessions = activeSessions;
 
 function getSessionPaths(sessionId) {
   const safeId    = safeSessionFolderName(sessionId);
@@ -626,14 +609,14 @@ function attachSessionHandlers(sock, sessionCtx) {
           if (statusSettings.auto_status_react === true) {
             try {
               const emojis = [
-                "😂", "🤣", "😍", "🥰", "😎", "🤔", "😭", "😱", "🔥", "💀",
-                "🥺", "😊", "😈", "👻", "🤖", "😤", "🥳", "🤯", "😨", "🥶",
-                "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💕", "💞", "💓",
-                "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤞", "🤙", "💪", "🖕",
-                "🙏", "💅", "✨", "⭐", "🌟", "💫", "⚡", "🎉", "🎊", "🥳",
-                "🎈", "🎯", "🏆", "💯", "🔞", "❓", "❗", "💢", "🐱", "🐶",
-                "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐸", "🍿", "🍕",
-                "🍔", "🌮", "🍩", "🍪", "☕", "🍺", "👀", "👁️", "💩", "👽"
+   "😂", "🤣", "😍", "🥰", "😎", "🤔", "😭", "😱", "🔥", "💀",
+  "🥺", "😊", "😈", "👻", "🤖", "😤", "🥳", "🤯", "😨", "🥶",
+  "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💕", "💞", "💓",
+  "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤞", "🤙", "💪", "🖕",
+  "🙏", "💅", "✨", "⭐", "🌟", "💫", "⚡", "🎉", "🎊", "🥳",
+  "🎈", "🎯", "🏆", "💯", "🔞", "❓", "❗", "💢", "🐱", "🐶",
+  "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐸", "🍿", "🍕",
+  "🍔", "🌮", "🍩", "🍪", "☕", "🍺", "👀", "👁️", "💩", "👽"
               ];
               const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
               await new Promise((r) => setTimeout(r, 1500));
@@ -822,6 +805,7 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
 
         // ── REPLY HANDLERS ─────────────────────────────────────
+        // ✅ FIX: sessionId passed to reply handlers
         if (!isCmd && replyHandlers && replyHandlers.length) {
           for (const h of replyHandlers) {
             if (typeof h.filter !== "function") continue;
@@ -831,7 +815,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               if (h.react) sock.sendMessage(from, { react: { text: h.react, key: mek.key } });
               await h.function(sock, mek, m, {
                 from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
-                sessionId: sessionCtx.sessionId,
+                sessionId: sessionCtx.sessionId, // ✅ ADDED: sessionId passed
               });
               break;
             }
@@ -839,6 +823,7 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
 
         // ── COMMANDS ───────────────────────────────────────────
+        // ✅ FIX: sessionId passed to commands
         if (isCmd) {
           if (botSettings.mode === "private" && !isOwner) continue messageLoop;
 
@@ -852,7 +837,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
               sessionOwnerPhone: sessionCtx.ownerNumber[0] || "",
               sessionOwnerName:  BOT_OWNER_NAME,
-              sessionId: sessionCtx.sessionId,
+              sessionId: sessionCtx.sessionId, // ✅ ADDED: sessionId passed
             });
           }
         }
@@ -902,12 +887,7 @@ function attachSessionHandlers(sock, sessionCtx) {
   });
 }
 
-/* ==================== EXPRESS ROUTING & APIS ==================== */
-
-if (settingsApiRouter) {
-  app.use("/api/settings", settingsApiRouter);
-}
-
+/* ==================== EXPRESS SERVER ==================== */
 app.get("/", (req, res) => {
   res.send(
     `Hey There, MALIYA-MD started ✅ | Active Sessions: ${activeSessions.size}/${MAX_ACTIVE_SESSIONS}`
@@ -935,7 +915,14 @@ app.get("/sessions", async (req, res) => {
 app.get("/health", (_req, res) => res.status(200).send("OK"));
 
 // ─────────────────────────────────────────────────────────────
+//  CORS — allow pair site (Vercel) to call this server
+// ─────────────────────────────────────────────────────────────
+app.use(cors({ origin: "*", methods: ["GET"] }));
+
+// ─────────────────────────────────────────────────────────────
 //  /api/pair  — Pair Code Generator for external pair site
+//  GET /api/pair?number=94xxxxxxxxx
+//  Returns: { code: "XXXX-XXXX" }
 // ─────────────────────────────────────────────────────────────
 app.get("/api/pair", async (req, res) => {
   const rawNumber = String(req.query.number || "").replace(/[^0-9]/g, "");
@@ -1036,6 +1023,7 @@ app.get("/api/pair", async (req, res) => {
       }
     });
 
+    // Wait for noise handshake then request code
     await new Promise((r) => setTimeout(r, 5000));
 
     if (!sock.authState.creds.registered && !codeSent) {
@@ -1056,6 +1044,8 @@ app.get("/api/pair", async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────
 //  /api/qr  — QR Code Generator for external pair site
+//  GET /api/qr
+//  Returns: { qr: "data:image/png;base64,..." }
 // ─────────────────────────────────────────────────────────────
 const QRCode = require("qrcode");
 
@@ -1214,6 +1204,7 @@ app.get("/api/qr", async (req, res) => {
 
   await initiateSession();
 });
+
 
 app.listen(port, () => {
   console.log(`🚀 Server listening on http://localhost:${port}`);
