@@ -41,7 +41,7 @@ function sameNumber(a = "", b = "") {
   return cleanPhone(a) === cleanPhone(b);
 }
 
-// 100% Universal Small Caps Font Converter (Supported on all phones)
+// 100% Universal Small Caps Font Converter
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
@@ -433,12 +433,36 @@ cmd(
   }
 );
 
-/* ================= REPLY HANDLER ================= */
+/* ================= REPLY HANDLER (FIXED FILTER) ================= */
 cmd(
   {
-    filter: (_text, { sender, from }) => {
+    filter: (text, { sender, from }) => {
+      if (!text) return false;
       const k = keyFor(sender, from);
-      return !!pendingMenu[k];
+      const state = pendingMenu[k];
+      if (!state) return false;
+      
+      // Check if it's a number reply
+      const num = parseInt(String(text).trim(), 10);
+      if (!isNaN(num) && num > 0 && num <= state.categories.length) {
+        return true;
+      }
+      
+      // Check if it's a category name reply
+      const normalized = normalizeText(text);
+      for (const cat of state.categories || []) {
+        const catText = normalizeText(cat);
+        if (
+          normalized === `${catText} MENU` ||
+          normalized.includes(`${catText} MENU`) ||
+          normalized === `${catText} COMMANDS` ||
+          normalized.includes(`${catText} COMMANDS`)
+        ) {
+          return true;
+        }
+      }
+      
+      return false;
     },
     dontAddCommandList: true,
     filename: __filename,
