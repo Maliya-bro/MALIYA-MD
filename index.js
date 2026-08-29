@@ -824,21 +824,50 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
 
         // ── REPLY HANDLERS ─────────────────────────────────────
-        if (!isCmd && replyHandlers && replyHandlers.length) {
-          for (const h of replyHandlers) {
-            if (typeof h.filter !== "function") continue;
-            let ok = false;
-            try { ok = h.filter(body, { sender, from, isGroup, senderNumber }); } catch { ok = false; }
-            if (ok) {
-              if (h.react) sock.sendMessage(from, { react: { text: h.react, key: mek.key } });
-              await h.function(sock, mek, m, {
-                from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
-                sessionId: sessionCtx.sessionId,
-              });
-              break;
-            }
-          }
-        }
+// ── REPLY HANDLERS ─────────────────────────────────────
+if (!isCmd && replyHandlers && replyHandlers.length) {
+  for (const h of replyHandlers) {
+    if (typeof h.filter !== "function") continue;
+    let ok = false;
+    try {
+      ok = h.filter(body, { 
+        sender, 
+        from, 
+        isGroup, 
+        senderNumber,
+        key: mek.key,
+        mek: mek
+      });
+    } catch (e) {
+      console.log("Filter error:", e?.message);
+      ok = false;
+    }
+    if (ok) {
+      if (h.react) {
+        try { await sock.sendMessage(from, { react: { text: h.react, key: mek.key } }); } catch (_) {}
+      }
+      try {
+        await h.function(sock, mek, m, {
+          from, 
+          body, 
+          args, 
+          q, 
+          sender, 
+          senderNumber, 
+          isGroup, 
+          isOwner, 
+          reply,
+          sessionId: sessionCtx.sessionId,
+          pushname: pushName,
+          m: m,
+        });
+      } catch (e) {
+        console.log("Reply handler error:", e?.message);
+      }
+      break;
+    }
+  }
+}
 
         // ── COMMANDS ───────────────────────────────────────────
         if (isCmd) {
