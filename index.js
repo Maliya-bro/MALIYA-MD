@@ -1,7 +1,7 @@
 // ╔══════════════════════════════════════════════════════════════╗
 //  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
 //  FIX: sessionId now passed to all commands and reply handlers
-//  ADDED: Body-parser middlewares & Settings API Routes
+//  ADDED: /api/settings routes for website integration (Heroku)
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -62,13 +62,8 @@ const { readSettings, isWorkAllowed } = require("./lib/botSettings");
 const { sms }           = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 
-// ── Settings API Router Import ──────────────────────────────
-let settingsApiRouter = null;
-try {
-  settingsApiRouter = require("./routes/settings-api.js");
-} catch (e) {
-  console.log("⚠️ Settings API Route not found or error loading:", e?.message || e);
-}
+// ── Settings API Routes (NEW) ──────────────────────────────
+const settingsApiRouter = require("./routes/settings-api.js");
 
 // ── Plugins ──────────────────────────────────────────────────
 const { handleAutoMsg } = require("./plugins/auto_msg.js");
@@ -91,13 +86,6 @@ try {
 
 const app  = express();
 const port = process.env.PORT || 8000;
-
-/* ==================== MIDDLEWARES (FIXED FOR req.body) ==================== */
-// Express එකේ req.body undefined වෙන එක නතර කිරීමට json සහ urlencoded body-parsers එක් කරන ලදී
-app.use(cors({ origin: "*", methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"] }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, "public")));
 
 const prefix         = ".";
 const BOT_OWNER_NAME = config.OWNER_NAME || "Malindu Nadith";
@@ -288,7 +276,7 @@ const reconnectTimers = new Map();
 const startingSessions = new Set();
 let   watcherStarted   = false;
 
-// Expose activeSessions for external API / dashboard access
+// 🔥 EXPOSE activeSessions GLOBALLY for settings API
 global.__maliya_active_sessions = activeSessions;
 
 function getSessionPaths(sessionId) {
@@ -628,14 +616,14 @@ function attachSessionHandlers(sock, sessionCtx) {
           if (statusSettings.auto_status_react === true) {
             try {
               const emojis = [
-                "😂", "🤣", "😍", "🥰", "😎", "🤔", "😭", "😱", "🔥", "💀",
-                "🥺", "😊", "😈", "👻", "🤖", "😤", "🥳", "🤯", "😨", "🥶",
-                "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💕", "💞", "💓",
-                "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤞", "🤙", "💪", "🖕",
-                "🙏", "💅", "✨", "⭐", "🌟", "💫", "⚡", "🎉", "🎊", "🥳",
-                "🎈", "🎯", "🏆", "💯", "🔞", "❓", "❗", "💢", "🐱", "🐶",
-                "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐸", "🍿", "🍕",
-                "🍔", "🌮", "🍩", "🍪", "☕", "🍺", "👀", "👁️", "💩", "👽"
+   "😂", "🤣", "😍", "🥰", "😎", "🤔", "😭", "😱", "🔥", "💀",
+  "🥺", "😊", "😈", "👻", "🤖", "😤", "🥳", "🤯", "😨", "🥶",
+  "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💕", "💞", "💓",
+  "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤞", "🤙", "💪", "🖕",
+  "🙏", "💅", "✨", "⭐", "🌟", "💫", "⚡", "🎉", "🎊", "🥳",
+  "🎈", "🎯", "🏆", "💯", "🔞", "❓", "❗", "💢", "🐱", "🐶",
+  "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐸", "🍿", "🍕",
+  "🍔", "🌮", "🍩", "🍪", "☕", "🍺", "👀", "👁️", "💩", "👽"
               ];
               const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
               await new Promise((r) => setTimeout(r, 1500));
@@ -824,50 +812,21 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
 
         // ── REPLY HANDLERS ─────────────────────────────────────
-// ── REPLY HANDLERS ─────────────────────────────────────
-if (!isCmd && replyHandlers && replyHandlers.length) {
-  for (const h of replyHandlers) {
-    if (typeof h.filter !== "function") continue;
-    let ok = false;
-    try {
-      ok = h.filter(body, { 
-        sender, 
-        from, 
-        isGroup, 
-        senderNumber,
-        key: mek.key,
-        mek: mek
-      });
-    } catch (e) {
-      console.log("Filter error:", e?.message);
-      ok = false;
-    }
-    if (ok) {
-      if (h.react) {
-        try { await sock.sendMessage(from, { react: { text: h.react, key: mek.key } }); } catch (_) {}
-      }
-      try {
-        await h.function(sock, mek, m, {
-          from, 
-          body, 
-          args, 
-          q, 
-          sender, 
-          senderNumber, 
-          isGroup, 
-          isOwner, 
-          reply,
-          sessionId: sessionCtx.sessionId,
-          pushname: pushName,
-          m: m,
-        });
-      } catch (e) {
-        console.log("Reply handler error:", e?.message);
-      }
-      break;
-    }
-  }
-}
+        if (!isCmd && replyHandlers && replyHandlers.length) {
+          for (const h of replyHandlers) {
+            if (typeof h.filter !== "function") continue;
+            let ok = false;
+            try { ok = h.filter(body, { sender, from, isGroup, senderNumber }); } catch { ok = false; }
+            if (ok) {
+              if (h.react) sock.sendMessage(from, { react: { text: h.react, key: mek.key } });
+              await h.function(sock, mek, m, {
+                from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
+                sessionId: sessionCtx.sessionId,
+              });
+              break;
+            }
+          }
+        }
 
         // ── COMMANDS ───────────────────────────────────────────
         if (isCmd) {
@@ -933,13 +892,7 @@ if (!isCmd && replyHandlers && replyHandlers.length) {
   });
 }
 
-/* ==================== EXPRESS ROUTING & APIS ==================== */
-
-// Settings API Router mount කිරීම
-if (settingsApiRouter) {
-  app.use("/api/settings", settingsApiRouter);
-}
-
+/* ==================== EXPRESS SERVER ==================== */
 app.get("/", (req, res) => {
   res.send(
     `Hey There, MALIYA-MD started ✅ | Active Sessions: ${activeSessions.size}/${MAX_ACTIVE_SESSIONS}`
@@ -967,289 +920,38 @@ app.get("/sessions", async (req, res) => {
 app.get("/health", (_req, res) => res.status(200).send("OK"));
 
 // ─────────────────────────────────────────────────────────────
-//  /api/pair  — Pair Code Generator for external pair site
-//  GET /api/pair?number=94xxxxxxxxx
-//  Returns: { code: "XXXX-XXXX" }
+//  CORS — allow Vercel to call this server (Settings API)
 // ─────────────────────────────────────────────────────────────
-app.get("/api/pair", async (req, res) => {
-  const rawNumber = String(req.query.number || "").replace(/[^0-9]/g, "");
-
-  if (!rawNumber || rawNumber.length < 7 || rawNumber.length > 15) {
-    return res.status(400).json({ code: "Invalid phone number." });
-  }
-
-  const pairDir = path.join(os.tmpdir(), `pair_${rawNumber}_${Date.now()}`);
-  let codeSent    = false;
-  let sessionDone = false;
-
-  const cleanup = () => {
-    try { fs.rmSync(pairDir, { recursive: true, force: true }); } catch (_) {}
-  };
-
-  async function savePairSessionToMongo(sessionId, phone, credsPath) {
-    try {
-      const db  = await getDb();
-      const col = db.collection(SESSION_COLLECTION);
-      const now = new Date();
-      const data = fs.readFileSync(credsPath).toString("base64");
-      await col.updateOne(
-        { sessionId },
-        {
-          $set: {
-            sessionId,
-            fileName:    `creds_${phone}_${Date.now()}.json`,
-            primaryFile: { name: "creds.json", mimeType: "application/json", data },
-            status:      "ready",
-            connectBot:  true,
-            source:      "pair-code",
-            phone,
-            updatedAt:   now,
-          },
-          $setOnInsert: { createdAt: now },
-        },
-        { upsert: true }
-      );
-      console.log(`✅ Pair session saved to MongoDB: ${sessionId}`);
-    } catch (e) {
-      console.log("⚠️ savePairSession error:", e?.message || e);
+app.use(cors({
+  origin: (origin, cb) => {
+    if (
+      !origin ||
+      /\.vercel\.app$/.test(origin) ||
+      /\.vercel\.dev$/.test(origin) ||
+      /^http:\/\/localhost(:\d+)?$/.test(origin) ||
+      /\.herokuapp\.com$/.test(origin)
+    ) {
+      cb(null, true);
+    } else {
+      cb(new Error("CORS: origin not allowed"));
     }
-  }
+  },
+  methods: ["GET", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-api-key", "x-settings-token"],
+  credentials: true,
+}));
 
-  try {
-    fs.mkdirSync(pairDir, { recursive: true });
-    const { state, saveCreds } = await useMultiFileAuthState(pairDir);
-    const { version }          = await fetchLatestBaileysVersion();
+// ── Settings API Routes ──────────────────────────────────────
+app.use("/api/settings", settingsApiRouter);
 
-    const sock = makeWASocket({
-      version,
-      auth:              state,
-      printQRInTerminal: false,
-      logger:            P({ level: "silent" }),
-      browser:           Browsers.macOS("Safari"),
-      markOnlineOnConnect:            false,
-      syncFullHistory:                false,
-      generateHighQualityLinkPreview: false,
-      getMessage: async () => ({ conversation: "hello" }),
-    });
-
-    sock.ev.on("creds.update", saveCreds);
-
-    sock.ev.on("connection.update", async (update) => {
-      if (sessionDone) return;
-      const { connection, lastDisconnect } = update;
-
-      if (connection === "open") {
-        sessionDone = true;
-        console.log(`✅ Pair session opened for ${rawNumber}`);
-        const chars     = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-        const randStr   = (n) => Array.from({ length: n }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-        const sessionId = `${randStr(8)}#${randStr(43)}`;
-        await savePairSessionToMongo(sessionId, rawNumber, path.join(pairDir, "creds.json"));
-        sock.ev.removeAllListeners();
-        try { await sock.ws.close(); } catch (_) {}
-        cleanup();
-        return;
-      }
-
-      if (connection === "close") {
-        const statusCode = lastDisconnect?.error?.output?.statusCode;
-        if (codeSent && statusCode === 408) {
-          console.log(`⚠️ Pair code session ended (408) for ${rawNumber}`);
-          sessionDone = true;
-          sock.ev.removeAllListeners();
-          try { sock.ws.close(); } catch (_) {}
-          cleanup();
-          return;
-        }
-        if (statusCode === 401 || sessionDone) {
-          sessionDone = true;
-          sock.ev.removeAllListeners();
-          try { sock.ws.close(); } catch (_) {}
-          cleanup();
-        }
-      }
-    });
-
-    // Wait for noise handshake then request code
-    await new Promise((r) => setTimeout(r, 5000));
-
-    if (!sock.authState.creds.registered && !codeSent) {
-      let code = await sock.requestPairingCode(rawNumber);
-      code     = code?.match(/.{1,4}/g)?.join("-") || code;
-      codeSent = true;
-      console.log(`📱 Pair code for ${rawNumber}: ${code}`);
-      return res.json({ code });
-    }
-  } catch (err) {
-    console.log("❌ /api/pair error:", err?.message || err);
-    cleanup();
-    if (!res.headersSent) {
-      return res.status(500).json({ code: "Failed to generate pairing code. Please try again." });
-    }
-  }
-});
-
-// ─────────────────────────────────────────────────────────────
-//  /api/qr  — QR Code Generator for external pair site
-//  GET /api/qr
-//  Returns: { qr: "data:image/png;base64,..." }
-// ─────────────────────────────────────────────────────────────
-const QRCode = require("qrcode");
-
-app.get("/api/qr", async (req, res) => {
-  const tempId    = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-  const qrDir     = path.join(os.tmpdir(), `qr_session_${tempId}`);
-  const sessionId = (() => {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    const rand  = (n) => Array.from({ length: n }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-    return `${rand(8)}#${rand(43)}`;
-  })();
-
-  let responseSent = false;
-  let sessionDone  = false;
-  let reconnecting = false;
-
-  const cleanup = () => {
-    try { fs.rmSync(qrDir, { recursive: true, force: true }); } catch (_) {}
-  };
-
-  async function saveQrSessionToMongo(phone, credsPath) {
-    try {
-      const db   = await getDb();
-      const col  = db.collection(SESSION_COLLECTION);
-      const now  = new Date();
-      const data = fs.readFileSync(credsPath).toString("base64");
-      await col.updateOne(
-        { sessionId },
-        {
-          $set: {
-            sessionId,
-            fileName:    `creds_qr_${tempId}.json`,
-            primaryFile: { name: "creds.json", mimeType: "application/json", data },
-            status:      "ready",
-            connectBot:  true,
-            source:      "qr-code",
-            phone,
-            updatedAt:   now,
-          },
-          $setOnInsert: { createdAt: now },
-        },
-        { upsert: true }
-      );
-      console.log(`✅ QR session saved to MongoDB: ${sessionId}`);
-    } catch (e) {
-      console.log("⚠️ saveQrSession error:", e?.message || e);
-    }
-  }
-
-  const timeoutHandle = setTimeout(() => {
-    if (!responseSent) {
-      responseSent = true;
-      sessionDone  = true;
-      if (!res.headersSent) res.status(408).json({ code: "QR generation timeout — please try again." });
-      cleanup();
-    }
-  }, 30000);
-
-  async function initiateSession() {
-    if (sessionDone) return;
-    try {
-      fs.mkdirSync(qrDir, { recursive: true });
-      const { state, saveCreds } = await useMultiFileAuthState(qrDir);
-      const safeSaveCreds = async () => { try { await saveCreds(); } catch (_) {} };
-
-      let version;
-      try { const f = await fetchLatestBaileysVersion(); version = f.version; }
-      catch (_) { version = [2, 3000, 1023628085]; }
-
-      const sock = makeWASocket({
-        version,
-        auth:              state,
-        printQRInTerminal: false,
-        logger:            P({ level: "silent" }),
-        browser:           Browsers.macOS("Safari"),
-        markOnlineOnConnect:            false,
-        syncFullHistory:                false,
-        generateHighQualityLinkPreview: false,
-        getMessage: async () => ({ conversation: "hello" }),
-        defaultQueryTimeoutMs: 60000,
-        connectTimeoutMs:      60000,
-        keepAliveIntervalMs:   30000,
-        retryRequestDelayMs:   250,
-        maxRetries:            5,
-      });
-
-      sock.ev.on("creds.update", safeSaveCreds);
-
-      sock.ev.on("connection.update", async (update) => {
-        if (sessionDone) return;
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr && !responseSent) {
-          clearTimeout(timeoutHandle);
-          try {
-            const qrDataURL = await QRCode.toDataURL(qr, {
-              errorCorrectionLevel: "M", type: "image/png",
-              quality: 0.92, margin: 1,
-              color: { dark: "#000000", light: "#FFFFFF" },
-            });
-            responseSent = true;
-            console.log("🟢 QR generated and sent to client");
-            res.json({ qr: qrDataURL, message: "QR Code Generated! Scan with WhatsApp." });
-          } catch (qrErr) {
-            console.log("❌ QR image error:", qrErr?.message);
-            if (!responseSent) {
-              responseSent = true; sessionDone = true;
-              res.status(500).json({ code: "Failed to generate QR image" });
-              cleanup();
-            }
-          }
-        }
-
-        if (connection === "open") {
-          sessionDone = true;
-          clearTimeout(timeoutHandle);
-          console.log("✅ QR session connected — saving to MongoDB...");
-          const phone = sock.user?.id?.split("@")[0]?.split(":")[0] || "";
-          await saveQrSessionToMongo(phone, path.join(qrDir, "creds.json"));
-          sock.ev.removeAllListeners();
-          try { await sock.ws.close(); } catch (_) {}
-          cleanup();
-          return;
-        }
-
-        if (connection === "close") {
-          const statusCode = lastDisconnect?.error?.output?.statusCode;
-          const reason     = lastDisconnect?.error?.message || "unknown";
-          console.log(`🔴 QR session closed. Code: ${statusCode}, Reason: ${reason}`);
-          if (statusCode === 401 || sessionDone) {
-            sessionDone = true;
-            sock.ev.removeAllListeners();
-            try { sock.ws.close(); } catch (_) {}
-            if (!responseSent) cleanup();
-            return;
-          }
-          if (reconnecting) return;
-          sock.ev.removeAllListeners();
-          try { sock.ws.close(); } catch (_) {}
-          const delay = String(reason).toLowerCase().includes("conflict") ? 8000 : 3000;
-          reconnecting = true;
-          await new Promise((r) => setTimeout(r, delay));
-          reconnecting = false;
-          try { await initiateSession(); } catch (e) {
-            console.log("❌ QR reconnect error:", e?.message);
-          }
-        }
-      });
-
-    } catch (err) {
-      console.log("❌ /api/qr init error:", err?.message || err);
-      cleanup();
-      if (!res.headersSent) res.status(503).json({ code: "Service Unavailable" });
-    }
-  }
-
-  await initiateSession();
+// ── API Status ──────────────────────────────────────────────
+app.get("/api/status", (req, res) => {
+  res.json({
+    ok: true,
+    activeSessions: activeSessions.size,
+    maxSessions: MAX_ACTIVE_SESSIONS,
+    uptime: process.uptime(),
+  });
 });
 
 app.listen(port, () => {
