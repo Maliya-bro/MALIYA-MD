@@ -1,4 +1,4 @@
-const { cmd, commands } = require("../command");
+const { cmd, commands, replyHandlers } = require("../command");
 const { sendInteractiveMessage } = require("gifted-btns");
 const config = require("../config");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
@@ -41,7 +41,6 @@ function sameNumber(a = "", b = "") {
   return cleanPhone(a) === cleanPhone(b);
 }
 
-// 100% Universal Small Caps Font Converter
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
@@ -287,7 +286,6 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
-// ----- Build a beautifully styled numbered main menu -----
 function buildStyledMainMenu(state, userName) {
   const { categories } = state;
   const line = "━━━━━━━━━━━━━";
@@ -308,7 +306,6 @@ function buildStyledMainMenu(state, userName) {
   return msg;
 }
 
-// ----- Send numbered main menu with custom image and styled text -----
 async function sendNumberedMainMenu(sock, from, mek, state, userName, sessionId) {
   let headerImg = DEFAULT_HEADER_IMAGE;
   if (sessionId) {
@@ -382,7 +379,6 @@ async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
     }
   }
 
-  // Numbered menu fallback (always works)
   return sendNumberedMainMenu(sock, from, mek, state, userName, sessionId);
 }
 
@@ -434,40 +430,34 @@ cmd(
 );
 
 /* ================= REPLY HANDLER (FIXED FILTER) ================= */
-cmd(
-  {
-    filter: (text, { sender, from }) => {
-      if (!text) return false;
-      const k = keyFor(sender, from);
-      const state = pendingMenu[k];
-      if (!state) return false;
-      
-      // Check if it's a number reply
-      const num = parseInt(String(text).trim(), 10);
-      if (!isNaN(num) && num > 0 && num <= state.categories.length) {
+const menuReplyHandler = {
+  filter: (text, { sender, from }) => {
+    if (!text) return false;
+    const k = keyFor(sender, from);
+    const state = pendingMenu[k];
+    if (!state) return false;
+    
+    const num = parseInt(String(text).trim(), 10);
+    if (!isNaN(num) && num > 0 && num <= state.categories.length) {
+      return true;
+    }
+    
+    const normalized = normalizeText(text);
+    for (const cat of state.categories || []) {
+      const catText = normalizeText(cat);
+      if (
+        normalized === `${catText} MENU` ||
+        normalized.includes(`${catText} MENU`) ||
+        normalized === `${catText} COMMANDS` ||
+        normalized.includes(`${catText} COMMANDS`)
+      ) {
         return true;
       }
-      
-      // Check if it's a category name reply
-      const normalized = normalizeText(text);
-      for (const cat of state.categories || []) {
-        const catText = normalizeText(cat);
-        if (
-          normalized === `${catText} MENU` ||
-          normalized.includes(`${catText} MENU`) ||
-          normalized === `${catText} COMMANDS` ||
-          normalized.includes(`${catText} COMMANDS`)
-        ) {
-          return true;
-        }
-      }
-      
-      return false;
-    },
-    dontAddCommandList: true,
-    filename: __filename,
+    }
+    
+    return false;
   },
-  async (sock, mek, m, { body, from, sender, pushname, reply, sessionId }) => {
+  function: async (sock, mek, m, { from, body, sender, pushname, reply, sessionId }) => {
     try {
       const k = keyFor(sender, from);
       const state = pendingMenu[k];
@@ -503,7 +493,12 @@ cmd(
       console.log("MENU ACTION ERROR:", e?.message || e);
     }
   }
-);
+};
+
+// Register the reply handler
+if (Array.isArray(replyHandlers)) {
+  replyHandlers.push(menuReplyHandler);
+}
 
 /* ================= AUTO CLEANUP ================= */
 setInterval(() => {
