@@ -6,7 +6,7 @@ const pendingQuality = {};
 
 const API_BASE = "https://chama-movie-api.koyeb.app";
 
-// API Keys ලැයිස්තුව
+// API Keys
 const API_KEYS = [
   "chama_api_430e2c6fba9381049992c8b23378d092",
   "chama_api_b1f489dd1a70d495e36b866f1d357d31",
@@ -29,7 +29,7 @@ function toSmallCaps(str = "") {
     .join("");
 }
 
-// මාරුවෙන් මාරුවට API Key එක ලබාදෙන Function එක (Round-Robin Rotation)
+// Round-Robin API Key Rotation
 function getNextApiKey() {
   const apiKey = API_KEYS[currentKeyIndex];
   currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length;
@@ -50,14 +50,18 @@ cmd({
   filename: __filename
 }, async (danuwa, mek, m, { from, q, sender, reply }) => {
   if (!q) {
-    return reply(`🎬 *ᴄɪɴᴇsᴜʙᴢ ᴍᴏᴠɪᴇ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ*\n\n📌 *ᴜsᴀɢᴇ:* \`.cinesubz <movie_name>\`\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`.cinesubz avengers\``);
+    return reply(`🎬 *ᴄɪɴᴇsᴜʙᴢ ᴍᴏᴠɪᴇ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ*
+
+📌 *ᴜsᴀɢᴇ:* \`.cinesubz <movie_name>\`
+💡 *ᴇxᴀᴍᴘʟᴇ:* \`.cinesubz avengers\``);
   }
 
   await danuwa.sendMessage(from, { react: { text: "🔍", key: m.key } });
-  await reply(`🔍 *sᴇᴀʀᴄʜɪɴɢ ᴄɪɴᴇsᴜʙᴢ ғᴏʀ ᴍᴏᴠɪᴇs...*\n\n⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...*`);
+  await reply(`🔍 *sᴇᴀʀᴄʜɪɴɢ ᴄɪɴᴇsᴜʙᴢ ғᴏʀ ᴍᴏᴠɪᴇs...*
+
+⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...*`);
 
   try {
-    // මේ සෙවුම් වටය සඳහා API Key එකක් තෝරාගැනීම
     const apiKey = getNextApiKey();
     const searchUrl = `${API_BASE}/api/v1/movie/cinesubz/search?q=${encodeURIComponent(q.trim())}&api_key=${apiKey}`;
     const res = await axios.get(searchUrl, { headers, timeout: 60000 });
@@ -67,13 +71,16 @@ cmd({
     }
 
     const results = res.data.data.slice(0, 10);
-    // තෝරාගත් API Key එක Session එක තුළ Save කර තැබීම
     pendingSearch[sender] = { results, apiKey, timestamp: Date.now() };
 
-    let text = `╭━━━〔 🎬 *ᴄɪɴᴇsᴜʙᴢ sᴇᴀʀᴄʜ* 〕━━━\n┃\n`;
-    text += `┃ 🔎 *sᴇᴀʀᴄʜ:* ${toSmallCaps(q)}\n`;
-    text += `┃ 📊 *ʀᴇsᴜʟᴛs:* ${results.length}\n┃\n`;
-    text += `╰━━━───────━━━━► ❥\n\n`;
+    let text = `╭───〔 🎬 *ᴄɪɴᴇsᴜʙᴢ sᴇᴀʀᴄʜ* 〕───
+│
+│ 🔎 *sᴇᴀʀᴄʜ:* ${toSmallCaps(q)}
+│ 📊 *ʀᴇsᴜʟᴛs:* ${results.length}
+│
+╰────────────────► ❥
+
+`;
 
     results.forEach((item, index) => {
       const numStr = String(index + 1).padStart(2, "0");
@@ -81,8 +88,9 @@ cmd({
       text += `*[ ${numStr} ]* ${typeIcon} *${toSmallCaps(item.title)}*\n`;
     });
 
-    text += `\n───────────────────\n`;
-    text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴍᴏᴠɪᴇ ɴᴜᴍʙᴇʀ (1-${results.length})*`;
+    text += `
+───────────────────
+📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴍᴏᴠɪᴇ ɴᴜᴍʙᴇʀ (1-${results.length})*`;
     
     await danuwa.sendMessage(from, { text }, { quoted: mek });
 
@@ -92,18 +100,26 @@ cmd({
   }
 });
 
-// 2. Movie Selection Listener
+// 2. Movie Selection Listener (FIXED FILTER)
 cmd({
-  filter: (text, { sender }) => pendingSearch[sender] && !isNaN(text) && parseInt(text) > 0 && parseInt(text) <= pendingSearch[sender].results.length
+  filter: (text, { sender }) => {
+    if (!text || !pendingSearch[sender]) return false;
+    const num = parseInt(String(text).trim(), 10);
+    if (isNaN(num)) return false;
+    if (num < 1 || num > pendingSearch[sender].results.length) return false;
+    return true;
+  }
 }, async (danuwa, mek, m, { body, sender, reply, from }) => {
   await danuwa.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
   const index = parseInt(body.trim()) - 1;
   const selected = pendingSearch[sender].results[index];
-  const apiKey = pendingSearch[sender].apiKey; // Search එකට භාවිත කළ Key එකම ලබා ගැනීම
+  const apiKey = pendingSearch[sender].apiKey;
   delete pendingSearch[sender];
 
-  await reply(`🎬 *${toSmallCaps(selected.title)}*\n\n🔗 *ғᴇᴛᴄʜɪɴɢ ᴍᴏᴠɪᴇ ᴅᴇᴛᴀɪʟs ᴀɴᴅ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋs...*`);
+  await reply(`🎬 *${toSmallCaps(selected.title)}*
+
+🔗 *ғᴇᴛᴄʜɪɴɢ ᴍᴏᴠɪᴇ ᴅᴇᴛᴀɪʟs ᴀɴᴅ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋs...*`);
 
   try {
     const movieUrl = `${API_BASE}/api/v1/movie/cinesubz/infodl?q=${encodeURIComponent(selected.link)}&api_key=${apiKey}`;
@@ -117,19 +133,25 @@ cmd({
     const downloadLinks = movieInfo.downloads;
     pendingQuality[sender] = { movie: { metadata: movieInfo, downloadLinks }, apiKey, timestamp: Date.now() };
 
-    let qualityMsg = `╭━━━〔 📥 *ᴀᴠᴀɪʟᴀʙʟᴇ ǫᴜᴀʟɪᴛɪᴇs* 〕━━━\n┃\n`;
-    qualityMsg += `┃ 🎬 *${toSmallCaps(movieInfo.title)}*\n`;
-    if (movieInfo.imdb || movieInfo.rating) qualityMsg += `┃ ⭐ *ɪᴍᴅʙ:* ${movieInfo.imdb || movieInfo.rating}\n`;
-    if (movieInfo.year) qualityMsg += `┃ 📅 *ʏᴇᴀʀ:* ${movieInfo.year}\n`;
-    qualityMsg += `┃\n╰━━━───────━━━━► ❥\n\n`;
+    let qualityMsg = `╭───〔 📥 *ᴀᴠᴀɪʟᴀʙʟᴇ ǫᴜᴀʟɪᴛɪᴇs* 〕───
+│
+│ 🎬 *${toSmallCaps(movieInfo.title)}*
+`;
+    if (movieInfo.imdb || movieInfo.rating) qualityMsg += `│ ⭐ *ɪᴍʙᴅ:* ${movieInfo.imdb || movieInfo.rating}\n`;
+    if (movieInfo.year) qualityMsg += `│ 📅 *ʏᴇᴀʀ:* ${movieInfo.year}\n`;
+    qualityMsg += `│
+╰────────────────► ❥
+
+`;
 
     downloadLinks.forEach((d, i) => {
       const numStr = String(i + 1).padStart(2, "0");
       qualityMsg += `*[ ${numStr} ]* 📊 *${d.quality}* _(${d.size || "N/A"})_\n`;
     });
 
-    qualityMsg += `\n───────────────────\n`;
-    qualityMsg += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ǫᴜᴀʟɪᴛʏ ɴᴜᴍʙᴇʀ (1-${downloadLinks.length}) ᴛᴏ ʀᴇᴄᴇɪᴠᴇ ᴛʜᴇ ᴍᴏᴠɪᴇ.*`;
+    qualityMsg += `
+───────────────────
+📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ǫᴜᴀʟɪᴛʏ ɴᴜᴍʙᴇʀ (1-${downloadLinks.length}) ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ ᴛʜᴇ ᴍᴏᴠɪᴇ.*`;
 
     if (movieInfo.image || movieInfo.thumbnail) {
       await danuwa.sendMessage(from, { image: { url: movieInfo.image || movieInfo.thumbnail }, caption: qualityMsg }, { quoted: mek });
@@ -139,13 +161,19 @@ cmd({
 
   } catch (error) {
     console.error("Fetch Movie Details Error:", error.message);
-    reply(`❌ *ғᴀɪʟᴇᴅ ᴛᴏ ʟᴏᴀᴅ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋs.*`);
+    reply(`❌ *ғᴀɪʟᴇᴅ ᴛᴏ ғᴇᴛᴄʜ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋs.*`);
   }
 });
 
-// 3. Quality Selection & Document Send Listener
+// 3. Quality Selection & Document Send Listener (FIXED FILTER)
 cmd({
-  filter: (text, { sender }) => pendingQuality[sender] && !isNaN(text) && parseInt(text) > 0 && parseInt(text) <= pendingQuality[sender].movie.downloadLinks.length
+  filter: (text, { sender }) => {
+    if (!text || !pendingQuality[sender]) return false;
+    const num = parseInt(String(text).trim(), 10);
+    if (isNaN(num)) return false;
+    if (num < 1 || num > pendingQuality[sender].movie.downloadLinks.length) return false;
+    return true;
+  }
 }, async (danuwa, mek, m, { body, sender, reply, from }) => {
   await danuwa.sendMessage(from, { react: { text: "⚡", key: m.key } });
 
@@ -154,7 +182,12 @@ cmd({
   delete pendingQuality[sender];
 
   const selectedLink = movie.downloadLinks[index];
-  await reply(`⬇️ *ᴜᴘʟᴏᴀᴅɪɴɢ ${selectedLink.quality} ᴍᴏᴠɪᴇ ᴀs ᴀ ᴅᴏᴄᴜᴍᴇɴᴛ...*\n\n🎬 *${toSmallCaps(movie.metadata.title)}*\n📊 *ǫᴜᴀʟɪᴛʏ:* ${selectedLink.quality}\n\n⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ A ᴍᴏᴍᴇɴᴛ...*`);
+  await reply(`⬇️ *ᴜᴘʟᴏᴀᴅɪɴɢ ${selectedLink.quality} ᴍᴏᴠɪᴇ ᴀs ᴀ ᴅᴏᴄᴜᴍᴇɴᴛ...*
+
+🎬 *${toSmallCaps(movie.metadata.title)}*
+📊 *ǫᴜᴀʟɪᴛʏ:* ${selectedLink.quality}
+
+⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ A ᴍᴏᴍᴇɴᴛ...*`);
 
   try {
     const cleanTitle = movie.metadata.title.replace(/[^\w\s.-]/gi, "").substring(0, 50);
@@ -163,7 +196,14 @@ cmd({
       document: { url: selectedLink.link },
       mimetype: "video/mp4",
       fileName: `MALIYA-MD-MINI ${cleanTitle} - ${selectedLink.quality}.mp4`,
-      caption: `🎬 *${toSmallCaps(movie.metadata.title)}*\n\n📊 *ǫᴜᴀʟɪᴛʏ:* ${selectedLink.quality}\n💾 *sɪᴢᴇ:* ${selectedLink.size || "N/A"}\n\n🍿 *ᴇɴᴊᴏʏ ʏᴏᴜʀ ᴍᴏᴠɪᴇ!*\n\n👑 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*`
+      caption: `🎬 *${toSmallCaps(movie.metadata.title)}*
+
+📊 *ǫᴜᴀʟɪᴛʏ:* ${selectedLink.quality}
+💾 *sɪᴢᴇ:* ${selectedLink.size || "N/A"}
+
+🍿 *ᴇɴᴊᴏʏ ʏᴏᴜʀ ᴍᴏᴠɪᴇ!*
+
+👑 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*`
     }, { quoted: mek });
 
     await danuwa.sendMessage(from, { react: { text: "✅", key: m.key } });
