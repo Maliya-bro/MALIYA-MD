@@ -1,9 +1,9 @@
 const { cmd, replyHandlers } = require("../command");
 const axios = require("axios");
 
-const API_BASE = "https://chama-movie-api.koyeb.app";
+const API_BASE = "https://api.chamindu.site";
 const API_KEY = "chama_api_c18d54f734c23ea0c333d33b7494b3b2";
-const DEFAULT_IMAGE = "https://chama-movie-api.koyeb.app/logo.png";
+//const DEFAULT_IMAGE = "https://chama-movie-api.koyeb.app/logo.png";
 const DEFAULT_FOOTER = `\n\n> 🎭 ᴍᴀʟɪʏᴀ-ᴍᴅ 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ`;
 
 // Store active sessions: messageId -> session data
