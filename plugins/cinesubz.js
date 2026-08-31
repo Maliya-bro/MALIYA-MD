@@ -4,7 +4,7 @@ const axios = require("axios");
 const pendingSearch = {};
 const pendingQuality = {};
 
-const API_BASE = "https://chama-movie-api.koyeb.app";
+const API_BASE = "https://api.chamindu.site";
 
 // API Keys
 const API_KEYS = [
