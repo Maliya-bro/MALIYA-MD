@@ -1,182 +1,455 @@
-const { cmd, replyHandlers } = require("../command");
-const axios = require("axios");
+const { cmd, replyHandlers } = require('../command');
+const axios = require('axios');
+const cheerio = require('cheerio');
 
-const API_BASE = "https://chama-movie-api.koyeb.app";
-const API_KEY = "chama_api_c18d54f734c23ea0c333d33b7494b3b2";
-const DEFAULT_IMAGE = "https://chama-movie-api.koyeb.app/logo.png";
-const DEFAULT_FOOTER = `\n\n> 🎭 ᴍᴀʟɪʏᴀ-ᴍᴅ ʟᴇɢᴀᴄʏ ʙʏ\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ`;
+// State Management
+const pendingCartoonSearch = {};
+const pendingCartoonSelection = {};
+const lastProcessedMsg = {}; // Loop Protection State
 
-const cartoonSessions = new Map();
+const SESSION_TIMEOUT = 10 * 60 * 1000; // 10 Minutes
+const LOOP_COOLDOWN = 3000;
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-cmd({
-  pattern: "cartoon",
-  alias: ["sinhalacartoons", "cdl"],
-  desc: "Search and download cartoons from Sinhalacartoons",
-  category: "download",
-  react: "📺",
-}, async (sock, mek, m, { from, args, reply }) => {
-  if (!args.length) {
-    return reply(`*❪ ERROR ❫*\n\n⚠️ *Invalid Usage!*\n\n🎬 *Example:*\n• .cartoon ben 10\n• .sinhalacartoons frozen\n\n📝 _Please provide the Cartoon or Anime name!_${DEFAULT_FOOTER}`);
-  }
+// Channel Forwarding Meta Data
+const CHANNEL_JID = "120363427174988449@newsletter";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
 
-  const query = args.join(' ');
-  await reply(`*❪ SEARCHING ❫*\n\n🔍 *Searching Sinhalacartoons...*\n⚡ _Please wait a moment._`);
-
-  try {
-    const searchResponse = await axios.get(`${API_BASE}/api/v1/movie/sinhalacartoons/search?q=${encodeURIComponent(query)}&api_key=${API_KEY}`);
-    const searchData = searchResponse.data;
-
-    if (!searchData.status || !searchData.data || searchData.data.length === 0) {
-      return reply(`*❪ NO RESULTS ❫*\n\n😞 *No Results Found!*\n\n🎬 *Query:* _${query}_\n💡 *Tip:* _Please check the spelling and try again!_${DEFAULT_FOOTER}`);
-    }
-
-    const results = searchData.data.slice(0, 25);
-    let listText = `*❪ SEARCH RESULTS ❫*\n\n🎯 *Query:* _${query}_\n📊 *Results:* _${results.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
-    results.forEach((item, index) => {
-      const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
-      listText += `*${num}* ➜ 📺 _${item.title.substring(0, 30)}_\n`;
-    });
-    listText += `\n${DEFAULT_FOOTER}`;
-
-    const sentMsg = await sock.sendMessage(from, { text: listText }, { quoted: mek });
-    const messageID = sentMsg.key.id;
-
-    cartoonSessions.set(messageID, {
-      step: "SELECT_SEARCH",
-      results: results,
-      sender: from,
-      timestamp: Date.now(),
-    });
-
-    setTimeout(() => cartoonSessions.delete(messageID), 300000);
-
-  } catch (error) {
-    console.error('Sinhalacartoons search error:', error);
-    reply(`*❪ SYSTEM ERROR ❫*\n\n❌ *System Error!*\n🚫 _${error.message || 'Unknown error'}_\n\n🔄 _Please try again later..._${DEFAULT_FOOTER}`);
-  }
-});
-
-const cartoonReplyHandler = {
-  filter: (body, { sender, from }) => {
-    if (!body) return false;
-    const num = parseInt(body.trim());
-    if (isNaN(num)) return false;
-
-    for (const [key, session] of cartoonSessions) {
-      if (session.sender === from && session.step) {
-        return true;
-      }
-    }
-    return false;
-  },
-  function: async (sock, mek, m, { from, body, reply }) => {
-    const num = parseInt(body.trim());
-
-    let activeKey = null;
-    let sessionData = null;
-    for (const [key, session] of cartoonSessions) {
-      if (session.sender === from && session.step) {
-        activeKey = key;
-        sessionData = session;
-        break;
-      }
-    }
-
-    if (!sessionData) return;
-
-    const choiceNum = num - 1;
-
-    if (sessionData.step === "SELECT_SEARCH") {
-      const { results } = sessionData;
-      cartoonSessions.delete(activeKey);
-
-      if (choiceNum < 0 || choiceNum >= results.length) {
-        return reply(`*❪ INVALID ❫*\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${results.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`);
-      }
-
-      const selectedItem = results[choiceNum];
-
-      await reply(`*❪ FETCHING ❫*\n\n📺 *Fetching Cartoon Details...*\n⚡ _Please wait..._`);
-
-      try {
-        const detailsResponse = await axios.get(`${API_BASE}/api/v1/movie/sinhalacartoons/infodl?q=${encodeURIComponent(selectedItem.link)}&api_key=${API_KEY}`);
-        const detailsData = detailsResponse.data;
-
-        if (!detailsData.status || !detailsData.data) throw new Error('Failed to fetch details');
-
-        const cartoonInfo = detailsData.data;
-        const validDownloads = cartoonInfo.downloads || [];
-
-        if (validDownloads.length === 0) {
-          return reply(`*❪ NO DOWNLOADS ❫*\n\n⚠️ *No Downloads Found!*\n😞 _There are no downloads available for this cartoon!_${DEFAULT_FOOTER}`);
+function getChannelContext() {
+    return {
+        contextInfo: {
+            forwardingScore: 999,
+            isForwarded: true,
+            forwardedNewsletterMessageInfo: {
+                newsletterJid: CHANNEL_JID,
+                newsletterName: CHANNEL_NAME,
+                serverMessageId: -1,
+            },
         }
-
-        const detailsText = `*❪ CARTOON DETAILS ❫*\n\n🎬 *${cartoonInfo.title}*\n⭐ 𝗜𝗠𝗗𝗕 ➜ ★ ${cartoonInfo.imdb || cartoonInfo.rating || 'N/A'}\n📅 𝗬𝗲𝗮𝗿 ➜ ${cartoonInfo.year || 'N/A'}\n⏳ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻 ➜ ${cartoonInfo.duration || 'N/A'}\n🌍 𝗖ᴏᴜɴ𝘁𝗿ʏ ➜ ${cartoonInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻𝗿𝗲𝘀 ➜ ${cartoonInfo.genres ? cartoonInfo.genres.join(', ') : 'N/A'}\n🏷️ ➜ ${cartoonInfo.language || 'N/A'}\n🎬 ➜ ${cartoonInfo.director || 'N/A'}\n📝 𝗦𝘁𝗼𝗿𝘆 ➜ ${cartoonInfo.story ? (cartoonInfo.story.length > 250 ? cartoonInfo.story.substring(0, 250) + '...' : cartoonInfo.story) : 'N/A'}\n🗿 ➜ sinhalacartoons.com\n${DEFAULT_FOOTER}`;
-
-        const posterUrl = cartoonInfo.image || selectedItem.image || DEFAULT_IMAGE;
-        await sock.sendMessage(from, {
-          image: { url: posterUrl },
-          caption: detailsText
-        }, { quoted: mek });
-
-        // Create download selection session
-        const downloadOptionsText = `*❪ DOWNLOADS ❫*\n\n📥 *Select Episode / Quality:*\n\n${validDownloads.map((dl, i) => {
-          const numStr = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
-          return `*${numStr}* ➜ 💾 _${dl.quality}_ 📁 _${dl.size || 'N/A'}_`;
-        }).join('\n')}\n\n*💬 REPLY TO DOWNLOAD 💬*\n📌 _Reply with the number_${DEFAULT_FOOTER}`;
-
-        const downloadOptionsMsg = await sock.sendMessage(from, { text: downloadOptionsText }, { quoted: mek });
-        const optionsMsgID = downloadOptionsMsg.key.id;
-
-        cartoonSessions.set(optionsMsgID, {
-          step: "SELECT_DOWNLOAD",
-          cartoonInfo,
-          validDownloads,
-          sender: from,
-          timestamp: Date.now(),
-        });
-
-        setTimeout(() => cartoonSessions.delete(optionsMsgID), 300000);
-
-      } catch (detailsError) {
-        console.error('Cartoon details error:', detailsError);
-        reply(`*❪ ERROR ❫*\n\n❌ *Cartoon Details Error!*\n🚫 _${detailsError.message}_${DEFAULT_FOOTER}`);
-      }
-    }
-
-    else if (sessionData.step === "SELECT_DOWNLOAD") {
-      const { cartoonInfo, validDownloads } = sessionData;
-      cartoonSessions.delete(activeKey);
-
-      if (choiceNum < 0 || choiceNum >= validDownloads.length) {
-        return reply(`*❪ INVALID ❫*\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${validDownloads.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`);
-      }
-
-      const selectedDownload = validDownloads[choiceNum];
-      await sock.sendMessage(from, { react: { text: '📥', key: mek.key } });
-
-      try {
-        const finalDirectLink = selectedDownload.link;
-
-        await sock.sendMessage(from, {
-          document: { url: finalDirectLink },
-          mimetype: 'video/mp4',
-          fileName: `${cartoonInfo.title} - ${selectedDownload.quality}.mp4`,
-          caption: `*❪ CARTOON ❫*\n\n🎭 *${cartoonInfo.title}*\n📌 *Episode:* ${selectedDownload.quality}${DEFAULT_FOOTER}`
-        }, { quoted: mek });
-
-        await sock.sendMessage(from, { react: { text: '✅', key: mek.key } });
-
-      } catch (downloadError) {
-        console.error('Download error:', downloadError);
-        reply(`*❪ ERROR ❫*\n\n❌ *Download Failed!*\n🚫 _${downloadError.message}_${DEFAULT_FOOTER}`);
-      }
-    }
-  }
-};
-
-if (Array.isArray(replyHandlers)) {
-  replyHandlers.push(cartoonReplyHandler);
+    };
 }
 
-module.exports = { cartoonSessions };
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function keyFor(sender, from) {
+    return `${from || ""}::${(sender || "").split(":")[0]}`;
+}
+
+function toSmallCaps(str = "") {
+    const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+    return String(str)
+        .split("")
+        .map((char) => {
+            const idx = normal.indexOf(char);
+            return idx !== -1 ? small[idx] : char;
+        })
+        .join("");
+}
+
+function clearUserSession(k) {
+    delete pendingCartoonSearch[k];
+    delete pendingCartoonSelection[k];
+}
+
+// 1. Search Results Scraper
+async function getSearchResults(searchTerm) {
+    const url = `https://sinhalacartoons.com/?s=${encodeURIComponent(searchTerm)}`;
+    const { data } = await axios.get(url, { headers: { 'User-Agent': UA } });
+    const $ = cheerio.load(data);
+    const results = [];
+
+    $('.post, article, .search-result, .movie-item, .post-item').each((i, el) => {
+        const link = $(el).find('a[href*="sinhalacartoons.com"]').first();
+        const href = link.attr('href');
+        const title = link.text().trim() || $(el).find('h2, h3').text().trim();
+        
+        if (href && title && 
+            href.startsWith('https://sinhalacartoons.com/') && 
+            !href.includes('/category/') && 
+            !href.includes('/tag/') && 
+            !href.includes('/page/') && 
+            !href.includes('/author/') &&
+            !href.includes('/about-us/') &&
+            !href.includes('/contact-us/') &&
+            !href.includes('/dmca-policy/') &&
+            href !== 'https://sinhalacartoons.com' &&
+            title.length > 5) {
+            
+            if (!results.find(r => r.href === href)) {
+                results.push({ title, href });
+            }
+        }
+    });
+
+    if (results.length === 0) {
+        const contentArea = $('#content, .main-content, .site-content');
+        contentArea.find('a[href*="sinhalacartoons.com"]').each((i, el) => {
+            const href = $(el).attr('href');
+            const text = $(el).text().trim();
+            const parent = $(el).closest('div, article, li');
+            const parentText = parent.text().trim();
+            
+            if (href && text && 
+                href.startsWith('https://sinhalacartoons.com/') && 
+                !href.includes('/category/') && 
+                !href.includes('/tag/') && 
+                !href.includes('/page/') &&
+                !href.includes('/about-us/') &&
+                !href.includes('/contact-us/') &&
+                !href.includes('/dmca-policy/') &&
+                href !== 'https://sinhalacartoons.com' &&
+                text.length > 5 &&
+                parentText.length > 20) {
+                
+                if (!results.find(r => r.href === href)) {
+                    results.push({ title: text, href });
+                }
+            }
+        });
+    }
+
+    return results.slice(0, 15);
+}
+
+// 2. Fetch Detailed Cartoon Information
+async function getMovieDetails(moviePageUrl) {
+    const { data } = await axios.get(moviePageUrl, { headers: { 'User-Agent': UA } });
+    const $ = cheerio.load(data);
+
+    const details = {
+        poster: '',
+        title: '',
+        director: 'N/A',
+        year: 'N/A',
+        rating: 'N/A',
+        quality: 'N/A',
+        description: 'N/A',
+        isSeries: false
+    };
+
+    details.poster = $('.info-poster img').attr('src') || '';
+    details.title = $('h1.movie-title').text().trim() || $('title').text().trim();
+
+    const descDiv = $('h2.cast-header:contains("Description")').next('div');
+    if (descDiv.length) {
+        details.description = descDiv.text().trim().replace(/\s+/g, ' ').substring(0, 300) + '...';
+    } else {
+        const firstP = $('.main-content p').first();
+        if (firstP.length) {
+            details.description = firstP.text().trim().replace(/\s+/g, ' ').substring(0, 300) + '...';
+        }
+    }
+
+    $('.details-list li').each((i, el) => {
+        const text = $(el).text().trim();
+        if (text.includes('Director:')) {
+            details.director = text.replace('Director:', '').trim();
+        } else if (text.includes('Release Year:')) {
+            details.year = text.replace('Release Year:', '').trim();
+        } else if (text.includes('IMDb Rating:')) {
+            details.rating = text.replace('IMDb Rating:', '').trim();
+        } else if (text.includes('Quality:')) {
+            details.quality = text.replace('Quality:', '').trim();
+        }
+    });
+
+    if ($('#episode-section').length > 0 || $('.episode-row').length > 0) {
+        details.isSeries = true;
+    }
+
+    return details;
+}
+
+// 3. Extract "Bulk Download" Page Link
+async function getDownloadPageUrl(moviePageUrl) {
+    const { data } = await axios.get(moviePageUrl, { headers: { 'User-Agent': UA } });
+    const $ = cheerio.load(data);
+    
+    let downloadLink = $('a.dl-card[href*="bulk="]').attr('href');
+    if (!downloadLink) {
+        downloadLink = $('a[href*="bulk="]').attr('href');
+    }
+    return downloadLink;
+}
+
+// 4. Extract Episode Links from Download Page
+async function getEpisodeLinksFromDownloadPage(downloadPageUrl) {
+    const { data } = await axios.get(downloadPageUrl, { headers: { 'User-Agent': UA } });
+    const $ = cheerio.load(data);
+    
+    const episodeLinks = [];
+    
+    $('a.dl-card-landing.force-download-btn').each((i, el) => {
+        const href = $(el).attr('href');
+        const text = $(el).find('.dl-text-l strong').text().trim() || `Episode ${i + 1}`;
+        
+        if (href && href.includes('dl.sinhalacartoons.com')) {
+            episodeLinks.push({
+                title: text,
+                url: href
+            });
+        }
+    });
+    
+    return episodeLinks;
+}
+
+function generateResultText(results) {
+    let text = `╭━〔 🎬 *sɪɴʜᴀʟᴀ ᴄᴀʀᴛᴏᴏɴ sᴇᴀʀᴄʜ* 〕━╮\n┃\n`;
+    text += `┃ 📊 *TOTAL RESULTS:* ${results.length}\n┃\n`;
+    text += `╰━━━━━━━━━━━━╯\n\n`;
+
+    results.forEach((v, idx) => {
+        const numStr = String(idx + 1).padStart(2, "0");
+        const cleanTitle = v.title.replace(/\s+/g, ' ').trim();
+        text += `*[ ${numStr} ]* 🎥 *${toSmallCaps(cleanTitle.slice(0, 45))}*\n`;
+    });
+
+    text += `\n───────────────\n`;
+    text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ ᴛᴏ sᴇʟᴇᴄᴛ*\n\n`;
+    text += `⚙️ Made with ❤️ by\n╭───────────────⬣\n🔥 𝙈𝘼𝙇𝙄𝙉𝘿𝙐 𝙉𝘼𝘿𝙄𝙏𝙃 🔥\n╰───────────────⬣`;
+    return text;
+}
+
+// ===== 1. MAIN SEARCH COMMAND =====
+cmd({
+    pattern: "sinhalacartoon",
+    alias: ["scartoon", "sc", "cartoon"],
+    desc: "Search and download cartoons from SinhalaCartoons.com",
+    category: "download",
+    react: "🎬",
+    filename: __filename
+}, async (bot, mek, m, { from, q, sender, reply }) => {
+    if (!q) {
+        return reply(`🎬 *sɪɴʜᴀʟᴀ ᴄᴀʀᴛᴏᴏɴ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ*\n\n📌 *ᴜsᴀɢᴇ:* \`.scartoon [cartoon name]\`\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`.scartoon kung fu panda\``);
+    }
+
+    await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
+
+    try {
+        const results = await getSearchResults(q.trim());
+
+        if (!results || results.length === 0) {
+            await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
+            return reply(`❌ *ɴᴏ ʀᴇsᴜʟᴛs ғᴏᴜɴᴅ ғᴏʀ:* _${q}_`);
+        }
+
+        const k = keyFor(sender, from);
+        clearUserSession(k);
+
+        pendingCartoonSearch[k] = { 
+            results, 
+            timestamp: Date.now() 
+        };
+
+        const channelMeta = getChannelContext();
+        await bot.sendMessage(from, { 
+            text: generateResultText(results),
+            ...channelMeta
+        }, { quoted: mek });
+
+    } catch (error) {
+        console.error("SinhalaCartoon Search Error:", error);
+        await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
+        reply(`❌ *ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ ᴡʜɪʟᴇ sᴇᴀʀᴄʜɪɴɢ!*`);
+    }
+});
+
+// ===== 2. REPLY HANDLER (Selection & Multi-Episode Upload) =====
+const cartoonReplyHandler = {
+    filter: (text, { sender, from }) => {
+        if (!text) return false;
+        const k = keyFor(sender, from);
+        return Boolean(pendingCartoonSearch[k]) || Boolean(pendingCartoonSelection[k]);
+    },
+    function: async (bot, mek, m, { body, sender, reply, from }) => {
+        const input = body ? body.trim() : "";
+        if (!input) return;
+
+        const k = keyFor(sender, from);
+
+        // Loop protection
+        const now = Date.now();
+        const lastMsg = lastProcessedMsg[k];
+        if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
+            return;
+        }
+        lastProcessedMsg[k] = { text: input, time: now };
+
+        // --- STEP A: CARTOON SELECTION FROM SEARCH ---
+        if (pendingCartoonSearch[k]) {
+            const num = parseInt(input);
+            const session = pendingCartoonSearch[k];
+
+            if (isNaN(num) || num <= 0 || num > session.results.length) {
+                return reply(`❌ *ɪɴᴠᴀʟɪᴅ sᴇʟᴇᴄᴛɪᴏɴ! ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ ᴀ ᴠᴀʟɪᴅ ɴᴜᴍʙᴇʀ.*`);
+            }
+
+            const selectedMovie = session.results[num - 1];
+            delete pendingCartoonSearch[k]; // Clear search session
+
+            await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
+
+            try {
+                // Fetch Details and Download Links
+                const details = await getMovieDetails(selectedMovie.href);
+                const downloadPageUrl = await getDownloadPageUrl(selectedMovie.href);
+
+                if (!downloadPageUrl) {
+                    return reply(`❌ *ᴄᴏᴜʟᴅ ɴᴏᴛ ғɪɴᴅ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋ ғᴏʀ ᴛʜɪs ᴄᴀʀᴛᴏᴏɴ!*`);
+                }
+
+                const items = await getEpisodeLinksFromDownloadPage(downloadPageUrl);
+
+                if (!items || items.length === 0) {
+                    return reply(`❌ *ɴᴏ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋs ғᴏᴜɴᴅ!*`);
+                }
+
+                const channelMeta = getChannelContext();
+
+                // Store in selection pending state
+                pendingCartoonSelection[k] = {
+                    details,
+                    items,
+                    timestamp: Date.now()
+                };
+
+                let captionText = `╭━〔 🎬 *${toSmallCaps(details.title || selectedMovie.title)}* 〕━╮\n┃\n`;
+                captionText += `┃ 📅 *RELEASE YEAR:* ${details.year}\n`;
+                captionText += `┃ ⭐ *IMDB RATING:* ${details.rating}\n`;
+                captionText += `┃ 🎥 *QUALITY:* ${details.quality}\n`;
+                captionText += `┃ 🎬 *DIRECTOR:* ${details.director}\n`;
+                captionText += `┃ 📺 *TYPE:* ${details.isSeries ? 'TV Series' : 'Movie'}\n┃\n`;
+                captionText += `╰━━━━━━━━━━━━╯\n\n`;
+                captionText += `📖 *DESCRIPTION:*\n_${details.description}_\n\n`;
+                captionText += `───────────────────\n`;
+                captionText += `📥 *ᴀᴠᴀɪʟᴀʙʟᴇ ᴇᴘɪsᴏᴅᴇs / ᴅᴏᴡɴʟᴏᴀᴅs:* ${items.length}\n\n`;
+
+                captionText += `*[ 01 ]* 📦 *GET ALL EPISODES*\n`;
+                items.forEach((item, idx) => {
+                    const numStr = String(idx + 2).padStart(2, "0");
+                    captionText += `*[ ${numStr} ]* 📌 ${item.title}\n`;
+                });
+
+                captionText += `\n───────────────────\n`;
+                captionText += `📌 *Reply with "01" or "all" to download ALL episodes.*\n`;
+                captionText += `📌 *Or reply with numbers (e.g. "2,3,5" or "4") to download specific episodes.*\n\n`;
+                captionText += `⚙️ Made with ❤️ by\n╭───────────────⬣\n🔥 𝙈𝘼𝙇𝙄𝙉𝘿𝙐 𝙉𝘼𝘿𝙄𝙏𝙃 🔥\n╰───────────────⬣`;
+
+                if (details.poster) {
+                    await bot.sendMessage(from, {
+                        image: { url: details.poster },
+                        caption: captionText,
+                        ...channelMeta
+                    }, { quoted: mek });
+                } else {
+                    await bot.sendMessage(from, {
+                        text: captionText,
+                        ...channelMeta
+                    }, { quoted: mek });
+                }
+
+            } catch (err) {
+                console.error("SinhalaCartoon Details Error:", err);
+                await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
+                reply(`❌ *ғᴀɪʟᴇᴅ ᴛᴏ ғᴇᴛᴄʜ ᴄᴀʀᴛᴏᴏɴ ᴅᴇᴛᴀɪʟs!*`);
+            }
+            return;
+        }
+
+        // --- STEP B: MULTI-EPISODE SELECTION & DOCUMENT UPLOAD ---
+        if (pendingCartoonSelection[k]) {
+            const { details, items } = pendingCartoonSelection[k];
+
+            let selectedIndices = [];
+            const lowerInput = input.toLowerCase();
+
+            if (lowerInput === "01" || lowerInput === "1" || lowerInput === "all") {
+                // Select All Episodes
+                selectedIndices = items.map((_, idx) => idx);
+            } else {
+                // Parse numbers like "2,3,4,7"
+                const numbers = input.split(/[\s,]+/).map(n => parseInt(n)).filter(n => !isNaN(n));
+                
+                numbers.forEach(num => {
+                    if (num === 1) {
+                        // User replied '1' which means ALL
+                        items.forEach((_, idx) => selectedIndices.push(idx));
+                    } else if (num >= 2 && num <= items.length + 1) {
+                        selectedIndices.push(num - 2); // Map menu number (2) -> array index (0)
+                    }
+                });
+            }
+
+            // Deduplicate indices
+            selectedIndices = [...new Set(selectedIndices)].sort((a, b) => a - b);
+
+            if (selectedIndices.length === 0) {
+                return reply(`❌ *ɪɴᴠᴀʟɪᴅ sᴇʟᴇᴄᴛɪᴏɴ! ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ ᴠᴀʟɪᴅ ᴇᴘɪsᴏᴅᴇ ɴᴜᴍʙᴇʀs (ᴇ.ɢ. "2,3,5" ᴏʀ "01" ғᴏʀ ᴀʟʟ).*`);
+            }
+
+            delete pendingCartoonSelection[k]; // Clear selection state
+
+            await reply(`🚀 *sᴛᴀʀᴛɪɴɢ ʙᴀᴛᴄʜ ᴅᴏᴡɴʟᴏᴀᴅ:* Sending ${selectedIndices.length} Item(s) as Document Files...`);
+
+            const channelMeta = getChannelContext();
+
+            // Process selected episodes sequentially
+            for (let i = 0; i < selectedIndices.length; i++) {
+                const epIndex = selectedIndices[i];
+                const selectedItem = items[epIndex];
+
+                try {
+                    await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
+
+                    const cleanTitle = (details.title || "Cartoon").replace(/[^\w\s.-]/gi, "").substring(0, 40);
+                    const cleanSubTitle = (selectedItem.title || "").replace(/[^\w\s.-]/gi, "").substring(0, 20);
+
+                    await reply(`⚙️ *[${i + 1}/${selectedIndices.length}] Uploading ${selectedItem.title}...*`);
+
+                    // Direct Stream Send via R2 Direct Link
+                    await bot.sendMessage(from, {
+                        document: { url: selectedItem.url },
+                        mimetype: "video/mp4",
+                        fileName: `MALIYA-MD ${cleanTitle} - ${cleanSubTitle}.mp4`,
+                        caption: `🎬 *${toSmallCaps(details.title)}*\n📌 *${selectedItem.title}*\n\n📊 *ǫᴜᴀʟɪᴛʏ:* ${details.quality}\n⭐ *ʀᴀᴛɪɴɢ:* ${details.rating}\n\n🍿 *ᴇɴᴊᴏʏ ʏᴏᴜʀ ᴄᴀʀᴛᴏᴏɴ!*\n\n👑 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*`,
+                        ...channelMeta
+                    }, { quoted: mek });
+
+                    await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+
+                    // Cooldown delay (3 seconds) between sends to prevent rate-limit
+                    await delay(3000);
+
+                } catch (error) {
+                    console.error(`SinhalaCartoon Ep Send Error (${selectedItem.title}):`, error);
+                    await reply(`❌ *Failed to send ${selectedItem.title}: ${error.message || "Unknown error"}*`);
+                }
+            }
+
+            await reply(`🎉 *All Selected Downloads Completed Successfully!*`);
+        }
+    }
+};
+
+// Register reply handler
+if (Array.isArray(replyHandlers)) {
+    replyHandlers.push(cartoonReplyHandler);
+}
+
+// Auto Cleanup Interval
+setInterval(() => {
+    const now = Date.now();
+    for (const s in pendingCartoonSearch) {
+        if (now - pendingCartoonSearch[s].timestamp > SESSION_TIMEOUT) delete pendingCartoonSearch[s];
+    }
+    for (const s in pendingCartoonSelection) {
+        if (now - pendingCartoonSelection[s].timestamp > SESSION_TIMEOUT) delete pendingCartoonSelection[s];
+    }
+    for (const s in lastProcessedMsg) {
+        if (now - lastProcessedMsg[s].time > LOOP_COOLDOWN) delete lastProcessedMsg[s];
+    }
+}, 2.5 * 60 * 1000);
+
+module.exports = { pendingCartoonSearch, pendingCartoonSelection };
