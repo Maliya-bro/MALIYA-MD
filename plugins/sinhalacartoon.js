@@ -13,7 +13,7 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 // Channel Forwarding Meta Data
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
 
 function getChannelContext() {
     return {
@@ -196,43 +196,43 @@ async function getEpisodeLinksFromDownloadPage(downloadPageUrl) {
 }
 
 function generateResultText(results) {
-    let text = `╭─〔 🎬 *sɪɴʜᴀʟᴀ ᴄᴀʀᴛᴏᴏɴ sᴇᴀʀᴄʜ* 〕─╮\n│\n`;
-    text += `│ 📊 *TOTAL RESULTS:* ${results.length}\n│\n`;
-    text += `╰────────────────────╯\n\n`;
+    let text = `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡𝗦 ]─╮*\n│\n`;
+    text += `├─ 📊 *𝗥𝗲𝘀𝘂𝗹𝘁𝘀:* ${results.length}\n│\n`;
+    text += `├─ *👇 Reply with a Number:* 👇\n│\n`;
 
     results.forEach((v, idx) => {
         const numStr = String(idx + 1).padStart(2, "0");
         const cleanTitle = v.title.replace(/\s+/g, ' ').trim();
-        text += `*[ ${numStr} ]* 🎥 *${toSmallCaps(cleanTitle.slice(0, 45))}*\n`;
+        text += `├─ 📱 *[ ${numStr} ]* 🎬 *${toSmallCaps(cleanTitle.slice(0, 40))}*\n`;
     });
 
-    text += `\n────────────────────\n`;
-    text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ ᴛᴏ sᴇʟᴇᴄᴛ*\n\n`;
-    text += `⚙️ Made with ❤️ by\n╭───────────────────⬣\n🔥 𝙈𝘼𝙇𝙄𝙉𝘿𝙐 𝙉𝘼𝘿𝙄𝙏𝙃 🔥\n╰───────────────────⬣`;
+    text += `│\n╰────────────────────╯\n\n`;
+    text += `📌 *Reply with the number to select cartoon*`;
     return text;
 }
 
 // ===== 1. MAIN SEARCH COMMAND =====
 cmd({
     pattern: "sinhalacartoon",
-    alias: ["scartoon", "sc", "cartoon"],
+    alias: ["scartoon", "sc", "cartoon", "cdl"],
     desc: "Search and download cartoons from SinhalaCartoons.com",
     category: "download",
     react: "🎬",
     filename: __filename
 }, async (bot, mek, m, { from, q, sender, reply }) => {
     if (!q) {
-        return reply(`🎬 *sɪɴʜᴀʟᴀ ᴄᴀʀᴛᴏᴏɴ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ*\n\n📌 *ᴜsᴀɢᴇ:* \`.scartoon [cartoon name]\`\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`.scartoon kung fu panda\``);
+        return reply(`*╭──[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗨𝗦𝗔𝗚𝗘 ]──╮*\n│\n├─ 📌 *Usage:* .scartoon [cartoon name]\n├─ 💡 *Example:* .scartoon kung fu panda\n╰──────────────────╯`);
     }
 
     await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
+    await reply("*╭──[ 🔍 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ]──╮*\n│\n├─ 🎬 *Searching SinhalaCartoons...*\n├─ ⚡ _Please wait a moment..._\n╰─────────────────╯");
 
     try {
         const results = await getSearchResults(q.trim());
 
-        if (!results || results.length === 0) {
+        if (!results || !Array.isArray(results) || results.length === 0) {
             await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-            return reply(`❌ *ɴᴏ ʀᴇsᴜʟᴛs ғᴏᴜɴᴅ ғᴏʀ:* _${q}_`);
+            return reply(`*╭──[ 😞 𝗡𝗢 𝗥𝗘𝗦𝗨𝗟𝗧𝗦 ]──╮*\n│\n├─ 🎬 *Query:* _${q}_\n╰─────────────────╯`);
         }
 
         const k = keyFor(sender, from);
@@ -252,16 +252,22 @@ cmd({
     } catch (error) {
         console.error("SinhalaCartoon Search Error:", error);
         await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-        reply(`❌ *ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ ᴡʜɪʟᴇ sᴇᴀʀᴄʜɪɴɢ!*`);
+        reply(`*╭──[ ❌ 𝗦𝗬𝗦𝗧𝗘𝗠 𝗘𝗥𝗥𝗢𝗥 ]──╮*\n│\n├─ 🚫 _Error occurred while searching cartoons!_\n╰──────────────────╯`);
     }
 });
 
-// ===== 2. REPLY HANDLER (Selection & Multi-Episode Upload) =====
+// ===== 2. NUMBER & EPISODE REPLY HANDLER (xHamster Reply Filter Structure) =====
 const cartoonReplyHandler = {
     filter: (text, { sender, from }) => {
         if (!text) return false;
         const k = keyFor(sender, from);
-        return Boolean(pendingCartoonSearch[k]) || Boolean(pendingCartoonSelection[k]);
+        
+        const cleanInput = text.trim().toLowerCase();
+        const isNumberOrList = /^(\d+|all|\d+(\s*,\s*\d+)*)$/.test(cleanInput);
+
+        if (!isNumberOrList) return false;
+
+        return Boolean(pendingCartoonSearch[k] || pendingCartoonSelection[k]);
     },
     function: async (bot, mek, m, { body, sender, reply, from }) => {
         const input = body ? body.trim() : "";
@@ -269,7 +275,7 @@ const cartoonReplyHandler = {
 
         const k = keyFor(sender, from);
 
-        // Loop protection
+        // LOOP PROTECTION SYSTEM
         const now = Date.now();
         const lastMsg = lastProcessedMsg[k];
         if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
@@ -277,19 +283,19 @@ const cartoonReplyHandler = {
         }
         lastProcessedMsg[k] = { text: input, time: now };
 
-        // --- STEP A: CARTOON SELECTION FROM SEARCH ---
+        // --- STEP 1: CARTOON SELECTION FROM SEARCH ---
         if (pendingCartoonSearch[k]) {
-            const num = parseInt(input);
+            const num = parseInt(input, 10);
             const session = pendingCartoonSearch[k];
 
             if (isNaN(num) || num <= 0 || num > session.results.length) {
-                return reply(`❌ *ɪɴᴠᴀʟɪᴅ sᴇʟᴇᴄᴛɪᴏɴ! ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ ᴀ ᴠᴀʟɪᴅ ɴᴜᴍʙᴇʀ.*`);
+                return reply(`*╭──[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗢𝗣𝗧𝗜𝗢𝗡 ]──╮*\n│\n├─ 🎯 *Range:* 1 - ${session.results.length}\n╰─────────────────╯`);
             }
 
             const selectedMovie = session.results[num - 1];
-            delete pendingCartoonSearch[k]; // Clear search session
+            delete pendingCartoonSearch[k]; // Clear search state
 
-            await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
+            await reply(`*╭─[ ⏳ 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 𝗘𝗣𝗜𝗦𝗢𝗗𝗘𝗦 ]─╮*\n│\n├─ 🎬 *Parsing cartoon details...*\n├─ ⚡ _Please wait a moment..._\n╰────────────────╯`);
 
             try {
                 // Fetch Details and Download Links
@@ -297,45 +303,42 @@ const cartoonReplyHandler = {
                 const downloadPageUrl = await getDownloadPageUrl(selectedMovie.href);
 
                 if (!downloadPageUrl) {
-                    return reply(`❌ *ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋ ɴᴏᴛ ғᴏᴜɴᴅ ғᴏʀ ᴛʜɪs ᴄᴀʀᴛᴏᴏɴ!*`);
+                    return reply(`*╭──[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]──╮*\n│\n├─ 🚫 _Could not find download page!_\n╰─────────────────╯`);
                 }
 
                 const items = await getEpisodeLinksFromDownloadPage(downloadPageUrl);
 
                 if (!items || items.length === 0) {
-                    return reply(`❌ *ɴᴏ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋs ғᴏᴜɴᴅ!*`);
+                    return reply(`*╭──[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]──╮*\n│\n├─ 🚫 _No download episodes found!_\n╰─────────────────╯`);
                 }
 
-                const channelMeta = getChannelContext();
-
-                // Store in selection pending state
+                // Store in Selection Pending State (Does NOT auto download!)
                 pendingCartoonSelection[k] = {
                     details,
                     items,
                     timestamp: Date.now()
                 };
 
-                let captionText = `╭─〔 🎬 *${toSmallCaps(details.title || selectedMovie.title)}* 〕─╮\n│\n`;
-                captionText += `│ 📅 *RELEASE YEAR:* ${details.year}\n`;
-                captionText += `│ ⭐ *IMDB RATING:* ${details.rating}\n`;
-                captionText += `│ 🎥 *QUALITY:* ${details.quality}\n`;
-                captionText += `│ 🎬 *DIRECTOR:* ${details.director}\n`;
-                captionText += `│ 📺 *TYPE:* ${details.isSeries ? 'TV Series' : 'Movie'}\n│\n`;
-                captionText += `╰────────────────────╯\n\n`;
-                captionText += `📖 *DESCRIPTION:*\n_${details.description}_\n\n`;
-                captionText += `────────────────────\n`;
-                captionText += `📥 *ᴀᴠᴀɪʟᴀʙʟᴇ ᴇᴘɪsᴏᴅᴇs / ᴅᴏᴡɴʟᴏᴀᴅs:* ${items.length}\n\n`;
+                const channelMeta = getChannelContext();
 
-                captionText += `*[ 01 ]* 📦 *GET ALL EPISODES*\n`;
+                let captionText = `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡 ]─╮*\n│\n`;
+                captionText += `├─ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(details.title || selectedMovie.title)}\n`;
+                captionText += `├─ 📅 *𝗬𝗲𝗮𝗿:* ${details.year}\n`;
+                captionText += `├─ ⭐ *𝗥𝗮𝘁𝗶𝗻𝗴:* ${details.rating}\n`;
+                captionText += `├─ 🎥 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${details.quality}\n`;
+                captionText += `├─ 📺 *𝗧𝘆𝗽𝗲:* ${details.isSeries ? 'TV Series' : 'Movie'}\n│\n`;
+                captionText += `├─ 📥 *𝗔𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲 𝗘𝗽𝗶𝘀𝗼𝗱𝗲𝘀:* ${items.length}\n│\n`;
+                captionText += `├─ *👇 Reply to Select Download:* 👇\n│\n`;
+                captionText += `├─ 📱 *[ 01 ]* 📦 Download ALL Episodes\n`;
+
                 items.forEach((item, idx) => {
                     const numStr = String(idx + 2).padStart(2, "0");
-                    captionText += `*[ ${numStr} ]* 📌 ${item.title}\n`;
+                    captionText += `├─ 📱 *[ ${numStr} ]* 📌 ${item.title}\n`;
                 });
 
-                captionText += `\n────────────────────\n`;
-                captionText += `📌 *Reply with "01" or "all" to download ALL episodes.*\n`;
-                captionText += `📌 *Or reply with numbers (e.g. "2,3,5" or "4") to download specific episodes.*\n\n`;
-                captionText += `⚙️ Made with ❤️ by\n╭───────────────────⬣\n🔥 𝙈𝘼𝙇𝙄𝙉𝘿𝙐 𝙉𝘼𝘿𝙄𝙏𝙃 🔥\n╰───────────────────⬣`;
+                captionText += `│\n╰────────────────╯\n\n`;
+                captionText += `💡 *Reply "01" or "all" for ALL episodes.*\n`;
+                captionText += `💡 *Or reply with numbers (e.g., "2,3,5") for specific episodes.*`;
 
                 if (details.poster) {
                     await bot.sendMessage(from, {
@@ -353,12 +356,12 @@ const cartoonReplyHandler = {
             } catch (err) {
                 console.error("SinhalaCartoon Details Error:", err);
                 await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-                reply(`❌ *ғᴀɪʟᴇᴅ ᴛᴏ ғᴇᴛᴄʜ ᴄᴀʀᴛᴏᴏɴ ᴅᴇᴛᴀɪʟs!*`);
+                reply(`*╭──[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]──╮*\n│\n├─ 🚫 _Failed to fetch cartoon details!_\n╰────────────────╯`);
             }
             return;
         }
 
-        // --- STEP B: MULTI-EPISODE SELECTION & DOCUMENT UPLOAD ---
+        // --- STEP 2: MULTI-EPISODE SELECTION & DOWNLOAD (Triggers ONLY after user choice) ---
         if (pendingCartoonSelection[k]) {
             const { details, items } = pendingCartoonSelection[k];
 
@@ -369,30 +372,27 @@ const cartoonReplyHandler = {
                 // Select All Episodes
                 selectedIndices = items.map((_, idx) => idx);
             } else {
-                // Parse numbers like "2,3,4,7"
-                const numbers = input.split(/[\s,]+/).map(n => parseInt(n)).filter(n => !isNaN(n));
+                // Parse numbers like "2,3,4"
+                const numbers = input.split(/[\s,]+/).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
                 
                 numbers.forEach(num => {
                     if (num === 1) {
-                        // User replied '1' which means ALL
                         items.forEach((_, idx) => selectedIndices.push(idx));
                     } else if (num >= 2 && num <= items.length + 1) {
-                        selectedIndices.push(num - 2); // Map menu number (2) -> array index (0)
+                        selectedIndices.push(num - 2);
                     }
                 });
             }
 
-            // Deduplicate indices
             selectedIndices = [...new Set(selectedIndices)].sort((a, b) => a - b);
 
-            // ✅ FIX: Remove error message - just return silently if no selection
             if (selectedIndices.length === 0) {
-                return; // Silently ignore invalid selection
+                return reply(`*╭─[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗦𝗘𝗟𝗘𝗖𝗧𝗜𝗢𝗡 ]─╮*\n│\n├─ 📌 *Valid Range:* 01 - ${items.length + 1}\n╰──────────────────╯`);
             }
 
             delete pendingCartoonSelection[k]; // Clear selection state
 
-            await reply(`🚀 *sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ:* Sending ${selectedIndices.length} Item(s) as Document Files...`);
+            await reply(`*╭──[ ⬇️ 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚 ]──╮*\n│\n├─ 🚀 *Starting Batch Download...*\n├─ 📦 *Selected Items:* ${selectedIndices.length}\n╰──────────────────╯`);
 
             const channelMeta = getChannelContext();
 
@@ -414,22 +414,20 @@ const cartoonReplyHandler = {
                         document: { url: selectedItem.url },
                         mimetype: "video/mp4",
                         fileName: `MALIYA-MD ${cleanTitle} - ${cleanSubTitle}.mp4`,
-                        caption: `🎬 *${toSmallCaps(details.title)}*\n📌 *${selectedItem.title}*\n\n📊 *ϙᴜᴀʟɪᴛʏ:* ${details.quality}\n⭐ *ʀᴀᴛɪɴɢ:* ${details.rating}\n\n🍿 *ᴇɴᴊᴏʏ ʏᴏᴜʀ ᴄᴀʀᴛᴏᴏɴ!*\n\n🔑 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*`,
+                        caption: `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡 ]─╮*\n│\n├─ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(details.title)}\n├─ 📌 *𝗘𝗽𝗶𝘀𝗼𝗱𝗲:* ${selectedItem.title}\n├─ 📊 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${details.quality}\n├─ ⭐ *𝗥𝗮𝘁𝗶𝗻𝗴:* ${details.rating}\n│\n╰─────────────────╯\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`,
                         ...channelMeta
                     }, { quoted: mek });
 
                     await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-
-                    // Cooldown delay (3 seconds) between sends to prevent rate-limit
                     await delay(3000);
 
                 } catch (error) {
                     console.error(`SinhalaCartoon Ep Send Error (${selectedItem.title}):`, error);
-                    await reply(`❌ *Failed to send ${selectedItem.title}: ${error.message || "Unknown error"}*`);
+                    await reply(`*╭───[ ❌ 𝗙𝗔𝗜𝗟𝗘𝗗 ]───╮*\n│\n├─ 🚫 _Failed to send ${selectedItem.title}_\n╰─────────────────╯`);
                 }
             }
 
-            await reply(`🎉 *All Selected Downloads Completed Successfully!*`);
+            await reply(`*╭──[ ✅ 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗 ]──╮*\n│\n├─ 🎉 *All Selected Downloads Completed!*\n╰─────────────────╯`);
         }
     }
 };
