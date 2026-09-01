@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 // State Management
 const pendingPhSearch = {};
 const pendingPhOption = {};
+const pendingPhQuality = {};
 const pendingPhCustomTime = {};
 const lastProcessedMsg = {}; // Loop Protection State
 
@@ -40,6 +41,7 @@ function toSmallCaps(str = "") {
 function clearUserSession(k) {
     delete pendingPhSearch[k];
     delete pendingPhOption[k];
+    delete pendingPhQuality[k];
     delete pendingPhCustomTime[k];
 }
 
@@ -82,37 +84,76 @@ async function phSearch(query, limit = 100) {
     return allResults;
 }
 
-async function phDownloadBuffer(url, timeOptions = {}) {
+// Fetch HLS Master Playlist and Parse Available Qualities
+async function getPhStreamQualities(url) {
     const { data } = await axios.get(url, {
         headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' },
         timeout: 12000
     });
     
     const $ = cheerio.load(data);
-    let hlsUrl = null;
+    let masterM3u8Url = null;
 
-    // Extract HLS Master Playlist URL from inline scripts
     const flashvarsMatch = data.match(/flashvars_\d+\s*=\s*({.*?});/s) || data.match(/var\040media_0\s*=\s*({.*?});/s);
     if (flashvarsMatch) {
         try {
             const flashvars = JSON.parse(flashvarsMatch[1]);
             if (flashvars.mediaDefinitions) {
                 const hlsDef = flashvars.mediaDefinitions.find(m => m.format === 'hls' || m.videoUrl?.includes('.m3u8'));
-                if (hlsDef) hlsUrl = hlsDef.videoUrl;
+                if (hlsDef) masterM3u8Url = hlsDef.videoUrl;
             }
         } catch {}
     }
 
-    if (!hlsUrl) {
+    if (!masterM3u8Url) {
         const m3u8Match = data.match(/(https?:\\?\/\\?\/[^"]+\.m3u8[^"]*)/i);
-        if (m3u8Match) hlsUrl = m3u8Match[1].replace(/\\/g, '');
+        if (m3u8Match) masterM3u8Url = m3u8Match[1].replace(/\\/g, '');
     }
 
-    if (!hlsUrl) throw new Error('No video stream URL found for this Pornhub video.');
+    if (!masterM3u8Url) throw new Error('No video stream URL found for this Pornhub video.');
 
     let title = $('h1.inlineFree').first().text().trim() || $('title').text().replace('- Pornhub.com', '').trim() || 'Pornhub Video';
     const duration = $('span.duration').first().text().trim();
 
+    // Fetch the M3U8 Master Playlist content
+    const m3u8Res = await axios.get(masterM3u8Url, {
+        headers: { 'User-Agent': UA, 'Referer': 'https://www.pornhub.com/' },
+        timeout: 10000
+    });
+
+    const m3u8Text = m3u8Res.data;
+    const lines = m3u8Text.split('\n');
+    const qualities = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes('RESOLUTION=')) {
+            const resMatch = lines[i].match(/RESOLUTION=\d+x(\d+)/);
+            if (resMatch && lines[i + 1]) {
+                const height = resMatch[1] + 'p';
+                let streamUrl = lines[i + 1].trim();
+                if (!streamUrl.startsWith('http')) {
+                    const baseUrl = masterM3u8Url.substring(0, masterM3u8Url.lastIndexOf('/') + 1);
+                    streamUrl = baseUrl + streamUrl;
+                }
+                if (!qualities.some(q => q.quality === height)) {
+                    qualities.push({ quality: height, url: streamUrl });
+                }
+            }
+        }
+    }
+
+    // Sort qualities descending (e.g. 1080p, 720p, 480p...)
+    qualities.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
+
+    // Fallback if playlist structure is basic
+    if (qualities.length === 0) {
+        qualities.push({ quality: '720p', url: masterM3u8Url });
+    }
+
+    return { title, duration, qualities, defaultMasterUrl: masterM3u8Url };
+}
+
+async function phDownloadBuffer(streamUrl, timeOptions = {}) {
     const tmpDir = await mkdtemp(join(tmpdir(), 'phdl-'));
     const outPath = join(tmpDir, 'video.mp4');
 
@@ -121,7 +162,7 @@ async function phDownloadBuffer(url, timeOptions = {}) {
         '-y',
         '-user_agent', UA,
         '-headers', 'Referer: https://www.pornhub.com/\r\n',
-        '-i', hlsUrl
+        '-i', streamUrl
     ];
 
     if (timeOptions.startTimeInSec !== undefined) {
@@ -147,7 +188,7 @@ async function phDownloadBuffer(url, timeOptions = {}) {
             throw new Error('Downloaded stream returned empty file.');
         }
 
-        return { title, duration, buffer, quality: '720p' };
+        return buffer;
     } finally {
         await rm(tmpDir, { recursive: true, force: true });
     }
@@ -173,39 +214,38 @@ function generateResultText(results, startIndex = 0) {
     return text;
 }
 
-async function processDownload(bot, mek, m, reply, from, selected, timeOptions = {}, customMsg = "") {
-    await reply(`⚙️ *ᴘʀᴏᴄᴇssɪɴɢ sᴛʀᴇᴀᴍ & ʀᴇɴᴅᴇʀɪɴɢ ᴠɪᴅᴇᴏ...*\n\n⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...*`);
+async function processDownload(bot, mek, m, reply, from, targetQuality, selectedInfo, timeOptions = {}, customMsg = "") {
+    await reply(`⚙️ *ᴘʀᴏᴄᴇssɪɴɢ sᴛʀᴇᴀᴍ & ʀᴇɴᴅᴇʀɪɴɢ ᴠɪᴅᴇᴏ...*\n\n🎥 *ǫᴜᴀʟɪᴛʏ:* ${targetQuality.quality}\n⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...*`);
 
     try {
-        const videoData = await phDownloadBuffer(selected.url, timeOptions);
+        const buffer = await phDownloadBuffer(targetQuality.url, timeOptions);
 
-        if (!videoData || !videoData.buffer || videoData.buffer.length < 5000) {
+        if (!buffer || buffer.length < 5000) {
             return reply(`❌ *ᴄᴏᴜʟᴅ ɴᴏᴛ ᴘʀᴏᴄᴇss ᴠɪᴅᴇᴏ sᴛʀᴇᴀᴍ ᴏʀ ɪɴᴠᴀʟɪᴅ sᴇɢᴍᴇɴᴛ ʀᴀɴɢᴇ!*`);
         }
 
-        const sizeMB = videoData.buffer.length / (1024 * 1024);
-        const title = videoData.title || selected.title || "Pornhub Video";
+        const sizeMB = buffer.length / (1024 * 1024);
+        const title = selectedInfo.title || "Pornhub Video";
         const cleanTitle = title.replace(/[^\w\s.-]/gi, '_').substring(0, 50);
 
-        let captionText = `🎬 *${toSmallCaps(title)}*\n\n📊 *ǫᴜᴀʟɪᴛʏ:* ${videoData.quality || '720p'}\n⏱️ *ᴅᴜʀᴀᴛɪᴏɴ:* ${videoData.duration || selected.duration || 'N/A'}\n💾 *sɪᴢᴇ:* ${sizeMB.toFixed(2)} MB`;
+        let captionText = `🎬 *${toSmallCaps(title)}*\n\n📊 *ǫᴜᴀʟɪᴛʏ:* ${targetQuality.quality}\n⏱️ *ᴅᴜʀᴀᴛɪᴏɴ:* ${selectedInfo.duration || 'N/A'}\n💾 *sɪᴢᴇ:* ${sizeMB.toFixed(2)} MB`;
         if (customMsg) captionText += `\n✂️ *ᴄᴜsᴛᴏᴍ ʀᴀɴɢᴇ:* ${customMsg}`;
         captionText += `\n\n🍿 *ᴇɴᴊᴏʏ ʏᴏᴜʀ ᴠɪᴅᴇᴏ!*\n\n👑 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*`;
 
         await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
 
-        const fileName = `MALIYA-MD ${cleanTitle}.mp4`;
+        const fileName = `MALIYA-MD ${cleanTitle} [${targetQuality.quality}].mp4`;
 
-        // 40MB වලට වඩා වැඩි නම් Document Format එකෙන් Send වේ
         if (sizeMB > 40) {
             await bot.sendMessage(from, {
-                document: videoData.buffer,
+                document: buffer,
                 mimetype: "video/mp4",
                 fileName: fileName,
                 caption: captionText + `\n\n_📄 Video size is ${sizeMB.toFixed(1)}MB (>40MB limit), sent as document format._`
             }, { quoted: mek });
         } else {
             await bot.sendMessage(from, {
-                video: videoData.buffer,
+                video: buffer,
                 mimetype: "video/mp4",
                 fileName: fileName,
                 caption: captionText
@@ -262,7 +302,7 @@ cmd({
     }
 });
 
-// ===== 2. NUMBER & TIME REPLY HANDLER (Registered to replyHandlers) =====
+// ===== 2. REPLY HANDLER (Registered to replyHandlers) =====
 const phReplyHandler = {
     filter: (text, { sender, from }) => {
         if (!text) return false;
@@ -273,7 +313,7 @@ const phReplyHandler = {
 
         if (!isNumber && !isTimeFormat) return false;
 
-        return Boolean(pendingPhSearch[k] || pendingPhOption[k] || pendingPhCustomTime[k]);
+        return Boolean(pendingPhSearch[k] || pendingPhOption[k] || pendingPhQuality[k] || pendingPhCustomTime[k]);
     },
     function: async (bot, mek, m, { body, sender, reply, from }) => {
         const input = body ? body.trim() : "";
@@ -289,14 +329,14 @@ const phReplyHandler = {
         }
         lastProcessedMsg[k] = { text: input, time: now };
 
-        // 1. Custom Time Handling (Strict min:min format required)
+        // 1. Custom Time Handling
         if (pendingPhCustomTime[k]) {
             if (!/^\d+:\d+$/.test(input)) {
                 clearUserSession(k);
                 return reply(`❌ *ɪɴᴠᴀʟɪᴅ ᴛɪᴍᴇ ғᴏʀᴍᴀᴛ!*\n\n📌 *sᴇssɪᴏɴ ᴄᴀɴᴄᴇʟʟᴇᴅ. ᴘʟᴇᴀsᴇ sᴇᴀʀᴄʜ ᴀɢᴀɪɴ.*`);
             }
 
-            const selected = pendingPhCustomTime[k].selected;
+            const { streamData, targetQuality } = pendingPhCustomTime[k];
             const parts = input.split(':').map(n => parseInt(n.trim()));
             
             let startMin = parts[0];
@@ -313,28 +353,75 @@ const phReplyHandler = {
             const durationInSec = (endMin - startMin) * 60;
 
             await bot.sendMessage(from, { react: { text: "✂️", key: m.key } });
-            return processDownload(bot, mek, m, reply, from, selected, { startTimeInSec, durationInSec }, `${startMin} Min to ${endMin} Min`);
+            return processDownload(bot, mek, m, reply, from, targetQuality, streamData, { startTimeInSec, durationInSec }, `${startMin} Min to ${endMin} Min`);
         }
 
-        // 2. Option 1 or 2 Handling
+        // 2. Quality Selection Handling
+        if (pendingPhQuality[k]) {
+            const num = parseInt(input);
+            const { streamData, mode } = pendingPhQuality[k];
+
+            if (isNaN(num) || num <= 0 || num > streamData.qualities.length) {
+                return reply(`❌ *ɪɴᴠᴀʟɪᴅ ǫᴜᴀʟɪᴛʏ sᴇʟᴇᴄᴛɪᴏɴ! ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ ᴀ ᴠᴀʟɪᴅ ɴᴜᴍʙᴇʀ.*`);
+            }
+
+            const targetQuality = streamData.qualities[num - 1];
+            delete pendingPhQuality[k];
+
+            if (mode === 'full') {
+                await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+                return processDownload(bot, mek, m, reply, from, targetQuality, streamData, {});
+            }
+
+            if (mode === 'custom') {
+                pendingPhCustomTime[k] = { streamData, targetQuality, timestamp: Date.now() };
+                return reply(`✂️ *ᴄᴜsᴛᴏᴍ ᴛɪᴍᴇ ᴅᴏᴡɴʟᴏᴀᴅ (ɪɴ ᴍɪɴᴜᴛᴇs)*\n\n📌 *ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ sᴛᴀʀᴛ ᴍɪɴᴜᴛᴇ ᴀɴᴅ ᴇɴᴅ ᴍɪɴᴜᴛᴇ:*\n\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`5:10\`\n_(This will download from **5th minute** to **10th minute**)_`);
+            }
+        }
+
+        // 3. Option 1 or 2 Handling (Full Video / Custom Time)
         if (pendingPhOption[k]) {
             if (input !== '1' && input !== '2') return;
 
             const selected = pendingPhOption[k].selected;
             delete pendingPhOption[k];
 
-            if (input === '1') {
-                await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-                return processDownload(bot, mek, m, reply, from, selected, {});
-            } 
-            
-            if (input === '2') {
-                pendingPhCustomTime[k] = { selected, timestamp: Date.now() };
-                return reply(`✂️ *ᴄᴜsᴛᴏᴍ ᴛɪᴍᴇ ᴅᴏᴡɴʟᴏᴀᴅ (ɪɴ ᴍɪɴᴜᴛᴇs)*\n\n📌 *ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ sᴛᴀʀᴛ ᴍɪɴᴜᴛᴇ ᴀɴᴅ ᴇɴᴅ ᴍɪɴᴜᴛᴇ:*\n\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`5:10\`\n_(This will download from **5th minute** to **10th minute**)_`);
+            await reply("🔎 *ғᴇᴛᴄʜɪɴɢ ᴀᴠᴀɪʟᴀʙʟᴇ ǫᴜᴀʟɪᴛɪᴇs...*");
+
+            try {
+                const streamData = await getPhStreamQualities(selected.url);
+
+                if (!streamData.qualities || streamData.qualities.length === 0) {
+                    return reply("❌ *ғᴀɪʟᴇᴅ ᴛᴏ ғᴇᴛᴄʜ ǫᴜᴀʟɪᴛʏ ᴏᴘᴛɪᴏɴs ғᴏʀ ᴛʜɪs ᴠɪᴅᴇᴏ!*");
+                }
+
+                pendingPhQuality[k] = { 
+                    streamData, 
+                    mode: input === '1' ? 'full' : 'custom',
+                    timestamp: Date.now() 
+                };
+
+                let qMsg = `╭〔 🎥 *sᴇʟᴇᴄᴛ ᴠɪᴅᴇᴏ ǫᴜᴀʟɪᴛʏ* 〕━\n┃\n`;
+                qMsg += `┃ 📌 *${toSmallCaps(streamData.title.slice(0, 40))}*\n┃\n`;
+                qMsg += `╰━━━───────━► ❥\n\n`;
+
+                streamData.qualities.forEach((q, idx) => {
+                    const numStr = String(idx + 1).padStart(2, "0");
+                    qMsg += `*[ ${numStr} ]* 🎬 *${q.quality}*\n`;
+                });
+
+                qMsg += `\n───────────────\n`;
+                qMsg += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ǫᴜᴀʟɪᴛʏ ɴᴜᴍʙᴇʀ (ᴇ.ɢ. 1)*`;
+
+                return reply(qMsg);
+
+            } catch (err) {
+                console.error("Quality Fetch Error:", err);
+                return reply(`❌ *ᴇʀʀᴏʀ ғᴇᴛᴄʜɪɴɢ ǫᴜᴀʟɪᴛɪᴇs:* ${err.message}`);
             }
         }
 
-        // 3. Search Result Number Selection
+        // 4. Search Result Number Selection
         if (pendingPhSearch[k]) {
             const num = parseInt(input);
             if (isNaN(num)) return;
@@ -379,6 +466,9 @@ setInterval(() => {
     }
     for (const s in pendingPhOption) {
         if (now - pendingPhOption[s].timestamp > SESSION_TIMEOUT) delete pendingPhOption[s];
+    }
+    for (const s in pendingPhQuality) {
+        if (now - pendingPhQuality[s].timestamp > SESSION_TIMEOUT) delete pendingPhQuality[s];
     }
     for (const s in pendingPhCustomTime) {
         if (now - pendingPhCustomTime[s].timestamp > SESSION_TIMEOUT) delete pendingPhCustomTime[s];
