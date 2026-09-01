@@ -1,4 +1,4 @@
-const { cmd } = require('../command');
+const { cmd, replyHandlers } = require('../command');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { execFile } = require('child_process');
@@ -21,6 +21,10 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 // ===== HELPER FUNCTIONS =====
 
+function keyFor(sender, from) {
+    return `${from || ""}::${(sender || "").split(":")[0]}`;
+}
+
 function toSmallCaps(str = "") {
     const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
@@ -33,10 +37,10 @@ function toSmallCaps(str = "") {
         .join("");
 }
 
-function clearUserSession(sender) {
-    delete pendingPhSearch[sender];
-    delete pendingPhOption[sender];
-    delete pendingPhCustomTime[sender];
+function clearUserSession(k) {
+    delete pendingPhSearch[k];
+    delete pendingPhOption[k];
+    delete pendingPhCustomTime[k];
 }
 
 async function phSearch(query, limit = 100) {
@@ -191,12 +195,13 @@ async function processDownload(bot, mek, m, reply, from, selected, timeOptions =
 
         const fileName = `MALIYA-MD ${cleanTitle}.mp4`;
 
-        if (sizeMB > 60) {
+        // 40MB වලට වඩා වැඩි නම් Document Format එකෙන් Send වේ
+        if (sizeMB > 40) {
             await bot.sendMessage(from, {
                 document: videoData.buffer,
                 mimetype: "video/mp4",
                 fileName: fileName,
-                caption: captionText + `\n\n_📄 Video size is ${sizeMB.toFixed(1)}MB (>60MB limit), sent as document format._`
+                caption: captionText + `\n\n_📄 Video size is ${sizeMB.toFixed(1)}MB (>40MB limit), sent as document format._`
             }, { quoted: mek });
         } else {
             await bot.sendMessage(from, {
@@ -240,9 +245,10 @@ cmd({
             return reply(`❌ *ɴᴏ ʀᴇsᴜʟᴛs ғᴏᴜɴᴅ ᴏɴ ᴘᴏʀɴʜᴜʙ ғᴏʀ:* _${q}_`);
         }
 
-        clearUserSession(sender);
+        const k = keyFor(sender, from);
+        clearUserSession(k);
 
-        pendingPhSearch[sender] = { 
+        pendingPhSearch[k] = { 
             results, 
             timestamp: Date.now() 
         };
@@ -256,105 +262,114 @@ cmd({
     }
 });
 
-// ===== 2. NUMBER & TIME REPLY LISTENER (STRICT LOOP PROTECTION) =====
-cmd({
-    filter: (text, { sender, key }) => {
-        if (!sender || (key && key.fromMe)) return false;
-        
-        const isNumber = /^\d+$/.test(text ? text.trim() : "");
-        const isTimeFormat = /^\d+:\d+$/.test(text ? text.trim() : "");
+// ===== 2. NUMBER & TIME REPLY HANDLER (Registered to replyHandlers) =====
+const phReplyHandler = {
+    filter: (text, { sender, from }) => {
+        if (!text) return false;
+        const k = keyFor(sender, from);
+
+        const isNumber = /^\d+$/.test(text.trim());
+        const isTimeFormat = /^\d+:\d+$/.test(text.trim());
 
         if (!isNumber && !isTimeFormat) return false;
 
-        return Boolean(pendingPhSearch[sender] || pendingPhOption[sender] || pendingPhCustomTime[sender]);
-    }
-}, async (bot, mek, m, { body, sender, reply, from }) => {
-    const input = body ? body.trim() : "";
-    if (!input) return;
+        return Boolean(pendingPhSearch[k] || pendingPhOption[k] || pendingPhCustomTime[k]);
+    },
+    function: async (bot, mek, m, { body, sender, reply, from }) => {
+        const input = body ? body.trim() : "";
+        if (!input) return;
 
-    // === LOOP PROTECTION SYSTEM ===
-    const now = Date.now();
-    const lastMsg = lastProcessedMsg[sender];
-    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
-        return;
-    }
-    lastProcessedMsg[sender] = { text: input, time: now };
+        const k = keyFor(sender, from);
 
-    // 1. Custom Time Handling (Strict `min:min` format required)
-    if (pendingPhCustomTime[sender]) {
-        if (!/^\d+:\d+$/.test(input)) {
-            clearUserSession(sender);
-            return reply(`❌ *ɪɴᴠᴀʟɪᴅ ᴛɪᴍᴇ ғᴏʀᴍᴀᴛ!*\n\n📌 *sᴇssɪᴏɴ ᴄᴀɴᴄᴇʟʟᴇᴅ. ᴘʟᴇᴀsᴇ sᴇᴀʀᴄʜ ᴀɢᴀɪɴ.*`);
+        // LOOP PROTECTION SYSTEM
+        const now = Date.now();
+        const lastMsg = lastProcessedMsg[k];
+        if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
+            return;
+        }
+        lastProcessedMsg[k] = { text: input, time: now };
+
+        // 1. Custom Time Handling (Strict min:min format required)
+        if (pendingPhCustomTime[k]) {
+            if (!/^\d+:\d+$/.test(input)) {
+                clearUserSession(k);
+                return reply(`❌ *ɪɴᴠᴀʟɪᴅ ᴛɪᴍᴇ ғᴏʀᴍᴀᴛ!*\n\n📌 *sᴇssɪᴏɴ ᴄᴀɴᴄᴇʟʟᴇᴅ. ᴘʟᴇᴀsᴇ sᴇᴀʀᴄʜ ᴀɢᴀɪɴ.*`);
+            }
+
+            const selected = pendingPhCustomTime[k].selected;
+            const parts = input.split(':').map(n => parseInt(n.trim()));
+            
+            let startMin = parts[0];
+            let endMin = parts[1];
+
+            if (isNaN(startMin) || isNaN(endMin) || startMin < 0 || endMin <= startMin) {
+                clearUserSession(k);
+                return reply(`❌ *ɪɴᴠᴀʟɪᴅ ᴛɪᴍᴇ ᴠᴀʟᴜᴇs!*\n\n📌 *sᴛᴀʀᴛ ᴍɪɴᴜᴛᴇ ᴍᴜsᴛ ʙᴇ sᴍᴀʟʟᴇʀ ᴛʜᴀɴ ᴇɴᴅ ᴍɪɴᴜᴛᴇ. sᴇssɪᴏɴ ᴄᴀɴᴄᴇʟʟᴇᴅ.*`);
+            }
+
+            delete pendingPhCustomTime[k];
+
+            const startTimeInSec = startMin * 60;
+            const durationInSec = (endMin - startMin) * 60;
+
+            await bot.sendMessage(from, { react: { text: "✂️", key: m.key } });
+            return processDownload(bot, mek, m, reply, from, selected, { startTimeInSec, durationInSec }, `${startMin} Min to ${endMin} Min`);
         }
 
-        const selected = pendingPhCustomTime[sender].selected;
-        const parts = input.split(':').map(n => parseInt(n.trim()));
-        
-        let startMin = parts[0];
-        let endMin = parts[1];
+        // 2. Option 1 or 2 Handling
+        if (pendingPhOption[k]) {
+            if (input !== '1' && input !== '2') return;
 
-        if (isNaN(startMin) || isNaN(endMin) || startMin < 0 || endMin <= startMin) {
-            clearUserSession(sender);
-            return reply(`❌ *ɪɴᴠᴀʟɪᴅ ᴛɪᴍᴇ ᴠᴀʟᴜᴇs!*\n\n📌 *sᴛᴀʀᴛ ᴍɪɴᴜᴛᴇ ᴍᴜsᴛ ʙᴇ sᴍᴀʟʟᴇʀ ᴛʜᴀɴ ᴇɴᴅ ᴍɪɴᴜᴛᴇ. sᴇssɪᴏɴ ᴄᴀɴᴄᴇʟʟᴇᴅ.*`);
+            const selected = pendingPhOption[k].selected;
+            delete pendingPhOption[k];
+
+            if (input === '1') {
+                await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+                return processDownload(bot, mek, m, reply, from, selected, {});
+            } 
+            
+            if (input === '2') {
+                pendingPhCustomTime[k] = { selected, timestamp: Date.now() };
+                return reply(`✂️ *ᴄᴜsᴛᴏᴍ ᴛɪᴍᴇ ᴅᴏᴡɴʟᴏᴀᴅ (ɪɴ ᴍɪɴᴜᴛᴇs)*\n\n📌 *ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ sᴛᴀʀᴛ ᴍɪɴᴜᴛᴇ ᴀɴᴅ ᴇɴᴅ ᴍɪɴᴜᴛᴇ:*\n\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`5:10\`\n_(This will download from **5th minute** to **10th minute**)_`);
+            }
         }
 
-        delete pendingPhCustomTime[sender];
+        // 3. Search Result Number Selection
+        if (pendingPhSearch[k]) {
+            const num = parseInt(input);
+            if (isNaN(num)) return;
 
-        const startTimeInSec = startMin * 60;
-        const durationInSec = (endMin - startMin) * 60;
+            const session = pendingPhSearch[k];
+            if (num <= 0 || num > session.results.length) return;
 
-        await bot.sendMessage(from, { react: { text: "✂️", key: m.key } });
-        return processDownload(bot, mek, m, reply, from, selected, { startTimeInSec, durationInSec }, `${startMin} Min to ${endMin} Min`);
-    }
+            if ([11, 21, 31, 41, 51, 61, 71, 81, 91].includes(num)) {
+                session.timestamp = Date.now();
+                return reply(generateResultText(session.results, num - 1));
+            }
 
-    // 2. Option 1 or 2 Handling
-    if (pendingPhOption[sender]) {
-        if (input !== '1' && input !== '2') return;
+            const selected = session.results[num - 1];
+            delete pendingPhSearch[k];
 
-        const selected = pendingPhOption[sender].selected;
-        delete pendingPhOption[sender];
+            pendingPhOption[k] = { selected, timestamp: Date.now() };
 
-        if (input === '1') {
-            await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-            return processDownload(bot, mek, m, reply, from, selected, {});
-        } 
-        
-        if (input === '2') {
-            pendingPhCustomTime[sender] = { selected, timestamp: Date.now() };
-            return reply(`✂️ *ᴄᴜsᴛᴏᴍ ᴛɪᴍᴇ ᴅᴏᴡɴʟᴏᴀᴅ (ɪɴ ᴍɪɴᴜᴛᴇs)*\n\n📌 *ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ sᴛᴀʀᴛ ᴍɪɴᴜᴛᴇ ᴀɴᴅ ᴇɴᴅ ᴍɪɴᴜᴛᴇ:*\n\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`5:10\`\n_(This will download from **5th minute** to **10th minute**)_`);
+            let optMsg = `╭〔 🎬 *sᴇʟᴇᴄᴛᴇᴅ ᴠɪᴅᴇᴏ* 〕━\n┃\n`;
+            optMsg += `┃ 📌 *${toSmallCaps(selected.title.slice(0, 42))}*\n┃\n`;
+            optMsg += `╰━━━───────━► ❥\n\n`;
+            optMsg += `📌 *sᴇʟᴇᴄᴛ ᴅᴏᴡɴʟᴏᴀᴅ ᴍᴏᴅᴇ:*\n\n`;
+            optMsg += `*[ 01 ]* 🎬 *Full Video Download*\n`;
+            optMsg += `*[ 02 ]* ✂️ *Custom Time Range*\n\n`;
+            optMsg += `───────────────\n`;
+            optMsg += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2*`;
+
+            return reply(optMsg);
         }
     }
+};
 
-    // 3. Search Result Number Selection
-    if (pendingPhSearch[sender]) {
-        const num = parseInt(input);
-        if (isNaN(num)) return;
-
-        const session = pendingPhSearch[sender];
-        if (num <= 0 || num > session.results.length) return;
-
-        if ([11, 21, 31, 41, 51, 61, 71, 81, 91].includes(num)) {
-            session.timestamp = Date.now();
-            return reply(generateResultText(session.results, num - 1));
-        }
-
-        const selected = session.results[num - 1];
-        delete pendingPhSearch[sender];
-
-        pendingPhOption[sender] = { selected, timestamp: Date.now() };
-
-        let optMsg = `╭〔 🎬 *sᴇʟᴇᴄᴛᴇᴅ ᴠɪᴅᴇᴏ* 〕━\n┃\n`;
-        optMsg += `┃ 📌 *${toSmallCaps(selected.title.slice(0, 42))}*\n┃\n`;
-        optMsg += `╰━━━───────━► ❥\n\n`;
-        optMsg += `📌 *sᴇʟᴇᴄᴛ ᴅᴏᴡɴʟᴏᴀᴅ ᴍᴏᴅᴇ:*\n\n`;
-        optMsg += `*[ 01 ]* 🎬 *Full Video Download*\n`;
-        optMsg += `*[ 02 ]* ✂️ *Custom Time Range*\n\n`;
-        optMsg += `───────────────\n`;
-        optMsg += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2*`;
-
-        return reply(optMsg);
-    }
-});
+// Register reply handler
+if (Array.isArray(replyHandlers)) {
+    replyHandlers.push(phReplyHandler);
+}
 
 // Auto Cleanup & Loop Reset Interval
 setInterval(() => {
