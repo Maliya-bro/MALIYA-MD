@@ -5,7 +5,7 @@ const cheerio = require('cheerio');
 // State Management
 const pendingCartoonSearch = {};
 const pendingCartoonSelection = {};
-const lastProcessedMsg = {}; 
+const lastProcessedMsg = {}; // Loop Protection State
 
 const SESSION_TIMEOUT = 10 * 60 * 1000; // 10 Minutes
 const LOOP_COOLDOWN = 3000;
@@ -31,14 +31,11 @@ function getChannelContext() {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Clean User JID Normalizer
-function cleanJid(jid) {
-    if (!jid) return "";
-    return jid.split('@')[0].split(':')[0];
-}
-
+// Accurate & Safe Key Extraction (Supports Groups & DMs)
 function keyFor(sender, from) {
-    return `${cleanJid(from)}::${cleanJid(sender)}`;
+    const cleanFrom = (from || "").split('@')[0].split(':')[0];
+    const cleanSender = (sender || "").split('@')[0].split(':')[0];
+    return `${cleanFrom}::${cleanSender}`;
 }
 
 function toSmallCaps(str = "") {
@@ -202,9 +199,9 @@ async function getEpisodeLinksFromDownloadPage(downloadPageUrl) {
 }
 
 function generateResultText(results) {
-    let text = `╭━〔 🎬 *ᴄᴀʀᴛᴏᴏɴ sᴇᴀʀᴄʜ* 〕━╮\n┃\n`;
+    let text = `╭━〔 🎬 *sɪɴʜᴀʟᴀ ᴄᴀʀᴛᴏᴏɴ sᴇᴀʀᴄʜ* 〕━╮\n┃\n`;
     text += `┃ 📊 *TOTAL RESULTS:* ${results.length}\n┃\n`;
-    text += `╰━━━━━━━━━━━━━╯\n\n`;
+    text += `╰━━━━━━━━━━━━━━━━━━━━╯\n\n`;
 
     results.forEach((v, idx) => {
         const numStr = String(idx + 1).padStart(2, "0");
@@ -214,7 +211,7 @@ function generateResultText(results) {
 
     text += `\n───────────────\n`;
     text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ ᴛᴏ sᴇʟᴇᴄᴛ*\n\n`;
-    text += `⚙️ Made with ❤️ by\n╭───────────────⬣\n🔥 𝙈𝘼𝙇𝙄𝙉🇩🇺 𝙉𝘼𝘿🇮𝙏🇭 🔥\n╰───────────────⬣`;
+    text += `⚙️ Made with ❤️ by\n╭───────────────⬣\n🔥 𝙈𝘼𝙇🇮🇳🇩🇺 𝙉𝘼𝘿🇮𝙏🇭 🔥\n╰───────────────⬣`;
     return text;
 }
 
@@ -262,21 +259,21 @@ cmd({
     }
 });
 
-// ===== 2. FIXED REPLY HANDLER =====
+// ===== 2. REPLY HANDLER =====
 const cartoonReplyHandler = {
     filter: (text, { sender, from, key }) => {
-        // 1. Bot එක එවන පණිවිඩ Filter නොකිරීමට ( Self Loop Prevention )
+        // Prevent Bot Self-Loops
         if (key && key.fromMe) return false;
         if (!text) return false;
 
         const k = keyFor(sender, from);
-        const hasPendingSession = Boolean(pendingCartoonSearch[k]) || Boolean(pendingCartoonSelection[k]);
+        const hasSession = Boolean(pendingCartoonSearch[k]) || Boolean(pendingCartoonSelection[k]);
 
-        // 2. User එවන්නේ Numbers හෝ "all" නම් පමණක් Process කිරීම
+        // Validate Input Format
         const cleanText = text.trim().toLowerCase();
         const isValidInput = /^[\d\s,]+$/.test(cleanText) || cleanText === 'all';
 
-        return hasPendingSession && isValidInput;
+        return hasSession && isValidInput;
     },
     function: async (bot, mek, m, { body, sender, reply, from }) => {
         const input = body ? body.trim() : "";
@@ -284,7 +281,7 @@ const cartoonReplyHandler = {
 
         const k = keyFor(sender, from);
 
-        // Loop Protection Check
+        // Loop protection
         const now = Date.now();
         const lastMsg = lastProcessedMsg[k];
         if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
@@ -336,7 +333,7 @@ const cartoonReplyHandler = {
                 captionText += `┃ 🎥 *QUALITY:* ${details.quality}\n`;
                 captionText += `┃ 🎬 *DIRECTOR:* ${details.director}\n`;
                 captionText += `┃ 📺 *TYPE:* ${details.isSeries ? 'TV Series' : 'Movie'}\n┃\n`;
-                captionText += `╰━━━━━━━━━━━━━╯\n\n`;
+                captionText += `╰━━━━━━━━━━━━━━━━━━━━╯\n\n`;
                 captionText += `📖 *DESCRIPTION:*\n_${details.description}_\n\n`;
                 captionText += `───────────────────\n`;
                 captionText += `📥 *ᴀᴠᴀɪʟᴀʙʟᴇ ᴇᴘɪsᴏᴅᴇs / ᴅᴏᴡɴʟᴏᴀᴅs:* ${items.length}\n\n`;
@@ -347,7 +344,7 @@ const cartoonReplyHandler = {
                     captionText += `*[ ${numStr} ]* 📌 ${item.title}\n`;
                 });
 
-                captionText += `\n*─────────────────*\n`;
+                captionText += `\n───────────────────\n`;
                 captionText += `📌 *Reply with "01" or "all" to download ALL episodes.*\n`;
                 captionText += `📌 *Or reply with numbers (e.g. "2,3,5" or "4") to download specific episodes.*\n\n`;
                 captionText += `⚙️ Made with ❤️ by\n╭───────────────⬣\n🔥 𝙈𝘼𝙇🇮🇳🇩🇺 𝙉𝘼𝘿🇮𝙏🇭 🔥\n╰───────────────⬣`;
@@ -373,7 +370,7 @@ const cartoonReplyHandler = {
             return;
         }
 
-        // --- STEP B: MULTI-EPISODE SELECTION & DOCUMENT UPLOAD ---
+        // --- STEP B: SEQUENTIAL UPLOAD WITH IMMEDIATE MEMORY CLEANUP ---
         if (pendingCartoonSelection[k]) {
             const { details, items } = pendingCartoonSelection[k];
 
@@ -400,12 +397,13 @@ const cartoonReplyHandler = {
                 return reply(`❌ *ɪɴᴠᴀʟɪᴅ sᴇʟᴇᴄᴛɪᴏɴ! ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ ᴠᴀʟɪᴅ ᴇᴘɪsᴏᴅᴇ ɴᴜᴍʙᴇʀs.*`);
             }
 
-            delete pendingCartoonSelection[k]; // Session එක Clear කිරීම
+            delete pendingCartoonSelection[k]; // Clear user session from memory
 
             await reply(`🚀 *sᴛᴀʀᴛɪɴɢ ʙᴀᴛᴄʜ ᴅᴏᴡɴʟᴏᴀᴅ:* Sending ${selectedIndices.length} Item(s) as Document Files...`);
 
             const channelMeta = getChannelContext();
 
+            // Process selected episodes sequentially
             for (let i = 0; i < selectedIndices.length; i++) {
                 const epIndex = selectedIndices[i];
                 let selectedItem = items[epIndex];
@@ -418,6 +416,7 @@ const cartoonReplyHandler = {
 
                     await reply(`⚙️ *[${i + 1}/${selectedIndices.length}] Uploading ${selectedItem.title}...*`);
 
+                    // Stream Document Directly via R2 URL
                     await bot.sendMessage(from, {
                         document: { url: selectedItem.url },
                         mimetype: "video/mp4",
@@ -428,14 +427,17 @@ const cartoonReplyHandler = {
 
                     await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
 
+                    // Memory Cleanup for finished item
                     selectedItem = null;
                     cleanTitle = null;
                     cleanSubTitle = null;
 
+                    // Force Node.js Garbage Collection if enabled
                     if (global.gc) {
                         global.gc();
                     }
 
+                    // Delay between uploads to keep Server RAM cool
                     await delay(4000);
 
                 } catch (error) {
