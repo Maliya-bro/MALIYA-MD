@@ -198,7 +198,7 @@ async function getEpisodeLinksFromDownloadPage(downloadPageUrl) {
 function generateResultText(results) {
     let text = `╭━〔 🎬 *sɪɴʜᴀʟᴀ ᴄᴀʀᴛᴏᴏɴ sᴇᴀʀᴄʜ* 〕━╮\n┃\n`;
     text += `┃ 📊 *TOTAL RESULTS:* ${results.length}\n┃\n`;
-    text += `╰━━━━━━━━━━━━╯\n\n`;
+    text += `╰━━━━━━━━━━━━━━━━━━━━╯\n\n`;
 
     results.forEach((v, idx) => {
         const numStr = String(idx + 1).padStart(2, "0");
@@ -208,7 +208,7 @@ function generateResultText(results) {
 
     text += `\n───────────────\n`;
     text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ ᴛᴏ sᴇʟᴇᴄᴛ*\n\n`;
-    text += `⚙️ Made with ❤️ by\n╭───────────────⬣\n🔥 𝙈𝘼𝙇𝙄𝙉𝘿𝙐 𝙉𝘼𝘿𝙄𝙏𝙃 🔥\n╰───────────────⬣`;
+    text += `⚙️ Made with ❤️ by\n╭───────────────⬣\n🔥 𝙈𝘼𝙇𝙄𝙉🇩🇺 𝙉𝘼𝘿🇮𝙏𝙃 🔥\n╰───────────────⬣`;
     return text;
 }
 
@@ -256,12 +256,21 @@ cmd({
     }
 });
 
-// ===== 2. REPLY HANDLER (Selection & Multi-Episode Upload) =====
+// ===== 2. STRICT REPLY HANDLER =====
 const cartoonReplyHandler = {
-    filter: (text, { sender, from }) => {
+    filter: (text, { sender, from, key }) => {
+        // Ignore messages sent by bot itself
+        if (key && key.fromMe) return false;
         if (!text) return false;
+
         const k = keyFor(sender, from);
-        return Boolean(pendingCartoonSearch[k]) || Boolean(pendingCartoonSelection[k]);
+        const hasPendingSession = Boolean(pendingCartoonSearch[k]) || Boolean(pendingCartoonSelection[k]);
+        
+        // Strict check: Only respond if user typed numbers/all AND has an active session
+        const cleanText = text.trim().toLowerCase();
+        const isValidInput = /^[\d\s,]+$/.test(cleanText) || cleanText === 'all';
+
+        return hasPendingSession && isValidInput;
     },
     function: async (bot, mek, m, { body, sender, reply, from }) => {
         const input = body ? body.trim() : "";
@@ -283,7 +292,7 @@ const cartoonReplyHandler = {
             const session = pendingCartoonSearch[k];
 
             if (isNaN(num) || num <= 0 || num > session.results.length) {
-                return reply(`❌ *ɪɴᴠᴀʟɪᴅ sᴇʟᴇᴄᴛɪᴏɴ! ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ ᴀ ᴠᴀʟɪᴅ ɴᴜᴍʙᴇʀ.*`);
+                return reply(`❌ *ɪɴᴠᴀʟɪᴅ sᴇʟᴇᴄᴛɪᴏɴ! ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ ᴀ ᴠᴀʟɪᴅ ɴᴜᴍʙᴇʀ (1 - ${session.results.length}).*`);
             }
 
             const selectedMovie = session.results[num - 1];
@@ -321,7 +330,7 @@ const cartoonReplyHandler = {
                 captionText += `┃ 🎥 *QUALITY:* ${details.quality}\n`;
                 captionText += `┃ 🎬 *DIRECTOR:* ${details.director}\n`;
                 captionText += `┃ 📺 *TYPE:* ${details.isSeries ? 'TV Series' : 'Movie'}\n┃\n`;
-                captionText += `╰━━━━━━━━━━━━╯\n\n`;
+                captionText += `╰━━━━━━━━━━━━━━━━━━━━╯\n\n`;
                 captionText += `📖 *DESCRIPTION:*\n_${details.description}_\n\n`;
                 captionText += `───────────────────\n`;
                 captionText += `📥 *ᴀᴠᴀɪʟᴀʙʟᴇ ᴇᴘɪsᴏᴅᴇs / ᴅᴏᴡɴʟᴏᴀᴅs:* ${items.length}\n\n`;
@@ -335,7 +344,7 @@ const cartoonReplyHandler = {
                 captionText += `\n───────────────────\n`;
                 captionText += `📌 *Reply with "01" or "all" to download ALL episodes.*\n`;
                 captionText += `📌 *Or reply with numbers (e.g. "2,3,5" or "4") to download specific episodes.*\n\n`;
-                captionText += `⚙️ Made with ❤️ by\n╭───────────────⬣\n🔥 𝙈𝘼𝙇𝙄𝙉𝘿𝙐 𝙉𝘼𝘿𝙄𝙏𝙃 🔥\n╰───────────────⬣`;
+                captionText += `⚙️ Made with ❤️ by\n╭───────────────⬣\n🔥 𝙈𝘼𝙇𝙄𝙉🇩🇺 𝙉𝘼𝘿🇮𝙏🇭 🔥\n╰───────────────⬣`;
 
                 if (details.poster) {
                     await bot.sendMessage(from, {
@@ -366,30 +375,26 @@ const cartoonReplyHandler = {
             const lowerInput = input.toLowerCase();
 
             if (lowerInput === "01" || lowerInput === "1" || lowerInput === "all") {
-                // Select All Episodes
                 selectedIndices = items.map((_, idx) => idx);
             } else {
-                // Parse numbers like "2,3,4,7"
                 const numbers = input.split(/[\s,]+/).map(n => parseInt(n)).filter(n => !isNaN(n));
                 
                 numbers.forEach(num => {
                     if (num === 1) {
-                        // User replied '1' which means ALL
                         items.forEach((_, idx) => selectedIndices.push(idx));
                     } else if (num >= 2 && num <= items.length + 1) {
-                        selectedIndices.push(num - 2); // Map menu number (2) -> array index (0)
+                        selectedIndices.push(num - 2);
                     }
                 });
             }
 
-            // Deduplicate indices
             selectedIndices = [...new Set(selectedIndices)].sort((a, b) => a - b);
 
             if (selectedIndices.length === 0) {
-                return reply(`❌ *ɪɴᴠᴀʟɪᴅ sᴇʟᴇᴄᴛɪᴏɴ! ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ ᴠᴀʟɪᴅ ᴇᴘɪsᴏᴅᴇ ɴᴜᴍʙᴇʀs (ᴇ.ɢ. "2,3,5" ᴏʀ "01" ғᴏʀ ᴀʟʟ).*`);
+                return reply(`❌ *ɪɴᴠᴀʟɪᴅ sᴇʟᴇᴄᴛɪᴏɴ! ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ ᴠᴀʟɪᴅ ᴇᴘɪsᴏᴅᴇ ɴᴜᴍʙᴇʀs.*`);
             }
 
-            delete pendingCartoonSelection[k]; // Clear selection state
+            delete pendingCartoonSelection[k]; // Clear user session from memory
 
             await reply(`🚀 *sᴛᴀʀᴛɪɴɢ ʙᴀᴛᴄʜ ᴅᴏᴡɴʟᴏᴀᴅ:* Sending ${selectedIndices.length} Item(s) as Document Files...`);
 
@@ -398,17 +403,17 @@ const cartoonReplyHandler = {
             // Process selected episodes sequentially
             for (let i = 0; i < selectedIndices.length; i++) {
                 const epIndex = selectedIndices[i];
-                const selectedItem = items[epIndex];
+                let selectedItem = items[epIndex];
 
                 try {
                     await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
 
-                    const cleanTitle = (details.title || "Cartoon").replace(/[^\w\s.-]/gi, "").substring(0, 40);
-                    const cleanSubTitle = (selectedItem.title || "").replace(/[^\w\s.-]/gi, "").substring(0, 20);
+                    let cleanTitle = (details.title || "Cartoon").replace(/[^\w\s.-]/gi, "").substring(0, 40);
+                    let cleanSubTitle = (selectedItem.title || "").replace(/[^\w\s.-]/gi, "").substring(0, 20);
 
                     await reply(`⚙️ *[${i + 1}/${selectedIndices.length}] Uploading ${selectedItem.title}...*`);
 
-                    // Direct Stream Send via R2 Direct Link
+                    // Stream Document Directly via R2 URL
                     await bot.sendMessage(from, {
                         document: { url: selectedItem.url },
                         mimetype: "video/mp4",
@@ -419,12 +424,20 @@ const cartoonReplyHandler = {
 
                     await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
 
-                    // Cooldown delay (3 seconds) between sends to prevent rate-limit
-                    await delay(3000);
+                    // Memory Cleanup for finished item
+                    selectedItem = null;
+                    cleanTitle = null;
+                    cleanSubTitle = null;
+
+                    if (global.gc) {
+                        global.gc();
+                    }
+
+                    await delay(4000);
 
                 } catch (error) {
-                    console.error(`SinhalaCartoon Ep Send Error (${selectedItem.title}):`, error);
-                    await reply(`❌ *Failed to send ${selectedItem.title}: ${error.message || "Unknown error"}*`);
+                    console.error(`SinhalaCartoon Ep Send Error:`, error);
+                    await reply(`❌ *Failed to send episode: ${error.message || "Unknown error"}*`);
                 }
             }
 
