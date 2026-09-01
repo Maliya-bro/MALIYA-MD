@@ -1,4 +1,4 @@
-const { cmd } = require('../command');
+const { cmd, replyHandlers } = require('../command');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { execFile } = require('child_process');
@@ -14,13 +14,17 @@ const pendingXhamSearch = {};
 const pendingXhamQuality = {}; // Quality selection state
 const pendingXhamOption = {};  // Download mode state (Full / Custom)
 const pendingXhamCustomTime = {};
-const lastProcessedMsg = {}; // Loop Protection State
+const lastProcessedMsg = {};   // Loop Protection State
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 3000;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 // ===== HELPER FUNCTIONS =====
+
+function keyFor(sender, from) {
+    return `${from || ""}::${(sender || "").split(":")[0]}`;
+}
 
 function toSmallCaps(str = "") {
     const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -34,11 +38,11 @@ function toSmallCaps(str = "") {
         .join("");
 }
 
-function clearUserSession(sender) {
-    delete pendingXhamSearch[sender];
-    delete pendingXhamQuality[sender];
-    delete pendingXhamOption[sender];
-    delete pendingXhamCustomTime[sender];
+function clearUserSession(k) {
+    delete pendingXhamSearch[k];
+    delete pendingXhamQuality[k];
+    delete pendingXhamOption[k];
+    delete pendingXhamCustomTime[k];
 }
 
 async function xhamSearch(query, limit = 100) {
@@ -283,9 +287,10 @@ cmd({
             return reply(`*╭───[ 😞 𝗡𝗢 𝗥𝗘𝗦𝗨𝗟𝗧𝗦 ]───╮*\n│\n├─ 🎬 *Query:* _${q}_\n╰────────────────────────╯`);
         }
 
-        clearUserSession(sender);
+        const k = keyFor(sender, from);
+        clearUserSession(k);
 
-        pendingXhamSearch[sender] = { 
+        pendingXhamSearch[k] = { 
             results, 
             timestamp: Date.now() 
         };
@@ -299,152 +304,162 @@ cmd({
     }
 });
 
-// ===== 2. NUMBER & TIME REPLY LISTENER =====
-cmd({
-    filter: (text, { sender, key }) => {
-        if (!sender || (key && key.fromMe)) return false;
+// ===== 2. NUMBER & TIME REPLY HANDLER (Registered to replyHandlers) =====
+const xhamReplyHandler = {
+    filter: (text, { sender, from }) => {
+        if (!text) return false;
+        const k = keyFor(sender, from);
         
-        const isNumber = /^\d+$/.test(text ? text.trim() : "");
-        const isTimeFormat = /^\d+:\d+$/.test(text ? text.trim() : "");
+        const isNumber = /^\d+$/.test(text.trim());
+        const isTimeFormat = /^\d+:\d+$/.test(text.trim());
 
         if (!isNumber && !isTimeFormat) return false;
 
-        return Boolean(pendingXhamSearch[sender] || pendingXhamQuality[sender] || pendingXhamOption[sender] || pendingXhamCustomTime[sender]);
-    }
-}, async (bot, mek, m, { body, sender, reply, from }) => {
-    const input = body ? body.trim() : "";
-    if (!input) return;
+        return Boolean(pendingXhamSearch[k] || pendingXhamQuality[k] || pendingXhamOption[k] || pendingXhamCustomTime[k]);
+    },
+    function: async (bot, mek, m, { body, sender, reply, from }) => {
+        const input = body ? body.trim() : "";
+        if (!input) return;
 
-    // LOOP PROTECTION SYSTEM
-    const now = Date.now();
-    const lastMsg = lastProcessedMsg[sender];
-    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
-        return;
-    }
-    lastProcessedMsg[sender] = { text: input, time: now };
+        const k = keyFor(sender, from);
 
-    // 1. Custom Time Handling (Strict min:min format)
-    if (pendingXhamCustomTime[sender]) {
-        if (!/^\d+:\d+$/.test(input)) {
-            clearUserSession(sender);
-            return reply(`*╭───[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗙𝗢𝗥𝗠𝗔𝗧 ]───╮*\n│\n├─ 📝 _Session cancelled. Please search again._\n╰───────────────────────────╯`);
+        // LOOP PROTECTION SYSTEM
+        const now = Date.now();
+        const lastMsg = lastProcessedMsg[k];
+        if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
+            return;
+        }
+        lastProcessedMsg[k] = { text: input, time: now };
+
+        // 1. Custom Time Handling (Strict min:min format)
+        if (pendingXhamCustomTime[k]) {
+            if (!/^\d+:\d+$/.test(input)) {
+                clearUserSession(k);
+                return reply(`*╭─[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗙𝗢𝗥𝗠𝗔𝗧 ]─╮*\n│\n├─ 📝 _Session cancelled. Please search again._\n╰─────────────────────╯`);
+            }
+
+            const { selected, streamUrl, qualityName } = pendingXhamCustomTime[k];
+            const parts = input.split(':').map(n => parseInt(n.trim()));
+            
+            let startMin = parts[0];
+            let endMin = parts[1];
+
+            if (isNaN(startMin) || isNaN(endMin) || startMin < 0 || endMin <= startMin) {
+                clearUserSession(k);
+                return reply(`*╭─[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗧𝗜𝗠𝗘 ]─╮*\n│\n├─ 📝 _Start time must be less than end time!_\n╰─────────────────────╯`);
+            }
+
+            clearUserSession(k);
+
+            const startTimeInSec = startMin * 60;
+            const durationInSec = (endMin - startMin) * 60;
+
+            await bot.sendMessage(from, { react: { text: "✂️", key: m.key } });
+            return processDownload(bot, mek, m, reply, from, selected, streamUrl, qualityName, { startTimeInSec, durationInSec }, `${startMin} Min to ${endMin} Min`);
         }
 
-        const { selected, streamUrl, qualityName } = pendingXhamCustomTime[sender];
-        const parts = input.split(':').map(n => parseInt(n.trim()));
-        
-        let startMin = parts[0];
-        let endMin = parts[1];
+        // 2. Download Mode Handling (Full Video vs Custom Time)
+        if (pendingXhamOption[k]) {
+            if (input !== '1' && input !== '2') return;
 
-        if (isNaN(startMin) || isNaN(endMin) || startMin < 0 || endMin <= startMin) {
-            clearUserSession(sender);
-            return reply(`*╭───[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗧𝗜𝗠𝗘 ]───╮*\n│\n├─ 📝 _Start time must be less than end time!_\n╰──────────────────────────╯`);
+            const { selected, streamUrl, qualityName } = pendingXhamOption[k];
+            delete pendingXhamOption[k];
+
+            if (input === '1') {
+                clearUserSession(k);
+                await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+                return processDownload(bot, mek, m, reply, from, selected, streamUrl, qualityName, {});
+            } 
+            
+            if (input === '2') {
+                pendingXhamCustomTime[k] = { selected, streamUrl, qualityName, timestamp: Date.now() };
+                return reply(`*╭──[ ✂️ 𝗖𝗨𝗦𝗧𝗢𝗠 𝗧𝗜𝗠𝗘 ]──╮*\n│\n├─ 📌 *Reply with Start & End minutes:*\n├─ 💡 *Example:* \`5:10\`\n├─ _(Downloads from 5th to 10th min)_\n╰───────────────────╯`);
+            }
         }
 
-        delete pendingXhamCustomTime[sender];
+        // 3. Quality Selection Handling
+        if (pendingXhamQuality[k]) {
+            const choiceNum = parseInt(input) - 1;
+            const { selected, qualities } = pendingXhamQuality[k];
 
-        const startTimeInSec = startMin * 60;
-        const durationInSec = (endMin - startMin) * 60;
+            if (isNaN(choiceNum) || choiceNum < 0 || choiceNum >= qualities.length) {
+                return reply(`*╭───[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗢𝗣𝗧𝗜𝗢𝗡 ]───╮*\n│\n├─ 🎯 *Range:* 1 - ${qualities.length}\n╰─────────────────────╯`);
+            }
 
-        await bot.sendMessage(from, { react: { text: "✂️", key: m.key } });
-        return processDownload(bot, mek, m, reply, from, selected, streamUrl, qualityName, { startTimeInSec, durationInSec }, `${startMin} Min to ${endMin} Min`);
-    }
+            const chosenQuality = qualities[choiceNum];
+            delete pendingXhamQuality[k];
 
-    // 2. Download Mode Handling (Full Video vs Custom Time)
-    if (pendingXhamOption[sender]) {
-        if (input !== '1' && input !== '2') return;
-
-        const { selected, streamUrl, qualityName } = pendingXhamOption[sender];
-        delete pendingXhamOption[sender];
-
-        if (input === '1') {
-            await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-            return processDownload(bot, mek, m, reply, from, selected, streamUrl, qualityName, {});
-        } 
-        
-        if (input === '2') {
-            pendingXhamCustomTime[sender] = { selected, streamUrl, qualityName, timestamp: Date.now() };
-            return reply(`*╭───[ ✂️ 𝗖𝗨𝗦𝗧𝗢𝗠 𝗧𝗜𝗠𝗘 ]───╮*\n│\n├─ 📌 *Reply with Start & End minutes:*\n├─ 💡 *Example:* \`5:10\`\n├─ _(Downloads from 5th to 10th min)_\n╰───────────────────────────╯`);
-        }
-    }
-
-    // 3. Quality Selection Handling
-    if (pendingXhamQuality[sender]) {
-        const choiceNum = parseInt(input) - 1;
-        const { selected, qualities } = pendingXhamQuality[sender];
-
-        if (isNaN(choiceNum) || choiceNum < 0 || choiceNum >= qualities.length) {
-            return reply(`*╭───[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗢𝗣𝗧𝗜𝗢𝗡 ]───╮*\n│\n├─ 🎯 *Range:* 1 - ${qualities.length}\n╰───────────────────────────╯`);
-        }
-
-        const chosenQuality = qualities[choiceNum];
-        delete pendingXhamQuality[sender];
-
-        // Save state for Mode Selection (Full / Custom)
-        pendingXhamOption[sender] = {
-            selected,
-            streamUrl: chosenQuality.url,
-            qualityName: chosenQuality.quality,
-            timestamp: Date.now()
-        };
-
-        let optMsg = `*╭───[ 🎬 𝗦𝗘𝗟𝗘𝗖𝗧𝗘𝗗 𝗩𝗜𝗗𝗘𝗢 ]───╮*\n│\n`;
-        optMsg += `├─ 📌 *${toSmallCaps(selected.title.slice(0, 36))}*\n`;
-        optMsg += `├─ 📊 *Selected Quality:* ${chosenQuality.quality}\n│\n`;
-        optMsg += `├─ *👇 Select Download Mode:* 👇\n│\n`;
-        optMsg += `├─ 📱 *[ 01 ]* 🎬 Full Video Download\n`;
-        optMsg += `├─ 📱 *[ 02 ]* ✂️ Custom Time Range\n│\n`;
-        optMsg += `╰──────────────────────────────────╯`;
-
-        return reply(optMsg);
-    }
-
-    // 4. Search Result Selection -> Extract Qualities Step
-    if (pendingXhamSearch[sender]) {
-        const num = parseInt(input);
-        if (isNaN(num)) return;
-
-        const session = pendingXhamSearch[sender];
-        if (num <= 0 || num > session.results.length) return;
-
-        if ([11, 21, 31, 41, 51, 61, 71, 81, 91].includes(num)) {
-            session.timestamp = Date.now();
-            return reply(generateResultText(session.results, num - 1));
-        }
-
-        const selected = session.results[num - 1];
-        delete pendingXhamSearch[sender];
-
-        await reply(`*╭───[ ⏳ 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 𝗤𝗨𝗔𝗟𝗜𝗧𝗜𝗘𝗦 ]───╮*\n│\n├─ 🔞 *Parsing video stream qualities...*\n├─ ⚡ _Please wait a moment..._\n╰────────────────────────────╯`);
-
-        try {
-            const videoDetails = await fetchXhamVideoDetails(selected.url);
-
-            pendingXhamQuality[sender] = {
-                selected: { ...selected, title: videoDetails.title || selected.title, duration: videoDetails.duration || selected.duration },
-                qualities: videoDetails.qualities,
+            // Save state for Mode Selection (Full / Custom)
+            pendingXhamOption[k] = {
+                selected,
+                streamUrl: chosenQuality.url,
+                qualityName: chosenQuality.quality,
                 timestamp: Date.now()
             };
 
-            let qMsg = `*╭───[ 📊 𝗦𝗘𝗟𝗘𝗖𝗧 𝗤𝗨𝗔𝗟𝗜𝗧𝗬 ]───╮*\n│\n`;
-            qMsg += `├─ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(selected.title.slice(0, 36))}\n│\n`;
-            qMsg += `├─ *👇 Reply with Quality Number:* 👇\n│\n`;
+            let optMsg = `*╭─[ 🎬 𝗦𝗘𝗟𝗘𝗖𝗧𝗘𝗗 𝗩𝗜𝗗𝗘𝗢 ]─╮*\n│\n`;
+            optMsg += `├─ 📌 *${toSmallCaps(selected.title.slice(0, 36))}*\n`;
+            optMsg += `├─ 📊 *Selected Quality:* ${chosenQuality.quality}\n│\n`;
+            optMsg += `├─ *👇 Select Download Mode:* 👇\n│\n`;
+            optMsg += `├─ 📱 *[ 01 ]* 🎬 Full Video Download\n`;
+            optMsg += `├─ 📱 *[ 02 ]* ✂️ Custom Time Range\n│\n`;
+            optMsg += `╰─────────────────────╯`;
 
-            videoDetails.qualities.forEach((q, idx) => {
-                const numStr = String(idx + 1).padStart(2, "0");
-                qMsg += `├─ 📱 *[ ${numStr} ]* 🎬 ${q.quality}\n`;
-            });
+            return reply(optMsg);
+        }
 
-            qMsg += `│\n╰──────────────────────────────────╯`;
+        // 4. Search Result Selection -> Extract Qualities Step
+        if (pendingXhamSearch[k]) {
+            const num = parseInt(input);
+            if (isNaN(num)) return;
 
-            return reply(qMsg);
+            const session = pendingXhamSearch[k];
+            if (num <= 0 || num > session.results.length) return;
 
-        } catch (err) {
-            console.error("Quality Extract Error:", err);
-            return reply(`*╭───[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]───╮*\n│\n├─ 🚫 _Failed to extract stream qualities!_\n╰───────────────────╯`);
+            if ([11, 21, 31, 41, 51, 61, 71, 81, 91].includes(num)) {
+                session.timestamp = Date.now();
+                return reply(generateResultText(session.results, num - 1));
+            }
+
+            const selected = session.results[num - 1];
+            delete pendingXhamSearch[k];
+
+            await reply(`*╭─[ ⏳ 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 𝗤𝗨𝗔𝗟𝗜𝗧𝗜𝗘𝗦 ]─╮*\n│\n├─ 🔞 *Parsing video stream qualities...*\n├─ ⚡ _Please wait a moment..._\n╰────────────────────╯`);
+
+            try {
+                const videoDetails = await fetchXhamVideoDetails(selected.url);
+
+                pendingXhamQuality[k] = {
+                    selected: { ...selected, title: videoDetails.title || selected.title, duration: videoDetails.duration || selected.duration },
+                    qualities: videoDetails.qualities,
+                    timestamp: Date.now()
+                };
+
+                let qMsg = `*╭─[ 📊 𝗦𝗘𝗟𝗘𝗖𝗧 𝗤𝗨𝗔𝗟𝗜𝗧𝗬 ]─╮*\n│\n`;
+                qMsg += `├─ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(selected.title.slice(0, 36))}\n│\n`;
+                qMsg += `├─ *👇 Reply with Quality Number:* 👇\n│\n`;
+
+                videoDetails.qualities.forEach((q, idx) => {
+                    const numStr = String(idx + 1).padStart(2, "0");
+                    qMsg += `├─ 📱 *[ ${numStr} ]* 🎬 ${q.quality}\n`;
+                });
+
+                qMsg += `│\n╰────────────────────╯`;
+
+                return reply(qMsg);
+
+            } catch (err) {
+                console.error("Quality Extract Error:", err);
+                return reply(`*╭───[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]───╮*\n│\n├─ 🚫 _Failed to extract stream qualities!_\n╰───────────────────╯`);
+            }
         }
     }
-});
+};
+
+// Register reply handler
+if (Array.isArray(replyHandlers)) {
+    replyHandlers.push(xhamReplyHandler);
+}
 
 // Auto Cleanup
 setInterval(() => {
