@@ -31,7 +31,7 @@ function getChannelContext() {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Accurate & Safe Key Extraction (Supports Groups & DMs)
+// Safe Key Extraction (Supports Groups & DMs)
 function keyFor(sender, from) {
     const cleanFrom = (from || "").split('@')[0].split(':')[0];
     const cleanSender = (sender || "").split('@')[0].split(':')[0];
@@ -164,7 +164,7 @@ async function getMovieDetails(moviePageUrl) {
     return details;
 }
 
-// 3. Extract "Bulk Download" Page Link
+// 3. Extract Download Page Link
 async function getDownloadPageUrl(moviePageUrl) {
     const { data } = await axios.get(moviePageUrl, { headers: { 'User-Agent': UA } });
     const $ = cheerio.load(data);
@@ -176,7 +176,7 @@ async function getDownloadPageUrl(moviePageUrl) {
     return downloadLink;
 }
 
-// 4. Extract Episode Links from Download Page
+// 4. Extract Episode Links
 async function getEpisodeLinksFromDownloadPage(downloadPageUrl) {
     const { data } = await axios.get(downloadPageUrl, { headers: { 'User-Agent': UA } });
     const $ = cheerio.load(data);
@@ -199,9 +199,9 @@ async function getEpisodeLinksFromDownloadPage(downloadPageUrl) {
 }
 
 function generateResultText(results) {
-    let text = `╭━〔 🎬 *sɪɴʜᴀʟᴀ ᴄᴀʀᴛᴏᴏɴ sᴇᴀʀᴄʜ* 〕━╮\n┃\n`;
+    let text = `╭━〔 🎬 *ᴄᴀʀᴛᴏᴏɴ sᴇᴀʀᴄʜ* 〕━╮\n┃\n`;
     text += `┃ 📊 *TOTAL RESULTS:* ${results.length}\n┃\n`;
-    text += `╰━━━━━━━━━━━━━━━━━━━━╯\n\n`;
+    text += `╰━━━━━━━━━━━╯\n\n`;
 
     results.forEach((v, idx) => {
         const numStr = String(idx + 1).padStart(2, "0");
@@ -259,21 +259,34 @@ cmd({
     }
 });
 
-// ===== 2. REPLY HANDLER =====
+// ===== 2. REPLY HANDLER WITH MENU COMPATIBILITY =====
 const cartoonReplyHandler = {
     filter: (text, { sender, from, key }) => {
-        // Prevent Bot Self-Loops
+        // Prevent Self-Loops
         if (key && key.fromMe) return false;
         if (!text) return false;
 
         const k = keyFor(sender, from);
-        const hasSession = Boolean(pendingCartoonSearch[k]) || Boolean(pendingCartoonSelection[k]);
+        const hasSearchSession = Boolean(pendingCartoonSearch[k]);
+        const hasSelectionSession = Boolean(pendingCartoonSelection[k]);
 
-        // Validate Input Format
-        const cleanText = text.trim().toLowerCase();
-        const isValidInput = /^[\d\s,]+$/.test(cleanText) || cleanText === 'all';
+        if (!hasSearchSession && !hasSelectionSession) return false;
 
-        return hasSession && isValidInput;
+        const cleanText = String(text).trim().toLowerCase();
+
+        // 1. Search Selection Verification
+        if (hasSearchSession) {
+            const num = parseInt(cleanText, 10);
+            const max = pendingCartoonSearch[k].results.length;
+            return !isNaN(num) && num > 0 && num <= max;
+        }
+
+        // 2. Episode Download Selection Verification
+        if (hasSelectionSession) {
+            return /^[\d\s,]+$/.test(cleanText) || cleanText === 'all';
+        }
+
+        return false;
     },
     function: async (bot, mek, m, { body, sender, reply, from }) => {
         const input = body ? body.trim() : "";
@@ -281,7 +294,7 @@ const cartoonReplyHandler = {
 
         const k = keyFor(sender, from);
 
-        // Loop protection
+        // Loop protection check
         const now = Date.now();
         const lastMsg = lastProcessedMsg[k];
         if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
@@ -291,7 +304,7 @@ const cartoonReplyHandler = {
 
         // --- STEP A: CARTOON SELECTION FROM SEARCH ---
         if (pendingCartoonSearch[k]) {
-            const num = parseInt(input);
+            const num = parseInt(input, 10);
             const session = pendingCartoonSearch[k];
 
             if (isNaN(num) || num <= 0 || num > session.results.length) {
@@ -299,12 +312,11 @@ const cartoonReplyHandler = {
             }
 
             const selectedMovie = session.results[num - 1];
-            delete pendingCartoonSearch[k]; // Clear search session
+            delete pendingCartoonSearch[k]; // Clear search state
 
             await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
             try {
-                // Fetch Details and Download Links
                 const details = await getMovieDetails(selectedMovie.href);
                 const downloadPageUrl = await getDownloadPageUrl(selectedMovie.href);
 
@@ -320,7 +332,7 @@ const cartoonReplyHandler = {
 
                 const channelMeta = getChannelContext();
 
-                // Store in selection pending state
+                // Save selection pending state
                 pendingCartoonSelection[k] = {
                     details,
                     items,
@@ -333,7 +345,7 @@ const cartoonReplyHandler = {
                 captionText += `┃ 🎥 *QUALITY:* ${details.quality}\n`;
                 captionText += `┃ 🎬 *DIRECTOR:* ${details.director}\n`;
                 captionText += `┃ 📺 *TYPE:* ${details.isSeries ? 'TV Series' : 'Movie'}\n┃\n`;
-                captionText += `╰━━━━━━━━━━━━━━━━━━━━╯\n\n`;
+                captionText += `╰━━━━━━━━━━━━━╯\n\n`;
                 captionText += `📖 *DESCRIPTION:*\n_${details.description}_\n\n`;
                 captionText += `───────────────────\n`;
                 captionText += `📥 *ᴀᴠᴀɪʟᴀʙʟᴇ ᴇᴘɪsᴏᴅᴇs / ᴅᴏᴡɴʟᴏᴀᴅs:* ${items.length}\n\n`;
@@ -370,7 +382,7 @@ const cartoonReplyHandler = {
             return;
         }
 
-        // --- STEP B: SEQUENTIAL UPLOAD WITH IMMEDIATE MEMORY CLEANUP ---
+        // --- STEP B: SEQUENTIAL UPLOAD WITH MEMORY CLEANUP ---
         if (pendingCartoonSelection[k]) {
             const { details, items } = pendingCartoonSelection[k];
 
@@ -380,7 +392,7 @@ const cartoonReplyHandler = {
             if (lowerInput === "01" || lowerInput === "1" || lowerInput === "all") {
                 selectedIndices = items.map((_, idx) => idx);
             } else {
-                const numbers = input.split(/[\s,]+/).map(n => parseInt(n)).filter(n => !isNaN(n));
+                const numbers = input.split(/[\s,]+/).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
                 
                 numbers.forEach(num => {
                     if (num === 1) {
@@ -397,13 +409,12 @@ const cartoonReplyHandler = {
                 return reply(`❌ *ɪɴᴠᴀʟɪᴅ sᴇʟᴇᴄᴛɪᴏɴ! ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴡɪᴛʜ ᴠᴀʟɪᴅ ᴇᴘɪsᴏᴅᴇ ɴᴜᴍʙᴇʀs.*`);
             }
 
-            delete pendingCartoonSelection[k]; // Clear user session from memory
+            delete pendingCartoonSelection[k]; // Clear session state
 
             await reply(`🚀 *sᴛᴀʀᴛɪɴɢ ʙᴀᴛᴄʜ ᴅᴏᴡɴʟᴏᴀᴅ:* Sending ${selectedIndices.length} Item(s) as Document Files...`);
 
             const channelMeta = getChannelContext();
 
-            // Process selected episodes sequentially
             for (let i = 0; i < selectedIndices.length; i++) {
                 const epIndex = selectedIndices[i];
                 let selectedItem = items[epIndex];
@@ -416,7 +427,6 @@ const cartoonReplyHandler = {
 
                     await reply(`⚙️ *[${i + 1}/${selectedIndices.length}] Uploading ${selectedItem.title}...*`);
 
-                    // Stream Document Directly via R2 URL
                     await bot.sendMessage(from, {
                         document: { url: selectedItem.url },
                         mimetype: "video/mp4",
@@ -427,17 +437,14 @@ const cartoonReplyHandler = {
 
                     await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
 
-                    // Memory Cleanup for finished item
                     selectedItem = null;
                     cleanTitle = null;
                     cleanSubTitle = null;
 
-                    // Force Node.js Garbage Collection if enabled
                     if (global.gc) {
                         global.gc();
                     }
 
-                    // Delay between uploads to keep Server RAM cool
                     await delay(4000);
 
                 } catch (error) {
@@ -456,7 +463,7 @@ if (Array.isArray(replyHandlers)) {
     replyHandlers.push(cartoonReplyHandler);
 }
 
-// Auto Cleanup Interval
+// Auto Cleanup Routine
 setInterval(() => {
     const now = Date.now();
     for (const s in pendingCartoonSearch) {
