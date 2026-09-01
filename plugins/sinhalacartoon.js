@@ -206,7 +206,7 @@ function generateResultText(results) {
         text += `├─ 📱 *[ ${numStr} ]* 🎬 *${toSmallCaps(cleanTitle.slice(0, 40))}*\n`;
     });
 
-    text += `│\n╰────────────────────╯\n\n`;
+    text += `│\n╰──────────────────╯\n\n`;
     text += `📌 *Reply with the number to select cartoon*`;
     return text;
 }
@@ -214,25 +214,25 @@ function generateResultText(results) {
 // ===== 1. MAIN SEARCH COMMAND =====
 cmd({
     pattern: "sinhalacartoon",
-    alias: ["scartoon", "sc", "cartoon", "cdl"],
+    alias: ["scartoon", "sc", "cartoon"],
     desc: "Search and download cartoons from SinhalaCartoons.com",
     category: "download",
     react: "🎬",
     filename: __filename
 }, async (bot, mek, m, { from, q, sender, reply }) => {
     if (!q) {
-        return reply(`*╭──[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗨𝗦𝗔𝗚𝗘 ]──╮*\n│\n├─ 📌 *Usage:* .scartoon [cartoon name]\n├─ 💡 *Example:* .scartoon kung fu panda\n╰──────────────────╯`);
+        return reply(`*╭──[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗨𝗦𝗔𝗚𝗘 ]──╮*\n│\n├─ 📌 *Usage:* .scartoon [cartoon name]\n├─ 💡 *Example:* .scartoon kung fu panda\n╰────────────────────╯`);
     }
 
     await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
-    await reply("*╭──[ 🔍 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ]──╮*\n│\n├─ 🎬 *Searching SinhalaCartoons...*\n├─ ⚡ _Please wait a moment..._\n╰─────────────────╯");
+    await reply("*╭──[ 🔍 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ]──╮*\n│\n├─ 🎬 *Searching SinhalaCartoons...*\n├─ ⚡ _Please wait a moment..._\n╰───────────────────╯");
 
     try {
         const results = await getSearchResults(q.trim());
 
         if (!results || !Array.isArray(results) || results.length === 0) {
             await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-            return reply(`*╭──[ 😞 𝗡𝗢 𝗥𝗘𝗦𝗨𝗟𝗧𝗦 ]──╮*\n│\n├─ 🎬 *Query:* _${q}_\n╰─────────────────╯`);
+            return reply(`*╭───[ 😞 𝗡𝗢 𝗥𝗘𝗦𝗨𝗟𝗧𝗦 ]───╮*\n│\n├─ 🎬 *Query:* _${q}_\n╰────────────────────╯`);
         }
 
         const k = keyFor(sender, from);
@@ -252,11 +252,11 @@ cmd({
     } catch (error) {
         console.error("SinhalaCartoon Search Error:", error);
         await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-        reply(`*╭──[ ❌ 𝗦𝗬𝗦𝗧𝗘𝗠 𝗘𝗥𝗥𝗢𝗥 ]──╮*\n│\n├─ 🚫 _Error occurred while searching cartoons!_\n╰──────────────────╯`);
+        reply(`*╭──[ ❌ 𝗦𝗬𝗦𝗧𝗘𝗠 𝗘𝗥𝗥𝗢𝗥 ]──╮*\n│\n├─ 🚫 _Error occurred while searching cartoons!_\n╰───────────────────╯`);
     }
 });
 
-// ===== 2. NUMBER & EPISODE REPLY HANDLER (xHamster Reply Filter Structure) =====
+// ===== 2. NUMBER & EPISODE REPLY HANDLER =====
 const cartoonReplyHandler = {
     filter: (text, { sender, from }) => {
         if (!text) return false;
@@ -289,13 +289,13 @@ const cartoonReplyHandler = {
             const session = pendingCartoonSearch[k];
 
             if (isNaN(num) || num <= 0 || num > session.results.length) {
-                return reply(`*╭──[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗢𝗣𝗧𝗜𝗢𝗡 ]──╮*\n│\n├─ 🎯 *Range:* 1 - ${session.results.length}\n╰─────────────────╯`);
+                return reply(`*╭──[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗢𝗣𝗧𝗜𝗢𝗡 ]──╮*\n│\n├─ 🎯 *Range:* 1 - ${session.results.length}\n╰────────────────────╯`);
             }
 
             const selectedMovie = session.results[num - 1];
             delete pendingCartoonSearch[k]; // Clear search state
 
-            await reply(`*╭─[ ⏳ 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 𝗘𝗣𝗜𝗦𝗢𝗗𝗘𝗦 ]─╮*\n│\n├─ 🎬 *Parsing cartoon details...*\n├─ ⚡ _Please wait a moment..._\n╰────────────────╯`);
+            await reply(`*╭─[ ⏳ 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 𝗘𝗣𝗜𝗦𝗢𝗗𝗘𝗦 ]─╮*\n│\n├─ 🎬 *Parsing cartoon details...*\n├─ ⚡ _Please wait a moment..._\n╰───────────────────╯`);
 
             try {
                 // Fetch Details and Download Links
@@ -303,16 +303,16 @@ const cartoonReplyHandler = {
                 const downloadPageUrl = await getDownloadPageUrl(selectedMovie.href);
 
                 if (!downloadPageUrl) {
-                    return reply(`*╭──[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]──╮*\n│\n├─ 🚫 _Could not find download page!_\n╰─────────────────╯`);
+                    return reply(`*╭───[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]───╮*\n│\n├─ 🚫 _Could not find download page!_\n╰──────────────────╯`);
                 }
 
                 const items = await getEpisodeLinksFromDownloadPage(downloadPageUrl);
 
                 if (!items || items.length === 0) {
-                    return reply(`*╭──[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]──╮*\n│\n├─ 🚫 _No download episodes found!_\n╰─────────────────╯`);
+                    return reply(`*╭───[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]───╮*\n│\n├─ 🚫 _No download episodes found!_\n╰───────────────────╯`);
                 }
 
-                // Store in Selection Pending State (Does NOT auto download!)
+                // Store in Selection Pending State
                 pendingCartoonSelection[k] = {
                     details,
                     items,
@@ -336,7 +336,7 @@ const cartoonReplyHandler = {
                     captionText += `├─ 📱 *[ ${numStr} ]* 📌 ${item.title}\n`;
                 });
 
-                captionText += `│\n╰────────────────╯\n\n`;
+                captionText += `│\n╰──────────────────╯\n\n`;
                 captionText += `💡 *Reply "01" or "all" for ALL episodes.*\n`;
                 captionText += `💡 *Or reply with numbers (e.g., "2,3,5") for specific episodes.*`;
 
@@ -356,12 +356,12 @@ const cartoonReplyHandler = {
             } catch (err) {
                 console.error("SinhalaCartoon Details Error:", err);
                 await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-                reply(`*╭──[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]──╮*\n│\n├─ 🚫 _Failed to fetch cartoon details!_\n╰────────────────╯`);
+                reply(`*╭───[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]───╮*\n│\n├─ 🚫 _Failed to fetch cartoon details!_\n╰───────────────────╯`);
             }
             return;
         }
 
-        // --- STEP 2: MULTI-EPISODE SELECTION & DOWNLOAD (Triggers ONLY after user choice) ---
+        // --- STEP 2: MULTI-EPISODE SELECTION & DOWNLOAD (FIXED INDEX MATCHING) ---
         if (pendingCartoonSelection[k]) {
             const { details, items } = pendingCartoonSelection[k];
 
@@ -369,30 +369,35 @@ const cartoonReplyHandler = {
             const lowerInput = input.toLowerCase();
 
             if (lowerInput === "01" || lowerInput === "1" || lowerInput === "all") {
-                // Select All Episodes
+                // Select All Episodes (Array indices 0 to end)
                 selectedIndices = items.map((_, idx) => idx);
             } else {
-                // Parse numbers like "2,3,4"
+                // Parse numbers like "2,3,5,7"
                 const numbers = input.split(/[\s,]+/).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
                 
                 numbers.forEach(num => {
+                    // Option 01 or 1 means ALL
                     if (num === 1) {
                         items.forEach((_, idx) => selectedIndices.push(idx));
-                    } else if (num >= 2 && num <= items.length + 1) {
+                    } 
+                    // Option 02 maps to Array Index 0 (Episode 1)
+                    // Option 03 maps to Array Index 1 (Episode 2) ...
+                    else if (num >= 2 && num <= items.length + 1) {
                         selectedIndices.push(num - 2);
                     }
                 });
             }
 
+            // Remove duplicates and sort numerically
             selectedIndices = [...new Set(selectedIndices)].sort((a, b) => a - b);
 
             if (selectedIndices.length === 0) {
-                return reply(`*╭─[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗦𝗘𝗟𝗘𝗖𝗧𝗜𝗢𝗡 ]─╮*\n│\n├─ 📌 *Valid Range:* 01 - ${items.length + 1}\n╰──────────────────╯`);
+                return reply(`*╭──[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗦𝗘𝗟𝗘𝗖𝗧𝗜𝗢𝗡 ]──╮*\n│\n├─ 📌 *Valid Range:* 01 - ${String(items.length + 1).padStart(2, '0')}\n╰──────────────────╯`);
             }
 
             delete pendingCartoonSelection[k]; // Clear selection state
 
-            await reply(`*╭──[ ⬇️ 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚 ]──╮*\n│\n├─ 🚀 *Starting Batch Download...*\n├─ 📦 *Selected Items:* ${selectedIndices.length}\n╰──────────────────╯`);
+            await reply(`*╭──[ ⬇️ 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚 ]──╮*\n│\n├─ 🚀 *Starting Batch Download...*\n├─ 📦 *Selected Items:* ${selectedIndices.length}\n╰───────────────────╯`);
 
             const channelMeta = getChannelContext();
 
@@ -409,12 +414,12 @@ const cartoonReplyHandler = {
 
                     await reply(`⚙️ *[${i + 1}/${selectedIndices.length}] Uploading ${selectedItem.title}...*`);
 
-                    // Direct Stream Send via R2 Direct Link
+                    // Direct Stream Send
                     await bot.sendMessage(from, {
                         document: { url: selectedItem.url },
                         mimetype: "video/mp4",
                         fileName: `MALIYA-MD ${cleanTitle} - ${cleanSubTitle}.mp4`,
-                        caption: `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡 ]─╮*\n│\n├─ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(details.title)}\n├─ 📌 *𝗘𝗽𝗶𝘀𝗼𝗱𝗲:* ${selectedItem.title}\n├─ 📊 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${details.quality}\n├─ ⭐ *𝗥𝗮𝘁𝗶𝗻𝗴:* ${details.rating}\n│\n╰─────────────────╯\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`,
+                        caption: `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡 ]─╮*\n│\n├─ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(details.title)}\n├─ 📌 *𝗘𝗽𝗶𝘀𝗼𝗱𝗲:* ${selectedItem.title}\n├─ 📊 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${details.quality}\n├─ ⭐ *𝗥𝗮𝘁𝗶𝗻𝗴:* ${details.rating}\n│\n╰──────────────────╯\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`,
                         ...channelMeta
                     }, { quoted: mek });
 
@@ -427,7 +432,7 @@ const cartoonReplyHandler = {
                 }
             }
 
-            await reply(`*╭──[ ✅ 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗 ]──╮*\n│\n├─ 🎉 *All Selected Downloads Completed!*\n╰─────────────────╯`);
+            await reply(`*╭───[ ✅ 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗 ]───╮*\n│\n├─ 🎉 *All Selected Downloads Completed!*\n╰─────────────────╯`);
         }
     }
 };
