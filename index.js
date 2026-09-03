@@ -1,7 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
 //  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
-//  FIX: sessionId now passed to all commands and reply handlers
-//  ADDED: Body-parser middlewares & Settings API Routes
+//  FIX: Session reconnect loop with max attempts (403 fix)
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -92,8 +91,7 @@ try {
 const app  = express();
 const port = process.env.PORT || 8000;
 
-/* ==================== MIDDLEWARES (FIXED FOR req.body) ==================== */
-// Express එකේ req.body undefined වෙන එක නතර කිරීමට json සහ urlencoded body-parsers එක් කරන ලදී
+/* ==================== MIDDLEWARES ==================== */
 app.use(cors({ origin: "*", methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"] }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -149,7 +147,7 @@ async function getConnectableSessions(limit = MAX_ACTIVE_SESSIONS) {
   return col
     .find({
       connectBot:  true,
-      status:      { $nin: ["logged_out", "deleted", "disabled"] },
+      status:      { $nin: ["logged_out", "deleted", "disabled", "invalid"] }, // added "invalid"
       primaryFile: { $exists: true },
     })
     .sort({ updatedAt: -1, createdAt: -1 })
@@ -180,7 +178,7 @@ async function restoreCredsToFile(sessionId, targetFilePath) {
   return targetFilePath;
 }
 
-// ── FIX 2: push local creds.json back into MongoDB ────────────
+// ── creds sync ──────────────────────────────────────────────
 const credsSyncTimers = new Map();
 
 function scheduleCredsSync(sessionId, credsPath, delayMs = 2000) {
@@ -311,14 +309,28 @@ async function cleanupSessionFolder(sessionId) {
   } catch (_) {}
 }
 
+// =============== FIX: MAX RECONNECT ATTEMPTS ===============
 async function scheduleReconnect(sessionId, delayMs = 5000) {
   if (!sessionId)                     return;
   if (reconnectTimers.has(sessionId)) return;
 
+  // Check if session has exceeded max retries
+  const session = activeSessions.get(sessionId);
+  const attempts = session?.reconnectAttempts || 0;
+  if (attempts >= 3) {
+    console.log(`⛔ Max reconnect attempts (${attempts}) reached for ${sessionId}. Marking as invalid.`);
+    await updateSessionStatus(sessionId, {
+      status: "invalid",
+      connectBot: false,
+    });
+    activeSessions.delete(sessionId);
+    return;
+  }
+
   const timer = setTimeout(async () => {
     reconnectTimers.delete(sessionId);
     if (activeSessions.has(sessionId)) return;
-    console.log(`🔁 Reconnecting session ${sessionId}...`);
+    console.log(`🔁 Reconnecting session ${sessionId} (attempt ${attempts + 1})...`);
     await startSessionBot(sessionId);
   }, delayMs);
 
@@ -355,6 +367,7 @@ async function startSessionBot(sessionId) {
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version }          = await fetchLatestBaileysVersion();
 
+    // sessionCtx with reconnectAttempts
     const sessionCtx = {
       sessionId,
       authDir,
@@ -363,6 +376,7 @@ async function startSessionBot(sessionId) {
       connected:   false,
       connecting:  true,
       sock:        null,
+      reconnectAttempts: 0,   // reset attempts on fresh start
     };
 
     const sock = makeWASocket({
@@ -393,6 +407,8 @@ async function startSessionBot(sessionId) {
           sessionCtx.connected   = true;
           sessionCtx.connecting  = false;
           sessionCtx.ownerNumber = getOwnerNumberForSock(sock);
+          // reset attempts on successful connection
+          sessionCtx.reconnectAttempts = 0;
 
           await updateSessionStatus(sessionId, {
             status:     "connected",
@@ -457,7 +473,9 @@ async function startSessionBot(sessionId) {
           activeSessions.delete(sessionId);
 
           if (code !== DisconnectReason.loggedOut) {
-            console.log(`🔁 Session disconnected, reconnecting: ${sessionId} (code: ${code})`);
+            // Increment reconnect attempts
+            sessionCtx.reconnectAttempts = (sessionCtx.reconnectAttempts || 0) + 1;
+            console.log(`🔁 Session disconnected, reconnecting: ${sessionId} (code: ${code}, attempt: ${sessionCtx.reconnectAttempts})`);
             await updateSessionStatus(sessionId, {
               status:     "disconnected",
               connectBot: true,
@@ -518,6 +536,7 @@ function startSessionWatcher() {
       const docs = await col.find({
         connectBot:  true,
         primaryFile: { $exists: true },
+        status:      { $nin: ["logged_out", "deleted", "disabled", "invalid"] },
       }).toArray();
 
       console.log(
@@ -824,50 +843,49 @@ function attachSessionHandlers(sock, sessionCtx) {
         }
 
         // ── REPLY HANDLERS ─────────────────────────────────────
-// ── REPLY HANDLERS ─────────────────────────────────────
-if (!isCmd && replyHandlers && replyHandlers.length) {
-  for (const h of replyHandlers) {
-    if (typeof h.filter !== "function") continue;
-    let ok = false;
-    try {
-      ok = h.filter(body, { 
-        sender, 
-        from, 
-        isGroup, 
-        senderNumber,
-        key: mek.key,
-        mek: mek
-      });
-    } catch (e) {
-      console.log("Filter error:", e?.message);
-      ok = false;
-    }
-    if (ok) {
-      if (h.react) {
-        try { await sock.sendMessage(from, { react: { text: h.react, key: mek.key } }); } catch (_) {}
-      }
-      try {
-        await h.function(sock, mek, m, {
-          from, 
-          body, 
-          args, 
-          q, 
-          sender, 
-          senderNumber, 
-          isGroup, 
-          isOwner, 
-          reply,
-          sessionId: sessionCtx.sessionId,
-          pushname: pushName,
-          m: m,
-        });
-      } catch (e) {
-        console.log("Reply handler error:", e?.message);
-      }
-      break;
-    }
-  }
-}
+        if (!isCmd && replyHandlers && replyHandlers.length) {
+          for (const h of replyHandlers) {
+            if (typeof h.filter !== "function") continue;
+            let ok = false;
+            try {
+              ok = h.filter(body, { 
+                sender, 
+                from, 
+                isGroup, 
+                senderNumber,
+                key: mek.key,
+                mek: mek
+              });
+            } catch (e) {
+              console.log("Filter error:", e?.message);
+              ok = false;
+            }
+            if (ok) {
+              if (h.react) {
+                try { await sock.sendMessage(from, { react: { text: h.react, key: mek.key } }); } catch (_) {}
+              }
+              try {
+                await h.function(sock, mek, m, {
+                  from, 
+                  body, 
+                  args, 
+                  q, 
+                  sender, 
+                  senderNumber, 
+                  isGroup, 
+                  isOwner, 
+                  reply,
+                  sessionId: sessionCtx.sessionId,
+                  pushname: pushName,
+                  m: m,
+                });
+              } catch (e) {
+                console.log("Reply handler error:", e?.message);
+              }
+              break;
+            }
+          }
+        }
 
         // ── COMMANDS ───────────────────────────────────────────
         if (isCmd) {
@@ -967,9 +985,7 @@ app.get("/sessions", async (req, res) => {
 app.get("/health", (_req, res) => res.status(200).send("OK"));
 
 // ─────────────────────────────────────────────────────────────
-//  /api/pair  — Pair Code Generator for external pair site
-//  GET /api/pair?number=94xxxxxxxxx
-//  Returns: { code: "XXXX-XXXX" }
+//  /api/pair  — Pair Code Generator
 // ─────────────────────────────────────────────────────────────
 app.get("/api/pair", async (req, res) => {
   const rawNumber = String(req.query.number || "").replace(/[^0-9]/g, "");
@@ -1090,9 +1106,7 @@ app.get("/api/pair", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-//  /api/qr  — QR Code Generator for external pair site
-//  GET /api/qr
-//  Returns: { qr: "data:image/png;base64,..." }
+//  /api/qr  — QR Code Generator
 // ─────────────────────────────────────────────────────────────
 const QRCode = require("qrcode");
 
