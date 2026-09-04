@@ -6,7 +6,7 @@ const fs = require('fs');
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
 
-function getChannelContext() {
+function channelContextInfo() {
     return {
         contextInfo: {
             forwardingScore: 999,
@@ -85,12 +85,12 @@ cmd({
         // Read Audio Buffer directly
         const audioBuffer = fs.readFileSync(filePath);
 
-        // Send Audio File as Working Audio Stream (matching YT DL method)
+        // Send Audio File
         await sock.sendMessage(from, {
             audio: audioBuffer,
             mimetype: "audio/mpeg",
             ptt: true,
-            contextInfo: channelContextInfo(),
+            ...channelContextInfo(),
         }, { quoted: mek });
 
     } catch (error) {
