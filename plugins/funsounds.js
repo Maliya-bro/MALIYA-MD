@@ -66,11 +66,11 @@ soundConfig.forEach(item => {
 // ---------- REGISTER COMMAND ----------
 cmd({
     pattern: "meme",
-    alias: ["fun", "audio"],
+    alias: ["sound", "audio"],
     desc: "Play meme sound effect",
     category: "fun",
     filename: __filename
-}, async (bot, mek, m, { from, q, reply }) => {
+}, async (bot, mek, m, { from, q }) => {
     try {
         if (!q) return;
 
@@ -82,10 +82,13 @@ cmd({
         // React 🔊
         await bot.sendMessage(from, { react: { text: "🔊", key: m.key } });
 
-        // Send Audio File as PTT Voice Note
+        // Read Audio as Buffer
+        const audioBuffer = fs.readFileSync(filePath);
+
+        // Send Audio File
         await bot.sendMessage(from, {
-            audio: { url: filePath },
-            mimetype: 'audio/mp4',
+            audio: audioBuffer,
+            mimetype: 'audio/mpeg', // MP3 files සදහා audio/mpeg හෝ audio/mp4 භාවිතා වේ
             ptt: true,
             ...getChannelContext()
         }, { quoted: mek });
