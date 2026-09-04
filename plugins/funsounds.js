@@ -63,31 +63,34 @@ soundConfig.forEach(item => {
     });
 });
 
-// ---------- REGISTER HANDLER ----------
+// ---------- REGISTER COMMAND ----------
 cmd({
-    on: "text"
-}, async (bot, mek, m, { from, body }) => {
+    pattern: "meme",
+    alias: ["fun", "audio"],
+    desc: "Play meme sound effect",
+    category: "fun",
+    filename: __filename
+}, async (bot, mek, m, { from, q, reply }) => {
     try {
-        if (!body) return;
+        if (!q) return;
 
-        // Clean prefix if exists (.wow -> wow)
-        const textWithoutPrefix = body.replace(/^[.#/!]/, '').trim().toLowerCase();
+        const soundQuery = q.trim().toLowerCase();
+        const filePath = soundMap[soundQuery];
 
-        const filePath = soundMap[textWithoutPrefix];
+        if (!filePath || !fs.existsSync(filePath)) return;
 
-        if (filePath && fs.existsSync(filePath)) {
-            // React 🔊
-            await bot.sendMessage(from, { react: { text: "🔊", key: m.key } });
+        // React 🔊
+        await bot.sendMessage(from, { react: { text: "🔊", key: m.key } });
 
-            // Send Audio File as PTT Voice Note
-            await bot.sendMessage(from, {
-                audio: { url: filePath },
-                mimetype: 'audio/mp4',
-                ptt: true,
-                ...getChannelContext()
-            }, { quoted: mek });
-        }
+        // Send Audio File as PTT Voice Note
+        await bot.sendMessage(from, {
+            audio: { url: filePath },
+            mimetype: 'audio/mp4',
+            ptt: true,
+            ...getChannelContext()
+        }, { quoted: mek });
+
     } catch (error) {
-        console.error("Sound Player Error:", error);
+        console.error("Meme Command Error:", error);
     }
 });
