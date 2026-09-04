@@ -1,90 +1,100 @@
-// =============================================
-// SOUND COMMAND PLUGIN - Funny Meme MP3 Player
-// =============================================
-
+const { cmd } = require('../command');
 const path = require('path');
 const fs = require('fs');
 
-// ---------- CONFIGURATION ----------
-// Define your sounds: each entry has a file name and an array of triggers.
-// Triggers are what the user types after the command prefix (e.g., ".hello my dear")
-// You can have multiple triggers for the same file.
+// Channel Forwarding Meta Data
+const CHANNEL_JID = "120363427174988449@newsletter";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
+
+function getChannelContext() {
+    return {
+        contextInfo: {
+            forwardingScore: 999,
+            isForwarded: true,
+            forwardedNewsletterMessageInfo: {
+                newsletterJid: CHANNEL_JID,
+                newsletterName: CHANNEL_NAME,
+                serverMessageId: -1,
+            },
+        }
+    };
+}
+
+// ---------- SOUND CONFIGURATION ----------
+const soundDir = path.join(__dirname, '../sounds'); 
 
 const soundConfig = [
-    {
-        file: 'hello my dear bere.mp3',
-        triggers: ['hello my dear', 'hi dear', 'hello', 'hey dear']
-    },
-    {
-        file: 'good morning meme.mp3',
-        triggers: ['good morning', 'gm', 'morning']
-    },
-    {
-        file: 'laugh.mp3',
-        triggers: ['laugh', 'haha', 'lol']
-    },
-    // Add more as needed
+    { file: 'amma thama maha pakgediya.MP3', triggers: ['mama thama', 'pakgediya', 'danaraja', 'mama thama maha pakgediya', 'thaggedi pukawal', 'mama thama pakgediya'] },
+    { file: 'apita uyagena kanna puluwan.MP3', triggers: ['uyagena kanna', 'kanna puluwan', 'apita uyagena', 'apita uyagena kanna puluwan'] },
+    { file: 'ayyo hamanenanwa.MP3', triggers: ['ayyo hamanenawa', 'hamanenawa', 'ayyo', 'phone eka lamayekuta dipan'] },
+    { file: 'boru marisi danna epa.MP3', triggers: ['boru marisi', 'marisi danna epa', 'marisi', 'boru marisi danna epa'] },
+    { file: 'call ganna epa.MP3', triggers: ['call ganna epa', 'dont call', 'call epa'] },
+    { file: 'clap.MP3', triggers: ['clap', 'appudi', 'claps'] },
+    { file: 'cry.MP3', triggers: ['cry', 'andanna', 'adanawa'] },
+    { file: 'dane bara gaththa neda.MP3', triggers: ['dane bara gaththa', 'dane', 'bara gaththa', 'dane bara gaththa neda'] },
+    { file: 'eew.MP3', triggers: ['eew', 'chi', 'gross'] },
+    { file: 'fhaa.MP3', triggers: ['fhaa', 'fa', 'fah', 'fha', 'faa'] },
+    { file: 'genna thuwakkuwa.MP3', triggers: ['genna thuwakkuwa', 'thuwakkuwa', 'gun', 'police jeep eke thiyena thuwakkuwa'] },
+    { file: 'give some help.MP3', triggers: ['give some help', 'help me', 'help'] },
+    { file: 'haaa.MP3', triggers: ['haaa', 'ha'] },
+    { file: 'man kamathi sirimalta.MP3', triggers: ['man kamathi sirimalta', 'sirimalta', 'sirimal'] },
+    { file: 'man oyata adareyine.MP3', triggers: ['man oyata adareyine', 'adareyine', 'iloveyou', 'love', 'ala dennam'] },
+    { file: 'mata ba mata ba daddy full.MP3', triggers: ['mata ba daddy full', 'daddy full', 'daddy', 'mata ba mata ba daddy'] },
+    { file: 'mata ba mata ba daddy.MP3', triggers: ['mama marenawa', 'mata ba daddy', 'mata ba'] },
+    { file: 'muwa duwanawa.MP3', triggers: ['muwa duwanawa', 'duwanawa', 'run'] },
+    { file: 'nice.MP3', triggers: ['nice', 'elakiri', 'maru'] },
+    { file: 'noo.MP3', triggers: ['noo', 'no', 'ne'] },
+    { file: 'shakabom.MP3', triggers: ['shakabom', 'shaka', 'boom'] },
+    { file: 'sthya bohoma katukayi.MP3', triggers: ['sathya bohoma katukayi', 'katukayi', 'sathya'] },
+    { file: 'tape karaganin.MP3', triggers: ['tape karaganin', 'record karaganin', 'tape', 'ubalath tape karaganin bn'] },
+    { file: 'uba hena kathayi.MP3', triggers: ['uba hena kathayi', 'hena kathayi', 'kathayi', 'uba hena kathayi yako'] },
+    { file: 'what.MP3', triggers: ['what', 'mowada', 'mokadda'] },
+    { file: 'why are you running.MP3', triggers: ['why are you running', 'why running', 'running'] },
+    { file: 'wow.MP3', triggers: ['wow', 'woow', 'supiri'] }
 ];
 
-// Build a map: trigger -> file path
+// Build Map & Exact Case Lowercase Key Matcher
 const soundMap = {};
-const soundDir = path.join(__dirname, 'sounds'); // folder where MP3s are stored
 
 soundConfig.forEach(item => {
     const fullPath = path.join(soundDir, item.file);
-    // Check if file exists (optional)
-    if (!fs.existsSync(fullPath)) {
-        console.warn(`⚠️ Sound file not found: ${fullPath}`);
-    }
     item.triggers.forEach(trigger => {
-        // Convert trigger to lowercase for case-insensitive matching
-        const key = trigger.toLowerCase();
-        soundMap[key] = fullPath;
+        soundMap[trigger.toLowerCase().trim()] = fullPath;
     });
 });
 
-// Create a regex pattern that matches any trigger (case-insensitive)
+// Build Regex Dynamic Matcher for Commands
 const triggerKeys = Object.keys(soundMap);
 const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const pattern = `^(${triggerKeys.map(escapeRegex).join('|')})$`;
-const triggerRegex = new RegExp(pattern, 'i'); // case-insensitive
+const triggerRegex = new RegExp(pattern, 'i');
 
 // ---------- REGISTER COMMAND ----------
 cmd({
-    pattern: triggerRegex,      // dynamic pattern
-    alias: [],                  // no additional aliases needed
-    desc: "Play funny meme sounds",
+    pattern: triggerRegex,
+    alias: [],
+    desc: "Play sound effect",
     category: "fun",
-    react: "🔊",
-    filename: __filename,
-    use: ".hello my dear"
-}, async (bot, mek, m, { from, body, reply }) => {
-    // body is the full message text (e.g., ".hello my dear")
-    // Extract the trigger part (remove the command prefix)
-    // Since we are using cmd, the 'body' is the entire message.
-    // We need to extract the actual trigger string.
-    // However, the pattern matches the whole message (including prefix?).
-    // Usually cmd pattern matches the message after the prefix (if prefix is used).
-    // In this bot, if we have prefix '.' then the pattern matches the text after the dot.
-    // So the pattern we set is the trigger exactly.
-    // So we can simply use body.trim() as the trigger.
-    const trigger = body.trim().toLowerCase();
-    const filePath = soundMap[trigger];
-    if (!filePath) {
-        return reply(`❌ Sound not found for "${trigger}"`);
-    }
-    if (!fs.existsSync(filePath)) {
-        return reply(`❌ File missing: ${path.basename(filePath)}`);
-    }
+    filename: __filename
+}, async (bot, mek, m, { from, body }) => {
+    try {
+        const textWithoutPrefix = body.replace(/^[.#/!]/, '').trim().toLowerCase();
+        const filePath = soundMap[textWithoutPrefix];
 
-    // Send the MP3 as an audio message
-    await bot.sendMessage(from, {
-        audio: { url: filePath },  // or can use { file: fs.readFileSync(filePath) }
-        mimetype: 'audio/mpeg',
-        fileName: path.basename(filePath),
-        // optional caption
-        caption: `🔊 *${path.basename(filePath, '.mp3')}*`
-    }, { quoted: mek });
+        if (!filePath || !fs.existsSync(filePath)) return;
 
-    await bot.sendMessage(from, { react: { text: "🎵", key: m.key } });
+        // React 🔊 to the command message
+        await bot.sendMessage(from, { react: { text: "🔊", key: m.key } });
+
+        // Send Audio File as PTT Voice Note
+        await bot.sendMessage(from, {
+            audio: { url: filePath },
+            mimetype: 'audio/mp4',
+            ptt: true,
+            ...getChannelContext()
+        }, { quoted: mek });
+
+    } catch (error) {
+        console.error("Sound Command Error:", error);
+    }
 });
