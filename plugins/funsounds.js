@@ -85,11 +85,11 @@ cmd({
         // Read Audio Buffer directly
         const audioBuffer = fs.readFileSync(filePath);
 
-        // Send Audio File
+        // Send Audio File (Option 1: Without ptt - Voice note ekak widiyata noyawaa)
         await sock.sendMessage(from, {
             audio: audioBuffer,
             mimetype: "audio/mpeg",
-            ptt: true,
+            // ptt: true,   // මෙය ඉවත් කළා / comment කළා
             ...channelContextInfo(),
         }, { quoted: mek });
 
