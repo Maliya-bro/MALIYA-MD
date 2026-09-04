@@ -70,7 +70,7 @@ cmd({
     desc: "Play meme sound effect",
     category: "fun",
     filename: __filename
-}, async (bot, mek, m, { from, q }) => {
+}, async (sock, mek, m, { from, q }) => {
     try {
         if (!q) return;
 
@@ -79,18 +79,18 @@ cmd({
 
         if (!filePath || !fs.existsSync(filePath)) return;
 
-        // React 🔊
-        await bot.sendMessage(from, { react: { text: "🔊", key: m.key } });
+        // React 🔊 to command
+        await sock.sendMessage(from, { react: { text: "🔊", key: m.key } });
 
-        // Read Audio as Buffer
+        // Read Audio Buffer directly
         const audioBuffer = fs.readFileSync(filePath);
 
-        // Send Audio File
-        await bot.sendMessage(from, {
+        // Send Audio File as Working Audio Stream (matching YT DL method)
+        await sock.sendMessage(from, {
             audio: audioBuffer,
-            mimetype: 'audio/mpeg', // MP3 files සදහා audio/mpeg හෝ audio/mp4 භාවිතා වේ
+            mimetype: "audio/mpeg",
             ptt: true,
-            ...getChannelContext()
+            contextInfo: channelContextInfo(),
         }, { quoted: mek });
 
     } catch (error) {
