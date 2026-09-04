@@ -53,7 +53,7 @@ const soundConfig = [
     { file: 'wow.MP3', triggers: ['wow', 'woow', 'supiri'] }
 ];
 
-// Build Map & Exact Case Lowercase Key Matcher
+// Build Map
 const soundMap = {};
 
 soundConfig.forEach(item => {
@@ -63,38 +63,31 @@ soundConfig.forEach(item => {
     });
 });
 
-// Build Regex Dynamic Matcher for Commands
-const triggerKeys = Object.keys(soundMap);
-const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const pattern = `^(${triggerKeys.map(escapeRegex).join('|')})$`;
-const triggerRegex = new RegExp(pattern, 'i');
-
-// ---------- REGISTER COMMAND ----------
+// ---------- REGISTER HANDLER ----------
 cmd({
-    pattern: triggerRegex,
-    alias: [],
-    desc: "Play sound effect",
-    category: "fun",
-    filename: __filename
+    on: "text"
 }, async (bot, mek, m, { from, body }) => {
     try {
+        if (!body) return;
+
+        // Clean prefix if exists (.wow -> wow)
         const textWithoutPrefix = body.replace(/^[.#/!]/, '').trim().toLowerCase();
+
         const filePath = soundMap[textWithoutPrefix];
 
-        if (!filePath || !fs.existsSync(filePath)) return;
+        if (filePath && fs.existsSync(filePath)) {
+            // React 🔊
+            await bot.sendMessage(from, { react: { text: "🔊", key: m.key } });
 
-        // React 🔊 to the command message
-        await bot.sendMessage(from, { react: { text: "🔊", key: m.key } });
-
-        // Send Audio File as PTT Voice Note
-        await bot.sendMessage(from, {
-            audio: { url: filePath },
-            mimetype: 'audio/mp4',
-            ptt: true,
-            ...getChannelContext()
-        }, { quoted: mek });
-
+            // Send Audio File as PTT Voice Note
+            await bot.sendMessage(from, {
+                audio: { url: filePath },
+                mimetype: 'audio/mp4',
+                ptt: true,
+                ...getChannelContext()
+            }, { quoted: mek });
+        }
     } catch (error) {
-        console.error("Sound Command Error:", error);
+        console.error("Sound Player Error:", error);
     }
 });
