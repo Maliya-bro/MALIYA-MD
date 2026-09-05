@@ -1,167 +1,143 @@
 // plugins/anti-spam.js
-// Advanced Anti-Spam with tiered protection
+// Hybrid Anti-Spam (Virtex Auto-Delete + Normal Spam Tiered Mute/Block)
 
 const { cmd } = require("../command");
 const { readSettings } = require("../lib/botSettings");
 
-// ── In‑memory store ──────────────────────────────────────────
-const spamStore = new Map(); // key: "chatJid::senderJid" => { timestamps, state, until, lastWarned }
+const spamStore = new Map(); 
+// key: "chatJid::senderJid" => { timestamps, state, until, lastWarned, warned }
 
-// ✅ Rules
-const WARNING_COUNT = 4;        // 4th message triggers warning
-const MUTE_COUNT = 6;           // within 5s
-const TEMP_BLOCK_COUNT = 14;    // within 10s
-const LONG_BLOCK_COUNT = 30;    // within 20s
-
-const MUTE_DURATION = 10 * 1000;          // 10 seconds
-const TEMP_BLOCK_DURATION = 3 * 60 * 1000; // 3 minutes
-const LONG_BLOCK_DURATION = 60 * 60 * 1000; // 1 hour
-
-// ✅ Windows
-const WINDOW_WARNING = 3 * 1000;   // 3s
-const WINDOW_MUTE = 5 * 1000;      // 5s
-const WINDOW_TEMP = 10 * 1000;     // 10s
-const WINDOW_LONG = 20 * 1000;     // 20s
-
-// ── Helper: Get store key ──────────────────────────────────
 function getKey(chatJid, senderJid) {
   return `${chatJid}::${senderJid}`;
 }
 
-// ── Helper: Count messages in window ──────────────────────
-function countInWindow(timestamps, windowMs) {
-  const now = Date.now();
-  const cutoff = now - windowMs;
-  return timestamps.filter(ts => ts > cutoff).length;
+// 🔥 VIRTEX / BUG PAYLOAD DETECTOR 🔥
+function isVirtexPayload(mek) {
+    if (!mek || !mek.message) return false;
+    
+    try {
+        let text = mek.message.conversation || mek.message.extendedTextMessage?.text || "";
+        if (text.length > 10000) return true; // අකුරු 10,000 ට වැඩි නම්
+
+        const weirdChars = text.match(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\u0300-\u036F]/g);
+        if (weirdChars && weirdChars.length > 500) return true; // නොපෙනෙන අකුරු 500 ට වැඩි නම්
+
+        const rawJson = JSON.stringify(mek.message);
+        if (rawJson.length > 25000) return true; // ලොකු Contact/Location Bug එකක් නම්
+
+        return false;
+    } catch (e) {
+        return false;
+    }
 }
 
-// ── Helper: Clean old timestamps ──────────────────────────
-function cleanTimestamps(timestamps, windowMs = 20000) {
-  const now = Date.now();
-  const cutoff = now - windowMs;
-  return timestamps.filter(ts => ts > cutoff);
-}
-
-// ── Main anti‑spam logic ──────────────────────────────────
+// ── Main logic ──────────────────────────────────
 async function handleAntiSpam(sock, mek, m, { from, sender, senderNumber, isOwner, reply, sessionId }) {
-  // 🔥 BUG FIX: Passed sessionId to readSettings
   const settings = await readSettings(sessionId);
-  if (!settings.anti_spam) return true; // allow message
+  if (!settings.anti_spam) return true; 
 
-  // Owner is exempt
-  if (isOwner) return true;
+  if (isOwner) return true; // Owner ට මේ නීති අදාල නෑ! 😎
 
   const chatJid = from;
   const senderJid = sender;
   const key = getKey(chatJid, senderJid);
-
-  // Get or create user record
-  let record = spamStore.get(key);
-  if (!record) {
-    record = { timestamps: [], state: 'normal', until: 0, warned: false, lastWarned: 0 };
-    spamStore.set(key, record);
-  }
-
   const now = Date.now();
 
-  // ── Clean old timestamps (keep last 60s for safety) ────
-  record.timestamps = cleanTimestamps(record.timestamps, 60000);
-  record.timestamps.push(now);
+  let record = spamStore.get(key);
+  if (!record) {
+    record = { timestamps: [], state: 'normal', until: 0, lastWarned: 0, warned: false };
+    spamStore.set(key, record);
+  }
 
-  // ── 🔥 BUG FIX: Rate-limit Bot's own warnings so it doesn't spam back ────
+  // ==========================================
+  // 🐛 1. VIRTEX / CRASH BUG ACTION
+  // ==========================================
+  if (isVirtexPayload(mek)) {
+      // Bug එකක් ආපු ගමන්, ඒ මැසේජ් එක Auto Delete කරනවා! 🗑️
+      try {
+          await sock.sendMessage(chatJid, { delete: mek.key });
+      } catch(e) {}
+
+      // යූසර්ව කෙලින්ම විනාඩි 2කට Block කරනවා
+      record.state = 'blocked';
+      record.until = now + (2 * 60 * 1000); 
+      record.lastWarned = now;
+      spamStore.set(key, record);
+
+      await reply(`⛔ *VIRTEX / CRASH BUG DETECTED!*\n\n⚠️ මෙම පණිවිඩය WhatsApp Crash කිරීමට එවන ලද්දක් බැවින් එය *Auto Delete* කරන ලදී.\n🚫 *ඔයාව විනාඩි 2කට BLOCK කරනු ලැබුවා!*`);
+      return false; // මැසේජ් එක නවත්තනවා
+  }
+
+  // ==========================================
+  // 💬 2. NORMAL MESSAGE SPAM ACTION
+  // ==========================================
+  
+  // 🚫 දැනටමත් Block වෙලා නම්...
   if (record.state === 'blocked' && record.until > now) {
-    if (now - record.lastWarned > 10000) { // Only warn once every 10 seconds
-      const remaining = Math.ceil((record.until - now) / 1000);
-      const minutes = Math.floor(remaining / 60);
-      const seconds = remaining % 60;
-      let msg = `🚫 *You are temporarily blocked from using this bot!*\n`;
-      msg += `⏳ Remaining: ${minutes}m ${seconds}s\n`;
-      msg += `📌 Reason: Spam detected.\n`;
-      if (remaining > 300) {
-        msg += `\n👑 *Owner can unblock you with:* \`.unblock\` in this chat.`;
+      if (now - record.lastWarned > 10000) { // තත්පර 10කට සැරයක් විතරක් මතක් කරනවා
+          const remaining = Math.ceil((record.until - now) / 1000);
+          const minutes = Math.floor(remaining / 60);
+          const seconds = remaining % 60;
+          await reply(`🚫 *ඔයා දැනට බ්ලොක් කරලයි තියෙන්නේ!*\n⏳ ඉතුරු කාලය: ${minutes}m ${seconds}s\n_(කාලය ඉවර වුණාම Auto Unblock වෙනවා)_`);
+          record.lastWarned = now;
       }
-      await reply(msg);
-      record.lastWarned = now;
-    }
-    return false; // block message
+      return false; 
   }
 
+  // 🔇 දැනටමත් Mute වෙලා නම්...
   if (record.state === 'muted' && record.until > now) {
-    if (now - record.lastWarned > 5000) { // Only warn once every 5 seconds
-      const remaining = Math.ceil((record.until - now) / 1000);
-      await reply(`🔇 *You are muted for ${remaining} seconds due to spam.*`);
+      if (now - record.lastWarned > 3000) { // තත්පර 3කට සැරයක් මතක් කරනවා
+          const remaining = Math.ceil((record.until - now) / 1000);
+          await reply(`🔇 *ඔයා දැනට MUTE කරලයි තියෙන්නේ!*\n⏳ තව තත්පර ${remaining} ක් ඉන්න.`);
+          record.lastWarned = now;
+      }
+      return false; 
+  }
+
+  // කාලය ඉවර නම්, එයාව නිදහස් කරනවා (Auto Unblock / Unmute)
+  if ((record.state === 'blocked' || record.state === 'muted') && record.until <= now) {
+      record.state = 'normal';
+      record.until = 0;
+      record.warned = false;
+  }
+
+  // තත්පර 10ක් ඇතුලත දාපු මැසේජ් විතරක් මතක තියාගන්නවා
+  record.timestamps = record.timestamps.filter(t => now - t < 10000);
+  record.timestamps.push(now);
+  
+  // ⏱️ තත්පර 3ක් ඇතුලත දාපු මැසේජ් ගාන ගන්නවා
+  const count3s = record.timestamps.filter(t => now - t < 3000).length;
+
+  if (count3s >= 5) {
+      // 🚫 Strike 3: මැසේජ් 5ක් තත්පර 3ක් ඇතුලත - විනාඩි 2ක් Block!
+      record.state = 'blocked';
+      record.until = now + (2 * 60 * 1000); // 2 Minutes
       record.lastWarned = now;
-    }
-    return false; // mute message
-  }
+      await reply(`⛔ *SPAM DETECTED!*\n\n🚫 *ඔයා දිගටම ස්පෑම් කරපු නිසා විනාඩි 2කට BLOCK කරනු ලැබුවා!*\n_(විනාඩි 2කට පසුව Auto Unblock වනු ඇත)_`);
+      spamStore.set(key, record);
+      return false;
 
-  // If block/mute expired, reset state
-  if (record.state === 'blocked' && record.until <= now) {
-    record.state = 'normal';
-    record.until = 0;
-    record.warned = false;
-    record.timestamps = [];
-  }
-  if (record.state === 'muted' && record.until <= now) {
-    record.state = 'normal';
-    record.until = 0;
-    record.warned = false;
-  }
+  } else if (count3s === 4) {
+      // 🔇 Strike 2: මැසේජ් 4ක් තත්පර 3ක් ඇතුලත - තත්පර 5ක් Mute!
+      record.state = 'muted';
+      record.until = now + 5000; // 5 Seconds
+      record.lastWarned = now;
+      await reply(`🔇 *Warning!* ඔයා වේගෙන් මැසේජ් දානවා වැඩියි. ඔයාව තත්පර 5කට MUTE කරා!`);
+      spamStore.set(key, record);
+      return false;
 
-  // ── Count messages in each window ──────────────────────
-  const countWarning = countInWindow(record.timestamps, WINDOW_WARNING);
-  const count5s = countInWindow(record.timestamps, WINDOW_MUTE);
-  const count10s = countInWindow(record.timestamps, WINDOW_TEMP);
-  const count20s = countInWindow(record.timestamps, WINDOW_LONG);
-
-  // ── Apply tiered rules ──────────────────────────────────
-  // Tier 4: Long block (1 hour)
-  if (count20s >= LONG_BLOCK_COUNT) {
-    record.state = 'blocked';
-    record.until = now + LONG_BLOCK_DURATION;
-    record.lastWarned = now;
-    await reply(`🚫 *You have been BLOCKED for 1 HOUR due to excessive spamming!*\n\n📌 Contact owner to unblock: \`.unblock\``);
-    spamStore.set(key, record);
-    return false;
-  }
-
-  // Tier 3: Temp block (3 min)
-  if (count10s >= TEMP_BLOCK_COUNT) {
-    record.state = 'blocked';
-    record.until = now + TEMP_BLOCK_DURATION;
-    record.lastWarned = now;
-    await reply(`⛔ *You have been TEMPORARILY BLOCKED for 3 minutes due to spam!*`);
-    spamStore.set(key, record);
-    return false;
-  }
-
-  // Tier 2: Mute (10 sec)
-  if (count5s >= MUTE_COUNT) {
-    record.state = 'muted';
-    record.until = now + MUTE_DURATION;
-    record.lastWarned = now;
-    await reply(`🔇 *You have been MUTED for 10 seconds due to spam!*`);
-    spamStore.set(key, record);
-    return false;
-  }
-
-  // Tier 1: Warning (4 messages within 3 seconds)
-  if (countWarning >= WARNING_COUNT && !record.warned) {
-    record.warned = true;
-    await reply(`⚠️ *Warning!* You are sending too many messages.\n📌 Please slow down to avoid being muted or blocked.`);
-    spamStore.set(key, record);
-  }
-
-  if (record.warned && countWarning < WARNING_COUNT) {
-    record.warned = false;
-    spamStore.set(key, record);
+  } else if (count3s === 3 && !record.warned) {
+      // ⚠️ Strike 1: මැසේජ් 3ක් තත්පර 3ක් ඇතුලත - Warning!
+      record.warned = true;
+      await reply(`⚠️ *Warning!* කරුණාකර ටිකක් හිමින් මැසේජ් දාන්න. නැත්නම් ඔයාව Block වෙයි.`);
+      spamStore.set(key, record);
   }
 
   spamStore.set(key, record);
-  return true; // allow message
+  return true; // සාමාන්‍ය මැසේජ් එකක් නම් යන්න දෙනවා
 }
 
-// ── Command: .unblock (owner only) ────────────────────────
+// ── Command: .unblock (Owner Only) ────────────────────────
 cmd(
   {
     pattern: "unblock",
@@ -198,11 +174,11 @@ cmd(
     spamStore.set(key, record);
 
     const targetName = targetJid.split('@')[0];
-    await reply(`🔓 *Unblocked @${targetName} successfully!*\n✅ They can now use the bot normally.`);
+    await reply(`🔓 *Unblocked @${targetName} successfully!*\n✅ දැන් ආයෙමත් මැසේජ් දාන්න පුළුවන්.`);
   }
 );
 
-// ── Auto cleanup every 5 minutes ──────────────────────────
+// ── Auto cleanup ──────────────────────────
 setInterval(() => {
   const now = Date.now();
   for (const [key, record] of spamStore.entries()) {
