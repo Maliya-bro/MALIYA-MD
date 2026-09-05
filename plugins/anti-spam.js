@@ -5,9 +5,9 @@ const { cmd } = require("../command");
 const { readSettings } = require("../lib/botSettings");
 
 // ── In‑memory store ──────────────────────────────────────────
-const spamStore = new Map(); // key: "chatJid::senderJid" => { timestamps, state, until }
+const spamStore = new Map(); // key: "chatJid::senderJid" => { timestamps, state, until, lastWarned }
 
-// ✅ Updated Warning: 3 seconds, 4 messages
+// ✅ Rules
 const WARNING_COUNT = 4;        // 4th message triggers warning
 const MUTE_COUNT = 6;           // within 5s
 const TEMP_BLOCK_COUNT = 14;    // within 10s
@@ -17,7 +17,7 @@ const MUTE_DURATION = 10 * 1000;          // 10 seconds
 const TEMP_BLOCK_DURATION = 3 * 60 * 1000; // 3 minutes
 const LONG_BLOCK_DURATION = 60 * 60 * 1000; // 1 hour
 
-// ✅ Updated Warning Window: 3 seconds
+// ✅ Windows
 const WINDOW_WARNING = 3 * 1000;   // 3s
 const WINDOW_MUTE = 5 * 1000;      // 5s
 const WINDOW_TEMP = 10 * 1000;     // 10s
@@ -43,9 +43,9 @@ function cleanTimestamps(timestamps, windowMs = 20000) {
 }
 
 // ── Main anti‑spam logic ──────────────────────────────────
-async function handleAntiSpam(sock, mek, m, { from, sender, senderNumber, isOwner, reply }) {
-  // If anti_spam is off, skip
-  const settings = await readSettings();
+async function handleAntiSpam(sock, mek, m, { from, sender, senderNumber, isOwner, reply, sessionId }) {
+  // 🔥 BUG FIX: Passed sessionId to readSettings
+  const settings = await readSettings(sessionId);
   if (!settings.anti_spam) return true; // allow message
 
   // Owner is exempt
@@ -58,7 +58,7 @@ async function handleAntiSpam(sock, mek, m, { from, sender, senderNumber, isOwne
   // Get or create user record
   let record = spamStore.get(key);
   if (!record) {
-    record = { timestamps: [], state: 'normal', until: 0, warned: false };
+    record = { timestamps: [], state: 'normal', until: 0, warned: false, lastWarned: 0 };
     spamStore.set(key, record);
   }
 
@@ -68,24 +68,30 @@ async function handleAntiSpam(sock, mek, m, { from, sender, senderNumber, isOwne
   record.timestamps = cleanTimestamps(record.timestamps, 60000);
   record.timestamps.push(now);
 
-  // ── Check if currently blocked/muted ─────────────────────
+  // ── 🔥 BUG FIX: Rate-limit Bot's own warnings so it doesn't spam back ────
   if (record.state === 'blocked' && record.until > now) {
-    const remaining = Math.ceil((record.until - now) / 1000);
-    const minutes = Math.floor(remaining / 60);
-    const seconds = remaining % 60;
-    let msg = `🚫 *You are temporarily blocked from using this bot!*\n`;
-    msg += `⏳ Remaining: ${minutes}m ${seconds}s\n`;
-    msg += `📌 Reason: Spam detected (too many messages).\n`;
-    if (remaining > 300) { // > 5 min => 1 hour block
-      msg += `\n👑 *Owner can unblock you with:* \`.unblock\` in this chat.`;
+    if (now - record.lastWarned > 10000) { // Only warn once every 10 seconds
+      const remaining = Math.ceil((record.until - now) / 1000);
+      const minutes = Math.floor(remaining / 60);
+      const seconds = remaining % 60;
+      let msg = `🚫 *You are temporarily blocked from using this bot!*\n`;
+      msg += `⏳ Remaining: ${minutes}m ${seconds}s\n`;
+      msg += `📌 Reason: Spam detected.\n`;
+      if (remaining > 300) {
+        msg += `\n👑 *Owner can unblock you with:* \`.unblock\` in this chat.`;
+      }
+      await reply(msg);
+      record.lastWarned = now;
     }
-    await reply(msg);
     return false; // block message
   }
 
   if (record.state === 'muted' && record.until > now) {
-    const remaining = Math.ceil((record.until - now) / 1000);
-    await reply(`🔇 *You are muted for ${remaining} seconds due to spam.*`);
+    if (now - record.lastWarned > 5000) { // Only warn once every 5 seconds
+      const remaining = Math.ceil((record.until - now) / 1000);
+      await reply(`🔇 *You are muted for ${remaining} seconds due to spam.*`);
+      record.lastWarned = now;
+    }
     return false; // mute message
   }
 
@@ -113,6 +119,7 @@ async function handleAntiSpam(sock, mek, m, { from, sender, senderNumber, isOwne
   if (count20s >= LONG_BLOCK_COUNT) {
     record.state = 'blocked';
     record.until = now + LONG_BLOCK_DURATION;
+    record.lastWarned = now;
     await reply(`🚫 *You have been BLOCKED for 1 HOUR due to excessive spamming!*\n\n📌 Contact owner to unblock: \`.unblock\``);
     spamStore.set(key, record);
     return false;
@@ -122,6 +129,7 @@ async function handleAntiSpam(sock, mek, m, { from, sender, senderNumber, isOwne
   if (count10s >= TEMP_BLOCK_COUNT) {
     record.state = 'blocked';
     record.until = now + TEMP_BLOCK_DURATION;
+    record.lastWarned = now;
     await reply(`⛔ *You have been TEMPORARILY BLOCKED for 3 minutes due to spam!*`);
     spamStore.set(key, record);
     return false;
@@ -131,25 +139,24 @@ async function handleAntiSpam(sock, mek, m, { from, sender, senderNumber, isOwne
   if (count5s >= MUTE_COUNT) {
     record.state = 'muted';
     record.until = now + MUTE_DURATION;
+    record.lastWarned = now;
     await reply(`🔇 *You have been MUTED for 10 seconds due to spam!*`);
     spamStore.set(key, record);
     return false;
   }
 
-  // ✅ Tier 1: Warning (4 messages within 3 seconds)
+  // Tier 1: Warning (4 messages within 3 seconds)
   if (countWarning >= WARNING_COUNT && !record.warned) {
     record.warned = true;
-    await reply(`⚠️ *Warning!* You are sending too many messages (4 in 3 seconds).\n📌 Please slow down to avoid being muted or blocked.`);
+    await reply(`⚠️ *Warning!* You are sending too many messages.\n📌 Please slow down to avoid being muted or blocked.`);
     spamStore.set(key, record);
   }
 
-  // Reset warned flag if count drops below threshold
   if (record.warned && countWarning < WARNING_COUNT) {
     record.warned = false;
     spamStore.set(key, record);
   }
 
-  // Save record (if changed)
   spamStore.set(key, record);
   return true; // allow message
 }
@@ -174,6 +181,8 @@ cmd(
     let targetJid = sender;
     if (mentioned && mentioned.length > 0) {
       targetJid = mentioned[0];
+    } else if (mek.message?.extendedTextMessage?.contextInfo?.participant) {
+      targetJid = mek.message.extendedTextMessage.contextInfo.participant;
     }
 
     const key = getKey(chatJid, targetJid);
@@ -189,7 +198,7 @@ cmd(
     spamStore.set(key, record);
 
     const targetName = targetJid.split('@')[0];
-    await reply(`🔓 *Unblocked ${targetName} successfully!*\n✅ They can now use the bot normally.`);
+    await reply(`🔓 *Unblocked @${targetName} successfully!*\n✅ They can now use the bot normally.`);
   }
 );
 
