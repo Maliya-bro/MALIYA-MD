@@ -78,7 +78,12 @@
     "yt-dlp-exec": "latest",
     "youtube-dl-exec": "latest",
     "@danonino/starlyn-scraper": "latest",
-    "liyanaarachchi-animeheavenme": "latest"
+    "liyanaarachchi-animeheavenme": "latest",
+    "crypto-js": "latest",
+    "https": "latest",
+    "crypto": "latest"
+  
+    
 
 
   }
