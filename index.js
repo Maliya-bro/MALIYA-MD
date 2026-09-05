@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
 //  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
-//  FIX: Session reconnect loop with max attempts (403 fix)
+//  FIX: Session reconnect loop with max attempts (403 fix) + Anti-Spam
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -71,7 +71,6 @@ try {
 
 // ── Plugins ──────────────────────────────────────────────────
 const { handleAutoMsg } = require("./plugins/auto_msg.js");
-
 const autoReactPlugin   = require("./plugins/auto-react.js");
 
 let pdfScannerPlugin = null;
@@ -86,6 +85,13 @@ try {
   cmdFixPlugin = require("./plugins/cmd_autofix_confirm.js");
 } catch (e) {
   console.log("⚠️ cmd_autofix_confirm.js not found:", e?.message || e);
+}
+
+let antiSpamPlugin = null;
+try {
+  antiSpamPlugin = require("./plugins/anti-spam.js");
+} catch (e) {
+  console.log("⚠️ anti-spam.js not found:", e?.message || e);
 }
 
 const app  = express();
@@ -147,7 +153,7 @@ async function getConnectableSessions(limit = MAX_ACTIVE_SESSIONS) {
   return col
     .find({
       connectBot:  true,
-      status:      { $nin: ["logged_out", "deleted", "disabled", "invalid"] }, // added "invalid"
+      status:      { $nin: ["logged_out", "deleted", "disabled", "invalid"] },
       primaryFile: { $exists: true },
     })
     .sort({ updatedAt: -1, createdAt: -1 })
@@ -225,6 +231,7 @@ function loadCommandPluginsOnce() {
     fs.readdirSync("./plugins/").forEach((plugin) => {
       if (plugin === "auto_msg.js")   return;
       if (plugin === "antidelete.js") return;
+      if (plugin === "anti-spam.js")  return; // Loaded manually
       if (plugin.endsWith(".js")) {
         require(`./plugins/${plugin}`);
       }
@@ -286,7 +293,6 @@ const reconnectTimers = new Map();
 const startingSessions = new Set();
 let   watcherStarted   = false;
 
-// Expose activeSessions for external API / dashboard access
 global.__maliya_active_sessions = activeSessions;
 
 function getSessionPaths(sessionId) {
@@ -309,12 +315,10 @@ async function cleanupSessionFolder(sessionId) {
   } catch (_) {}
 }
 
-// =============== FIX: MAX RECONNECT ATTEMPTS ===============
 async function scheduleReconnect(sessionId, delayMs = 5000) {
   if (!sessionId)                     return;
   if (reconnectTimers.has(sessionId)) return;
 
-  // Check if session has exceeded max retries
   const session = activeSessions.get(sessionId);
   const attempts = session?.reconnectAttempts || 0;
   if (attempts >= 3) {
@@ -367,7 +371,6 @@ async function startSessionBot(sessionId) {
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version }          = await fetchLatestBaileysVersion();
 
-    // sessionCtx with reconnectAttempts
     const sessionCtx = {
       sessionId,
       authDir,
@@ -376,7 +379,7 @@ async function startSessionBot(sessionId) {
       connected:   false,
       connecting:  true,
       sock:        null,
-      reconnectAttempts: 0,   // reset attempts on fresh start
+      reconnectAttempts: 0,
     };
 
     const sock = makeWASocket({
@@ -407,7 +410,6 @@ async function startSessionBot(sessionId) {
           sessionCtx.connected   = true;
           sessionCtx.connecting  = false;
           sessionCtx.ownerNumber = getOwnerNumberForSock(sock);
-          // reset attempts on successful connection
           sessionCtx.reconnectAttempts = 0;
 
           await updateSessionStatus(sessionId, {
@@ -428,7 +430,7 @@ async function startSessionBot(sessionId) {
             month: "2-digit", day: "2-digit",
           }).format(now);
 
-          const settings = await readSettings(sessionId);
+          const settings = await readSettings(sessionCtx.sessionId);
           const BOT_VERSION = "v4.0.0";
           const up = `
 🌈━━━━━━━━━━━━━🌈
@@ -437,7 +439,7 @@ async function startSessionBot(sessionId) {
 
 ✅✨ Connection : CONNECTED & ONLINE
 ⚡🧬 System     : STABLE | FAST | SECURE
-🛡️🔐 Mode      : ${String(settings.mode || "public").toUpperCase()}
+🛡️🔐 Mode       : ${String(settings.mode || "public").toUpperCase()}
 🎯🧩 Prefix    : ${prefix}
 📍 Work Scope  : ${String(settings.work_scope || "private").toUpperCase()}
 
@@ -473,7 +475,6 @@ async function startSessionBot(sessionId) {
           activeSessions.delete(sessionId);
 
           if (code !== DisconnectReason.loggedOut) {
-            // Increment reconnect attempts
             sessionCtx.reconnectAttempts = (sessionCtx.reconnectAttempts || 0) + 1;
             console.log(`🔁 Session disconnected, reconnecting: ${sessionId} (code: ${code}, attempt: ${sessionCtx.reconnectAttempts})`);
             await updateSessionStatus(sessionId, {
@@ -784,6 +785,19 @@ function attachSessionHandlers(sock, sessionCtx) {
           console.log("AutoReact hook error:", e?.message || e);
         }
 
+        // ── 🔥 ANTI SPAM PLUGIN HOOK 🔥 ───────────────────────────────────
+        if (antiSpamPlugin && typeof antiSpamPlugin.handleAntiSpam === "function") {
+          try {
+            const isAllowed = await antiSpamPlugin.handleAntiSpam(sock, mek, m, {
+              from, sender, senderNumber, isOwner, reply,
+              sessionId: sessionCtx.sessionId
+            });
+            if (!isAllowed) continue messageLoop; // 🚫 Block spammer!
+          } catch (e) {
+            console.log("AntiSpam error:", e?.message);
+          }
+        }
+
         // ── BOT MODE CHECK ─────────────────────────────────────
         const botSettings = await readSettings(sessionCtx.sessionId);
         if (botSettings.mode === "private" && !isOwner) {
@@ -953,7 +967,6 @@ function attachSessionHandlers(sock, sessionCtx) {
 
 /* ==================== EXPRESS ROUTING & APIS ==================== */
 
-// Settings API Router mount කිරීම
 if (settingsApiRouter) {
   app.use("/api/settings", settingsApiRouter);
 }
@@ -1086,7 +1099,6 @@ app.get("/api/pair", async (req, res) => {
       }
     });
 
-    // Wait for noise handshake then request code
     await new Promise((r) => setTimeout(r, 5000));
 
     if (!sock.authState.creds.registered && !codeSent) {
