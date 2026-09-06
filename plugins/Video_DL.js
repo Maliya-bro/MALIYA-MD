@@ -17,7 +17,7 @@ const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 Ｍ𝗔𝗟𝗜𝗬🇦-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -73,6 +73,19 @@ function getFileSizeMB(filePath) {
 
 function sanitizeFileName(name = "youtube_video") {
   return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_video";
+}
+
+// ── Small Caps Font Effect ─────────────
+function toSmallCaps(str = "") {
+    const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+    return String(str)
+        .split("")
+        .map((char) => {
+            const idx = normal.indexOf(char);
+            return idx !== -1 ? small[idx] : char;
+        })
+        .join("");
 }
 
 function getQualityFromChoice(choice) {
@@ -188,20 +201,20 @@ function extractQualityFromTexts(texts) {
   return null;
 }
 
-// 🔥 Single-Sided Layouts 🔥
+// 🔥 Single-Sided Layouts with Small Caps Effect 🔥
 function buildVideoDetails(video) {
-  const title = video.title || "Unknown Title";
-  const channel = video.author?.name || "Unknown Channel";
+  const title = toSmallCaps(video.title || "Unknown Title");
+  const channel = toSmallCaps(video.author?.name || "Unknown Channel");
   const duration = video.timestamp || formatSeconds(video.seconds) || "0:00";
   const views = formatViews(video.views);
   const uploaded = video.ago || "Unknown";
   const url = video.url || "Unavailable";
 
-  return `╭─[ 🎥 *𝗩𝗜𝗗𝗘𝗢 𝗗𝗘𝗧𝗔𝗜𝗟𝗦* ]\n│\n├ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${title}\n├ 👤 *𝗖𝗵𝗮𝗻𝗻𝗲𝗹:* ${channel}\n├ ⏱️ *𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻:* ${duration}\n├ 👀 *𝗩𝗶𝗲𝘄𝘀:* ${views}\n├ 📅 *𝗨𝗽𝗹𝗼𝗮𝗱𝗲𝗱:* ${uploaded}\n├ 🔗 *𝗟𝗶𝗻𝗸:* ${url}\n│\n╰─[ ${generateProgressBar(duration)} ]`;
+  return `╭─[ 🎥 *${toSmallCaps("VIDEO DETAILS")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${title}\n├ 👤 *${toSmallCaps("Channel:")}* ${channel}\n├ ⏱️ *${toSmallCaps("Duration:")}* ${duration}\n├ 👀 *${toSmallCaps("Views:")}* ${views}\n├ 📅 *${toSmallCaps("Uploaded:")}* ${uploaded}\n├ 🔗 *${toSmallCaps("Link:")}* ${url}\n│\n╰─[ ${generateProgressBar(duration)} ]`;
 }
 
 function buildFinalCaption(video, qualityLabel, sizeMB) {
-  return `╭─[ ✅ *𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗗* ]\n│\n├ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${video.title || "Unknown Title"}\n├ 🎞️ *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${qualityLabel}\n├ 📦 *𝗦𝗶𝘇𝗲:* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎞️ *${toSmallCaps("Quality:")}* ${toSmallCaps(qualityLabel)}\n├ 📦 *${toSmallCaps("Size:")}* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 }
 
 async function getYoutube(query) {
@@ -258,7 +271,7 @@ async function reencodeForWhatsApp(inputPath, outputPath) {
 
 function buildStyledVideoMenu(video) {
   const details = buildVideoDetails(video);
-  return details + `\n\n╭─[ 🎥 *𝗩𝗜𝗗𝗘𝗢 𝗤𝗨𝗔𝗟𝗜𝗧𝗬* ]\n│\n├ 📱 *[ 01 ]* ➔ 360p\n├ 📱 *[ 02 ]* ➔ 480p\n├ 📱 *[ 03 ]* ➔ 720p HD\n├ 📱 *[ 04 ]* ➔ 1080p FHD\n│\n╰─[ 👇 *Reply with a Number* ]`;
+  return details + `\n\n╭─[ 🎥 *${toSmallCaps("VIDEO QUALITY")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 360p\n├ 📱 *[ 02 ]* ➔ 480p\n├ 📱 *[ 03 ]* ➔ 720p HD\n├ 📱 *[ 04 ]* ➔ 1080p FHD\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`;
 }
 
 async function sendNumberedVideoMenu(sock, from, mek, video) {
