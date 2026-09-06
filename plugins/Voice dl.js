@@ -109,10 +109,7 @@ function makePendingKey(sender, from) {
 function extractTexts(body, mek, m) {
   const texts = [];
   const direct = [
-    body,
-    m?.body,
-    m?.text,
-    m?.message?.conversation,
+    body, m?.body, m?.text, m?.message?.conversation,
     m?.message?.extendedTextMessage?.text,
     m?.message?.buttonsResponseMessage?.selectedButtonId,
     m?.message?.buttonsResponseMessage?.selectedDisplayText,
@@ -122,8 +119,7 @@ function extractTexts(body, mek, m) {
     m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
     m?.message?.interactiveResponseMessage?.body?.text,
     m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
-    mek?.message?.conversation,
-    mek?.message?.extendedTextMessage?.text,
+    mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
     mek?.message?.buttonsResponseMessage?.selectedButtonId,
     mek?.message?.buttonsResponseMessage?.selectedDisplayText,
     mek?.message?.templateButtonReplyMessage?.selectedId,
@@ -142,15 +138,7 @@ function extractTexts(body, mek, m) {
     if (!raw) continue;
     const parsed = tryParseJsonString(raw);
     if (!parsed) continue;
-    const vals = [
-      parsed.id,
-      parsed.selectedId,
-      parsed.selectedRowId,
-      parsed.title,
-      parsed.display_text,
-      parsed.text,
-      parsed.name,
-    ];
+    const vals = [parsed.id, parsed.selectedId, parsed.selectedRowId, parsed.title, parsed.display_text, parsed.text, parsed.name];
     for (const v of vals) {
       if (v) texts.push(String(v).trim());
     }
@@ -167,48 +155,27 @@ function extractOptionFromTexts(texts) {
   return null;
 }
 
+// 🔥 Single-Sided Layouts 🔥
 function buildSongDetails(video) {
   const title = video.title || "Unknown Title";
   const channel = video.author?.name || "Unknown Channel";
   const duration = video.timestamp || formatSeconds(video.seconds) || "0:00";
   const views = formatViews(video.views);
   const uploaded = video.ago || "Unknown";
-  const videoId = video.videoId || "Unknown";
   const url = video.url || "Unavailable";
 
-  return `┌─❮ 🎵 *𝐒𝐎𝐍𝐆 𝐃𝐄𝐓𝐀𝐈𝐋𝐒* ❯─
-│
-├─► 🎶 *ᴛɪᴛʟᴇ:* ${title}
-├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${channel}
-├─► 🆔 *ᴠɪᴅᴇᴏ ɪᴅ:* ${videoId}
-├─► ⏱️ *ᴅᴜʀᴀᴛɪᴏɴ:* ${duration}
-├─► 👀 *ᴠɪᴇᴡs:* ${views}
-├─► 📅 *ᴜᴘʟᴏᴀᴅᴇᴅ:* ${uploaded}
-├─► 🔗 *ʟɪɴᴋ:* ${url}
-│
-└─❮ ${generateProgressBar(duration)} ❯─`;
+  return `╭─[ 🎵 *𝗦𝗢𝗡𝗚 𝗗𝗘𝗧𝗔𝗜𝗟𝗦* ]\n│\n├ 🎶 *𝗧𝗶𝘁𝗹𝗲:* ${title}\n├ 👤 *𝗖𝗵𝗮𝗻𝗻𝗲𝗹:* ${channel}\n├ ⏱️ *𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻:* ${duration}\n├ 👀 *𝗩𝗶𝗲𝘄𝘀:* ${views}\n├ 📅 *𝗨𝗽𝗹𝗼𝗮𝗱𝗲𝗱:* ${uploaded}\n├ 🔗 *𝗟𝗶𝗻𝗸:* ${url}\n│\n╰─[ ${generateProgressBar(duration)} ]`;
 }
 
 function buildFinalCaption(video, typeLabel, sizeMB) {
-  return `┌─❮ ✅ *𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐂𝐎𝐌𝐏𝐋𝐄𝐓𝐄* ❯─
-│
-├─► 🎵 *ᴛɪᴛʟᴇ:* ${video.title || "Unknown Title"}
-├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${video.author?.name || "Unknown Channel"}
-├─► 🎧 *ᴛʏᴘᴇ:* ${typeLabel}
-├─► ⏱️ *ᴅᴜʀᴀᴛɪᴏɴ:* ${video.timestamp || formatSeconds(video.seconds) || "0:00"}
-├─► 👀 *ᴠɪᴇᴡs:* ${formatViews(video.views)}
-├─► 📦 *sɪᴢᴇ:* ${sizeMB.toFixed(2)} MB
-│
-└─❮ 💾 *MALIYA-〽️D* ❯─`;
+  return `╭─[ ✅ *𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗗* ]\n│\n├ 🎵 *𝗧𝗶𝘁𝗹𝗲:* ${video.title || "Unknown Title"}\n├ 🎧 *𝗧𝘆𝗽𝗲:* ${typeLabel}\n├ 📦 *𝗦𝗶𝘇𝗲:* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 }
 
 async function getYoutube(query) {
   const isUrl = /(youtube\.com|youtu\.be)/i.test(query);
 
   if (isUrl) {
-    const id = query.includes("v=")
-      ? query.split("v=")[1].split("&")[0]
-      : query.split("/").pop().split("?")[0];
+    const id = query.includes("v=") ? query.split("v=")[1].split("&")[0] : query.split("/").pop().split("?")[0];
     const info = await yts({ videoId: id });
     return info;
   }
@@ -220,14 +187,7 @@ async function getYoutube(query) {
 
 function buildStyledAudioMenu(video) {
   const details = buildSongDetails(video);
-  return details + `
-
-┌❮ 🎵 *𝐀𝐔𝐃𝐈𝐎 𝐎𝐏𝐓𝐈𝐎𝐍𝐒* ❯─
-│
-├►*[ 01 ]*➔ 🎶 Audio File (MP3)
-├►*[ 02 ]*➔ 📁 Document File
-│
-└❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1 ᴏʀ 2* ❯─`;
+  return details + `\n\n╭─[ 🎵 *𝗔𝗨𝗗𝗜𝗢 𝗢𝗣𝗧𝗜𝗢𝗡𝗦* ]\n│\n├ 📱 *[ 01 ]* ➔ 🎶 Audio File (MP3)\n├ 📱 *[ 02 ]* ➔ 📁 Document File\n│\n╰─[ 👇 *Reply with 1 or 2* ]`;
 }
 
 async function sendNumberedAudioMenu(sock, from, mek, video) {
@@ -244,7 +204,6 @@ async function sendNumberedAudioMenu(sock, from, mek, video) {
 }
 
 async function sendInteractiveAudioMenu(sock, from, mek, video, sessionId) {
-  // ✅ FIX: readSettings with sessionId
   const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
@@ -256,7 +215,7 @@ async function sendInteractiveAudioMenu(sock, from, mek, video, sessionId) {
         {
           image: { url: video.thumbnail },
           text: buildSongDetails(video),
-          footer: "𝐌𝐀𝐋𝐈𝐘𝐀-𝐌𝐃 | 𝐀𝐔𝐃𝐈𝐎 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐑",
+          footer: "𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗔𝗨𝗗𝗜𝗢 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥",
           interactiveButtons: [
             {
               name: "single_select",
@@ -296,7 +255,15 @@ function isCookiesRelatedError(errText = "") {
   );
 }
 
-async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice) {
+// 🔥 ERROR MSG SENDER WITH CHANNEL CONTEXT 🔥
+async function sendErrorMsg(sock, from, mek, text) {
+  await sock.sendMessage(from, { 
+    text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`,
+    contextInfo: channelContextInfo()
+  }, { quoted: mek });
+}
+
+async function handleAudioDownload(sock, mek, from, sender, optionChoice) {
   const key = makePendingKey(sender, from);
   const pending = pendingMediaChoice[key];
   if (!pending) return;
@@ -308,9 +275,9 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
 
   try {
     const isDoc = optionChoice === "doc";
-    const label = isDoc ? "Document" : "Audio";
 
-    await reply(`⬇️ *ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ* ${label}...`);
+    // ⬇️ Only Reacts for downloading state
+    await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
 
     audioFile = makeTempFile(".mp3");
 
@@ -340,47 +307,48 @@ async function handleAudioDownload(sock, mek, from, sender, reply, optionChoice)
     const sizeMB = getFileSizeMB(audioFile);
     const cleanTitle = sanitizeFileName(pending.video.title);
 
+    // ⬆️ React for uploading state
+    await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
+
+    const msgPayload = {
+      mimetype: "audio/mpeg",
+      fileName: `${cleanTitle}.mp3`,
+      contextInfo: channelContextInfo(),
+    };
+
     if (isDoc || sizeMB > MEDIA_LIMIT_MB) {
-      await sock.sendMessage(
-        from,
-        {
-          document: fs.readFileSync(audioFile),
-          mimetype: "audio/mpeg",
-          fileName: `${cleanTitle}.mp3`,
-          caption: buildFinalCaption(pending.video, "Document MP3", sizeMB),
-        },
-        { quoted: mek }
-      );
+      msgPayload.document = fs.readFileSync(audioFile);
+      msgPayload.caption = buildFinalCaption(pending.video, "Document MP3", sizeMB);
     } else {
-      await sock.sendMessage(
-        from,
-        {
-          audio: fs.readFileSync(audioFile),
-          mimetype: "audio/mpeg",
-          fileName: `${cleanTitle}.mp3`,
-          caption: buildFinalCaption(pending.video, "Audio MP3", sizeMB),
-          ptt: false,
-        },
-        { quoted: mek }
-      );
+      msgPayload.audio = fs.readFileSync(audioFile);
+      msgPayload.caption = buildFinalCaption(pending.video, "Audio MP3", sizeMB);
+      msgPayload.ptt = false;
     }
+
+    await sock.sendMessage(from, msgPayload, { quoted: mek });
+
+    // ✅ React for success
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
     delete pendingMediaChoice[key];
   } catch (e) {
     const errText = (e && (e.stderr || e.message)) || "";
     console.log("AUDIO DOWNLOAD ERROR:", errText);
 
+    // ❌ React for error
+    await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+
     if (isCookiesRelatedError(errText)) {
       const cookies = cookiesStatus();
       if (!cookies.exists) {
-        reply("❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴍɪssɪɴɢ.*\n\nYouTube is blocking this download with a bot-check.\nExport a fresh `cookies.txt` from a logged-in YouTube session and place it in the bot's root folder.");
+        await sendErrorMsg(sock, from, mek, "Download failed! Cookies missing. Export fresh cookies.txt.");
       } else if (cookies.sizeBytes === 0) {
-        reply("❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs.ᴛxᴛ ɪs ᴇᴍᴘᴛʏ.*\n\nRe-export cookies.txt from a logged-in YouTube session (make sure you're actually signed in when exporting).");
+        await sendErrorMsg(sock, from, mek, "Download failed! cookies.txt is empty.");
       } else {
-        reply("❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴇxᴘɪʀᴇᴅ ᴏʀ ɪɴᴠᴀʟɪᴅ.*\n\nYour saved cookies.txt is no longer valid. Export a fresh one from a logged-in YouTube session and replace the old file.");
+        await sendErrorMsg(sock, from, mek, "Download failed! Cookies expired. Export fresh cookies.txt.");
       }
     } else {
-      reply("❌ *ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ/sᴇɴᴅɪɴɢ ᴀᴜᴅɪᴏ.*");
+      await sendErrorMsg(sock, from, mek, "Error while downloading/sending audio.");
     }
 
     delete pendingMediaChoice[key];
@@ -396,19 +364,20 @@ cmd(
   {
     pattern: "song",
     alias: ["play", "ytmp3", "yta"],
-    react: "🎵",
+    react: "🔍", // React instead of search text
     desc: "Download YouTube audio with options",
     category: "download",
     filename: __filename,
   },
-  async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
+  async (sock, mek, m, { from, q, sender, sessionId }) => {
     try {
-      if (!q) return reply("🎵 *ᴘʟᴇᴀsᴇ ᴘʀᴏᴠɪᴅᴇ ᴀ sᴏɴɢ ɴᴀᴍᴇ ᴏʀ ʏᴏᴜᴛᴜʙᴇ ʟɪɴᴋ.*");
-
-      await reply("🔍 *sᴇᴀʀᴄʜɪɴɢ ᴀᴜᴅɪᴏ...*");
+      if (!q) return await sendErrorMsg(sock, from, mek, "Please provide a song name or YouTube link.");
 
       const video = await getYoutube(q);
-      if (!video) return reply("❌ *ɴᴏ ʀᴇsᴜʟᴛs ғᴏᴜɴᴅ.*");
+      if (!video) {
+        await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+        return await sendErrorMsg(sock, from, mek, "No results found.");
+      }
 
       const key = makePendingKey(sender, from);
 
@@ -419,11 +388,11 @@ cmd(
         isProcessing: false,
       };
 
-      // ✅ FIX: pass sessionId
       await sendInteractiveAudioMenu(sock, from, mek, video, sessionId);
     } catch (e) {
       console.log("SONG MENU ERROR:", e && e.message);
-      reply("❌ *ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴘʀᴇᴘᴀʀɪɴɢ ᴀᴜᴅɪᴏ ᴍᴇɴᴜ.*");
+      await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+      await sendErrorMsg(sock, from, mek, "Error while preparing audio menu.");
     }
   }
 );
@@ -434,7 +403,7 @@ replyHandlers.push({
     return !!pendingMediaChoice[key];
   },
 
-  function: async (sock, mek, m, { from, body, sender, reply }) => {
+  function: async (sock, mek, m, { from, body, sender }) => {
     const key = makePendingKey(sender, from);
     const pending = pendingMediaChoice[key];
     if (!pending || pending.isProcessing) return;
@@ -448,7 +417,7 @@ replyHandlers.push({
 
     if (!choice) return;
 
-    return handleAudioDownload(sock, mek, from, sender, reply, choice);
+    return handleAudioDownload(sock, mek, from, sender, choice);
   },
 });
 
