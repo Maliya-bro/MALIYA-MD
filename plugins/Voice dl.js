@@ -16,10 +16,8 @@ ffmpeg.setFfprobePath(ffprobePath);
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
-
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡ𝗟𝗜𝗬𝗔-〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -31,18 +29,6 @@ function channelContextInfo() {
       serverMessageId: -1,
     },
   };
-}
-
-function cookiesStatus() {
-  if (!fs.existsSync(COOKIES_PATH)) {
-    return { exists: false, sizeBytes: 0 };
-  }
-  try {
-    const stat = fs.statSync(COOKIES_PATH);
-    return { exists: true, sizeBytes: stat.size };
-  } catch {
-    return { exists: false, sizeBytes: 0 };
-  }
 }
 
 const MEDIA_LIMIT_MB = 45;
@@ -168,7 +154,7 @@ function buildSongDetails(video) {
 }
 
 function buildFinalCaption(video, typeLabel, sizeMB) {
-  return `╭─[ ✅ *𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗗* ]\n│\n├ 🎵 *𝗧𝗶𝘁𝗹𝗲:* ${video.title || "Unknown Title"}\n├ 🎧 *𝗧𝘆𝗽𝗲:* ${typeLabel}\n├ 📦 *𝗦𝗶𝘇𝗲:* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+  return `╭─[ ✅ *𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗱𝗘𝗗* ]\n│\n├ 🎵 *𝗧𝗶𝘁𝗹𝗲:* ${video.title || "Unknown Title"}\n├ 🎧 *𝗧𝘆𝗽𝗲:* ${typeLabel}\n├ 📦 *𝗦𝗶𝘇𝗲:* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 }
 
 async function getYoutube(query) {
@@ -244,18 +230,7 @@ async function sendInteractiveAudioMenu(sock, from, mek, video, sessionId) {
   return sendNumberedAudioMenu(sock, from, mek, video);
 }
 
-function isCookiesRelatedError(errText = "") {
-  const t = String(errText).toLowerCase();
-  return (
-    t.includes("sign in to confirm") ||
-    t.includes("not a bot") ||
-    t.includes("cookies") ||
-    t.includes("login required") ||
-    (t.includes("private video") && t.includes("sign in"))
-  );
-}
-
-// 🔥 ERROR MSG SENDER WITH CHANNEL CONTEXT 🔥
+// 🔥 ERROR MSG SENDER WITH REAL ERROR DISPLAY 🔥
 async function sendErrorMsg(sock, from, mek, text) {
   await sock.sendMessage(from, { 
     text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`,
@@ -281,7 +256,7 @@ async function handleAudioDownload(sock, mek, from, sender, optionChoice) {
 
     audioFile = makeTempFile(".mp3");
 
-    const cookies = cookiesStatus();
+    // 🔥 NO COOKIES: Clean & Direct Android/Web Client Request 🔥
     const ytArgs = {
       extractAudio: true,
       audioFormat: "mp3",
@@ -293,10 +268,6 @@ async function handleAudioDownload(sock, mek, from, sender, optionChoice) {
       extractorArgs: "youtube:player_client=android,web",
       addHeader: ["referer:youtube.com"],
     };
-
-    if (cookies.exists && cookies.sizeBytes > 0) {
-      ytArgs.cookies = COOKIES_PATH;
-    }
 
     await ytDlp(pending.video.url, ytArgs);
 
@@ -332,24 +303,16 @@ async function handleAudioDownload(sock, mek, from, sender, optionChoice) {
 
     delete pendingMediaChoice[key];
   } catch (e) {
-    const errText = (e && (e.stderr || e.message)) || "";
+    // 🔥 මෙතනදී සැබෑ Error එක (yt-dlp stderr හෝ message) අල්ලලා WhatsApp එකට දෙනවා 🔥
+    const errText = (e && (e.stderr || e.message)) || "Unknown Error";
     console.log("AUDIO DOWNLOAD ERROR:", errText);
 
     // ❌ React for error
     await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
 
-    if (isCookiesRelatedError(errText)) {
-      const cookies = cookiesStatus();
-      if (!cookies.exists) {
-        await sendErrorMsg(sock, from, mek, "Download failed! Cookies missing. Export fresh cookies.txt.");
-      } else if (cookies.sizeBytes === 0) {
-        await sendErrorMsg(sock, from, mek, "Download failed! cookies.txt is empty.");
-      } else {
-        await sendErrorMsg(sock, from, mek, "Download failed! Cookies expired. Export fresh cookies.txt.");
-      }
-    } else {
-      await sendErrorMsg(sock, from, mek, "Error while downloading/sending audio.");
-    }
+    // සැබෑ Error එකේ පේළි කීපයක් හෝ මුල් අකුරු 150 WhatsApp එකේ පෙන්නයි
+    const cleanErr = String(errText).replace(/\n/g, " ").trim();
+    await sendErrorMsg(sock, from, mek, `Audio Download Failed: ${cleanErr.substring(0, 150)}`);
 
     delete pendingMediaChoice[key];
   } finally {
@@ -364,7 +327,7 @@ cmd(
   {
     pattern: "song",
     alias: ["play", "ytmp3", "yta"],
-    react: "🔍", // React instead of search text
+    react: "🔍",
     desc: "Download YouTube audio with options",
     category: "download",
     filename: __filename,
