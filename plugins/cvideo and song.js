@@ -36,6 +36,20 @@ function isGroupJid(jid = "") {
   return typeof jid === "string" && jid.endsWith("@g.us");
 }
 
+/* ================= CHANNEL CONTEXT ================= */
+
+function channelContextInfo() {
+  return {
+    forwardingScore: 999,
+    isForwarded: true,
+    forwardedNewsletterMessageInfo: {
+      newsletterJid: "120363427174988449@newsletter",
+      newsletterName: "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁",
+      serverMessageId: -1,
+    },
+  };
+}
+
 /* ================= HELPERS ================= */
 
 function getBodyFromMek(mek) {
@@ -287,7 +301,7 @@ async function downloadVideo(videoUrl, outPath, quality = 480) {
   return outPath;
 }
 
-/* ================= SENDERS ================= */
+/* ================= SENDERS (with context only) ================= */
 
 async function sendAudioToGroup(bot, quoted, target, video) {
   await bot.sendMessage(
@@ -295,6 +309,7 @@ async function sendAudioToGroup(bot, quoted, target, video) {
     {
       image: { url: video.thumbnail },
       caption: makeSongCaption(video),
+      contextInfo: channelContextInfo(),
     },
     { quoted }
   );
@@ -313,6 +328,7 @@ async function sendAudioToGroup(bot, quoted, target, video) {
         mimetype: "audio/mpeg",
         fileName: `${sanitizeFileName(video.title)}.mp3`,
         ptt: false,
+        contextInfo: channelContextInfo(),
       },
       { quoted }
     );
@@ -323,7 +339,7 @@ async function sendAudioToGroup(bot, quoted, target, video) {
 
 async function prepareVideoFile(video) {
   const VIDEO_LIMIT_MB = 45;
-  const quality = 480; // you can adjust this (360, 480, 720, etc.)
+  const quality = 480;
   let rawFile = null;
   let fixedFile = null;
 
@@ -365,6 +381,7 @@ async function sendVideoOnlyToGroup(bot, quoted, target, video) {
           mimetype: "video/mp4",
           fileName: prepared.fileName,
           caption: makeVideoCaption(video, prepared.sizeMB, "Document"),
+          contextInfo: channelContextInfo(),
         },
         { quoted }
       );
@@ -377,6 +394,7 @@ async function sendVideoOnlyToGroup(bot, quoted, target, video) {
           fileName: prepared.fileName,
           caption: makeVideoCaption(video, prepared.sizeMB, "Playable Video"),
           gifPlayback: false,
+          contextInfo: channelContextInfo(),
         },
         { quoted }
       );
@@ -403,6 +421,7 @@ async function sendVideoAndAudioToGroup(bot, quoted, target, video) {
           mimetype: "video/mp4",
           fileName: prepared.fileName,
           caption: makeVideoCaption(video, prepared.sizeMB, "Document"),
+          contextInfo: channelContextInfo(),
         },
         { quoted }
       );
@@ -415,12 +434,12 @@ async function sendVideoAndAudioToGroup(bot, quoted, target, video) {
           fileName: prepared.fileName,
           caption: makeVideoCaption(video, prepared.sizeMB, "Playable Video"),
           gifPlayback: false,
+          contextInfo: channelContextInfo(),
         },
         { quoted }
       );
     }
 
-    // small delay
     await new Promise((resolve) => setTimeout(resolve, 1500));
 
     // Audio
@@ -436,6 +455,7 @@ async function sendVideoAndAudioToGroup(bot, quoted, target, video) {
         mimetype: "audio/mpeg",
         fileName: `${sanitizeFileName(video.title)}.mp3`,
         ptt: false,
+        contextInfo: channelContextInfo(),
       },
       { quoted }
     );
@@ -488,7 +508,10 @@ async function executeSendMode(bot, quoted, from, target, targetName, video, mod
     await sendAudioToGroup(bot, quoted, target, video);
     await bot.sendMessage(
       from,
-      { text: `✅ Audio sent successfully to *${targetName}*.` },
+      { 
+        text: `✅ Audio sent successfully to *${targetName}*.`,
+        contextInfo: channelContextInfo(),
+      },
       { quoted }
     );
     return;
@@ -498,7 +521,10 @@ async function executeSendMode(bot, quoted, from, target, targetName, video, mod
     await sendVideoOnlyToGroup(bot, quoted, target, video);
     await bot.sendMessage(
       from,
-      { text: `✅ Video sent successfully to *${targetName}*.` },
+      { 
+        text: `✅ Video sent successfully to *${targetName}*.`,
+        contextInfo: channelContextInfo(),
+      },
       { quoted }
     );
     return;
@@ -507,7 +533,10 @@ async function executeSendMode(bot, quoted, from, target, targetName, video, mod
   if (mode === "video_audio") {
     await bot.sendMessage(
       from,
-      { text: `📦 Sending video and audio to *${targetName}*...` },
+      { 
+        text: `📦 Sending video and audio to *${targetName}*...`,
+        contextInfo: channelContextInfo(),
+      },
       { quoted }
     );
 
@@ -515,7 +544,10 @@ async function executeSendMode(bot, quoted, from, target, targetName, video, mod
 
     await bot.sendMessage(
       from,
-      { text: `✅ Video and audio sent successfully to *${targetName}*.` },
+      { 
+        text: `✅ Video and audio sent successfully to *${targetName}*.`,
+        contextInfo: channelContextInfo(),
+      },
       { quoted }
     );
     return;
@@ -641,6 +673,7 @@ cmd(
           text: makePreviewCaption(video),
           footer: "MALIYA-MD | Media Sender",
           image: { url: video.thumbnail },
+          contextInfo: channelContextInfo(),
           buttons: [
             { id: "cmode:audio", text: "🎵 Send Audio" },
             { id: "cmode:video", text: "🎬 Send Video" },
@@ -678,7 +711,10 @@ global.pluginHooks.push({
         delete pending[key];
         await bot.sendMessage(
           from,
-          { text: "Selection expired. Please run .csend again." },
+          { 
+            text: "Selection expired. Please run .csend again.",
+            contextInfo: channelContextInfo(),
+          },
           { quoted: mek }
         );
         return;
@@ -704,7 +740,10 @@ global.pluginHooks.push({
             delete pending[key];
             await bot.sendMessage(
               from,
-              { text: `📤 Sending to *${targetName}*...` },
+              { 
+                text: `📤 Sending to *${targetName}*...`,
+                contextInfo: channelContextInfo(),
+              },
               { quoted: mek }
             );
             await executeSendMode(bot, mek, from, target, targetName, p.video, mode);
@@ -725,6 +764,7 @@ global.pluginHooks.push({
           from,
           {
             text: `🎯 *Selected:* ${mode === "audio" ? "Send Audio" : mode === "video" ? "Send Video" : "Send Video & Audio"}\n\nReply with target group number:\n\n${list}`,
+            contextInfo: channelContextInfo(),
           },
           { quoted: mek }
         );
@@ -738,7 +778,10 @@ global.pluginHooks.push({
         if (num < 1 || num > p.groups.length) {
           await bot.sendMessage(
             from,
-            { text: `Invalid number. Reply 1-${p.groups.length} only.` },
+            { 
+              text: `Invalid number. Reply 1-${p.groups.length} only.`,
+              contextInfo: channelContextInfo(),
+            },
             { quoted: mek }
           );
           return;
@@ -755,7 +798,10 @@ global.pluginHooks.push({
 
         await bot.sendMessage(
           from,
-          { text: `📤 Sending to *${targetName}*...` },
+          { 
+            text: `📤 Sending to *${targetName}*...`,
+            contextInfo: channelContextInfo(),
+          },
           { quoted: mek }
         );
 
