@@ -1,12 +1,14 @@
-const { cmd, replyHandlers } = require("../command");
+const { cmd } = require("../command");
 const ytDlp = require("youtube-dl-exec");
 const yts = require("yt-search");
 const fs = require("fs");
+const axios = require("axios");
 const path = require("path");
 const crypto = require("crypto");
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 const ffprobePath = require("@ffprobe-installer/ffprobe").path;
+const { sendButtons } = require("gifted-btns");
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
@@ -16,8 +18,6 @@ ffmpeg.setFfprobePath(ffprobePath);
 const STORE_PATH = path.join(__dirname, "csong_targets.json");
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
-
-const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
 
 function readStore() {
   try {
@@ -36,52 +36,81 @@ function isGroupJid(jid = "") {
   return typeof jid === "string" && jid.endsWith("@g.us");
 }
 
-/* ================= CONTEXT & HELPERS ================= */
+/* ================= HELPERS ================= */
 
-const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
-
-function channelContextInfo() {
-  return {
-    forwardingScore: 999,
-    isForwarded: true,
-    forwardedNewsletterMessageInfo: {
-      newsletterJid: CHANNEL_JID,
-      newsletterName: CHANNEL_NAME,
-      serverMessageId: -1,
-    },
-  };
-}
-
-function cookiesStatus() {
-  if (!fs.existsSync(COOKIES_PATH)) {
-    return { exists: false, sizeBytes: 0 };
-  }
-  try {
-    const stat = fs.statSync(COOKIES_PATH);
-    return { exists: true, sizeBytes: stat.size };
-  } catch {
-    return { exists: false, sizeBytes: 0 };
-  }
-}
-
-function isCookiesRelatedError(errText = "") {
-  const t = String(errText).toLowerCase();
+function getBodyFromMek(mek) {
+  const msg = mek?.message || {};
   return (
-    t.includes("sign in to confirm") ||
-    t.includes("not a bot") ||
-    t.includes("cookies") ||
-    t.includes("login required") ||
-    (t.includes("private video") && t.includes("sign in"))
+    msg.conversation ||
+    msg.extendedTextMessage?.text ||
+    msg.imageMessage?.caption ||
+    msg.videoMessage?.caption ||
+    msg.buttonsResponseMessage?.selectedButtonId ||
+    msg.buttonsResponseMessage?.selectedDisplayText ||
+    msg.templateButtonReplyMessage?.selectedId ||
+    msg.templateButtonReplyMessage?.selectedDisplayText ||
+    msg.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    msg.listResponseMessage?.title ||
+    msg.interactiveResponseMessage?.body?.text ||
+    ""
   );
 }
 
 function tryParseJsonString(s) {
-  try { return JSON.parse(s); } catch { return null; }
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+function extractTextsFromMek(mek) {
+  const msg = mek?.message || {};
+  const texts = [];
+
+  const vals = [
+    msg.conversation,
+    msg.extendedTextMessage?.text,
+    msg.imageMessage?.caption,
+    msg.videoMessage?.caption,
+    msg.buttonsResponseMessage?.selectedButtonId,
+    msg.buttonsResponseMessage?.selectedDisplayText,
+    msg.templateButtonReplyMessage?.selectedId,
+    msg.templateButtonReplyMessage?.selectedDisplayText,
+    msg.listResponseMessage?.singleSelectReply?.selectedRowId,
+    msg.listResponseMessage?.title,
+    msg.interactiveResponseMessage?.body?.text,
+    msg.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
+  ];
+
+  for (const v of vals) {
+    if (v) texts.push(String(v).trim());
+  }
+
+  const raw = msg.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  if (raw) {
+    const parsed = tryParseJsonString(raw);
+    if (parsed) {
+      const pvals = [
+        parsed.id,
+        parsed.selectedId,
+        parsed.selectedRowId,
+        parsed.title,
+        parsed.display_text,
+        parsed.text,
+        parsed.name,
+      ];
+      for (const v of pvals) {
+        if (v) texts.push(String(v).trim());
+      }
+    }
+  }
+
+  return [...new Set(texts.filter(Boolean))];
 }
 
 function normalizeText(s = "") {
-  return String(s).replace(/\r/g, "").replace(/\n+/g, "\n").replace(/\s+/g, " ").trim().toUpperCase();
+  return String(s).replace(/\s+/g, " ").trim().toUpperCase();
 }
 
 function getSenderJid(sock, mek) {
@@ -92,10 +121,32 @@ function makePendingKey(senderJid, from) {
   return `${from || ""}::${(senderJid || "").split(":")[0]}`;
 }
 
+function makeTempFile(ext = ".mp4") {
+  const id = crypto.randomBytes(6).toString("hex");
+  return path.join(TEMP_DIR, `${Date.now()}_${id}${ext}`);
+}
+
+function safeUnlink(file) {
+  try {
+    if (file && fs.existsSync(file)) fs.unlinkSync(file);
+  } catch {}
+}
+
+function getFileSizeMB(filePath) {
+  const stats = fs.statSync(filePath);
+  return stats.size / (1024 * 1024);
+}
+
+function sanitizeFileName(name = "youtube_media") {
+  return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_media";
+}
+
 async function getYoutube(query) {
   const isUrl = /(youtube\.com|youtu\.be)/i.test(query);
   if (isUrl) {
-    const id = query.includes("v=") ? query.split("v=")[1].split("&")[0] : query.split("/").pop().split("?")[0];
+    const id = query.includes("v=")
+      ? query.split("v=")[1].split("&")[0]
+      : query.split("/").pop().split("?")[0];
     const r = await yts({ videoId: id });
     return r?.title ? r : null;
   }
@@ -104,7 +155,9 @@ async function getYoutube(query) {
 }
 
 function generateProgressBar(duration) {
-  return `▰▰▰▰▰▰▰ *${duration || "0:00"}*`;
+  const totalBars = 10;
+  const bar = "─".repeat(totalBars);
+  return `*00:00* ${bar}○ *${duration || "0:00"}*`;
 }
 
 async function getGroupName(bot, jid) {
@@ -114,15 +167,6 @@ async function getGroupName(bot, jid) {
   } catch {
     return jid;
   }
-}
-
-function sanitizeFileName(name = "youtube_media") {
-  return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_media";
-}
-
-function getFileSizeMB(filePath) {
-  const stats = fs.statSync(filePath);
-  return stats.size / (1024 * 1024);
 }
 
 async function reencodeForWhatsApp(inputPath, outputPath) {
@@ -135,8 +179,8 @@ async function reencodeForWhatsApp(inputPath, outputPath) {
         "-pix_fmt yuv420p",
         "-profile:v main",
         "-level 3.1",
-        "-preset fast",
-        "-crf 26",
+        "-preset veryfast",
+        "-crf 28",
         "-maxrate 1200k",
         "-bufsize 2400k",
         "-vf scale='min(854,iw)':-2"
@@ -148,123 +192,90 @@ async function reencodeForWhatsApp(inputPath, outputPath) {
   });
 }
 
-function safeUnlink(file) {
-  try {
-    if (file && fs.existsSync(file)) fs.unlinkSync(file);
-  } catch {}
-}
-
-// 🔥 Single-Sided Layouts 🔥
-
-function makeTargetBox(title, desc) {
-    return `╭─[ 🎯 *${title}* ]\n│\n├ ${desc}\n╰──────────────⮞`;
-}
-
-function buildMenuCaption(video) {
+function makePreviewCaption(video, extraLine = "") {
   const title = video?.title || "Unknown Title";
   const channel = video?.author?.name || "Unknown";
   const duration = video?.timestamp || "0:00";
-  
-  let msg = `╭─[ 🎯 *𝗖𝗛𝗢𝗢𝗦𝗘 𝗠𝗢𝗗𝗘* ]\n│\n`;
-  msg += `├ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${title}\n`;
-  msg += `├ 👤 *𝗖𝗵𝗮𝗻𝗻𝗲𝗹:* ${channel}\n`;
-  msg += `├ ⏱️ *𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻:* ${duration}\n│\n`;
-  msg += `├ 👇 *Reply with a Number:*\n│\n`;
-  msg += `├ 📱 *[ 01 ]* 🎵 Send Audio\n`;
-  msg += `├ 📱 *[ 02 ]* 🎬 Send Video\n`;
-  msg += `├ 📱 *[ 03 ]* 📦 Send Both\n│\n`;
-  msg += `╰──────────────⮞`;
-  return msg;
+  const views = Number(video?.views || 0).toLocaleString();
+  const uploaded = video?.ago || "Unknown";
+  const progressBar = generateProgressBar(duration);
+
+  return `
+🎬 *${title}*
+
+👤 *Channel:* ${channel}
+⏱ *Duration:* ${duration}
+👀 *Views:* ${views}
+📅 *Uploaded:* ${uploaded}
+
+${progressBar}
+${extraLine ? `\n\n${extraLine}` : ""}
+  `.trim();
 }
 
-function buildGroupSelectionCaption(names, mode) {
-  let modeText = mode === "audio" ? "Audio" : mode === "video" ? "Video" : "Video & Audio";
-  let msg = `╭─[ 🎯 *𝗦𝗘𝗟𝗘𝗖𝗧 𝗚𝗥𝗢𝗨𝗣* ]\n│\n`;
-  msg += `├ 📌 *𝗠𝗼𝗱𝗲:* ${modeText}\n│\n`;
-  msg += `├ 👇 *Reply with Group Number:*\n│\n`;
-  names.forEach((n, i) => {
-      msg += `├ 📱 *[ ${String(i + 1).padStart(2, "0")} ]* 👥 ${n}\n`;
-  });
-  msg += `│\n╰──────────────⮞`;
-  return msg;
-}
-
-function makeFinalCaption(video, sizeMB, modeLabel) {
+function makeSongCaption(video) {
   const title = video?.title || "Unknown Title";
   const channel = video?.author?.name || "Unknown";
   const duration = video?.timestamp || "0:00";
+  const views = Number(video?.views || 0).toLocaleString();
+  const uploaded = video?.ago || "Unknown";
+  const progressBar = generateProgressBar(duration);
 
-  return `╭─[ ✅ *𝗠𝗘𝗗𝗜𝗔 𝗦𝗘𝗡𝗧* ]\n│\n├ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${title}\n├ 👤 *𝗖𝗵𝗮𝗻𝗻𝗲𝗹:* ${channel}\n├ ⏱️ *𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻:* ${duration}\n├ 📦 *𝗦𝗶𝘇𝗲:* ${sizeMB.toFixed(2)} MB\n├ 📁 *𝗠𝗼𝗱𝗲:* ${modeLabel}\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+  return `
+🎵 *${title}*
+
+👤 *Channel:* ${channel}
+⏱ *Duration:* ${duration}
+👀 *Views:* ${views}
+📅 *Uploaded:* ${uploaded}
+
+${progressBar}
+
+🍀 *ENJOY YOUR SONG* 🍀
+> USE HEADPHONES FOR THE BEST EXPERIENCE 🎧🎧🎧🎧🎧🎧🎧
+  `.trim();
 }
 
-// Send Error function
-async function sendErrorMsg(sock, from, mek, text) {
-    await sock.sendMessage(from, { 
-        text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`,
-        contextInfo: channelContextInfo()
-    }, { quoted: mek });
+function makeVideoCaption(video, sizeMB, modeLabel = "Video") {
+  const title = video?.title || "Unknown Title";
+  const channel = video?.author?.name || "Unknown";
+  const duration = video?.timestamp || "0:00";
+  const views = Number(video?.views || 0).toLocaleString();
+  const uploaded = video?.ago || "Unknown";
+
+  return `🎬 *${title}*
+
+👤 *Channel:* ${channel}
+⏱ *Duration:* ${duration}
+👀 *Views:* ${views}
+📅 *Uploaded:* ${uploaded}
+📦 *Size:* ${sizeMB.toFixed(2)} MB
+📁 *Mode:* ${modeLabel}`;
 }
 
-/* ================= DOWNLOADERS & SENDERS ================= */
+/* ================= DOWNLOAD FUNCTIONS (using yt-dlp) ================= */
 
-async function sendAudioToGroup(bot, target, video, from, originalMek) {
-  await bot.sendMessage(from, { react: { text: "⬇️", key: originalMek.key } });
-
-  const audioFile = path.join(TEMP_DIR, `${Date.now()}_${Math.random().toString(16).slice(2)}.mp3`);
-  
-  const cookies = cookiesStatus();
+async function downloadAudio(videoUrl, outPath) {
   const ytArgs = {
     extractAudio: true,
     audioFormat: "mp3",
     audioQuality: "0",
-    output: audioFile,
+    output: outPath,
     noWarnings: true,
     noCheckCertificates: true,
     noPlaylist: true,
     extractorArgs: "youtube:player_client=android,web",
     addHeader: ["referer:youtube.com"],
   };
-
-  if (cookies.exists && cookies.sizeBytes > 0) {
-    ytArgs.cookies = COOKIES_PATH;
-  }
-
-  await ytDlp(video.url, ytArgs);
-
-  if (!fs.existsSync(audioFile)) throw new Error("Audio download failed.");
-
-  await bot.sendMessage(from, { react: { text: "⬆️", key: originalMek.key } });
-  const sizeMB = getFileSizeMB(audioFile);
-
-  await bot.sendMessage(target, {
-    audio: fs.readFileSync(audioFile),
-    mimetype: "audio/mpeg",
-    fileName: `${sanitizeFileName(video.title)}.mp3`,
-    contextInfo: channelContextInfo(),
-  });
-
-  await bot.sendMessage(target, { 
-      text: makeFinalCaption(video, sizeMB, "Audio Track"),
-      contextInfo: channelContextInfo() 
-  });
-
-  safeUnlink(audioFile);
+  await ytDlp(videoUrl, ytArgs);
+  return outPath;
 }
 
-async function prepareVideoFile(video, from, originalMek, bot) {
-  const VIDEO_LIMIT_MB = 45;
-  await bot.sendMessage(from, { react: { text: "⬇️", key: originalMek.key } });
-
-  const stamp = Date.now();
-  const rawFile = path.join(TEMP_DIR, `cmedia_raw_${stamp}.mp4`);
-  const fixedFile = path.join(TEMP_DIR, `cmedia_fixed_${stamp}.mp4`);
-
-  const cookies = cookiesStatus();
-  const formatStr = `bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360]/best`;
-  
+async function downloadVideo(videoUrl, outPath, quality = 480) {
+  const formatStr = `bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}]/best`;
   const ytArgs = {
     format: formatStr,
-    output: rawFile,
+    output: outPath,
     ffmpegLocation: ffmpegPath,
     noWarnings: true,
     noCheckCertificates: true,
@@ -272,268 +283,490 @@ async function prepareVideoFile(video, from, originalMek, bot) {
     extractorArgs: "youtube:player_client=android,web",
     addHeader: ["referer:youtube.com"],
   };
-
-  if (cookies.exists && cookies.sizeBytes > 0) {
-    ytArgs.cookies = COOKIES_PATH;
-  }
-
-  await ytDlp(video.url, ytArgs);
-
-  await bot.sendMessage(from, { react: { text: "🛠", key: originalMek.key } });
-  await reencodeForWhatsApp(rawFile, fixedFile);
-
-  const sizeMB = getFileSizeMB(fixedFile);
-  const fileName = `${sanitizeFileName(video.title)}.mp4`;
-
-  return { rawFile, fixedFile, sizeMB, fileName, asDocument: sizeMB > VIDEO_LIMIT_MB };
+  await ytDlp(videoUrl, ytArgs);
+  return outPath;
 }
 
-async function sendVideoOnlyToGroup(bot, target, video, from, originalMek) {
-  let prepared = null;
+/* ================= SENDERS ================= */
+
+async function sendAudioToGroup(bot, quoted, target, video) {
+  await bot.sendMessage(
+    target,
+    {
+      image: { url: video.thumbnail },
+      caption: makeSongCaption(video),
+    },
+    { quoted }
+  );
+
+  const audioFile = makeTempFile(".mp3");
   try {
-    prepared = await prepareVideoFile(video, from, originalMek, bot);
-    await bot.sendMessage(from, { react: { text: "⬆️", key: originalMek.key } });
-
-    const msgPayload = {
-        mimetype: "video/mp4",
-        fileName: prepared.fileName,
-        caption: makeFinalCaption(video, prepared.sizeMB, prepared.asDocument ? "Document" : "Video"),
-        contextInfo: channelContextInfo()
-    };
-
-    if (prepared.asDocument) msgPayload.document = fs.readFileSync(prepared.fixedFile);
-    else {
-      msgPayload.video = fs.readFileSync(prepared.fixedFile);
-      msgPayload.gifPlayback = false;
+    await downloadAudio(video.url, audioFile);
+    if (!fs.existsSync(audioFile) || fs.statSync(audioFile).size === 0) {
+      throw new Error("Downloaded audio file is empty.");
     }
 
-    await bot.sendMessage(target, msgPayload);
+    await bot.sendMessage(
+      target,
+      {
+        audio: fs.readFileSync(audioFile),
+        mimetype: "audio/mpeg",
+        fileName: `${sanitizeFileName(video.title)}.mp3`,
+        ptt: false,
+      },
+      { quoted }
+    );
+  } finally {
+    safeUnlink(audioFile);
+  }
+}
+
+async function prepareVideoFile(video) {
+  const VIDEO_LIMIT_MB = 45;
+  const quality = 480; // you can adjust this (360, 480, 720, etc.)
+  let rawFile = null;
+  let fixedFile = null;
+
+  try {
+    const stamp = Date.now();
+    rawFile = makeTempFile(`_raw_${stamp}.mp4`);
+    fixedFile = makeTempFile(`_fixed_${stamp}.mp4`);
+
+    await downloadVideo(video.url, rawFile, quality);
+    await reencodeForWhatsApp(rawFile, fixedFile);
+
+    const sizeMB = getFileSizeMB(fixedFile);
+    const fileName = `${sanitizeFileName(video.title)}.mp4`;
+
+    return {
+      rawFile,
+      fixedFile,
+      sizeMB,
+      fileName,
+      asDocument: sizeMB > VIDEO_LIMIT_MB,
+    };
+  } catch (e) {
+    safeUnlink(rawFile);
+    safeUnlink(fixedFile);
+    throw e;
+  }
+}
+
+async function sendVideoOnlyToGroup(bot, quoted, target, video) {
+  let prepared = null;
+  try {
+    prepared = await prepareVideoFile(video);
+
+    if (prepared.asDocument) {
+      await bot.sendMessage(
+        target,
+        {
+          document: fs.readFileSync(prepared.fixedFile),
+          mimetype: "video/mp4",
+          fileName: prepared.fileName,
+          caption: makeVideoCaption(video, prepared.sizeMB, "Document"),
+        },
+        { quoted }
+      );
+    } else {
+      await bot.sendMessage(
+        target,
+        {
+          video: fs.readFileSync(prepared.fixedFile),
+          mimetype: "video/mp4",
+          fileName: prepared.fileName,
+          caption: makeVideoCaption(video, prepared.sizeMB, "Playable Video"),
+          gifPlayback: false,
+        },
+        { quoted }
+      );
+    }
   } finally {
     safeUnlink(prepared?.rawFile);
     safeUnlink(prepared?.fixedFile);
   }
 }
 
-async function sendVideoAndAudioToGroup(bot, target, video, from, originalMek) {
-  await sendVideoOnlyToGroup(bot, target, video, from, originalMek);
-  await sendAudioToGroup(bot, target, video, from, originalMek);
+async function sendVideoAndAudioToGroup(bot, quoted, target, video) {
+  let prepared = null;
+  let audioFile = null;
+
+  try {
+    // Video
+    prepared = await prepareVideoFile(video);
+
+    if (prepared.asDocument) {
+      await bot.sendMessage(
+        target,
+        {
+          document: fs.readFileSync(prepared.fixedFile),
+          mimetype: "video/mp4",
+          fileName: prepared.fileName,
+          caption: makeVideoCaption(video, prepared.sizeMB, "Document"),
+        },
+        { quoted }
+      );
+    } else {
+      await bot.sendMessage(
+        target,
+        {
+          video: fs.readFileSync(prepared.fixedFile),
+          mimetype: "video/mp4",
+          fileName: prepared.fileName,
+          caption: makeVideoCaption(video, prepared.sizeMB, "Playable Video"),
+          gifPlayback: false,
+        },
+        { quoted }
+      );
+    }
+
+    // small delay
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    // Audio
+    audioFile = makeTempFile(".mp3");
+    await downloadAudio(video.url, audioFile);
+
+    const audioBuffer = fs.readFileSync(audioFile);
+
+    await bot.sendMessage(
+      target,
+      {
+        audio: audioBuffer,
+        mimetype: "audio/mpeg",
+        fileName: `${sanitizeFileName(video.title)}.mp3`,
+        ptt: false,
+      },
+      { quoted }
+    );
+  } finally {
+    safeUnlink(prepared?.rawFile);
+    safeUnlink(prepared?.fixedFile);
+    safeUnlink(audioFile);
+  }
 }
 
-/* ================= PENDING STATE ================= */
+/* ================= PENDING ================= */
 
-const pendingCSend = Object.create(null);
+const pending = Object.create(null);
+const TTL = 2 * 60 * 1000;
 
 function getModeFromTexts(texts) {
   const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
+
   for (const text of normalized) {
-    if (text.includes("AUDIO") || text === "1") return "audio";
-    if (text.includes("VIDEO") || text === "2") return "video";
-    if (text.includes("BOTH") || text === "3") return "video_audio";
+    if (
+      text.includes("CMODE:AUDIO") ||
+      text.includes("SEND AUDIO")
+    ) return "audio";
+
+    if (
+      text.includes("CMODE:VIDEO_AUDIO") ||
+      text.includes("VIDEO & AUDIO") ||
+      text.includes("VIDEO AND AUDIO")
+    ) return "video_audio";
+
+    if (
+      text.includes("CMODE:VIDEO") ||
+      text.includes("SEND VIDEO")
+    ) return "video";
   }
+
   return null;
 }
 
-async function executeSendMode(bot, from, originalMek, target, video, mode) {
-  try {
-      if (mode === "audio") {
-        await sendAudioToGroup(bot, target, video, from, originalMek);
-      } else if (mode === "video") {
-        await sendVideoOnlyToGroup(bot, target, video, from, originalMek);
-      } else if (mode === "video_audio") {
-        await sendVideoAndAudioToGroup(bot, target, video, from, originalMek);
-      }
-      // ✅ Success React
-      await bot.sendMessage(from, { react: { text: "✅", key: originalMek.key } });
-  } catch (error) {
-      console.log("Send Execution Error:", error);
-      const errText = (error && (error.stderr || error.message)) || "";
-      await bot.sendMessage(from, { react: { text: "❌", key: originalMek.key } });
+function isDuplicateAction(state, sig) {
+  const now = Date.now();
+  if (state.lastSig === sig && now - (state.lastAt || 0) < 4000) return true;
+  state.lastSig = sig;
+  state.lastAt = now;
+  return false;
+}
 
-      if (isCookiesRelatedError(errText)) {
-        await sendErrorMsg(bot, from, originalMek, "Download blocked by YouTube. Export fresh cookies.txt.");
-      } else {
-        await sendErrorMsg(bot, from, originalMek, "Failed to send media to the target group.");
-      }
+async function executeSendMode(bot, quoted, from, target, targetName, video, mode) {
+  if (mode === "audio") {
+    await sendAudioToGroup(bot, quoted, target, video);
+    await bot.sendMessage(
+      from,
+      { text: `✅ Audio sent successfully to *${targetName}*.` },
+      { quoted }
+    );
+    return;
+  }
+
+  if (mode === "video") {
+    await sendVideoOnlyToGroup(bot, quoted, target, video);
+    await bot.sendMessage(
+      from,
+      { text: `✅ Video sent successfully to *${targetName}*.` },
+      { quoted }
+    );
+    return;
+  }
+
+  if (mode === "video_audio") {
+    await bot.sendMessage(
+      from,
+      { text: `📦 Sending video and audio to *${targetName}*...` },
+      { quoted }
+    );
+
+    await sendVideoAndAudioToGroup(bot, quoted, target, video);
+
+    await bot.sendMessage(
+      from,
+      { text: `✅ Video and audio sent successfully to *${targetName}*.` },
+      { quoted }
+    );
+    return;
   }
 }
 
-/* ================= COMMANDS ================= */
+/* ================= COMMANDS: TARGET GROUP MGMT ================= */
 
-cmd({ pattern: "ctarget", react: "🎯", category: "config", filename: __filename }, async (bot, mek, m, { from, reply }) => {
-  try {
-    if (!isGroupJid(from)) return reply(makeTargetBox("𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗖𝗛𝗔𝗧", "📌 _Use this command inside a group._"));
-    const store = readStore();
-    if (!store.groups.includes(from)) {
-      store.groups.push(from);
+cmd(
+  { pattern: "ctarget", react: "🎯", category: "config", filename: __filename },
+  async (bot, mek, m, { from, reply }) => {
+    try {
+      if (!isGroupJid(from)) return reply("Use this command inside a group.");
+
+      const store = readStore();
+      if (!store.groups.includes(from)) {
+        store.groups.push(from);
+        writeStore(store);
+      }
+
+      const name = await getGroupName(bot, from);
+      return reply(`Saved target group: *${name}*`);
+    } catch (e) {
+      console.log(e);
+      return reply("Error saving target group.");
+    }
+  }
+);
+
+cmd(
+  { pattern: "ctargetlist", react: "📋", category: "config", filename: __filename },
+  async (bot, mek, m, { reply }) => {
+    try {
+      const store = readStore();
+      if (!store.groups.length) return reply("No target groups saved.");
+
+      const names = await Promise.all(store.groups.map((g) => getGroupName(bot, g)));
+      const lines = names.map((n, i) => `${i + 1}. ${n}`).join("\n");
+      return reply(`Saved target groups:\n\n${lines}\n\nRemove: .ctargetdel <number>\nClear: .ctargetclear`);
+    } catch (e) {
+      console.log(e);
+      return reply("Error listing target groups.");
+    }
+  }
+);
+
+cmd(
+  { pattern: "ctargetdel", alias: ["ctargetremove"], react: "🗑️", category: "config", filename: __filename },
+  async (bot, mek, m, { q, reply }) => {
+    try {
+      const store = readStore();
+      if (!store.groups.length) return reply("No target groups saved.");
+
+      const num = parseInt((q || "").trim(), 10);
+      if (!num || num < 1 || num > store.groups.length) {
+        return reply(`Usage: .ctargetdel <number>\nExample: .ctargetdel 2`);
+      }
+
+      const removed = store.groups.splice(num - 1, 1)[0];
       writeStore(store);
+
+      const name = await getGroupName(bot, removed);
+      return reply(`Removed target group: *${name}*`);
+    } catch (e) {
+      console.log(e);
+      return reply("Error removing target group.");
     }
-    const name = await getGroupName(bot, from);
-    return reply(makeTargetBox("𝗧𝗔𝗥𝗚𝗘𝗧 𝗦𝗔𝗩𝗘𝗗", `📌 *𝗚𝗿𝗼𝘂𝗽:* ${name}`));
-  } catch (e) {
-    return reply(makeTargetBox("𝗘𝗥𝗥𝗢𝗥", "🚫 _Error saving target group._"));
   }
-});
+);
 
-cmd({ pattern: "ctargetlist", react: "📋", category: "config", filename: __filename }, async (bot, mek, m, { reply }) => {
-  try {
-    const store = readStore();
-    if (!store.groups.length) return reply(makeTargetBox("𝗧𝗔𝗥𝗚𝗘𝗧 𝗟𝗜𝗦𝗧", "📌 _No target groups saved._"));
-
-    const names = await Promise.all(store.groups.map((g) => getGroupName(bot, g)));
-    const lines = names.map((n, i) => `├ 📱 *[ ${String(i + 1).padStart(2, "0")} ]* ${n}`).join("\n");
-    return reply(`╭─[ 📋 *𝗧𝗔𝗥𝗚𝗘𝗧 𝗟𝗜𝗦𝗧* ]\n│\n${lines}\n│\n├ 🗑️ .ctargetdel <num>\n├ 🧹 .ctargetclear\n╰──────────────⮞`);
-  } catch (e) {
-    return reply(makeTargetBox("𝗘𝗥𝗥𝗢𝗥", "🚫 _Error listing target groups._"));
-  }
-});
-
-cmd({ pattern: "ctargetdel", alias: ["ctargetremove"], react: "🗑️", category: "config", filename: __filename }, async (bot, mek, m, { q, reply }) => {
-  try {
-    const store = readStore();
-    if (!store.groups.length) return reply(makeTargetBox("𝗘𝗠𝗣𝗧𝗬", "📌 _No target groups saved._"));
-
-    const num = parseInt((q || "").trim(), 10);
-    if (!num || num < 1 || num > store.groups.length) {
-      return reply(makeTargetBox("𝗜𝗡𝗩𝗔𝗟𝗜𝗗", "📌 _Usage: .ctargetdel <number>_"));
+cmd(
+  { pattern: "ctargetclear", react: "🧹", category: "config", filename: __filename },
+  async (bot, mek, m, { reply }) => {
+    try {
+      writeStore({ groups: [] });
+      return reply("All target groups cleared.");
+    } catch (e) {
+      console.log(e);
+      return reply("Error clearing target groups.");
     }
-
-    const removed = store.groups.splice(num - 1, 1)[0];
-    writeStore(store);
-
-    const name = await getGroupName(bot, removed);
-    return reply(makeTargetBox("𝗧𝗔𝗥𝗚𝗘𝗧 𝗥𝗘𝗠𝗢𝗩𝗘𝗗", `📌 *𝗚𝗿𝗼𝘂𝗽:* ${name}`));
-  } catch (e) {
-    return reply(makeTargetBox("𝗘𝗥𝗥𝗢𝗥", "🚫 _Error removing target group._"));
   }
-});
+);
 
-cmd({ pattern: "ctargetclear", react: "🧹", category: "config", filename: __filename }, async (bot, mek, m, { reply }) => {
-  try {
-    writeStore({ groups: [] });
-    return reply(makeTargetBox("𝗖𝗟𝗘𝗔𝗥𝗘𝗗", "📌 _All target groups cleared._"));
-  } catch (e) {
-    return reply(makeTargetBox("𝗘𝗥𝗥𝗢𝗥", "🚫 _Error clearing target groups._"));
+/* ================= MAIN COMMAND ================= */
+
+cmd(
+  { pattern: "csend", alias: ["cmedia"], react: "🎬", category: "download", filename: __filename },
+  async (bot, mek, m, { from, q, reply, sender }) => {
+    try {
+      const store = readStore();
+      const groups = store.groups || [];
+
+      if (!groups.length) {
+        return reply("No target groups saved. Use .ctarget inside a group first.");
+      }
+
+      if (!q) return reply("Please provide a song/video name or YouTube link.");
+
+      await reply("🔎 Searching media...");
+
+      const video = await getYoutube(q);
+      if (!video) return reply("No results found.");
+
+      const senderJid = sender || getSenderJid(bot, mek);
+      const key = makePendingKey(senderJid, from);
+
+      pending[key] = {
+        mode: "choose_send_type",
+        video,
+        groups,
+        from,
+        createdAt: Date.now(),
+        lastSig: "",
+        lastAt: 0,
+        isProcessing: false,
+      };
+
+      await sendButtons(
+        bot,
+        from,
+        {
+          title: "🎯 Choose Send Type",
+          text: makePreviewCaption(video),
+          footer: "MALIYA-MD | Media Sender",
+          image: { url: video.thumbnail },
+          buttons: [
+            { id: "cmode:audio", text: "🎵 Send Audio" },
+            { id: "cmode:video", text: "🎬 Send Video" },
+            { id: "cmode:video_audio", text: "📦 Send Video & Audio" },
+          ],
+        },
+        { quoted: mek }
+      );
+    } catch (e) {
+      console.log("csend command error:", e?.message || e);
+      return reply("Error while processing the media.");
+    }
   }
-});
+);
 
-/* ================= MAIN SENDER COMMAND ================= */
+/* ================= BUTTON / NUMBER HOOK ================= */
 
-cmd({ pattern: "csend", alias: ["cmedia"], react: "🔍", category: "download", filename: __filename }, async (bot, mek, m, { from, q, sender }) => {
-  try {
-    const store = readStore();
-    const groups = store.groups || [];
+global.pluginHooks = global.pluginHooks || [];
+global.pluginHooks.push({
+  onMessage: async (bot, mek) => {
+    try {
+      const from = mek.key?.remoteJid;
+      if (!from || from === "status@broadcast") return;
 
-    if (!groups.length) {
-      await bot.sendMessage(from, { react: { text: "❌", key: mek.key } });
-      return await sendErrorMsg(bot, from, mek, "No target groups saved. Use .ctarget inside a group first.");
-    }
-    if (!q) {
-      await bot.sendMessage(from, { react: { text: "❌", key: mek.key } });
-      return await sendErrorMsg(bot, from, mek, "Please provide a song/video name or YouTube link.");
-    }
+      const senderJid = getSenderJid(bot, mek);
+      if (!senderJid) return;
 
-    const video = await getYoutube(q);
-    if (!video) {
-      await bot.sendMessage(from, { react: { text: "❌", key: mek.key } });
-      return await sendErrorMsg(bot, from, mek, "No results found.");
-    }
+      const key = makePendingKey(senderJid, from);
+      const p = pending[key];
+      if (!p) return;
 
-    const senderJid = sender || getSenderJid(bot, mek);
-    const key = makePendingKey(senderJid, from);
+      if (p.from !== from) return;
 
-    pendingCSend[key] = {
-      mode: "choose_send_type",
-      video,
-      groups,
-      from,
-      originalMek: mek, // Save original message to react on it later
-      createdAt: Date.now(),
-      isProcessing: false,
-    };
+      if (Date.now() - p.createdAt > TTL) {
+        delete pending[key];
+        await bot.sendMessage(
+          from,
+          { text: "Selection expired. Please run .csend again." },
+          { quoted: mek }
+        );
+        return;
+      }
 
-    // ⏳ React to indicate waiting for input
-    await bot.sendMessage(from, { react: { text: "⏳", key: mek.key } });
+      if (p.isProcessing) return;
 
-    await bot.sendMessage(from, {
-        image: { url: video.thumbnail },
-        caption: buildMenuCaption(video),
-        contextInfo: channelContextInfo()
-    }, { quoted: mek });
+      const body = (getBodyFromMek(mek) || "").trim();
+      const texts = extractTextsFromMek(mek);
+      const mode = getModeFromTexts(texts);
 
-  } catch (e) {
-    console.log("csend command error:", e);
-    await bot.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    await sendErrorMsg(bot, from, mek, "Error while processing the media.");
-  }
-});
+      if (p.mode === "choose_send_type") {
+        if (!mode) return;
 
-/* ================= REPLY HANDLER ================= */
+        if (isDuplicateAction(p, `mode:${mode}`)) return;
 
-replyHandlers.push({
-    filter: (body, { sender, from }) => {
-        const key = makePendingKey(sender, from);
-        return !!pendingCSend[key];
-    },
-    function: async (bot, mek, m, { from, body, sender }) => {
-        const key = makePendingKey(sender, from);
-        const p = pendingCSend[key];
-        if (!p || p.isProcessing) return;
+        if (p.groups.length === 1) {
+          const target = p.groups[0];
+          const targetName = await getGroupName(bot, target);
 
-        const input = (body || "").trim();
-        
-        if (p.mode === "choose_send_type") {
-            const mode = getModeFromTexts([input]);
-            if (!mode) return; // Ignore invalid inputs
-
-            if (p.groups.length === 1) {
-                // 1 Target only -> Start Processing Immediately
-                p.isProcessing = true;
-                const target = p.groups[0];
-                delete pendingCSend[key];
-
-                await executeSendMode(bot, from, p.originalMek, target, p.video, mode);
-                return;
-            }
-
-            // Multiple Targets -> Ask for Group
-            p.mode = "choose_group";
-            p.selectedSendMode = mode;
-            p.createdAt = Date.now();
-
-            const names = await Promise.all(p.groups.map((g) => getGroupName(bot, g)));
-            await bot.sendMessage(from, {
-                text: buildGroupSelectionCaption(names, mode),
-                contextInfo: channelContextInfo()
-            }, { quoted: mek });
-            return;
+          p.isProcessing = true;
+          try {
+            delete pending[key];
+            await bot.sendMessage(
+              from,
+              { text: `📤 Sending to *${targetName}*...` },
+              { quoted: mek }
+            );
+            await executeSendMode(bot, mek, from, target, targetName, p.video, mode);
+          } finally {
+            p.isProcessing = false;
+          }
+          return;
         }
 
-        if (p.mode === "choose_group") {
-            if (!/^\d+$/.test(input)) return;
+        p.mode = "choose_group";
+        p.selectedSendMode = mode;
+        p.createdAt = Date.now();
 
-            const num = parseInt(input, 10);
-            if (num < 1 || num > p.groups.length) {
-                await sendErrorMsg(bot, from, mek, `Invalid number. Reply 1-${p.groups.length} only.`);
-                return;
-            }
+        const names = await Promise.all(p.groups.map((g) => getGroupName(bot, g)));
+        const list = names.map((n, i) => `${i + 1}. ${n}`).join("\n");
 
-            const target = p.groups[num - 1];
-            const modeToSend = p.selectedSendMode;
-            
-            p.isProcessing = true;
-            delete pendingCSend[key];
+        await bot.sendMessage(
+          from,
+          {
+            text: `🎯 *Selected:* ${mode === "audio" ? "Send Audio" : mode === "video" ? "Send Video" : "Send Video & Audio"}\n\nReply with target group number:\n\n${list}`,
+          },
+          { quoted: mek }
+        );
+        return;
+      }
 
-            await executeSendMode(bot, from, p.originalMek, target, p.video, modeToSend);
+      if (p.mode === "choose_group") {
+        if (!/^\d+$/.test(body)) return;
+
+        const num = parseInt(body, 10);
+        if (num < 1 || num > p.groups.length) {
+          await bot.sendMessage(
+            from,
+            { text: `Invalid number. Reply 1-${p.groups.length} only.` },
+            { quoted: mek }
+          );
+          return;
         }
-    }
-});
 
-/* ================= CLEANUP ================= */
-setInterval(() => {
-  const now = Date.now();
-  for (const key of Object.keys(pendingCSend)) {
-    if (now - pendingCSend[key].createdAt > 2 * 60 * 1000) {
-      delete pendingCSend[key];
+        if (isDuplicateAction(p, `group:${num}`)) return;
+
+        const target = p.groups[num - 1];
+        const targetName = await getGroupName(bot, target);
+        const modeToSend = p.selectedSendMode;
+
+        p.isProcessing = true;
+        delete pending[key];
+
+        await bot.sendMessage(
+          from,
+          { text: `📤 Sending to *${targetName}*...` },
+          { quoted: mek }
+        );
+
+        try {
+          await executeSendMode(bot, mek, from, target, targetName, p.video, modeToSend);
+        } finally {
+          p.isProcessing = false;
+        }
+      }
+    } catch (e) {
+      console.log("csend hook error:", e?.message || e);
     }
-  }
-}, 30000);
+  },
+});
