@@ -163,48 +163,27 @@ function makePendingKey(sender, from) {
 function extractTexts(body, mek, m) {
   const texts = [];
   const direct = [
-    body,
-    m?.body,
-    m?.text,
-    m?.message?.conversation,
+    body, m?.body, m?.text, m?.message?.conversation,
     m?.message?.extendedTextMessage?.text,
     m?.message?.buttonsResponseMessage?.selectedButtonId,
-    m?.message?.buttonsResponseMessage?.selectedDisplayText,
-    m?.message?.templateButtonReplyMessage?.selectedId,
-    m?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    m?.message?.listResponseMessage?.title,
     m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
     m?.message?.interactiveResponseMessage?.body?.text,
-    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
-    mek?.message?.conversation,
-    mek?.message?.extendedTextMessage?.text,
+    mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
     mek?.message?.buttonsResponseMessage?.selectedButtonId,
-    mek?.message?.buttonsResponseMessage?.selectedDisplayText,
-    mek?.message?.templateButtonReplyMessage?.selectedId,
-    mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    mek?.message?.listResponseMessage?.title,
     mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
     mek?.message?.interactiveResponseMessage?.body?.text,
-    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
   ];
   for (const item of direct) {
     if (item) texts.push(String(item).trim());
   }
+  
   const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   for (const raw of [p1, p2]) {
     if (!raw) continue;
     const parsed = tryParseJsonString(raw);
     if (!parsed) continue;
-    const vals = [
-      parsed.id,
-      parsed.selectedId,
-      parsed.selectedRowId,
-      parsed.title,
-      parsed.display_text,
-      parsed.text,
-      parsed.name,
-    ];
+    const vals = [parsed.id, parsed.selectedId, parsed.title, parsed.name];
     for (const v of vals) {
       if (v) texts.push(String(v).trim());
     }
@@ -213,79 +192,48 @@ function extractTexts(body, mek, m) {
 }
 
 function extractQualityFromTexts(texts) {
-  const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
+  const normalized = texts.map((t) => normalizeText(t));
   for (const text of normalized) {
-    if (text.includes("QUALITY:360")) return "360";
-    if (text.includes("QUALITY:480")) return "480";
-    if (text.includes("QUALITY:720")) return "720";
-    if (text.includes("QUALITY:1080")) return "1080";
-    if (text === "360P" || text.includes("360P")) return "360";
-    if (text === "480P" || text.includes("480P")) return "480";
-    if (text === "720P" || text.includes("720P")) return "720";
-    if (text === "1080P" || text.includes("1080P")) return "1080";
-    if (text === "1") return "360";
-    if (text === "2") return "480";
-    if (text === "3") return "720";
-    if (text === "4") return "1080";
+    if (text.includes("QUALITY:360") || text === "360P" || text === "1") return "360";
+    if (text.includes("QUALITY:480") || text === "480P" || text === "2") return "480";
+    if (text.includes("QUALITY:720") || text === "720P" || text === "3") return "720";
+    if (text.includes("QUALITY:1080") || text === "1080P" || text === "4") return "1080";
   }
   return null;
 }
 
+// 🔥 Single-Sided Layouts 🔥
 function buildVideoDetails(video) {
   const title = video.title || "Unknown Title";
   const channel = video.author?.name || "Unknown Channel";
   const duration = video.timestamp || formatSeconds(video.seconds) || "0:00";
   const views = formatViews(video.views);
   const uploaded = video.ago || "Unknown";
-  const videoId = video.videoId || "Unknown";
   const url = video.url || "Unavailable";
-  const live = video.live ? "Yes" : "No";
 
-  return `┌─❮ 🎥 *𝐕𝐈𝐃𝐄𝐎 𝐃𝐄𝐓𝐀𝐈𝐋𝐒* ❯─
-│
-├─► 🎬 *ᴛɪᴛʟᴇ:* ${title}
-├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${channel}
-├─► 🆔 *ᴠɪᴅᴇᴏ ɪᴅ:* ${videoId}
-├─► ⏱️ *ᴅᴜʀᴀᴛɪᴏɴ:* ${duration}
-├─► 👀 *ᴠɪᴇᴡs:* ${views}
-├─► 📅 *ᴜᴘʟᴏᴀᴅᴇᴅ:* ${uploaded}
-├─► 📡 *ʟɪᴠᴇ:* ${live}
-├─► 🔗 *ʟɪɴᴋ:* ${url}
-│
-└─❮ ${generateProgressBar(duration)} ❯─`;
+  return `╭─[ 🎥 *𝗩𝗜𝗗𝗘𝗢 𝗗𝗘𝗧𝗔𝗜𝗟𝗦* ]\n│\n├ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${title}\n├ 👤 *𝗖𝗵𝗮𝗻𝗻𝗲𝗹:* ${channel}\n├ ⏱️ *𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻:* ${duration}\n├ 👀 *𝗩𝗶𝗲𝘄𝘀:* ${views}\n├ 📅 *𝗨𝗽𝗹𝗼𝗮𝗱𝗲𝗱:* ${uploaded}\n├ 🔗 *𝗟𝗶𝗻𝗸:* ${url}\n│\n╰─[ ${generateProgressBar(duration)} ]`;
 }
 
 function buildFinalCaption(video, qualityLabel, sizeMB) {
-  return `┌─❮ ✅ *𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐂𝐎𝐌𝐏𝐋𝐄𝐓𝐄* ❯─
-│
-├─► 🎬 *ᴛɪᴛʟᴇ:* ${video.title || "Unknown Title"}
-├─► 👤 *ᴄʜᴀɴɴᴇʟ:* ${video.author?.name || "Unknown Channel"}
-├─► 🎞️ *ǫᴜᴀʟɪᴛʏ:* ${qualityLabel}
-├─► ⏱️ *ᴅᴜʀᴀᴛɪᴏɴ:* ${video.timestamp || formatSeconds(video.seconds) || "0:00"}
-├─► 👀 *ᴠɪᴇᴡs:* ${formatViews(video.views)}
-├─► 📦 *sɪᴢᴇ:* ${sizeMB.toFixed(2)} MB
-│
-└─❮ 💾 *MALIYA-〽️D* ❯─`;
+  return `╭─[ ✅ *𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗗* ]\n│\n├ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${video.title || "Unknown Title"}\n├ 🎞️ *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${qualityLabel}\n├ 📦 *𝗦𝗶𝘇𝗲:* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 }
 
 async function getYoutube(query) {
   const isUrl = /(youtube\.com|youtu\.be)/i.test(query);
-
   if (isUrl) {
-    const id = query.includes("v=")
-      ? query.split("v=")[1].split("&")[0]
-      : query.split("/").pop().split("?")[0];
+    const id = query.includes("v=") ? query.split("v=")[1].split("&")[0] : query.split("/").pop().split("?")[0];
     const info = await yts({ videoId: id });
     return info;
   }
-
   const search = await yts(query);
   if (!search.videos.length) return null;
   return search.videos[0];
 }
 
+// 🔥 QUALITY FIX 🔥
 async function downloadVideoWithYtdl(videoUrl, quality, outPath) {
-  const formatStr = `bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}][ext=mp4]/best`;
+  // මේ format string එකෙන් yt-dlp එකට අදාල quality එකම ඉල්ලන්න force කරනවා
+  const formatStr = `bestvideo[height=${quality}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}]/best`;
 
   const cookies = cookiesStatus();
   const ytArgs = {
@@ -317,11 +265,9 @@ async function reencodeForWhatsApp(inputPath, outputPath) {
         "-pix_fmt yuv420p",
         "-profile:v main",
         "-level 3.1",
-        "-preset veryfast",
-        "-crf 28",
-        "-maxrate 1200k",
-        "-bufsize 2400k",
-        "-vf scale='min(854,iw)':-2",
+        "-preset fast", // Changed from veryfast for better quality retention
+        "-crf 26",      // Lower CRF = Better Quality (was 28)
+        "-vf scale='min(1280,iw)':-2", // Increased max resolution to 720p for the final output
       ])
       .format("mp4")
       .on("end", () => resolve(outputPath))
@@ -332,16 +278,7 @@ async function reencodeForWhatsApp(inputPath, outputPath) {
 
 function buildStyledVideoMenu(video) {
   const details = buildVideoDetails(video);
-  return details + `
-
-┌─❮ 🎥 *𝐕𝐈𝐃𝐄𝐎 𝐐𝐔𝐀𝐋𝐈𝐓𝐘* ❯─
-│
-├─► *[ 01 ]* ➔ 360p
-├─► *[ 02 ]* ➔ 480p
-├─► *[ 03 ]* ➔ 720p HD
-├─► *[ 04 ]* ➔ 1080p FHD
-│
-└─❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ 1, 2, 3, ᴏʀ 4* ❯─`;
+  return details + `\n\n╭─[ 🎥 *𝗩𝗜𝗗𝗘𝗢 𝗤𝗨𝗔𝗟𝗜𝗧𝗬* ]\n│\n├ 📱 *[ 01 ]* ➔ 360p\n├ 📱 *[ 02 ]* ➔ 480p\n├ 📱 *[ 03 ]* ➔ 720p HD\n├ 📱 *[ 04 ]* ➔ 1080p FHD\n│\n╰─[ 👇 *Reply with a Number* ]`;
 }
 
 async function sendNumberedVideoMenu(sock, from, mek, video) {
@@ -358,7 +295,6 @@ async function sendNumberedVideoMenu(sock, from, mek, video) {
 }
 
 async function sendQualityInteractiveMenu(sock, from, mek, video, sessionId) {
-  // ✅ FIX: readSettings with sessionId
   const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
@@ -370,7 +306,7 @@ async function sendQualityInteractiveMenu(sock, from, mek, video, sessionId) {
         {
           image: { url: video.thumbnail },
           text: buildVideoDetails(video),
-          footer: "𝐌𝐀𝐋𝐈𝐘𝐀-𝐌𝐃 | 𝐕𝐈𝐃𝐄𝐎 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐑",
+          footer: "𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥",
           interactiveButtons: [
             {
               name: "single_select",
@@ -381,9 +317,9 @@ async function sendQualityInteractiveMenu(sock, from, mek, video, sessionId) {
                     title: "Video Qualities",
                     rows: [
                       { title: "📹 360p", description: "Fast & smaller size", id: "quality:360" },
-                      { title: "📺 480p", description: "Better standard quality", id: "quality:480" },
-                      { title: "✨ 720p HD", description: "HD quality video", id: "quality:720" },
-                      { title: "🔥 1080p FHD", description: "Full HD quality video", id: "quality:1080" },
+                      { title: "📺 480p", description: "Standard quality", id: "quality:480" },
+                      { title: "✨ 720p HD", description: "High Definition", id: "quality:720" },
+                      { title: "🔥 1080p FHD", description: "Full High Definition", id: "quality:1080" },
                     ],
                   },
                 ],
@@ -404,9 +340,7 @@ async function sendQualityInteractiveMenu(sock, from, mek, video, sessionId) {
 function isDuplicateQualityAction(state, quality) {
   const now = Date.now();
   const sig = `quality:${quality}`;
-  if (state.lastActionSig === sig && now - (state.lastActionAt || 0) < 5000) {
-    return true;
-  }
+  if (state.lastActionSig === sig && now - (state.lastActionAt || 0) < 5000) return true;
   state.lastActionSig = sig;
   state.lastActionAt = now;
   return false;
@@ -423,6 +357,11 @@ function isCookiesRelatedError(errText = "") {
   );
 }
 
+// SEND ERROR FUNCTION WITH CHANNEL CONTEXT
+async function sendErrorMsg(reply, text) {
+    await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`);
+}
+
 async function handleVideoQualityDownload(sock, mek, from, sender, reply, choiceRaw) {
   const key = makePendingKey(sender, from);
   const pending = pendingVideoQuality[key];
@@ -432,7 +371,6 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
   const qualityLabel = getQualityLabel(choiceRaw);
 
   if (!quality) return;
-
   if (pending.isProcessing) return;
   if (isDuplicateQualityAction(pending, quality)) return;
 
@@ -442,121 +380,102 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
   let fixedFile = null;
 
   try {
-    await reply(`⬇️ *ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ* ${qualityLabel} ᴠɪᴅᴇᴏ...`);
+    // Reacts ONLY
+    await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
 
     rawFile = makeTempFile(".mp4");
     fixedFile = makeTempFile(".mp4");
 
     await downloadVideoWithYtdl(pending.video.url, quality, rawFile);
 
-    await reply("🛠 *ᴄᴏɴᴠᴇʀᴛɪɴɢ ᴠɪᴅᴇᴏ ғᴏʀ ᴘʜᴏɴᴇ sᴜᴘᴘᴏʀᴛ...*");
+    await sock.sendMessage(from, { react: { text: "🛠", key: mek.key } });
     await reencodeForWhatsApp(rawFile, fixedFile);
 
     const sizeMB = getFileSizeMB(fixedFile);
     const cleanTitle = sanitizeFileName(pending.video.title);
 
+    await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
+
+    const msgPayload = {
+        mimetype: "video/mp4",
+        fileName: `${cleanTitle}_${quality}p.mp4`,
+        caption: buildFinalCaption(pending.video, qualityLabel, sizeMB),
+        contextInfo: channelContextInfo(),
+    };
+
     if (sizeMB > VIDEO_LIMIT_MB) {
-      await sock.sendMessage(
-        from,
-        {
-          document: fs.readFileSync(fixedFile),
-          mimetype: "video/mp4",
-          fileName: `${cleanTitle}_${quality}p.mp4`,
-          caption: buildFinalCaption(pending.video, qualityLabel, sizeMB),
-        },
-        { quoted: mek }
-      );
+        msgPayload.document = fs.readFileSync(fixedFile);
     } else {
-      await sock.sendMessage(
-        from,
-        {
-          video: fs.readFileSync(fixedFile),
-          mimetype: "video/mp4",
-          fileName: `${cleanTitle}_${quality}p.mp4`,
-          caption: buildFinalCaption(pending.video, qualityLabel, sizeMB),
-          gifPlayback: false,
-        },
-        { quoted: mek }
-      );
+        msgPayload.video = fs.readFileSync(fixedFile);
+        msgPayload.gifPlayback = false;
     }
+
+    await sock.sendMessage(from, msgPayload, { quoted: mek });
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
     delete pendingVideoQuality[key];
+
   } catch (e) {
     const errText = (e && (e.stderr || e.message)) || "";
-    console.log("VIDEO QUALITY ERROR:", errText, e && e.stack);
+    await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
 
     if (isCookiesRelatedError(errText)) {
-      const cookies = cookiesStatus();
-      if (!cookies.exists) {
-        reply("❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴍɪssɪɴɢ.*\n\nYouTube is blocking this download with a bot-check.\nExport a fresh `cookies.txt` from a logged-in YouTube session and place it in the bot's root folder.");
-      } else if (cookies.sizeBytes === 0) {
-        reply("❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs.ᴛxᴛ ɪs ᴇᴍᴘᴛʏ.*\n\nRe-export cookies.txt from a logged-in YouTube session (make sure you're actually signed in when exporting).");
-      } else {
-        reply("❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ — ᴄᴏᴏᴋɪᴇs ᴇxᴘɪʀᴇᴅ ᴏʀ ɪɴᴠᴀʟɪᴅ.*\n\nYour saved cookies.txt is no longer valid. Export a fresh one from a logged-in YouTube session and replace the old file.");
-      }
+      await sendErrorMsg(reply, "Download blocked by YouTube (Cookies required/expired). Export fresh cookies.txt.");
     } else {
-      reply("❌ *ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ/ᴄᴏɴᴠᴇʀᴛɪɴɢ sᴇʟᴇᴄᴛᴇᴅ ǫᴜᴀʟɪᴛʏ ᴠɪᴅᴇᴏ.*");
+      await sendErrorMsg(reply, "Error while downloading/converting the video.");
     }
-
     delete pendingVideoQuality[key];
   } finally {
     safeUnlink(rawFile);
     safeUnlink(fixedFile);
-    if (pendingVideoQuality[key]) {
-      pendingVideoQuality[key].isProcessing = false;
-    }
+    if (pendingVideoQuality[key]) pendingVideoQuality[key].isProcessing = false;
   }
 }
 
-cmd(
-  {
-    pattern: "video",
-    alias: ["ytmp4", "ytv", "vdl"],
-    react: "🎥",
-    desc: "Download YouTube video with quality selection",
-    category: "download",
-    filename: __filename,
-  },
-  async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
-    try {
-      if (!q) return reply("🎬 *ᴘʟᴇᴀsᴇ ᴘʀᴏᴠɪᴅᴇ ᴀ ʏᴏᴜᴛᴜʙᴇ ʟɪɴᴋ ᴏʀ ᴠɪᴅᴇᴏ ɴᴀᴍᴇ.*");
+// MAIN CMD
+cmd({
+  pattern: "video",
+  alias: ["ytmp4", "ytv", "vdl"],
+  react: "🔍",
+  desc: "Download YouTube video with quality selection",
+  category: "download",
+  filename: __filename,
+},
+async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
+  try {
+    if (!q) return await sendErrorMsg(reply, "Please provide a YouTube link or video name.");
 
-      await reply("🔍 *sᴇᴀʀᴄʜɪɴɢ ᴠɪᴅᴇᴏ...*");
+    const video = await getYoutube(q);
+    if (!video) return await sendErrorMsg(reply, "No results found.");
 
-      const video = await getYoutube(q);
-      if (!video) return reply("❌ *ɴᴏ ʀᴇsᴜʟᴛs ғᴏᴜɴᴅ.*");
+    const key = makePendingKey(sender, from);
+    pendingVideoQuality[key] = {
+      video,
+      from,
+      createdAt: Date.now(),
+      isProcessing: false,
+      lastActionSig: "",
+      lastActionAt: 0,
+    };
 
-      const key = makePendingKey(sender, from);
-
-      pendingVideoQuality[key] = {
-        video,
-        from,
-        createdAt: Date.now(),
-        isProcessing: false,
-        lastActionSig: "",
-        lastActionAt: 0,
-      };
-
-      // ✅ FIX: pass sessionId
-      await sendQualityInteractiveMenu(sock, from, mek, video, sessionId);
-    } catch (e) {
-      console.log("VIDEO MENU ERROR:", e && e.message, e && e.stack);
-      reply("❌ *ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴘʀᴇᴘᴀʀɪɴɢ ᴠɪᴅᴇᴏ ᴍᴇɴᴜ.*");
-    }
+    // Notice we do NOT pass contextInfo into sendQualityInteractiveMenu internally, 
+    // because WhatsApp Interactive Buttons break if you attach contextInfo.
+    await sendQualityInteractiveMenu(sock, from, mek, video, sessionId);
+  } catch (e) {
+    await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+    await sendErrorMsg(reply, "Error while preparing video menu.");
   }
-);
+});
 
 replyHandlers.push({
   filter: (_body, { sender, from }) => {
     const key = makePendingKey(sender, from);
     return !!pendingVideoQuality[key];
   },
-
   function: async (sock, mek, m, { from, body, sender, reply }) => {
     const key = makePendingKey(sender, from);
     const pending = pendingVideoQuality[key];
-    if (!pending) return;
-    if (pending.isProcessing) return;
+    if (!pending || pending.isProcessing) return;
 
     const texts = extractTexts(body, mek, m);
     let quality = extractQualityFromTexts(texts);
@@ -566,7 +485,6 @@ replyHandlers.push({
     }
 
     if (!quality) return;
-
     return handleVideoQualityDownload(sock, mek, from, sender, reply, quality);
   },
 });
