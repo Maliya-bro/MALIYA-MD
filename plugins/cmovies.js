@@ -11,7 +11,7 @@ const pendingSearch = {};
 const pendingQuality = {};
 const pendingTargetSelection = {};
 
-// ── Storage for Target Groups ─────────────
+// ── Storage for Target Groups (shared with csend) ─────────────
 const STORE_PATH = path.join(__dirname, "csong_targets.json");
 
 function readStore() {
@@ -189,67 +189,7 @@ async function getCineSubzLinks(originalUrl) {
 }
 
 // ==========================================
-// 1. Target Group Manager Commands (.ctarget)
-// ==========================================
-cmd({ pattern: "ctarget", react: "🎯", category: "config", filename: __filename }, async (bot, mek, m, { from, reply }) => {
-  try {
-    if (!from.endsWith("@g.us")) return reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Use this command inside a group._\n╰──────────────⮞`);
-    const store = readStore();
-    if (!store.groups.includes(from)) {
-      store.groups.push(from);
-      writeStore(store);
-    }
-    const name = await getGroupName(bot, from);
-    return reply(`╭─[ 🎯 *𝗧𝗔𝗥𝗚𝗘𝗧 𝗦𝗔𝗩𝗘𝗗* ]\n│\n├ 📌 *Group:* ${name}\n╰──────────────⮞`);
-  } catch (e) {
-    return reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Error saving target group._\n╰──────────────⮞`);
-  }
-});
-
-cmd({ pattern: "ctargetlist", react: "📋", category: "config", filename: __filename }, async (bot, mek, m, { reply }) => {
-  try {
-    const store = readStore();
-    if (!store.groups.length) return reply(`╭─[ 📋 *𝗧𝗔𝗥𝗚𝗘𝗧 𝗟𝗜𝗦𝗧* ]\n│\n├ 📌 _No target groups saved._\n╰──────────────⮞`);
-
-    const names = await Promise.all(store.groups.map((g) => getGroupName(bot, g)));
-    const lines = names.map((n, i) => `├ 📱 *[ ${String(i + 1).padStart(2, "0")} ]* ${n}`).join("\n");
-    return reply(`╭─[ 📋 *𝗧𝗔𝗥𝗚𝗘𝗧 𝗟𝗜𝗦𝗧* ]\n│\n${lines}\n│\n├ 🗑️ .ctargetdel <num>\n├ 🧹 .ctargetclear\n╰──────────────⮞`);
-  } catch (e) {
-    return reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Error listing target groups._\n╰──────────────⮞`);
-  }
-});
-
-cmd({ pattern: "ctargetdel", alias: ["ctargetremove"], react: "🗑️", category: "config", filename: __filename }, async (bot, mek, m, { q, reply }) => {
-  try {
-    const store = readStore();
-    if (!store.groups.length) return reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _No target groups saved._\n╰──────────────⮞`);
-
-    const num = parseInt((q || "").trim(), 10);
-    if (!num || num < 1 || num > store.groups.length) {
-      return reply(`╭─[ ⚠️ *𝗜𝗡𝗩𝗔𝗟𝗜𝗗* ]\n│\n├ 📌 _Usage: .ctargetdel <number>_\n╰──────────────⮞`);
-    }
-
-    const removed = store.groups.splice(num - 1, 1)[0];
-    writeStore(store);
-
-    const name = await getGroupName(bot, removed);
-    return reply(`╭─[ 🗑️ *𝗧𝗔𝗥𝗚𝗘𝗧 𝗥𝗘𝗠𝗢𝗩𝗘𝗗* ]\n│\n├ 📌 *Group:* ${name}\n╰──────────────⮞`);
-  } catch (e) {
-    return reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Error removing target group._\n╰──────────────⮞`);
-  }
-});
-
-cmd({ pattern: "ctargetclear", react: "🧹", category: "config", filename: __filename }, async (bot, mek, m, { reply }) => {
-  try {
-    writeStore({ groups: [] });
-    return reply(`╭─[ 🧹 *𝗖𝗟𝗘𝗔𝗥𝗘𝗗* ]\n│\n├ 📌 _All target groups cleared._\n╰──────────────⮞`);
-  } catch (e) {
-    return reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Error clearing target groups._\n╰──────────────⮞`);
-  }
-});
-
-// ==========================================
-// 2. Movie Sender Command (.cmovie / .cfilm)
+// Movie Sender Command (.cmovie / .cfilm)
 // ==========================================
 cmd({
     pattern: "cmovie",
@@ -320,7 +260,7 @@ cmd({
 
 
 // ==========================================
-// 3. Movie Selection Listener (Number Reply)
+// Movie Selection Listener (Number Reply)
 // ==========================================
 cmd({
     filter: (text, { sender, from }) => {
@@ -407,7 +347,7 @@ cmd({
 
 
 // ==========================================
-// 4. Quality Selection & Target Group Send
+// Quality Selection & Target Group Send
 // ==========================================
 cmd({
     filter: (text, { sender, from }) => {
@@ -452,7 +392,7 @@ cmd({
 
 
 // ==========================================
-// 5. Group Selection Listener (If multiple targets)
+// Group Selection Listener (If multiple targets)
 // ==========================================
 cmd({
     filter: (text, { sender, from }) => {
