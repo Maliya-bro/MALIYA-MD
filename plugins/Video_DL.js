@@ -16,10 +16,8 @@ ffmpeg.setFfprobePath(ffprobePath);
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
-
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 Ｍ𝗔𝗟𝗜𝗬🇦-〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -31,18 +29,6 @@ function channelContextInfo() {
       serverMessageId: -1,
     },
   };
-}
-
-function cookiesStatus() {
-  if (!fs.existsSync(COOKIES_PATH)) {
-    return { exists: false, sizeBytes: 0 };
-  }
-  try {
-    const stat = fs.statSync(COOKIES_PATH);
-    return { exists: true, sizeBytes: stat.size };
-  } catch {
-    return { exists: false, sizeBytes: 0 };
-  }
 }
 
 const VIDEO_LIMIT_MB = 45;
@@ -230,12 +216,10 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// 🔥 QUALITY FIX 🔥
+// 🔥 NO COOKIES: Clean & Direct Android/Web Client Request 🔥
 async function downloadVideoWithYtdl(videoUrl, quality, outPath) {
-  // මේ format string එකෙන් yt-dlp එකට අදාල quality එකම ඉල්ලන්න force කරනවා
   const formatStr = `bestvideo[height=${quality}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}]/best`;
 
-  const cookies = cookiesStatus();
   const ytArgs = {
     format: formatStr,
     output: outPath,
@@ -246,10 +230,6 @@ async function downloadVideoWithYtdl(videoUrl, quality, outPath) {
     extractorArgs: "youtube:player_client=android,web",
     addHeader: ["referer:youtube.com"],
   };
-
-  if (cookies.exists && cookies.sizeBytes > 0) {
-    ytArgs.cookies = COOKIES_PATH;
-  }
 
   await ytDlp(videoUrl, ytArgs);
   return outPath;
@@ -265,9 +245,9 @@ async function reencodeForWhatsApp(inputPath, outputPath) {
         "-pix_fmt yuv420p",
         "-profile:v main",
         "-level 3.1",
-        "-preset fast", // Changed from veryfast for better quality retention
-        "-crf 26",      // Lower CRF = Better Quality (was 28)
-        "-vf scale='min(1280,iw)':-2", // Increased max resolution to 720p for the final output
+        "-preset fast",
+        "-crf 26",
+        "-vf scale='min(1280,iw)':-2",
       ])
       .format("mp4")
       .on("end", () => resolve(outputPath))
@@ -346,18 +326,7 @@ function isDuplicateQualityAction(state, quality) {
   return false;
 }
 
-function isCookiesRelatedError(errText = "") {
-  const t = String(errText).toLowerCase();
-  return (
-    t.includes("sign in to confirm") ||
-    t.includes("not a bot") ||
-    t.includes("cookies") ||
-    t.includes("login required") ||
-    (t.includes("private video") && t.includes("sign in"))
-  );
-}
-
-// SEND ERROR FUNCTION WITH CHANNEL CONTEXT
+// SEND ERROR FUNCTION WITH CHANNEL CONTEXT & REAL ERROR DISPLAY
 async function sendErrorMsg(reply, text) {
     await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`);
 }
@@ -416,14 +385,15 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
     delete pendingVideoQuality[key];
 
   } catch (e) {
-    const errText = (e && (e.stderr || e.message)) || "";
+    // 🔥 සැබෑ Error එක අල්ලලා WhatsApp එකට දෙනවා 🔥
+    const errText = (e && (e.stderr || e.message)) || "Unknown Error";
+    console.log("VIDEO DOWNLOAD ERROR:", errText);
+
     await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
 
-    if (isCookiesRelatedError(errText)) {
-      await sendErrorMsg(reply, "Download blocked by YouTube (Cookies required/expired). Export fresh cookies.txt.");
-    } else {
-      await sendErrorMsg(reply, "Error while downloading/converting the video.");
-    }
+    const cleanErr = String(errText).replace(/\n/g, " ").trim();
+    await sendErrorMsg(reply, `Video Download Failed: ${cleanErr.substring(0, 150)}`);
+
     delete pendingVideoQuality[key];
   } finally {
     safeUnlink(rawFile);
@@ -458,8 +428,6 @@ async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
       lastActionAt: 0,
     };
 
-    // Notice we do NOT pass contextInfo into sendQualityInteractiveMenu internally, 
-    // because WhatsApp Interactive Buttons break if you attach contextInfo.
     await sendQualityInteractiveMenu(sock, from, mek, video, sessionId);
   } catch (e) {
     await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
