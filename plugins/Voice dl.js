@@ -16,8 +16,11 @@ ffmpeg.setFfprobePath(ffprobePath);
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
+// 🔥 Cookies File Path 🔥
+const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
+
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡ𝗟𝗜𝗬𝗔-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 Ｍ𝗔𝗟𝗜𝗬Ａ-〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -29,6 +32,19 @@ function channelContextInfo() {
       serverMessageId: -1,
     },
   };
+}
+
+// 🔥 Cookies Status Checker 🔥
+function cookiesStatus() {
+  if (!fs.existsSync(COOKIES_PATH)) {
+    return { exists: false, sizeBytes: 0 };
+  }
+  try {
+    const stat = fs.statSync(COOKIES_PATH);
+    return { exists: true, sizeBytes: stat.size };
+  } catch {
+    return { exists: false, sizeBytes: 0 };
+  }
 }
 
 const MEDIA_LIMIT_MB = 45;
@@ -56,9 +72,7 @@ function formatSeconds(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
-  if (h > 0) {
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
@@ -75,13 +89,21 @@ function sanitizeFileName(name = "youtube_download") {
   return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_download";
 }
 
+// ── Small Caps Font Effect ─────────────
+function toSmallCaps(str = "") {
+    const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+    return String(str)
+        .split("")
+        .map((char) => {
+            const idx = normal.indexOf(char);
+            return idx !== -1 ? small[idx] : char;
+        })
+        .join("");
+}
+
 function normalizeText(s = "") {
-  return String(s)
-    .replace(/\r/g, "")
-    .replace(/\n+/g, "\n")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toUpperCase();
+  return String(s).replace(/\r/g, "").replace(/\n+/g, "\n").replace(/\s+/g, " ").trim().toUpperCase();
 }
 
 function tryParseJsonString(s) {
@@ -98,36 +120,25 @@ function extractTexts(body, mek, m) {
     body, m?.body, m?.text, m?.message?.conversation,
     m?.message?.extendedTextMessage?.text,
     m?.message?.buttonsResponseMessage?.selectedButtonId,
-    m?.message?.buttonsResponseMessage?.selectedDisplayText,
-    m?.message?.templateButtonReplyMessage?.selectedId,
-    m?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    m?.message?.listResponseMessage?.title,
     m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
     m?.message?.interactiveResponseMessage?.body?.text,
-    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
     mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
     mek?.message?.buttonsResponseMessage?.selectedButtonId,
-    mek?.message?.buttonsResponseMessage?.selectedDisplayText,
-    mek?.message?.templateButtonReplyMessage?.selectedId,
-    mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    mek?.message?.listResponseMessage?.title,
     mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
     mek?.message?.interactiveResponseMessage?.body?.text,
-    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
   ];
   for (const item of direct) {
     if (item) texts.push(String(item).trim());
   }
+  
   const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   for (const raw of [p1, p2]) {
     if (!raw) continue;
     const parsed = tryParseJsonString(raw);
     if (!parsed) continue;
-    const vals = [parsed.id, parsed.selectedId, parsed.selectedRowId, parsed.title, parsed.display_text, parsed.text, parsed.name];
-    for (const v of vals) {
-      if (v) texts.push(String(v).trim());
-    }
+    const vals = [parsed.id, parsed.selectedId, parsed.title, parsed.name];
+    for (const v of vals) if (v) texts.push(String(v).trim());
   }
   return [...new Set(texts.filter(Boolean))];
 }
@@ -141,31 +152,28 @@ function extractOptionFromTexts(texts) {
   return null;
 }
 
-// 🔥 Single-Sided Layouts 🔥
+// 🔥 Single-Sided Layouts with Small Caps Effect 🔥
 function buildSongDetails(video) {
-  const title = video.title || "Unknown Title";
-  const channel = video.author?.name || "Unknown Channel";
+  const title = toSmallCaps(video.title || "Unknown Title");
+  const channel = toSmallCaps(video.author?.name || "Unknown Channel");
   const duration = video.timestamp || formatSeconds(video.seconds) || "0:00";
   const views = formatViews(video.views);
   const uploaded = video.ago || "Unknown";
   const url = video.url || "Unavailable";
 
-  return `╭─[ 🎵 *𝗦𝗢𝗡𝗚 𝗗𝗘𝗧𝗔𝗜𝗟𝗦* ]\n│\n├ 🎶 *𝗧𝗶𝘁𝗹𝗲:* ${title}\n├ 👤 *𝗖𝗵𝗮𝗻𝗻𝗲𝗹:* ${channel}\n├ ⏱️ *𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻:* ${duration}\n├ 👀 *𝗩𝗶𝗲𝘄𝘀:* ${views}\n├ 📅 *𝗨𝗽𝗹𝗼𝗮𝗱𝗲𝗱:* ${uploaded}\n├ 🔗 *𝗟𝗶𝗻𝗸:* ${url}\n│\n╰─[ ${generateProgressBar(duration)} ]`;
+  return `╭─[ 🎵 *${toSmallCaps("SONG DETAILS")}* ]\n│\n├ 🎶 *${toSmallCaps("Title:")}* ${title}\n├ 👤 *${toSmallCaps("Channel:")}* ${channel}\n├ ⏱️ *${toSmallCaps("Duration:")}* ${duration}\n├ 👀 *${toSmallCaps("Views:")}* ${views}\n├ 📅 *${toSmallCaps("Uploaded:")}* ${uploaded}\n├ 🔗 *${toSmallCaps("Link:")}* ${url}\n│\n╰─[ ${generateProgressBar(duration)} ]`;
 }
 
 function buildFinalCaption(video, typeLabel, sizeMB) {
-  return `╭─[ ✅ *𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗱𝗘𝗗* ]\n│\n├ 🎵 *𝗧𝗶𝘁𝗹𝗲:* ${video.title || "Unknown Title"}\n├ 🎧 *𝗧𝘆𝗽𝗲:* ${typeLabel}\n├ 📦 *𝗦𝗶𝘇𝗲:* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎵 *${toSmallCaps("Title:")}* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎧 *${toSmallCaps("Type:")}* ${toSmallCaps(typeLabel)}\n├ 📦 *${toSmallCaps("Size:")}* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 }
 
 async function getYoutube(query) {
   const isUrl = /(youtube\.com|youtu\.be)/i.test(query);
-
   if (isUrl) {
     const id = query.includes("v=") ? query.split("v=")[1].split("&")[0] : query.split("/").pop().split("?")[0];
-    const info = await yts({ videoId: id });
-    return info;
+    return await yts({ videoId: id });
   }
-
   const search = await yts(query);
   if (!search.videos.length) return null;
   return search.videos[0];
@@ -173,32 +181,22 @@ async function getYoutube(query) {
 
 function buildStyledAudioMenu(video) {
   const details = buildSongDetails(video);
-  return details + `\n\n╭─[ 🎵 *𝗔𝗨𝗗𝗜𝗢 𝗢𝗣𝗧𝗜𝗢𝗡𝗦* ]\n│\n├ 📱 *[ 01 ]* ➔ 🎶 Audio File (MP3)\n├ 📱 *[ 02 ]* ➔ 📁 Document File\n│\n╰─[ 👇 *Reply with 1 or 2* ]`;
+  return details + `\n\n╭─[ 🎵 *${toSmallCaps("AUDIO OPTIONS")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 🎶 Audio File (MP3)\n├ 📱 *[ 02 ]* ➔ 📁 Document File\n│\n╰─[ 👇 *${toSmallCaps("Reply with 1 or 2")}* ]`;
 }
 
 async function sendNumberedAudioMenu(sock, from, mek, video) {
-  const caption = buildStyledAudioMenu(video);
-  return sock.sendMessage(
-    from,
-    {
+  return sock.sendMessage(from, {
       image: { url: video.thumbnail },
-      caption: caption,
+      caption: buildStyledAudioMenu(video),
       contextInfo: channelContextInfo(),
-    },
-    { quoted: mek }
-  );
+  }, { quoted: mek });
 }
 
 async function sendInteractiveAudioMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
-  const btnsOn = !!settings.btns_enabled;
-
-  if (btnsOn && sendInteractiveMessage) {
+  if (!!settings.btns_enabled && sendInteractiveMessage) {
     try {
-      return await sendInteractiveMessage(
-        sock,
-        from,
-        {
+      return await sendInteractiveMessage(sock, from, {
           image: { url: video.thumbnail },
           text: buildSongDetails(video),
           footer: "𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗔𝗨𝗗𝗜𝗢 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥",
@@ -219,18 +217,27 @@ async function sendInteractiveAudioMenu(sock, from, mek, video, sessionId) {
               }),
             },
           ],
-        },
-        { quoted: mek }
+        }, { quoted: mek }
       );
     } catch (e) {
       console.log("AUDIO BUTTON ERROR:", e);
     }
   }
-
   return sendNumberedAudioMenu(sock, from, mek, video);
 }
 
-// 🔥 ERROR MSG SENDER WITH REAL ERROR DISPLAY 🔥
+function isCookiesRelatedError(errText = "") {
+  const t = String(errText).toLowerCase();
+  return (
+    t.includes("sign in to confirm") ||
+    t.includes("not a bot") ||
+    t.includes("cookies") ||
+    t.includes("login required") ||
+    (t.includes("private video") && t.includes("sign in"))
+  );
+}
+
+// 🔥 REAL ERROR SENDER 🔥
 async function sendErrorMsg(sock, from, mek, text) {
   await sock.sendMessage(from, { 
     text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`,
@@ -241,22 +248,18 @@ async function sendErrorMsg(sock, from, mek, text) {
 async function handleAudioDownload(sock, mek, from, sender, optionChoice) {
   const key = makePendingKey(sender, from);
   const pending = pendingMediaChoice[key];
-  if (!pending) return;
-
-  if (pending.isProcessing) return;
+  if (!pending || pending.isProcessing) return;
   pending.isProcessing = true;
 
   let audioFile = null;
 
   try {
     const isDoc = optionChoice === "doc";
-
-    // ⬇️ Only Reacts for downloading state
     await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
 
     audioFile = makeTempFile(".mp3");
 
-    // 🔥 NO COOKIES: Clean & Direct Android/Web Client Request 🔥
+    // 🔥 YT-DLP With Cookies 🔥
     const ytArgs = {
       extractAudio: true,
       audioFormat: "mp3",
@@ -269,6 +272,11 @@ async function handleAudioDownload(sock, mek, from, sender, optionChoice) {
       addHeader: ["referer:youtube.com"],
     };
 
+    const cookies = cookiesStatus();
+    if (cookies.exists && cookies.sizeBytes > 0) {
+      ytArgs.cookies = COOKIES_PATH;
+    }
+
     await ytDlp(pending.video.url, ytArgs);
 
     if (!fs.existsSync(audioFile) || fs.statSync(audioFile).size === 0) {
@@ -278,7 +286,6 @@ async function handleAudioDownload(sock, mek, from, sender, optionChoice) {
     const sizeMB = getFileSizeMB(audioFile);
     const cleanTitle = sanitizeFileName(pending.video.title);
 
-    // ⬆️ React for uploading state
     await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
 
     const msgPayload = {
@@ -297,29 +304,35 @@ async function handleAudioDownload(sock, mek, from, sender, optionChoice) {
     }
 
     await sock.sendMessage(from, msgPayload, { quoted: mek });
-
-    // ✅ React for success
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
     delete pendingMediaChoice[key];
+
   } catch (e) {
-    // 🔥 මෙතනදී සැබෑ Error එක (yt-dlp stderr හෝ message) අල්ලලා WhatsApp එකට දෙනවා 🔥
+    // 🔥 සැබෑ Error එක අල්ලලා WhatsApp එකට දෙනවා 🔥
     const errText = (e && (e.stderr || e.message)) || "Unknown Error";
     console.log("AUDIO DOWNLOAD ERROR:", errText);
 
-    // ❌ React for error
     await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
 
-    // සැබෑ Error එකේ පේළි කීපයක් හෝ මුල් අකුරු 150 WhatsApp එකේ පෙන්නයි
-    const cleanErr = String(errText).replace(/\n/g, " ").trim();
-    await sendErrorMsg(sock, from, mek, `Audio Download Failed: ${cleanErr.substring(0, 150)}`);
+    if (isCookiesRelatedError(errText)) {
+      const cookies = cookiesStatus();
+      if (!cookies.exists) {
+        await sendErrorMsg(sock, from, mek, "Download blocked by YouTube. Please put cookies.txt in the root folder.");
+      } else if (cookies.sizeBytes === 0) {
+        await sendErrorMsg(sock, from, mek, "Download failed! cookies.txt is empty. Export a fresh one.");
+      } else {
+        await sendErrorMsg(sock, from, mek, "Download failed! Your cookies are expired. Please export fresh cookies.txt.");
+      }
+    } else {
+      const cleanErr = String(errText).replace(/\n/g, " ").trim();
+      await sendErrorMsg(sock, from, mek, `Audio Download Failed: ${cleanErr.substring(0, 150)}`);
+    }
 
     delete pendingMediaChoice[key];
   } finally {
     safeUnlink(audioFile);
-    if (pendingMediaChoice[key]) {
-      pendingMediaChoice[key].isProcessing = false;
-    }
+    if (pendingMediaChoice[key]) pendingMediaChoice[key].isProcessing = false;
   }
 }
 
@@ -343,7 +356,6 @@ cmd(
       }
 
       const key = makePendingKey(sender, from);
-
       pendingMediaChoice[key] = {
         video,
         from,
@@ -362,10 +374,8 @@ cmd(
 
 replyHandlers.push({
   filter: (_body, { sender, from }) => {
-    const key = makePendingKey(sender, from);
-    return !!pendingMediaChoice[key];
+    return !!pendingMediaChoice[makePendingKey(sender, from)];
   },
-
   function: async (sock, mek, m, { from, body, sender }) => {
     const key = makePendingKey(sender, from);
     const pending = pendingMediaChoice[key];
@@ -379,16 +389,14 @@ replyHandlers.push({
     }
 
     if (!choice) return;
-
     return handleAudioDownload(sock, mek, from, sender, choice);
   },
 });
 
 setInterval(() => {
   const now = Date.now();
-  const timeout = 2 * 60 * 1000;
   for (const key of Object.keys(pendingMediaChoice)) {
-    if (now - pendingMediaChoice[key].createdAt > timeout) {
+    if (now - pendingMediaChoice[key].createdAt > 2 * 60 * 1000) {
       delete pendingMediaChoice[key];
     }
   }
