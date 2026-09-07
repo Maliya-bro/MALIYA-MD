@@ -20,7 +20,7 @@ if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
 
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 Ｍ𝗔𝗟𝗜𝗬Ａ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 Ｍ𝗔𝗟𝗜𝗬𝗔-〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -138,7 +138,7 @@ function extractTexts(body, mek, m) {
     const parsed = tryParseJsonString(raw);
     if (!parsed) continue;
     const vals = [parsed.id, parsed.selectedId, parsed.title, parsed.name];
-    for (const v of vals) if (v) texts.push(String(v).trim());
+    for (const v of vals) if (v) textspush(String(v).trim());
   }
   return [...new Set(texts.filter(Boolean))];
 }
@@ -259,12 +259,13 @@ async function handleAudioDownload(sock, mek, from, sender, optionChoice) {
 
     audioFile = makeTempFile(".mp3");
 
-    // 🔥 YT-DLP With Cookies 🔥
+    // 🔥 YT-DLP Format Fix 🔥
     const ytArgs = {
+      format: "bestaudio/best", // හොඳම Audio එක බානවා
       extractAudio: true,
-      audioFormat: "mp3",
-      audioQuality: "0",
+      audioFormat: "mp3",       // FFMPEG හරහා අනිවාර්යයෙන්ම MP3 කරනවා
       output: audioFile,
+      ffmpegLocation: ffmpegPath, // FFMPEG එකට ලින්ක් එක දෙනවා
       noWarnings: true,
       noCheckCertificates: true,
       noPlaylist: true,
