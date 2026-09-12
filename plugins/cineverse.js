@@ -3,10 +3,11 @@ const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 // ── Context Info (Channel Details) ─────────────
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -27,6 +28,8 @@ const DL_HEADERS = {
   "Accept": "application/json, text/plain, */*",
   "Cookie": "cv_auth=true;"
 };
+
+const DEFAULT_POSTER = "https://i.ibb.co/3m1bXvt/cineverse.jpg";
 
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
@@ -87,8 +90,11 @@ cmd({
   desc: "Search and download Sinhala Subbed Movies & Series",
   category: "download",
   filename: __filename,
-}, async (sock, mek, m, { from, q }) => {
+}, async (sock, mek, m, { from, q, sessionId }) => {
   try {
+    // 🔥 Bot Settings Check (menu.js ආකාරයටම)
+    const settings = await readSettings(sessionId);
+
     if (!q) {
       return await sock.sendMessage(from, {
         text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.cv <name>\`\n💡 *Example:* \`.cv sonic\``,
@@ -105,6 +111,13 @@ cmd({
       return await sendErrorMsg(sock, from, mek, `No results found for "${q}" on CineVerse LK.`);
     }
 
+    pendingCvSearch[from] = {
+      results,
+      step: 1,
+      createdAt: Date.now(),
+      isProcessing: false,
+    };
+
     let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
     text += `🎬 *𝐂𝐕 𝐒𝐄𝐀𝐑𝐂𝐇 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n`;
     text += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
@@ -119,30 +132,31 @@ cmd({
       text += `  ├ 🏷️ ${type} | ⭐ ${item.imdbRating || "N/A"}\n`;
       text += `  ╰ 💿 ${item.quality || "HD"} | ✍️ ${item.subtitleAuthor || "CineVerse"}\n\n`;
     });
-    text += `⊱━━━━━━━━━━━━━━━⊰\n> 👇 *Swipe & Reply this message with a number to Download...*`;
+    text += `⊱━━━━━━━━━━━━━━━⊰\n> 👇 *Reply with a number to Download...*`;
 
-    const poster = results[0].posterImage || results[0].image || results[0].poster || "https://i.ibb.co/3m1bXvt/cineverse.jpg";
-    
-    // 1. පෝස්ටරය යැවීම
+    // 🔥 Custom Image Check (menu.js ආකාරයටම)
+    let poster = results[0].posterImage || results[0].image || results[0].poster || DEFAULT_POSTER;
+    if (sessionId) {
+      try {
+        const custom = await getCustomImage(sessionId, "cineverse_header");
+        if (custom && custom.data) {
+          poster = custom.data;
+        }
+      } catch (e) {
+        console.log("⚠️ Failed to load custom image:", e.message);
+      }
+    }
+
     const imgMsg = await sock.sendMessage(from, { 
       image: { url: poster }, 
       caption: `> 🎬 *${results[0].title}*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ ᴍᴅ`, 
       contextInfo: channelContextInfo() 
     }, { quoted: mek });
 
-    // 2. විස්තර ලැයිස්තුව යැවීම
     await sock.sendMessage(from, { 
       text: text, 
       contextInfo: channelContextInfo() 
     }, { quoted: imgMsg });
-
-    // Chat ID එකට session එක සේව් කිරීම (apk.js ක්‍රමය)
-    pendingCvSearch[from] = {
-      results,
-      step: 1,
-      createdAt: Date.now(),
-      isProcessing: false,
-    };
 
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
   } catch (e) {
@@ -152,40 +166,27 @@ cmd({
 });
 
 // ==========================================
-// 3. Number Reply Listener (apk.js ක්‍රමය)
+// 3. Number Reply Listener
 // ==========================================
 replyHandlers.push({
-  filter: (text, { from }) => {
-    const pending = pendingCvSearch[from];
-    if (!pending) return false;
-    const input = String(text || "").trim();
-    if (pending.step === 1) {
-      const num = parseInt(input, 10);
-      return !isNaN(num) && num >= 1 && num <= pending.results.length;
-    } else if (pending.step === 2) {
-      const parts = input.split(/\s+/);
-      return parts.length >= 2 && !isNaN(parseInt(parts[0], 10)) && !isNaN(parseInt(parts[1], 10));
-    }
-    return false;
-  },
+  filter: (text, { from }) => !!pendingCvSearch[from],
   function: async (sock, mek, m, { body, from }) => {
     const pending = pendingCvSearch[from];
     if (!pending || pending.isProcessing) return;
 
-    const input = String(body).trim();
+    const rawInput = String(body || m?.text || m?.body || "").trim();
 
     // STEP 1: Movie හෝ Series තේරීම
     if (pending.step === 1) {
-      const num = parseInt(input, 10);
-      if (isNaN(num) || num < 1 || num > pending.results.length) return;
+      const input = parseInt(rawInput, 10);
+      if (isNaN(input) || input < 1 || input > pending.results.length) return;
 
-      const selected = pending.results[num - 1];
+      const selected = pending.results[input - 1];
 
       if (!selected.isSeries) {
         pending.isProcessing = true;
         const dlUrl = selected.directLink;
         if (!dlUrl || dlUrl === '#') {
-          pending.isProcessing = false;
           delete pendingCvSearch[from];
           return await sendErrorMsg(sock, from, mek, "Direct download link is not available for this movie.");
         }
@@ -212,22 +213,18 @@ replyHandlers.push({
     } 
     // STEP 2: Series Season සහ Episode ලබා ගැනීම
     else if (pending.step === 2) {
-      const parts = input.split(/\s+/);
-      if (parts.length < 2) {
-        return await sendErrorMsg(sock, from, mek, "Invalid format! Example: 1 2");
-      }
+      const parts = rawInput.split(/\s+/);
+      if (parts.length < 2) return;
 
       const s = parseInt(parts[0], 10);
       const e = parseInt(parts[1], 10);
-      
-      if (isNaN(s) || isNaN(e)) return await sendErrorMsg(sock, from, mek, "Please provide valid numbers.");
+      if (isNaN(s) || isNaN(e)) return;
 
       pending.isProcessing = true;
       const series = pending.selectedSeries;
       const epData = series.episodesData && series.episodesData[s] ? series.episodesData[s][e] : null;
 
       if (!epData || !epData.d || epData.d === '#') {
-        pending.isProcessing = false;
         delete pendingCvSearch[from];
         return await sendErrorMsg(sock, from, mek, `Link not found for S${s} E${e}.`);
       }
@@ -294,7 +291,7 @@ async function executeDownload(sock, mek, from, url, titleName) {
       contextInfo: channelContextInfo(),
     }, { quoted: mek });
 
-    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+    await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
   } catch (err) {
     let fallbackMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
     fallbackMsg += `⚠️ *𝐅𝐈𝐋𝐄 𝐓𝐎𝐎 𝐋𝐀𝐑𝐆𝐄*\n`;
@@ -311,7 +308,6 @@ async function executeDownload(sock, mek, from, url, titleName) {
   }
 }
 
-// Expired sessions ඉවත් කිරීම (විනාඩි 5)
 setInterval(() => {
   const now = Date.now();
   for (const key of Object.keys(pendingCvSearch)) {
