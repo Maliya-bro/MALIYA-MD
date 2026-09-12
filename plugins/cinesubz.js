@@ -6,7 +6,6 @@ const crypto = require("crypto");
 const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
-// ── Context Info (Channel Details) ─────────────
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
 
@@ -23,6 +22,11 @@ function channelContextInfo() {
 }
 
 const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
+
+// 🔥 සර්ච් කරපු කෙනාට විතරක් වැඩ කරන්න Key එක හදනවා
+function makePendingKey(sender, from) {
+  return `${from || ""}::${(sender || "").split(":")[0]}`;
+}
 
 const pendingCineSubz = Object.create(null);
 
@@ -177,9 +181,8 @@ cmd({
   desc: "Search and send movies from Cinesubz.co",
   category: "download",
   filename: __filename
-}, async (sock, mek, m, { from, q, sessionId }) => {
+}, async (sock, mek, m, { from, q, sender, sessionId }) => {
   try {
-    // 🔥 Bot Settings Check (menu.js ආකාරයටම)
     const settings = await readSettings(sessionId);
 
     if (!q) {
@@ -200,7 +203,9 @@ cmd({
 
     const topResults = results.slice(0, 10);
 
-    pendingCineSubz[from] = {
+    // User-Specific Session Key
+    const key = makePendingKey(sender, from);
+    pendingCineSubz[key] = {
       step: 1,
       results: topResults,
       createdAt: Date.now(),
@@ -218,19 +223,14 @@ cmd({
       text += `*[ ${numStr} ]* ➔ *${item.title}*\n`;
     });
 
-    text += `\n⊱━━━━━━━━━━━━━━━⊰\n> 👇 *Reply with a number to Download...*`;
+    text += `\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 👇 *Reply with a number to Download...*`;
 
-    // 🔥 Custom Image Check (menu.js ආකාරයටම)
     let searchImg = DEFAULT_SEARCH_IMAGE;
     if (sessionId) {
       try {
         const custom = await getCustomImage(sessionId, "cinesubz_header");
-        if (custom && custom.data) {
-          searchImg = custom.data;
-        }
-      } catch (e) {
-        console.log("⚠️ Failed to load custom image:", e.message);
-      }
+        if (custom && custom.data) searchImg = custom.data;
+      } catch (e) {}
     }
 
     const imgMsg = await sock.sendMessage(from, { 
@@ -254,15 +254,19 @@ cmd({
 });
 
 // ==========================================
-// 2. Number Reply Listener
+// 2. Number Reply Listener (Settings ක්‍රමයටම)
 // ==========================================
 replyHandlers.push({
-  filter: (text, { from }) => !!pendingCineSubz[from],
-  function: async (sock, mek, m, { body, from }) => {
-    const pending = pendingCineSubz[from];
+  filter: (text, { sender, from }) => {
+    const key = makePendingKey(sender, from);
+    return !!pendingCineSubz[key];
+  },
+  function: async (sock, mek, m, { body, sender, from }) => {
+    const key = makePendingKey(sender, from);
+    const pending = pendingCineSubz[key];
     if (!pending || pending.isProcessing) return;
 
-    const rawInput = String(body || m?.text || m?.body || "").trim();
+    const rawInput = String(body || m?.message?.conversation || m?.message?.extendedTextMessage?.text || "").trim();
     const input = parseInt(rawInput, 10);
     if (isNaN(input)) return;
 
@@ -279,7 +283,7 @@ replyHandlers.push({
         const movieInfo = await scrapeCineSubz(selected.url);
 
         if (!movieInfo || !movieInfo.downloadLinks || movieInfo.downloadLinks.length === 0) {
-          delete pendingCineSubz[from];
+          delete pendingCineSubz[key];
           return await sendErrorMsg(sock, from, mek, "No download links available for this movie.");
         }
 
@@ -295,7 +299,7 @@ replyHandlers.push({
         });
 
         if (downloadLinks.length === 0) {
-          delete pendingCineSubz[from];
+          delete pendingCineSubz[key];
           return await sendErrorMsg(sock, from, mek, "No download links found below 2GB.");
         }
 
@@ -312,7 +316,7 @@ replyHandlers.push({
           qualityMsg += `*[ ${numStr} ]* 📊 *${d.quality}*\n`;
         });
 
-        qualityMsg += `\n⊱━━━━━━━━━━━━━━━⊰\n> 👇 *Reply with quality number to Download...*`;
+        qualityMsg += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply with quality number to Download...*`;
 
         if (movieInfo.poster) {
           await sock.sendMessage(from, { 
@@ -335,7 +339,7 @@ replyHandlers.push({
 
       } catch (error) {
         console.error("CineSubz Scrape Error:", error.message);
-        delete pendingCineSubz[from];
+        delete pendingCineSubz[key];
         await sendErrorMsg(sock, from, mek, "Failed to fetch download links for this movie.");
       }
     }
@@ -351,7 +355,7 @@ replyHandlers.push({
       const selectedLink = movie.downloadLinks[input - 1];
       let targetServerLink = selectedLink.directUrl;
 
-      delete pendingCineSubz[from];
+      delete pendingCineSubz[key];
 
       try {
         targetServerLink = targetServerLink.replace(/^https:\/\/[^\/]+/, 'https://drive.csplayer2.space');
@@ -387,7 +391,7 @@ replyHandlers.push({
         if (pixeldrainLinks.length > 0) captionText += `⚡ *Pixeldrain :* ${pixeldrainLinks[0]}\n\n`;
         if (telegramLinks.length > 0) captionText += `✈️ *Telegram :* ${telegramLinks[0]}\n\n`;
         
-        captionText += `⊱━━━━━━━━━━━━━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+        captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
         if (directDownloadUrl) {
           await sock.sendMessage(from, {
