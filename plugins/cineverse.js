@@ -13,6 +13,7 @@ const DL_HEADERS = {
 };
 
 const DEFAULT_POSTER = "https://i.ibb.co/3m1bXvt/cineverse.jpg";
+const SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
 
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
@@ -25,12 +26,24 @@ function safeUnlink(file) {
   try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
 }
 
-// 🔥 සර්ච් කරපු කෙනාට විතරක් වැඩ කරන්න Key එක හදනවා
+// 🔥 video.js ආකෘතියට අනුව Key එක සෑදීම
 function makePendingKey(sender, from) {
   return `${from || ""}::${(sender || "").split(":")[0]}`;
 }
 
 const pendingCvSearch = Object.create(null);
+
+function channelContextInfo() {
+  return {
+    forwardingScore: 999,
+    isForwarded: true,
+    forwardedNewsletterMessageInfo: {
+      newsletterJid: "120363427174988449@newsletter",
+      newsletterName: "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁",
+      serverMessageId: -1,
+    },
+  };
+}
 
 async function sendErrorMsg(sock, from, mek, text) {
   await sock.sendMessage(from, {
@@ -38,9 +51,6 @@ async function sendErrorMsg(sock, from, mek, text) {
   }, { quoted: mek });
 }
 
-// ==========================================
-// 1. Fetch JSON Data & Smart Search
-// ==========================================
 async function searchCineverse(query) {
   const cb = Date.now();
   try {
@@ -68,7 +78,7 @@ async function searchCineverse(query) {
 }
 
 // ==========================================
-// 2. Command Trigger
+// 1. Command Trigger
 // ==========================================
 cmd({
   pattern: "cineverse",
@@ -79,8 +89,6 @@ cmd({
   filename: __filename,
 }, async (sock, mek, m, { from, q, sender, sessionId }) => {
   try {
-    const settings = await readSettings(sessionId);
-
     if (!q) {
       return await sock.sendMessage(from, {
         text: `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐋*\n⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n📌 *Usage:* \`.cv <name>\`\n💡 *Example:* \`.cv sonic\``,
@@ -96,6 +104,7 @@ cmd({
       return await sendErrorMsg(sock, from, mek, `No results found for "${q}" on CineVerse LK.`);
     }
 
+    // 🔥 video.js ක්‍රමයට session එක සෑදීම
     const key = makePendingKey(sender, from);
     pendingCvSearch[key] = {
       results,
@@ -121,18 +130,18 @@ cmd({
     text += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n> 👇 *Reply with a number to Download...*`;
 
     let poster = results[0].posterImage || results[0].image || results[0].poster || DEFAULT_POSTER;
-    if (sessionId) {
-      try {
-        const custom = await getCustomImage(sessionId, "cineverse_header");
-        if (custom && custom.data) poster = custom.data;
-      } catch (e) {}
-    }
 
-    // Image එකයි Text එකයි එකට යවනවා
-    await sock.sendMessage(from, { 
+    // 1. Film Poster
+    const posterMsg = await sock.sendMessage(from, { 
       image: { url: poster }, 
-      caption: text 
+      caption: `> 🎬 *${results[0].title}*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ ᴍᴅ`
     }, { quoted: mek });
+
+    // 2. Movie List
+    await sock.sendMessage(from, { 
+      image: { url: SEARCH_IMAGE },
+      caption: text 
+    }, { quoted: posterMsg });
 
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
   } catch (e) {
@@ -142,19 +151,16 @@ cmd({
 });
 
 // ==========================================
-// 3. Number Reply Listener
+// 2. Number Reply Listener (video.js ආකෘතිය)
 // ==========================================
 replyHandlers.push({
-  filter: (text, { sender, from }) => {
-    const key = makePendingKey(sender, from);
-    return !!pendingCvSearch[key];
-  },
+  filter: (_body, { sender, from }) => !!pendingCvSearch[makePendingKey(sender, from)],
   function: async (sock, mek, m, { body, sender, from }) => {
     const key = makePendingKey(sender, from);
     const pending = pendingCvSearch[key];
     if (!pending || pending.isProcessing) return;
 
-    const rawInput = String(body || m?.message?.conversation || m?.message?.extendedTextMessage?.text || "").trim();
+    const rawInput = String(body || "").trim();
 
     if (pending.step === 1) {
       const input = parseInt(rawInput, 10);
@@ -218,7 +224,7 @@ replyHandlers.push({
 });
 
 // ==========================================
-// 4. Download Execution
+// 3. Download Execution
 // ==========================================
 async function executeDownload(sock, mek, from, url, titleName) {
   let tempFile = makeTempFile(".mp4");
