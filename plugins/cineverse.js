@@ -6,7 +6,7 @@ const crypto = require("crypto");
 
 // ── Context Info (Channel Details) ─────────────
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -39,14 +39,7 @@ function safeUnlink(file) {
   try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
 }
 
-// Chat ID (from) මත පදනම් වූ session ගබඩාව (ඕනෑම අයෙකුට reply කළ හැක)
 const pendingCvSearch = Object.create(null);
-
-function getQuotedId(m, mek) {
-  return m?.quoted?.id || 
-         mek?.message?.extendedTextMessage?.contextInfo?.stanzaId || 
-         m?.message?.extendedTextMessage?.contextInfo?.stanzaId || null;
-}
 
 async function sendErrorMsg(sock, from, mek, text) {
   await sock.sendMessage(from, {
@@ -98,7 +91,7 @@ cmd({
   try {
     if (!q) {
       return await sock.sendMessage(from, {
-        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.cv <name>\`\n💡 *Example:* \`.cv alien romulus\``,
+        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.cv <name>\`\n💡 *Example:* \`.cv sonic\``,
         contextInfo: channelContextInfo(),
       }, { quoted: mek });
     }
@@ -138,14 +131,13 @@ cmd({
     }, { quoted: mek });
 
     // 2. විස්තර ලැයිස්තුව යැවීම
-    const menuMsg = await sock.sendMessage(from, { 
+    await sock.sendMessage(from, { 
       text: text, 
       contextInfo: channelContextInfo() 
     }, { quoted: imgMsg });
 
-    // apk.js ආකාරයටම Message ID එක පමණක් lock කිරීම
+    // Chat ID එකට session එක සේව් කිරීම (apk.js ක්‍රමය)
     pendingCvSearch[from] = {
-      expectedMsgId: menuMsg.key.id,
       results,
       step: 1,
       createdAt: Date.now(),
@@ -160,14 +152,21 @@ cmd({
 });
 
 // ==========================================
-// 3. Number Reply Listener (apk.js ආකෘතියට අනුව)
+// 3. Number Reply Listener (apk.js ක්‍රමය)
 // ==========================================
 replyHandlers.push({
-  filter: (text, { from, m, mek }) => {
+  filter: (text, { from }) => {
     const pending = pendingCvSearch[from];
     if (!pending) return false;
-    const quotedId = getQuotedId(m, mek);
-    return quotedId && quotedId === pending.expectedMsgId;
+    const input = String(text || "").trim();
+    if (pending.step === 1) {
+      const num = parseInt(input, 10);
+      return !isNaN(num) && num >= 1 && num <= pending.results.length;
+    } else if (pending.step === 2) {
+      const parts = input.split(/\s+/);
+      return parts.length >= 2 && !isNaN(parseInt(parts[0], 10)) && !isNaN(parseInt(parts[1], 10));
+    }
+    return false;
   },
   function: async (sock, mek, m, { body, from }) => {
     const pending = pendingCvSearch[from];
@@ -190,8 +189,8 @@ replyHandlers.push({
           delete pendingCvSearch[from];
           return await sendErrorMsg(sock, from, mek, "Direct download link is not available for this movie.");
         }
-        await executeDownload(sock, mek, from, dlUrl, `${selected.title} (${selected.year || "HD"})`);
         delete pendingCvSearch[from];
+        await executeDownload(sock, mek, from, dlUrl, `${selected.title} (${selected.year || "HD"})`);
       } else {
         pending.step = 2;
         pending.selectedSeries = selected;
@@ -204,13 +203,11 @@ replyHandlers.push({
         sText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
         sText += `🎬 *Series:* ${selected.title}\n`;
         sText += `🗂️ *Seasons:* ${availableSeasons || "N/A"}\n\n`;
-        sText += `> 👇 *Swipe & Reply this message with Season & Episode:*\n`;
+        sText += `> 👇 *Reply with Season & Episode:*\n`;
         sText += `> 💡 *Example:* \`1 2\` (Season 1, Ep 2)\n\n`;
         sText += `⊱━━━━━━━━━━━━━━━⊰`;
 
-        const seriesPrompt = await sock.sendMessage(from, { text: sText, contextInfo: channelContextInfo() }, { quoted: mek });
-        // දෙවන පියවර සඳහා අදාළ Message ID එක lock කිරීම
-        pending.expectedMsgId = seriesPrompt.key.id;
+        await sock.sendMessage(from, { text: sText, contextInfo: channelContextInfo() }, { quoted: mek });
       }
     } 
     // STEP 2: Series Season සහ Episode ලබා ගැනීම
@@ -239,14 +236,14 @@ replyHandlers.push({
       const fE = e < 10 ? '0' + e : e;
       const epTitle = `${series.title} S${fS}E${fE}`;
 
-      await executeDownload(sock, mek, from, epData.d, epTitle);
       delete pendingCvSearch[from];
+      await executeDownload(sock, mek, from, epData.d, epTitle);
     }
   },
 });
 
 // ==========================================
-// 4. Download Execution (60MB Document Condition සහිතව)
+// 4. Download Execution (60MB Document Condition)
 // ==========================================
 async function executeDownload(sock, mek, from, url, titleName) {
   let tempFile = makeTempFile(".mp4");
