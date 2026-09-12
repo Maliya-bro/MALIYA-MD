@@ -4,6 +4,7 @@ const CryptoJS = require("crypto-js");
 const https = require("https");
 const crypto = require("crypto");
 const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
+const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 // ── Context Info (Channel Details) ─────────────
 const CHANNEL_JID = "120363427174988449@newsletter";
@@ -21,9 +22,8 @@ function channelContextInfo() {
   };
 }
 
-const SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
+const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
 
-// Chat ID (from) මත පදනම් වූ session එක (apk.js ආකෘතිය)
 const pendingCineSubz = Object.create(null);
 
 function toSmallCaps(str = "") {
@@ -177,17 +177,20 @@ cmd({
   desc: "Search and send movies from Cinesubz.co",
   category: "download",
   filename: __filename
-}, async (sock, mek, m, { from, q }) => {
-  if (!q) {
-    return await sock.sendMessage(from, { 
-      text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.cinesubz <name>\`\n💡 *Example:* \`.cinesubz avengers\``, 
-      contextInfo: channelContextInfo() 
-    }, { quoted: mek });
-  }
-
-  await sock.sendMessage(from, { react: { text: "🔍", key: m.key } });
-
+}, async (sock, mek, m, { from, q, sessionId }) => {
   try {
+    // 🔥 Bot Settings Check (menu.js ආකාරයටම)
+    const settings = await readSettings(sessionId);
+
+    if (!q) {
+      return await sock.sendMessage(from, { 
+        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.cinesubz <name>\`\n💡 *Example:* \`.cinesubz avengers\``, 
+        contextInfo: channelContextInfo() 
+      }, { quoted: mek });
+    }
+
+    await sock.sendMessage(from, { react: { text: "🔍", key: m.key } });
+
     const results = await searchCineSubz(q.trim());
 
     if (!results || results.length === 0) {
@@ -196,6 +199,13 @@ cmd({
     }
 
     const topResults = results.slice(0, 10);
+
+    pendingCineSubz[from] = {
+      step: 1,
+      results: topResults,
+      createdAt: Date.now(),
+      isProcessing: false,
+    };
 
     let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
     text += `🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n`;
@@ -208,28 +218,31 @@ cmd({
       text += `*[ ${numStr} ]* ➔ *${item.title}*\n`;
     });
 
-    text += `\n⊱━━━━━━━━━━━━━━━⊰\n> 👇 *Reply this message with a number to Download...*`;
+    text += `\n⊱━━━━━━━━━━━━━━━⊰\n> 👇 *Reply with a number to Download...*`;
 
-    // 1. Image යැවීම
+    // 🔥 Custom Image Check (menu.js ආකාරයටම)
+    let searchImg = DEFAULT_SEARCH_IMAGE;
+    if (sessionId) {
+      try {
+        const custom = await getCustomImage(sessionId, "cinesubz_header");
+        if (custom && custom.data) {
+          searchImg = custom.data;
+        }
+      } catch (e) {
+        console.log("⚠️ Failed to load custom image:", e.message);
+      }
+    }
+
     const imgMsg = await sock.sendMessage(from, { 
-      image: { url: SEARCH_IMAGE }, 
+      image: { url: searchImg }, 
       caption: `> 🎬 *${topResults[0].title}*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ ᴍᴅ`,
       contextInfo: channelContextInfo()
     }, { quoted: mek });
 
-    // 2. Menu මැසේජ් එක යැවීම
     await sock.sendMessage(from, { 
       text: text, 
       contextInfo: channelContextInfo() 
     }, { quoted: imgMsg });
-
-    // Session එක Chat ID එකට සේව් කිරීම (apk.js ක්‍රමය)
-    pendingCineSubz[from] = {
-      step: 1,
-      results: topResults,
-      createdAt: Date.now(),
-      isProcessing: false,
-    };
 
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
 
@@ -241,30 +254,21 @@ cmd({
 });
 
 // ==========================================
-// 2. Number Reply Listener (apk.js ක්‍රමය)
+// 2. Number Reply Listener
 // ==========================================
 replyHandlers.push({
-  filter: (text, { from }) => {
-    const pending = pendingCineSubz[from];
-    if (!pending) return false;
-    const input = parseInt(String(text || "").trim(), 10);
-    if (isNaN(input)) return false;
-    if (pending.step === 1) {
-      return input >= 1 && input <= pending.results.length;
-    } else if (pending.step === 2) {
-      return input >= 1 && input <= pending.movie.downloadLinks.length;
-    }
-    return false;
-  },
+  filter: (text, { from }) => !!pendingCineSubz[from],
   function: async (sock, mek, m, { body, from }) => {
     const pending = pendingCineSubz[from];
     if (!pending || pending.isProcessing) return;
 
-    const input = parseInt(String(body).trim(), 10);
+    const rawInput = String(body || m?.text || m?.body || "").trim();
+    const input = parseInt(rawInput, 10);
+    if (isNaN(input)) return;
 
-    // ── STEP 1: Movie Selection ──
+    // STEP 1: Movie Selection
     if (pending.step === 1) {
-      if (isNaN(input) || input < 1 || input > pending.results.length) return;
+      if (input < 1 || input > pending.results.length) return;
 
       pending.isProcessing = true;
       await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
@@ -275,7 +279,6 @@ replyHandlers.push({
         const movieInfo = await scrapeCineSubz(selected.url);
 
         if (!movieInfo || !movieInfo.downloadLinks || movieInfo.downloadLinks.length === 0) {
-          pending.isProcessing = false;
           delete pendingCineSubz[from];
           return await sendErrorMsg(sock, from, mek, "No download links available for this movie.");
         }
@@ -292,7 +295,6 @@ replyHandlers.push({
         });
 
         if (downloadLinks.length === 0) {
-          pending.isProcessing = false;
           delete pendingCineSubz[from];
           return await sendErrorMsg(sock, from, mek, "No download links found below 2GB.");
         }
@@ -333,15 +335,14 @@ replyHandlers.push({
 
       } catch (error) {
         console.error("CineSubz Scrape Error:", error.message);
-        pending.isProcessing = false;
         delete pendingCineSubz[from];
         await sendErrorMsg(sock, from, mek, "Failed to fetch download links for this movie.");
       }
     }
 
-    // ── STEP 2: Quality Selection & Download ──
+    // STEP 2: Quality Selection & Download
     else if (pending.step === 2) {
-      if (isNaN(input) || input < 1 || input > pending.movie.downloadLinks.length) return;
+      if (input < 1 || input > pending.movie.downloadLinks.length) return;
 
       pending.isProcessing = true;
       await sock.sendMessage(from, { react: { text: "⬆️", key: m.key } });
@@ -413,7 +414,6 @@ replyHandlers.push({
   },
 });
 
-// Expired sessions ඉවත් කිරීම (විනාඩි 10)
 setInterval(() => {
   const now = Date.now();
   for (const key of Object.keys(pendingCineSubz)) {
