@@ -21,7 +21,6 @@ function channelContextInfo() {
   };
 }
 
-// ── Security Bypass Headers (CineVerse LK) ─────────────
 const DL_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
   "Referer": "https://cineverselk.space/",
@@ -42,6 +41,11 @@ function safeUnlink(file) {
   try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
 }
 
+// 🔥 සර්ච් කරපු කෙනාට විතරක් වැඩ කරන්න Key එක හදනවා
+function makePendingKey(sender, from) {
+  return `${from || ""}::${(sender || "").split(":")[0]}`;
+}
+
 const pendingCvSearch = Object.create(null);
 
 async function sendErrorMsg(sock, from, mek, text) {
@@ -51,9 +55,6 @@ async function sendErrorMsg(sock, from, mek, text) {
   }, { quoted: mek });
 }
 
-// ==========================================
-// 1. Fetch JSON Data & Smart Search
-// ==========================================
 async function searchCineverse(query) {
   const cb = Date.now();
   try {
@@ -90,9 +91,8 @@ cmd({
   desc: "Search and download Sinhala Subbed Movies & Series",
   category: "download",
   filename: __filename,
-}, async (sock, mek, m, { from, q, sessionId }) => {
+}, async (sock, mek, m, { from, q, sender, sessionId }) => {
   try {
-    // 🔥 Bot Settings Check (menu.js ආකාරයටම)
     const settings = await readSettings(sessionId);
 
     if (!q) {
@@ -111,7 +111,9 @@ cmd({
       return await sendErrorMsg(sock, from, mek, `No results found for "${q}" on CineVerse LK.`);
     }
 
-    pendingCvSearch[from] = {
+    // User-Specific Session Key
+    const key = makePendingKey(sender, from);
+    pendingCvSearch[key] = {
       results,
       step: 1,
       createdAt: Date.now(),
@@ -132,19 +134,14 @@ cmd({
       text += `  ├ 🏷️ ${type} | ⭐ ${item.imdbRating || "N/A"}\n`;
       text += `  ╰ 💿 ${item.quality || "HD"} | ✍️ ${item.subtitleAuthor || "CineVerse"}\n\n`;
     });
-    text += `⊱━━━━━━━━━━━━━━━⊰\n> 👇 *Reply with a number to Download...*`;
+    text += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n> 👇 *Reply with a number to Download...*`;
 
-    // 🔥 Custom Image Check (menu.js ආකාරයටම)
     let poster = results[0].posterImage || results[0].image || results[0].poster || DEFAULT_POSTER;
     if (sessionId) {
       try {
         const custom = await getCustomImage(sessionId, "cineverse_header");
-        if (custom && custom.data) {
-          poster = custom.data;
-        }
-      } catch (e) {
-        console.log("⚠️ Failed to load custom image:", e.message);
-      }
+        if (custom && custom.data) poster = custom.data;
+      } catch (e) {}
     }
 
     const imgMsg = await sock.sendMessage(from, { 
@@ -166,17 +163,20 @@ cmd({
 });
 
 // ==========================================
-// 3. Number Reply Listener
+// 3. Number Reply Listener (Settings ක්‍රමයටම)
 // ==========================================
 replyHandlers.push({
-  filter: (text, { from }) => !!pendingCvSearch[from],
-  function: async (sock, mek, m, { body, from }) => {
-    const pending = pendingCvSearch[from];
+  filter: (text, { sender, from }) => {
+    const key = makePendingKey(sender, from);
+    return !!pendingCvSearch[key];
+  },
+  function: async (sock, mek, m, { body, sender, from }) => {
+    const key = makePendingKey(sender, from);
+    const pending = pendingCvSearch[key];
     if (!pending || pending.isProcessing) return;
 
-    const rawInput = String(body || m?.text || m?.body || "").trim();
+    const rawInput = String(body || m?.message?.conversation || m?.message?.extendedTextMessage?.text || "").trim();
 
-    // STEP 1: Movie හෝ Series තේරීම
     if (pending.step === 1) {
       const input = parseInt(rawInput, 10);
       if (isNaN(input) || input < 1 || input > pending.results.length) return;
@@ -187,10 +187,10 @@ replyHandlers.push({
         pending.isProcessing = true;
         const dlUrl = selected.directLink;
         if (!dlUrl || dlUrl === '#') {
-          delete pendingCvSearch[from];
+          delete pendingCvSearch[key];
           return await sendErrorMsg(sock, from, mek, "Direct download link is not available for this movie.");
         }
-        delete pendingCvSearch[from];
+        delete pendingCvSearch[key];
         await executeDownload(sock, mek, from, dlUrl, `${selected.title} (${selected.year || "HD"})`);
       } else {
         pending.step = 2;
@@ -206,12 +206,11 @@ replyHandlers.push({
         sText += `🗂️ *Seasons:* ${availableSeasons || "N/A"}\n\n`;
         sText += `> 👇 *Reply with Season & Episode:*\n`;
         sText += `> 💡 *Example:* \`1 2\` (Season 1, Ep 2)\n\n`;
-        sText += `⊱━━━━━━━━━━━━━━━⊰`;
+        sText += `⊱━━• ✿ •━━━━━━• ✿ •━━⊰`;
 
         await sock.sendMessage(from, { text: sText, contextInfo: channelContextInfo() }, { quoted: mek });
       }
     } 
-    // STEP 2: Series Season සහ Episode ලබා ගැනීම
     else if (pending.step === 2) {
       const parts = rawInput.split(/\s+/);
       if (parts.length < 2) return;
@@ -225,7 +224,7 @@ replyHandlers.push({
       const epData = series.episodesData && series.episodesData[s] ? series.episodesData[s][e] : null;
 
       if (!epData || !epData.d || epData.d === '#') {
-        delete pendingCvSearch[from];
+        delete pendingCvSearch[key];
         return await sendErrorMsg(sock, from, mek, `Link not found for S${s} E${e}.`);
       }
 
@@ -233,14 +232,14 @@ replyHandlers.push({
       const fE = e < 10 ? '0' + e : e;
       const epTitle = `${series.title} S${fS}E${fE}`;
 
-      delete pendingCvSearch[from];
+      delete pendingCvSearch[key];
       await executeDownload(sock, mek, from, epData.d, epTitle);
     }
   },
 });
 
 // ==========================================
-// 4. Download Execution (60MB Document Condition)
+// 4. Download Execution
 // ==========================================
 async function executeDownload(sock, mek, from, url, titleName) {
   let tempFile = makeTempFile(".mp4");
@@ -281,7 +280,7 @@ async function executeDownload(sock, mek, from, url, titleName) {
     caption += `🎬 *Title:* ${titleName}\n`;
     caption += `📦 *Size:* ${sizeMB.toFixed(2)} MB\n`;
     caption += `📁 *Format:* ${isLargeDoc ? "Document (Raw Stream)" : "Standard MP4"}\n\n`;
-    caption += `⊱━━━━━━━━━━━━━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+    caption += `⊱━━• ✿ •━━━━━━• ✿ •━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
     await sock.sendMessage(from, {
       document: fs.readFileSync(tempFile),
@@ -291,7 +290,7 @@ async function executeDownload(sock, mek, from, url, titleName) {
       contextInfo: channelContextInfo(),
     }, { quoted: mek });
 
-    await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
   } catch (err) {
     let fallbackMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
     fallbackMsg += `⚠️ *𝐅𝐈𝐋𝐄 𝐓𝐎𝐎 𝐋𝐀𝐑𝐆𝐄*\n`;
@@ -299,7 +298,7 @@ async function executeDownload(sock, mek, from, url, titleName) {
     fallbackMsg += `🎬 *Title:* ${titleName}\n`;
     fallbackMsg += `ℹ️ _File might exceed WhatsApp limits or connection timed out._\n\n`;
     fallbackMsg += `🔗 *Direct Download Link:*\n${url}\n\n`;
-    fallbackMsg += `⊱━━━━━━━━━━━━━━━⊰`;
+    fallbackMsg += `⊱━━• ✿ •━━━━━• ✿ •━━⊰`;
     
     await sock.sendMessage(from, { text: fallbackMsg, contextInfo: channelContextInfo() }, { quoted: mek });
     await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
