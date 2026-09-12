@@ -4,9 +4,8 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-// ── Context Info (Channel Details) ─────────────
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬ𝗜𝗬Ａ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -20,7 +19,6 @@ function channelContextInfo() {
   };
 }
 
-// ── Security Bypass Headers (CineVerse LK) ─────────────
 const DL_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
     "Referer": "https://cineverselk.space/",
@@ -28,21 +26,11 @@ const DL_HEADERS = {
     "Cookie": "cv_auth=true;"
 };
 
-function toSmallCaps(str = "") {
-  const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
-  return String(str).split("").map((char) => {
-      const idx = normal.indexOf(char);
-      return idx !== -1 ? small[idx] : char;
-  }).join("");
-}
-
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
 function makeTempFile(ext = ".mp4") {
-  const id = crypto.randomBytes(6).toString("hex");
-  return path.join(TEMP_DIR, `${Date.now()}_${id}${ext}`);
+  return path.join(TEMP_DIR, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${ext}`);
 }
 
 function safeUnlink(file) {
@@ -51,6 +39,12 @@ function safeUnlink(file) {
 
 const pendingCvSearch = Object.create(null);
 
+function getQuotedId(m, mek) {
+  return m?.quoted?.id || 
+         mek?.message?.extendedTextMessage?.contextInfo?.stanzaId || 
+         m?.message?.extendedTextMessage?.contextInfo?.stanzaId || null;
+}
+
 async function sendErrorMsg(sock, from, mek, text) {
   await sock.sendMessage(from, {
     text: `⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _${text}_`,
@@ -58,9 +52,6 @@ async function sendErrorMsg(sock, from, mek, text) {
   }, { quoted: mek });
 }
 
-// ==========================================
-// 1. Fetch JSON Data & Smart Search
-// ==========================================
 async function searchCineverse(query) {
     const cb = Date.now();
     try {
@@ -82,16 +73,11 @@ async function searchCineverse(query) {
             const titleClean = item.title.toLowerCase().replace(/[^a-z0-9]/g, ' ');
             return queryWords.every(word => titleClean.includes(word));
         }).slice(0, 10);
-
     } catch (e) {
-        console.error("CineVerse Search Error:", e.message);
         return [];
     }
 }
 
-// ==========================================
-// 2. Command Trigger
-// ==========================================
 cmd({
   pattern: "cineverse",
   alias: ["cv", "cvlk", "sinhala"],
@@ -103,7 +89,7 @@ cmd({
   try {
     if (!q) {
       return await sock.sendMessage(from, {
-        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.cv <name>\`\n💡 *Example:* \`.cv alien romulus\`\n\n⊱━━━━━━━━━━━━━━━⊰`,
+        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.cv <name>\`\n💡 *Example:* \`.cv alien romulus\``,
         contextInfo: channelContextInfo(),
       }, { quoted: mek });
     }
@@ -117,13 +103,6 @@ cmd({
       return await sendErrorMsg(sock, from, mek, `No results found for "${q}" on CineVerse LK.`);
     }
 
-    pendingCvSearch[from] = {
-      step: 1,
-      results,
-      createdAt: Date.now(),
-      isProcessing: false,
-    };
-
     let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
     text += `🎬 *𝐂𝐕 𝐒𝐄𝐀𝐑𝐂𝐇 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n`;
     text += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
@@ -134,25 +113,35 @@ cmd({
       const numStr = String(index + 1).padStart(2, "0");
       const type = item.isSeries ? "📺 Series" : "🎥 Movie";
       const year = item.year ? `(${item.year})` : "";
-      
       text += `*[ ${numStr} ]* ➔ *${item.title}* ${year}\n`;
       text += `  ├ 🏷️ ${type} | ⭐ ${item.imdbRating || "N/A"}\n`;
       text += `  ╰ 💿 ${item.quality || "HD"} | ✍️ ${item.subtitleAuthor || "CineVerse"}\n\n`;
     });
-    text += `⊱━━━━━━━━━━━━━⊰\n> 👇 *Reply with a Number to Download...*`;
+    text += `⊱━━━━━━━━━━━━━━━⊰\n> 👇 *Swipe & Reply this message with a number to Download...*`;
 
     const poster = results[0].posterImage || results[0].image || results[0].poster || "https://i.ibb.co/3m1bXvt/cineverse.jpg";
     
+    // Send Poster
     const imgMsg = await sock.sendMessage(from, { 
         image: { url: poster }, 
         caption: `> 🎬 *${results[0].title}*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ ᴍᴅ`, 
         contextInfo: channelContextInfo() 
     }, { quoted: mek });
 
-    await sock.sendMessage(from, { 
+    // Send Details Menu
+    const menuMsg = await sock.sendMessage(from, { 
         text: text, 
         contextInfo: channelContextInfo() 
     }, { quoted: imgMsg });
+
+    // 🔥 Store Menu Message ID (Strict Quoted Verification)
+    pendingCvSearch[from] = {
+      step: 1,
+      expectedMsgId: menuMsg.key.id,
+      results,
+      createdAt: Date.now(),
+      isProcessing: false,
+    };
 
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
   } catch (e) {
@@ -161,11 +150,14 @@ cmd({
   }
 });
 
-// ==========================================
-// 3. Multi-Step Reply Handler
-// ==========================================
 replyHandlers.push({
-  filter: (text, { from }) => !!pendingCvSearch[from],
+  filter: (text, { from, m, mek }) => {
+    const session = pendingCvSearch[from];
+    if (!session) return false;
+    const quotedId = getQuotedId(m, mek);
+    // 🔥 අදාළ මැසේජ් එකට Quoted Reply එකක් කරලා තියෙනවා නම් පමණක් වැඩ කරයි!
+    return quotedId && quotedId === session.expectedMsgId;
+  },
   function: async (sock, mek, m, { body, from }) => {
     const session = pendingCvSearch[from];
     if (!session || session.isProcessing) return;
@@ -201,11 +193,13 @@ replyHandlers.push({
           sText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
           sText += `🎬 *Series:* ${selected.title}\n`;
           sText += `🗂️ *Seasons:* ${availableSeasons || "N/A"}\n\n`;
-          sText += `> 👇 *Reply with Season & Episode Number:*\n`;
+          sText += `> 👇 *Swipe & Reply this message with Season & Episode:*\n`;
           sText += `> 💡 *Example:* \`1 2\` (Season 1, Ep 2)\n\n`;
-          sText += `⊱━━━━━━━━━━━━━⊰`;
+          sText += `⊱━━━━━━━━━━━━━━━⊰`;
 
-          await sock.sendMessage(from, { text: sText, contextInfo: channelContextInfo() }, { quoted: mek });
+          const seriesPrompt = await sock.sendMessage(from, { text: sText, contextInfo: channelContextInfo() }, { quoted: mek });
+          // Update expected message ID for Step 2
+          session.expectedMsgId = seriesPrompt.key.id;
       }
     } 
     else if (session.step === 2) {
@@ -239,12 +233,8 @@ replyHandlers.push({
   },
 });
 
-// ==========================================
-// 4. Core Download Execution Function
-// ==========================================
 async function executeDownload(sock, mek, from, url, titleName) {
     let tempFile = makeTempFile(".mp4");
-    
     try {
         await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
 
@@ -254,7 +244,7 @@ async function executeDownload(sock, mek, from, url, titleName) {
             responseType: "stream",
             headers: DL_HEADERS, 
             timeout: 120000, 
-            maxContentLength: 2000 * 1024 * 1024 // 2GB Limit
+            maxContentLength: 2000 * 1024 * 1024
         });
 
         const writer = fs.createWriteStream(tempFile);
@@ -274,12 +264,12 @@ async function executeDownload(sock, mek, from, url, titleName) {
 
         const cleanName = titleName.replace(/[\\/:*?"<>|]/g, "").trim();
         
-        let finalCaption = `⊱━━━━ • ✿ • ━━━━⊰\n`;
+        let finalCaption = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
         finalCaption += `✅ *𝐅𝐈𝐋𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
-        finalCaption += `⊱━━━━ • ✿ • ━━━━⊰\n\n`;
+        finalCaption += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
         finalCaption += `🎬 *Title:* ${titleName}\n`;
         finalCaption += `📦 *Size:* ${sizeMB.toFixed(2)} MB\n\n`;
-        finalCaption += `⊱━━━━━━━━━━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+        finalCaption += `⊱━━━━━━━━━━━━━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
         await sock.sendMessage(from, {
             document: fs.readFileSync(tempFile),
@@ -290,17 +280,14 @@ async function executeDownload(sock, mek, from, url, titleName) {
         }, { quoted: mek });
 
         await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-
     } catch (err) {
-        console.log("CINEVERSE DOWNLOAD ERROR:", err.message);
-
         let fallbackMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
         fallbackMsg += `⚠️ *𝐅𝐈𝐋𝐄 𝐓𝐎𝐎 𝐋𝐀𝐑𝐆𝐄*\n`;
         fallbackMsg += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
         fallbackMsg += `🎬 *Title:* ${titleName}\n`;
         fallbackMsg += `ℹ️ _File might exceed WhatsApp limits._\n\n`;
         fallbackMsg += `🔗 *Direct Download Link:*\n${url}\n\n`;
-        fallbackMsg += `⊱━━━━━━━━━━━━━⊰`;
+        fallbackMsg += `⊱━━━━━━━━━━━━━━━⊰`;
         
         await sock.sendMessage(from, { text: fallbackMsg, contextInfo: channelContextInfo() }, { quoted: mek });
         await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
@@ -316,4 +303,4 @@ setInterval(() => {
       delete pendingCvSearch[key];
     }
   }
-}, 300000);
+}, 30000);
