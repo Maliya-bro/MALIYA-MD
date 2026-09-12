@@ -10,6 +10,21 @@ const BOT_NAME = "𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
+const CHANNEL_JID = "120363427174988449@newsletter";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+
+function channelContextInfo() {
+  return {
+    forwardingScore: 999,
+    isForwarded: true,
+    forwardedNewsletterMessageInfo: {
+      newsletterJid: CHANNEL_JID,
+      newsletterName: CHANNEL_NAME,
+      serverMessageId: -1,
+    },
+  };
+}
+
 const OWNER_NUMBER_RAW = String(config.BOT_OWNER || "").trim();
 const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
   ? OWNER_NUMBER_RAW
@@ -31,6 +46,17 @@ const MENU_CACHE_MS = 60 * 1000;
 /* ================= HELPERS ================= */
 function keyFor(sender, from) {
   return `${from || ""}::${(sender || "").split(":")[0]}`;
+}
+
+function getQuotedId(m, mek) {
+  return (
+    m?.quoted?.id ||
+    mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    null
+  );
 }
 
 function cleanPhone(num = "") {
@@ -151,19 +177,20 @@ function buildCommandMapCached() {
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
-  return `✨ 👋 *ʜɪ, ${styledUser}!* ✨
+  return `⊱━━━━━ • ✿ • ━━━━━⊰
+★彡 *${BOT_NAME}* 彡★
+⊱━━━━━ • ✿ • ━━━━━⊰
 
-╭〔 🌟 *${BOT_NAME}* 🌟 〕━
-┃
-┃ 🤖 *ʙᴏᴛ ɴᴀᴍᴇ* : ${BOT_NAME}
-┃ 👤 *ᴜsᴇʀ*     : ${styledUser}
-┃ 👑 *ᴏᴡɴᴇʀ*    : ${OWNER_NUMBER}
-┃ 🕒 *ᴛɪᴍᴇ*    : ${time}
-┃ 📅 *ᴅᴀᴛᴇ*    : ${date}
-┃ 🎯 *ᴘʀᴇғɪx*  : [ ${PREFIX} ]
-┃
-╰━━━━━━━━━━━━━━
+✨ 👋 *ʜɪ, ${styledUser}!*
 
+🤖 *ʙᴏᴛ ɴᴀᴍᴇ :* ${BOT_NAME}
+👤 *ᴜsᴇʀ :* ${styledUser}
+👑 *ᴏᴡɴᴇʀ :* ${OWNER_NUMBER}
+🕒 *ᴛɪᴍᴇ :* ${time}
+📅 *ᴅᴀᴛᴇ :* ${date}
+🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]
+
+⊱━━━━━━━━━━━━━━━⊰
 👇 *Select a command category below to view commands:*`;
 }
 
@@ -171,22 +198,23 @@ function commandListCaption(cat, list, userName = "User") {
   const emo = getCategoryEmoji(cat);
   const styledCat = toSmallCaps(cat);
   const styledUser = toSmallCaps(userName);
-  let txt = `✨ 👋 *ʜɪ, ${styledUser}!* ✨\n\n`;
-  txt += `╭━〔 ${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs* 〕━\n`;
-  txt += `┃ 📦 *ᴛᴏᴛᴀʟ*  : ${list.length} Commands\n`;
-  txt += `┃ 🎯 *ᴘʀᴇғɪx*  : [ ${PREFIX} ]\n`;
-  txt += `╰━━━━━━━━━━━━━━━━\n\n`;
-  
+  let txt = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+  txt += `${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n`;
+  txt += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+  txt += `👤 *ᴜsᴇʀ :* ${styledUser}\n`;
+  txt += `📦 *ᴛᴏᴛᴀʟ :* ${list.length} Commands\n`;
+  txt += `🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]\n\n`;
+
   list.forEach((c) => {
     const primary = c.pattern ? `${PREFIX}${toSmallCaps(c.pattern)}` : "No Pattern";
     const aliases = (c.alias || []).filter(Boolean).map((a) => `${PREFIX}${toSmallCaps(a)}`);
     txt += `🔹 *${primary}*\n`;
-    if (aliases.length) txt += `   ↳ 💬 *ᴀʟɪᴀsᴇs:* \`${aliases.join(", ")}\`\n`;
-    txt += `   ↳ 📌 *ᴅᴇsᴄ:* _${c.desc || "No description"}_\n\n`;
+    if (aliases.length) txt += `  ├ 💬 *ᴀʟɪᴀs:* \`${aliases.join(", ")}\`\n`;
+    txt += `  ╰ 📌 *ᴅᴇsᴄ:* _${c.desc || "No description"}_\n\n`;
   });
-  
-  txt += `───────────────────\n`;
-  txt += `👑 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ:* ${BOT_NAME} | *ᴏᴡɴᴇʀ:* ${OWNER_NUMBER}`;
+
+  txt += `⊱━━━━━━━━━━━━━━━⊰\n`;
+  txt += `> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
   return txt;
 }
 
@@ -288,21 +316,21 @@ function isDuplicateAction(state, action) {
 
 function buildStyledMainMenu(state, userName) {
   const { categories } = state;
-  const line = "━━━━━━━━━━━━━";
   const styledUser = toSmallCaps(userName);
-  let msg = `╔══════════════════╗\n`;
-  msg += `║  ★彡 𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻 彡★ ║\n`;
-  msg += `╚══════════════════╝\n\n`;
+  let msg = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+  msg += `★彡 *${BOT_NAME}* 彡★\n`;
+  msg += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
   msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
-  msg += line + "\n";
+
   categories.forEach((cat, idx) => {
     const emo = getCategoryEmoji(cat);
     const numStr = String(idx + 1).padStart(2, "0");
     const styledCat = toSmallCaps(cat);
     msg += `*[ ${numStr} ]*  ${emo}  *${styledCat}*  _(${state.map[cat].length})_\n`;
   });
-  msg += line + "\n\n";
-  msg += `📌 *Reply with the number of your choice (e.g. 1)*`;
+
+  msg += `\n⊱━━━━━━━━━━━━━━━⊰\n`;
+  msg += `> 👇 *Swipe & Reply this message with a number...*`;
   return msg;
 }
 
@@ -320,11 +348,12 @@ async function sendNumberedMainMenu(sock, from, mek, state, userName, sessionId)
   }
 
   const caption = buildStyledMainMenu(state, userName);
-  return sock.sendMessage(
+  return await sock.sendMessage(
     from,
     {
       image: { url: headerImg },
       caption: caption,
+      contextInfo: channelContextInfo(),
     },
     { quoted: mek }
   );
@@ -379,15 +408,16 @@ async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
     }
   }
 
-  return sendNumberedMainMenu(sock, from, mek, state, userName, sessionId);
+  return await sendNumberedMainMenu(sock, from, mek, state, userName, sessionId);
 }
 
 async function sendCommandsList(sock, from, mek, cat, list, userName) {
-  return sock.sendMessage(
+  return await sock.sendMessage(
     from,
     {
       image: { url: DEFAULT_HEADER_IMAGE },
       caption: commandListCaption(cat, list, userName),
+      contextInfo: channelContextInfo(),
     },
     { quoted: mek }
   );
@@ -412,7 +442,9 @@ cmd(
       const userName = getUserName(pushname, m, mek, sender);
       const k = keyFor(sender, from);
 
-      pendingMenu[k] = {
+      // Session එක User-specific (`keyFor`) විදියට සේව් වෙනවා
+      const state = {
+        expectedMsgId: null,
         map,
         categories,
         userName,
@@ -421,7 +453,13 @@ cmd(
         lastActionAt: 0,
       };
 
-      await sendMainMenu(sock, from, mek, pendingMenu[k], userName, sessionId);
+      const sentMsg = await sendMainMenu(sock, from, mek, state, userName, sessionId);
+
+      // යැවූ Menu පණිවිඩයේ ID එක user session එකට strict lock කරමු
+      if (sentMsg?.key?.id) {
+        state.expectedMsgId = sentMsg.key.id;
+        pendingMenu[k] = state;
+      }
     } catch (e) {
       console.log("MENU ERROR:", e?.message || e);
       reply("❌ Menu eka send karanna බැරි වුණා.");
@@ -429,35 +467,25 @@ cmd(
   }
 );
 
-/* ================= REPLY HANDLER (FIXED FILTER) ================= */
+/* ================= REPLY HANDLER (USER & QUOTED LOCKED) ================= */
 const menuReplyHandler = {
-  filter: (text, { sender, from }) => {
-    if (!text) return false;
+  filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
     const state = pendingMenu[k];
     if (!state) return false;
-    
-    const num = parseInt(String(text).trim(), 10);
-    if (!isNaN(num) && num > 0 && num <= state.categories.length) {
-      return true;
-    }
-    
-    const normalized = normalizeText(text);
-    for (const cat of state.categories || []) {
-      const catText = normalizeText(cat);
-      if (
-        normalized === `${catText} MENU` ||
-        normalized.includes(`${catText} MENU`) ||
-        normalized === `${catText} COMMANDS` ||
-        normalized.includes(`${catText} COMMANDS`)
-      ) {
-        return true;
-      }
-    }
-    
-    return false;
+
+    // 🔥 User Swipe කර Quoted Reply කළ Message ID එක සහ Menu Message ID එක 100% සමාන විය යුතුය
+    const quotedId = getQuotedId(m, mek);
+    if (!quotedId || quotedId !== state.expectedMsgId) return false;
+
+    const texts = extractTexts(text, mek, m);
+    const action = resolveMenuAction(texts, state);
+    if (action) return true;
+
+    const num = parseInt(String(text || "").trim(), 10);
+    return !isNaN(num) && num > 0 && num <= state.categories.length;
   },
-  function: async (sock, mek, m, { from, body, sender, pushname, reply, sessionId }) => {
+  function: async (sock, mek, m, { from, body, sender, pushname, reply }) => {
     try {
       const k = keyFor(sender, from);
       const state = pendingMenu[k];
@@ -468,7 +496,7 @@ const menuReplyHandler = {
       if (!action) {
         const num = parseInt(String(body || "").trim(), 10);
         if (!isNaN(num) && num > 0 && num <= state.categories.length) {
-          action = { type: "view", cat: state.categories[num-1] };
+          action = { type: "view", cat: state.categories[num - 1] };
         }
       }
       if (!action) return;
@@ -488,14 +516,13 @@ const menuReplyHandler = {
         react: { text: getCategoryEmoji(cat), key: mek.key },
       });
 
-      return sendCommandsList(sock, from, mek, cat, list, userName);
+      return await sendCommandsList(sock, from, mek, cat, list, userName);
     } catch (e) {
       console.log("MENU ACTION ERROR:", e?.message || e);
     }
-  }
+  },
 };
 
-// Register the reply handler
 if (Array.isArray(replyHandlers)) {
   replyHandlers.push(menuReplyHandler);
 }
@@ -503,7 +530,7 @@ if (Array.isArray(replyHandlers)) {
 /* ================= AUTO CLEANUP ================= */
 setInterval(() => {
   const now = Date.now();
-  const timeout = 2 * 60 * 1000;
+  const timeout = 3 * 60 * 1000;
   for (const k of Object.keys(pendingMenu)) {
     if (now - pendingMenu[k].timestamp > timeout) {
       delete pendingMenu[k];
