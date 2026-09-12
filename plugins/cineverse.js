@@ -5,22 +5,6 @@ const path = require("path");
 const crypto = require("crypto");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
-// ── Context Info (Channel Details) ─────────────
-const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
-
-function channelContextInfo() {
-  return {
-    forwardingScore: 999,
-    isForwarded: true,
-    forwardedNewsletterMessageInfo: {
-      newsletterJid: CHANNEL_JID,
-      newsletterName: CHANNEL_NAME,
-      serverMessageId: -1,
-    },
-  };
-}
-
 const DL_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
   "Referer": "https://cineverselk.space/",
@@ -50,11 +34,13 @@ const pendingCvSearch = Object.create(null);
 
 async function sendErrorMsg(sock, from, mek, text) {
   await sock.sendMessage(from, {
-    text: `⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _${text}_`,
-    contextInfo: channelContextInfo(),
+    text: `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n🚫 _${text}_`,
   }, { quoted: mek });
 }
 
+// ==========================================
+// 1. Fetch JSON Data & Smart Search
+// ==========================================
 async function searchCineverse(query) {
   const cb = Date.now();
   try {
@@ -97,8 +83,7 @@ cmd({
 
     if (!q) {
       return await sock.sendMessage(from, {
-        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.cv <name>\`\n💡 *Example:* \`.cv sonic\``,
-        contextInfo: channelContextInfo(),
+        text: `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐋*\n⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n📌 *Usage:* \`.cv <name>\`\n💡 *Example:* \`.cv sonic\``,
       }, { quoted: mek });
     }
 
@@ -111,7 +96,6 @@ cmd({
       return await sendErrorMsg(sock, from, mek, `No results found for "${q}" on CineVerse LK.`);
     }
 
-    // User-Specific Session Key
     const key = makePendingKey(sender, from);
     pendingCvSearch[key] = {
       results,
@@ -120,9 +104,9 @@ cmd({
       isProcessing: false,
     };
 
-    let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+    let text = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n`;
     text += `🎬 *𝐂𝐕 𝐒𝐄𝐀𝐑𝐂𝐇 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n`;
-    text += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+    text += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n`;
     text += `🎀 *Search :* ${q}\n`;
     text += `🍿 *Results :* ${results.length}\n\n`;
 
@@ -144,16 +128,11 @@ cmd({
       } catch (e) {}
     }
 
-    const imgMsg = await sock.sendMessage(from, { 
-      image: { url: poster }, 
-      caption: `> 🎬 *${results[0].title}*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ ᴍᴅ`, 
-      contextInfo: channelContextInfo() 
-    }, { quoted: mek });
-
+    // Image එකයි Text එකයි එකට යවනවා
     await sock.sendMessage(from, { 
-      text: text, 
-      contextInfo: channelContextInfo() 
-    }, { quoted: imgMsg });
+      image: { url: poster }, 
+      caption: text 
+    }, { quoted: mek });
 
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
   } catch (e) {
@@ -163,7 +142,7 @@ cmd({
 });
 
 // ==========================================
-// 3. Number Reply Listener (Settings ක්‍රමයටම)
+// 3. Number Reply Listener
 // ==========================================
 replyHandlers.push({
   filter: (text, { sender, from }) => {
@@ -199,16 +178,16 @@ replyHandlers.push({
 
         let availableSeasons = Object.keys(selected.episodesData || {}).join(", ");
         
-        let sText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+        let sText = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n`;
         sText += `📺 *𝐒𝐄𝐑𝐈𝐄𝐒 𝐒𝐄𝐋𝐄𝐂𝐓𝐄𝐃*\n`;
-        sText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+        sText += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n`;
         sText += `🎬 *Series:* ${selected.title}\n`;
         sText += `🗂️ *Seasons:* ${availableSeasons || "N/A"}\n\n`;
         sText += `> 👇 *Reply with Season & Episode:*\n`;
         sText += `> 💡 *Example:* \`1 2\` (Season 1, Ep 2)\n\n`;
-        sText += `⊱━━• ✿ •━━━━━━• ✿ •━━⊰`;
+        sText += `⊱━━• ✿ •━━━━━• ✿ •━━⊰`;
 
-        await sock.sendMessage(from, { text: sText, contextInfo: channelContextInfo() }, { quoted: mek });
+        await sock.sendMessage(from, { text: sText }, { quoted: mek });
       }
     } 
     else if (pending.step === 2) {
@@ -274,33 +253,32 @@ async function executeDownload(sock, mek, from, url, titleName) {
     const cleanName = titleName.replace(/[\\/:*?"<>|]/g, "").trim();
     const isLargeDoc = sizeMB > 60;
     
-    let caption = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+    let caption = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n`;
     caption += `✅ *𝐅𝐈𝐋𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
-    caption += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+    caption += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n`;
     caption += `🎬 *Title:* ${titleName}\n`;
     caption += `📦 *Size:* ${sizeMB.toFixed(2)} MB\n`;
     caption += `📁 *Format:* ${isLargeDoc ? "Document (Raw Stream)" : "Standard MP4"}\n\n`;
-    caption += `⊱━━• ✿ •━━━━━━• ✿ •━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+    caption += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
     await sock.sendMessage(from, {
       document: fs.readFileSync(tempFile),
       mimetype: isLargeDoc ? "application/octet-stream" : "video/mp4",
       fileName: `${cleanName} (Sinhala Sub).mp4`,
-      caption: caption,
-      contextInfo: channelContextInfo(),
+      caption: caption
     }, { quoted: mek });
 
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
   } catch (err) {
-    let fallbackMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+    let fallbackMsg = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n`;
     fallbackMsg += `⚠️ *𝐅𝐈𝐋𝐄 𝐓𝐎𝐎 𝐋𝐀𝐑𝐆𝐄*\n`;
-    fallbackMsg += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+    fallbackMsg += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n`;
     fallbackMsg += `🎬 *Title:* ${titleName}\n`;
     fallbackMsg += `ℹ️ _File might exceed WhatsApp limits or connection timed out._\n\n`;
-    fallbackMsg += `🔗 *Direct Download Link:*\n${url}\n\n`;
+    fallbackMsg += `🔗 *Direct Link:*\n${url}\n\n`;
     fallbackMsg += `⊱━━• ✿ •━━━━━• ✿ •━━⊰`;
     
-    await sock.sendMessage(from, { text: fallbackMsg, contextInfo: channelContextInfo() }, { quoted: mek });
+    await sock.sendMessage(from, { text: fallbackMsg }, { quoted: mek });
     await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
   } finally {
     safeUnlink(tempFile);
