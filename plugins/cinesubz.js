@@ -7,7 +7,7 @@ const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
 
 // ── Context Info (Channel Details) ─────────────
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -23,14 +23,8 @@ function channelContextInfo() {
 
 const SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
 
-// Chat ID (from) මඟින් ක්‍රියාත්මක වන session ගබඩාව (ඕනෑම අයෙකුට reply කළ හැක)
+// Chat ID (from) මත පදනම් වූ session එක (apk.js ආකෘතිය)
 const pendingCineSubz = Object.create(null);
-
-function getQuotedId(m, mek) {
-  return m?.quoted?.id || 
-         mek?.message?.extendedTextMessage?.contextInfo?.stanzaId || 
-         m?.message?.extendedTextMessage?.contextInfo?.stanzaId || null;
-}
 
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -214,25 +208,24 @@ cmd({
       text += `*[ ${numStr} ]* ➔ *${item.title}*\n`;
     });
 
-    text += `\n⊱━━━━━━━━━━━━━━⊰\n> 👇 *Swipe & Reply this message with a number to Download...*`;
+    text += `\n⊱━━━━━━━━━━━━━━━⊰\n> 👇 *Reply this message with a number to Download...*`;
 
-    // 1. Image පළමුව යැවීම
+    // 1. Image යැවීම
     const imgMsg = await sock.sendMessage(from, { 
       image: { url: SEARCH_IMAGE }, 
       caption: `> 🎬 *${topResults[0].title}*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ ᴍᴅ`,
       contextInfo: channelContextInfo()
     }, { quoted: mek });
 
-    // 2. Menu මැසේජ් එක Image එකට Quoted කර යැවීම
-    const menuMsg = await sock.sendMessage(from, { 
+    // 2. Menu මැසේජ් එක යැවීම
+    await sock.sendMessage(from, { 
       text: text, 
       contextInfo: channelContextInfo() 
     }, { quoted: imgMsg });
 
-    // Message ID එක session එකට lock කිරීම
+    // Session එක Chat ID එකට සේව් කිරීම (apk.js ක්‍රමය)
     pendingCineSubz[from] = {
       step: 1,
-      expectedMsgId: menuMsg.key.id,
       results: topResults,
       createdAt: Date.now(),
       isProcessing: false,
@@ -248,14 +241,20 @@ cmd({
 });
 
 // ==========================================
-// 2. Multi-Step Quoted Reply Listener (Strict Message ID Lock)
+// 2. Number Reply Listener (apk.js ක්‍රමය)
 // ==========================================
 replyHandlers.push({
-  filter: (text, { from, m, mek }) => {
+  filter: (text, { from }) => {
     const pending = pendingCineSubz[from];
     if (!pending) return false;
-    const quotedId = getQuotedId(m, mek);
-    return quotedId && quotedId === pending.expectedMsgId;
+    const input = parseInt(String(text || "").trim(), 10);
+    if (isNaN(input)) return false;
+    if (pending.step === 1) {
+      return input >= 1 && input <= pending.results.length;
+    } else if (pending.step === 2) {
+      return input >= 1 && input <= pending.movie.downloadLinks.length;
+    }
+    return false;
   },
   function: async (sock, mek, m, { body, from }) => {
     const pending = pendingCineSubz[from];
@@ -281,7 +280,6 @@ replyHandlers.push({
           return await sendErrorMsg(sock, from, mek, "No download links available for this movie.");
         }
 
-        // 2GB ට අඩු download links ෆිල්ටර් කිරීම
         const downloadLinks = movieInfo.downloadLinks.filter(d => {
           const match = d.quality.match(/([\d.]+)\s*(MB|GB)/i);
           if (match) {
@@ -312,25 +310,22 @@ replyHandlers.push({
           qualityMsg += `*[ ${numStr} ]* 📊 *${d.quality}*\n`;
         });
 
-        qualityMsg += `\n⊱━━━━━━━━━━━━━━⊰\n> 👇 *Swipe & Reply this message with quality number to Download...*`;
+        qualityMsg += `\n⊱━━━━━━━━━━━━━━━⊰\n> 👇 *Reply with quality number to Download...*`;
 
-        let qMsg;
         if (movieInfo.poster) {
-          qMsg = await sock.sendMessage(from, { 
+          await sock.sendMessage(from, { 
             image: { url: movieInfo.poster }, 
             caption: qualityMsg,
             contextInfo: channelContextInfo()
           }, { quoted: mek });
         } else {
-          qMsg = await sock.sendMessage(from, { 
+          await sock.sendMessage(from, { 
             text: qualityMsg,
             contextInfo: channelContextInfo()
           }, { quoted: mek });
         }
 
-        // Session එක දෙවන පියවරට (Quality Selection) මාරු කර නව Message ID එක Lock කිරීම
         pending.step = 2;
-        pending.expectedMsgId = qMsg.key.id;
         pending.movie = { metadata: movieInfo, downloadLinks };
         pending.isProcessing = false;
 
@@ -391,7 +386,7 @@ replyHandlers.push({
         if (pixeldrainLinks.length > 0) captionText += `⚡ *Pixeldrain :* ${pixeldrainLinks[0]}\n\n`;
         if (telegramLinks.length > 0) captionText += `✈️ *Telegram :* ${telegramLinks[0]}\n\n`;
         
-        captionText += `⊱━━━━━━━━━━━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+        captionText += `⊱━━━━━━━━━━━━━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
         if (directDownloadUrl) {
           await sock.sendMessage(from, {
