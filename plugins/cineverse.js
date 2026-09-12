@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
+// ── Context Info (Channel Details) ─────────────
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 
@@ -19,11 +20,12 @@ function channelContextInfo() {
   };
 }
 
+// ── Security Bypass Headers (CineVerse LK) ─────────────
 const DL_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
-    "Referer": "https://cineverselk.space/",
-    "Accept": "application/json, text/plain, */*",
-    "Cookie": "cv_auth=true;"
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+  "Referer": "https://cineverselk.space/",
+  "Accept": "application/json, text/plain, */*",
+  "Cookie": "cv_auth=true;"
 };
 
 const TEMP_DIR = path.join(__dirname, "../temp");
@@ -37,6 +39,7 @@ function safeUnlink(file) {
   try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
 }
 
+// Chat ID (from) මත පදනම් වූ session ගබඩාව (ඕනෑම අයෙකුට reply කළ හැක)
 const pendingCvSearch = Object.create(null);
 
 function getQuotedId(m, mek) {
@@ -52,32 +55,38 @@ async function sendErrorMsg(sock, from, mek, text) {
   }, { quoted: mek });
 }
 
+// ==========================================
+// 1. Fetch JSON Data & Smart Search
+// ==========================================
 async function searchCineverse(query) {
-    const cb = Date.now();
-    try {
-        const [mRes, sRes] = await Promise.all([
-            axios.get(`https://cineverselk.space/movies.json?v=${cb}`, { headers: DL_HEADERS }).catch(() => null),
-            axios.get(`https://cineverselk.space/series.json?v=${cb}`, { headers: DL_HEADERS }).catch(() => null)
-        ]);
+  const cb = Date.now();
+  try {
+    const [mRes, sRes] = await Promise.all([
+      axios.get(`https://cineverselk.space/movies.json?v=${cb}`, { headers: DL_HEADERS }).catch(() => null),
+      axios.get(`https://cineverselk.space/series.json?v=${cb}`, { headers: DL_HEADERS }).catch(() => null)
+    ]);
 
-        const movies = mRes?.data?.data ? mRes.data.data : (Array.isArray(mRes?.data) ? mRes.data : []);
-        const series = sRes?.data?.data ? sRes.data.data : (Array.isArray(sRes?.data) ? sRes.data : []);
-        const allData = [...movies, ...series];
+    const movies = mRes?.data?.data ? mRes.data.data : (Array.isArray(mRes?.data) ? mRes.data : []);
+    const series = sRes?.data?.data ? sRes.data.data : (Array.isArray(sRes?.data) ? sRes.data : []);
+    const allData = [...movies, ...series];
 
-        if (allData.length === 0) return [];
+    if (allData.length === 0) return [];
 
-        const queryWords = query.toLowerCase().replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(Boolean);
+    const queryWords = query.toLowerCase().replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(Boolean);
 
-        return allData.filter(item => {
-            if (!item.title) return false;
-            const titleClean = item.title.toLowerCase().replace(/[^a-z0-9]/g, ' ');
-            return queryWords.every(word => titleClean.includes(word));
-        }).slice(0, 10);
-    } catch (e) {
-        return [];
-    }
+    return allData.filter(item => {
+      if (!item.title) return false;
+      const titleClean = item.title.toLowerCase().replace(/[^a-z0-9]/g, ' ');
+      return queryWords.every(word => titleClean.includes(word));
+    }).slice(0, 10);
+  } catch (e) {
+    return [];
+  }
 }
 
+// ==========================================
+// 2. Command Trigger
+// ==========================================
 cmd({
   pattern: "cineverse",
   alias: ["cv", "cvlk", "sinhala"],
@@ -121,24 +130,24 @@ cmd({
 
     const poster = results[0].posterImage || results[0].image || results[0].poster || "https://i.ibb.co/3m1bXvt/cineverse.jpg";
     
-    // Send Poster
+    // 1. පෝස්ටරය යැවීම
     const imgMsg = await sock.sendMessage(from, { 
-        image: { url: poster }, 
-        caption: `> 🎬 *${results[0].title}*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ ᴍᴅ`, 
-        contextInfo: channelContextInfo() 
+      image: { url: poster }, 
+      caption: `> 🎬 *${results[0].title}*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ ᴍᴅ`, 
+      contextInfo: channelContextInfo() 
     }, { quoted: mek });
 
-    // Send Details Menu
+    // 2. විස්තර ලැයිස්තුව යැවීම
     const menuMsg = await sock.sendMessage(from, { 
-        text: text, 
-        contextInfo: channelContextInfo() 
+      text: text, 
+      contextInfo: channelContextInfo() 
     }, { quoted: imgMsg });
 
-    // 🔥 Store Menu Message ID (Strict Quoted Verification)
+    // apk.js ආකාරයටම Message ID එක පමණක් lock කිරීම
     pendingCvSearch[from] = {
-      step: 1,
       expectedMsgId: menuMsg.key.id,
       results,
+      step: 1,
       createdAt: Date.now(),
       isProcessing: false,
     };
@@ -150,62 +159,65 @@ cmd({
   }
 });
 
+// ==========================================
+// 3. Number Reply Listener (apk.js ආකෘතියට අනුව)
+// ==========================================
 replyHandlers.push({
   filter: (text, { from, m, mek }) => {
-    const session = pendingCvSearch[from];
-    if (!session) return false;
+    const pending = pendingCvSearch[from];
+    if (!pending) return false;
     const quotedId = getQuotedId(m, mek);
-    // 🔥 අදාළ මැසේජ් එකට Quoted Reply එකක් කරලා තියෙනවා නම් පමණක් වැඩ කරයි!
-    return quotedId && quotedId === session.expectedMsgId;
+    return quotedId && quotedId === pending.expectedMsgId;
   },
   function: async (sock, mek, m, { body, from }) => {
-    const session = pendingCvSearch[from];
-    if (!session || session.isProcessing) return;
+    const pending = pendingCvSearch[from];
+    if (!pending || pending.isProcessing) return;
 
     const input = String(body).trim();
 
-    if (session.step === 1) {
+    // STEP 1: Movie හෝ Series තේරීම
+    if (pending.step === 1) {
       const num = parseInt(input, 10);
-      if (isNaN(num) || num < 1 || num > session.results.length) return;
+      if (isNaN(num) || num < 1 || num > pending.results.length) return;
 
-      session.isProcessing = true;
-      const selected = session.results[num - 1];
+      const selected = pending.results[num - 1];
 
       if (!selected.isSeries) {
-          const dlUrl = selected.directLink;
-          if (!dlUrl || dlUrl === '#') {
-              session.isProcessing = false;
-              delete pendingCvSearch[from];
-              return await sendErrorMsg(sock, from, mek, "Direct download link is not available for this movie.");
-          }
-          await executeDownload(sock, mek, from, dlUrl, `${selected.title} (${selected.year || "HD"})`);
+        pending.isProcessing = true;
+        const dlUrl = selected.directLink;
+        if (!dlUrl || dlUrl === '#') {
+          pending.isProcessing = false;
           delete pendingCvSearch[from];
-      } 
-      else {
-          session.step = 2;
-          session.selectedSeries = selected;
-          session.isProcessing = false;
+          return await sendErrorMsg(sock, from, mek, "Direct download link is not available for this movie.");
+        }
+        await executeDownload(sock, mek, from, dlUrl, `${selected.title} (${selected.year || "HD"})`);
+        delete pendingCvSearch[from];
+      } else {
+        pending.step = 2;
+        pending.selectedSeries = selected;
+        pending.isProcessing = false;
 
-          let availableSeasons = Object.keys(selected.episodesData || {}).join(", ");
-          
-          let sText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
-          sText += `📺 *𝐒𝐄𝐑𝐈𝐄𝐒 𝐒𝐄𝐋𝐄𝐂𝐓𝐄𝐃*\n`;
-          sText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
-          sText += `🎬 *Series:* ${selected.title}\n`;
-          sText += `🗂️ *Seasons:* ${availableSeasons || "N/A"}\n\n`;
-          sText += `> 👇 *Swipe & Reply this message with Season & Episode:*\n`;
-          sText += `> 💡 *Example:* \`1 2\` (Season 1, Ep 2)\n\n`;
-          sText += `⊱━━━━━━━━━━━━━━━⊰`;
+        let availableSeasons = Object.keys(selected.episodesData || {}).join(", ");
+        
+        let sText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+        sText += `📺 *𝐒𝐄𝐑𝐈𝐄𝐒 𝐒𝐄𝐋𝐄𝐂𝐓𝐄𝐃*\n`;
+        sText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+        sText += `🎬 *Series:* ${selected.title}\n`;
+        sText += `🗂️ *Seasons:* ${availableSeasons || "N/A"}\n\n`;
+        sText += `> 👇 *Swipe & Reply this message with Season & Episode:*\n`;
+        sText += `> 💡 *Example:* \`1 2\` (Season 1, Ep 2)\n\n`;
+        sText += `⊱━━━━━━━━━━━━━━━⊰`;
 
-          const seriesPrompt = await sock.sendMessage(from, { text: sText, contextInfo: channelContextInfo() }, { quoted: mek });
-          // Update expected message ID for Step 2
-          session.expectedMsgId = seriesPrompt.key.id;
+        const seriesPrompt = await sock.sendMessage(from, { text: sText, contextInfo: channelContextInfo() }, { quoted: mek });
+        // දෙවන පියවර සඳහා අදාළ Message ID එක lock කිරීම
+        pending.expectedMsgId = seriesPrompt.key.id;
       }
     } 
-    else if (session.step === 2) {
+    // STEP 2: Series Season සහ Episode ලබා ගැනීම
+    else if (pending.step === 2) {
       const parts = input.split(/\s+/);
       if (parts.length < 2) {
-          return await sendErrorMsg(sock, from, mek, "Invalid format! Example: 1 2");
+        return await sendErrorMsg(sock, from, mek, "Invalid format! Example: 1 2");
       }
 
       const s = parseInt(parts[0], 10);
@@ -213,18 +225,18 @@ replyHandlers.push({
       
       if (isNaN(s) || isNaN(e)) return await sendErrorMsg(sock, from, mek, "Please provide valid numbers.");
 
-      session.isProcessing = true;
-      const series = session.selectedSeries;
+      pending.isProcessing = true;
+      const series = pending.selectedSeries;
       const epData = series.episodesData && series.episodesData[s] ? series.episodesData[s][e] : null;
 
       if (!epData || !epData.d || epData.d === '#') {
-          session.isProcessing = false;
-          delete pendingCvSearch[from];
-          return await sendErrorMsg(sock, from, mek, `Link not found for S${s} E${e}.`);
+        pending.isProcessing = false;
+        delete pendingCvSearch[from];
+        return await sendErrorMsg(sock, from, mek, `Link not found for S${s} E${e}.`);
       }
 
-      const fS = s < 10 ? '0'+s : s;
-      const fE = e < 10 ? '0'+e : e;
+      const fS = s < 10 ? '0' + s : s;
+      const fE = e < 10 ? '0' + e : e;
       const epTitle = `${series.title} S${fS}E${fE}`;
 
       await executeDownload(sock, mek, from, epData.d, epTitle);
@@ -233,69 +245,76 @@ replyHandlers.push({
   },
 });
 
+// ==========================================
+// 4. Download Execution (60MB Document Condition සහිතව)
+// ==========================================
 async function executeDownload(sock, mek, from, url, titleName) {
-    let tempFile = makeTempFile(".mp4");
-    try {
-        await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
+  let tempFile = makeTempFile(".mp4");
+  try {
+    await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
 
-        const response = await axios({
-            url: url,
-            method: "GET",
-            responseType: "stream",
-            headers: DL_HEADERS, 
-            timeout: 120000, 
-            maxContentLength: 2000 * 1024 * 1024
-        });
+    const response = await axios({
+      url: url,
+      method: "GET",
+      responseType: "stream",
+      headers: DL_HEADERS, 
+      timeout: 180000, 
+      maxContentLength: 2000 * 1024 * 1024,
+      maxBodyLength: 2000 * 1024 * 1024
+    });
 
-        const writer = fs.createWriteStream(tempFile);
-        response.data.pipe(writer);
+    const writer = fs.createWriteStream(tempFile);
+    response.data.pipe(writer);
 
-        await new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-        });
+    await new Promise((resolve, reject) => {
+      writer.on('finish', resolve);
+      writer.on('error', reject);
+    });
 
-        const stats = fs.statSync(tempFile);
-        const sizeMB = stats.size / (1024 * 1024);
+    const stats = fs.statSync(tempFile);
+    const sizeMB = stats.size / (1024 * 1024);
 
-        if (sizeMB === 0) throw new Error("Downloaded file is empty");
+    if (sizeMB === 0) throw new Error("Downloaded file is empty");
 
-        await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
+    await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
 
-        const cleanName = titleName.replace(/[\\/:*?"<>|]/g, "").trim();
-        
-        let finalCaption = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
-        finalCaption += `✅ *𝐅𝐈𝐋𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
-        finalCaption += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
-        finalCaption += `🎬 *Title:* ${titleName}\n`;
-        finalCaption += `📦 *Size:* ${sizeMB.toFixed(2)} MB\n\n`;
-        finalCaption += `⊱━━━━━━━━━━━━━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+    const cleanName = titleName.replace(/[\\/:*?"<>|]/g, "").trim();
+    const isLargeDoc = sizeMB > 60;
+    
+    let caption = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+    caption += `✅ *𝐅𝐈𝐋𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
+    caption += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+    caption += `🎬 *Title:* ${titleName}\n`;
+    caption += `📦 *Size:* ${sizeMB.toFixed(2)} MB\n`;
+    caption += `📁 *Format:* ${isLargeDoc ? "Document (Raw Stream)" : "Standard MP4"}\n\n`;
+    caption += `⊱━━━━━━━━━━━━━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-        await sock.sendMessage(from, {
-            document: fs.readFileSync(tempFile),
-            mimetype: "video/mp4",
-            fileName: `${cleanName} (Sinhala Sub).mp4`,
-            caption: finalCaption,
-            contextInfo: channelContextInfo(),
-        }, { quoted: mek });
+    await sock.sendMessage(from, {
+      document: fs.readFileSync(tempFile),
+      mimetype: isLargeDoc ? "application/octet-stream" : "video/mp4",
+      fileName: `${cleanName} (Sinhala Sub).mp4`,
+      caption: caption,
+      contextInfo: channelContextInfo(),
+    }, { quoted: mek });
 
-        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-    } catch (err) {
-        let fallbackMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
-        fallbackMsg += `⚠️ *𝐅𝐈𝐋𝐄 𝐓𝐎𝐎 𝐋𝐀𝐑𝐆𝐄*\n`;
-        fallbackMsg += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
-        fallbackMsg += `🎬 *Title:* ${titleName}\n`;
-        fallbackMsg += `ℹ️ _File might exceed WhatsApp limits._\n\n`;
-        fallbackMsg += `🔗 *Direct Download Link:*\n${url}\n\n`;
-        fallbackMsg += `⊱━━━━━━━━━━━━━━━⊰`;
-        
-        await sock.sendMessage(from, { text: fallbackMsg, contextInfo: channelContextInfo() }, { quoted: mek });
-        await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    } finally {
-        safeUnlink(tempFile);
-    }
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+  } catch (err) {
+    let fallbackMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+    fallbackMsg += `⚠️ *𝐅𝐈𝐋𝐄 𝐓𝐎𝐎 𝐋𝐀𝐑𝐆𝐄*\n`;
+    fallbackMsg += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+    fallbackMsg += `🎬 *Title:* ${titleName}\n`;
+    fallbackMsg += `ℹ️ _File might exceed WhatsApp limits or connection timed out._\n\n`;
+    fallbackMsg += `🔗 *Direct Download Link:*\n${url}\n\n`;
+    fallbackMsg += `⊱━━━━━━━━━━━━━━━⊰`;
+    
+    await sock.sendMessage(from, { text: fallbackMsg, contextInfo: channelContextInfo() }, { quoted: mek });
+    await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+  } finally {
+    safeUnlink(tempFile);
+  }
 }
 
+// Expired sessions ඉවත් කිරීම (විනාඩි 5)
 setInterval(() => {
   const now = Date.now();
   for (const key of Object.keys(pendingCvSearch)) {
