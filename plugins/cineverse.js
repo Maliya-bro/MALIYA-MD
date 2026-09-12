@@ -53,7 +53,7 @@ const pendingCvSearch = Object.create(null);
 
 async function sendErrorMsg(sock, from, mek, text) {
   await sock.sendMessage(from, {
-    text: `┏━━━━━━━━━━━━\n┃ ❌ *𝐄𝐑𝐑𝐎𝐑*\n┗━━━━━━━━━━━━━\n🚫 _${text}_`,
+    text: `⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _${text}_`,
     contextInfo: channelContextInfo(),
   }, { quoted: mek });
 }
@@ -103,7 +103,7 @@ cmd({
   try {
     if (!q) {
       return await sock.sendMessage(from, {
-        text: `┏━━━━━━━━━━━━━\n┃ 🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐋*\n┗━━━━━━━━━━━━━━\n📌 *Usage:* \`.cv <name>\`\n💡 *Example:* \`.cv alien romulus\``,
+        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.cv <name>\`\n💡 *Example:* \`.cv alien romulus\`\n\n⊱━━━━━━━━━━━━━━━⊰`,
         contextInfo: channelContextInfo(),
       }, { quoted: mek });
     }
@@ -124,9 +124,9 @@ cmd({
       isProcessing: false,
     };
 
-    let text = `┏━━━━━━━━━━━━\n`;
-    text += `┃ 🎬 *𝐂𝐕 𝐒𝐄𝐀𝐑𝐂𝐇 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n`;
-    text += `┗━━━━━━━━━━━━━━\n`;
+    let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+    text += `🎬 *𝐂𝐕 𝐒𝐄𝐀𝐑𝐂𝐇 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n`;
+    text += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
     text += `🎀 *Search :* ${q}\n`;
     text += `🍿 *Results :* ${results.length}\n\n`;
 
@@ -136,10 +136,10 @@ cmd({
       const year = item.year ? `(${item.year})` : "";
       
       text += `*[ ${numStr} ]* ➔ *${item.title}* ${year}\n`;
-      text += ` ├ 🏷️ ${type} | ⭐ ${item.imdbRating || "N/A"}\n`;
-      text += ` ╰ 💿 ${item.quality || "HD"} | ✍️ ${item.subtitleAuthor || "CineVerse"}\n\n`;
+      text += `  ├ 🏷️ ${type} | ⭐ ${item.imdbRating || "N/A"}\n`;
+      text += `  ╰ 💿 ${item.quality || "HD"} | ✍️ ${item.subtitleAuthor || "CineVerse"}\n\n`;
     });
-    text += `> 👇 *Reply with a Number to Download...*`;
+    text += `⊱━━━━━━━━━━━━━⊰\n> 👇 *Reply with a Number to Download...*`;
 
     const poster = results[0].posterImage || results[0].image || results[0].poster || "https://i.ibb.co/3m1bXvt/cineverse.jpg";
     
@@ -196,13 +196,14 @@ replyHandlers.push({
 
           let availableSeasons = Object.keys(selected.episodesData || {}).join(", ");
           
-          let sText = `┏━━━━━━━━━━━━\n`;
-          sText += `┃ 📺 *𝐒𝐄𝐑𝐈𝐄𝐒 𝐒𝐄𝐋𝐄𝐂𝐓𝐄𝐃*\n`;
-          sText += `┗━━━━━━━━━━━━\n`;
+          let sText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+          sText += `📺 *𝐒𝐄𝐑𝐈𝐄𝐒 𝐒𝐄𝐋𝐄𝐂𝐓𝐄𝐃*\n`;
+          sText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
           sText += `🎬 *Series:* ${selected.title}\n`;
           sText += `🗂️ *Seasons:* ${availableSeasons || "N/A"}\n\n`;
           sText += `> 👇 *Reply with Season & Episode Number:*\n`;
-          sText += `> 💡 *Example:* \`1 2\` (Season 1, Ep 2)`;
+          sText += `> 💡 *Example:* \`1 2\` (Season 1, Ep 2)\n\n`;
+          sText += `⊱━━━━━━━━━━━━━⊰`;
 
           await sock.sendMessage(from, { text: sText, contextInfo: channelContextInfo() }, { quoted: mek });
       }
@@ -273,12 +274,12 @@ async function executeDownload(sock, mek, from, url, titleName) {
 
         const cleanName = titleName.replace(/[\\/:*?"<>|]/g, "").trim();
         
-        let finalCaption = `┏━━━━━━━━━━━━━\n`;
-        finalCaption += ` ┃ ✅ *𝐅𝐈𝐋𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
-        finalCaption += ` ┗━━━━━━━━━━━━━\n`;
+        let finalCaption = `⊱━━━━ • ✿ • ━━━━⊰\n`;
+        finalCaption += `✅ *𝐅𝐈𝐋𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
+        finalCaption += `⊱━━━━ • ✿ • ━━━━⊰\n\n`;
         finalCaption += `🎬 *Title:* ${titleName}\n`;
         finalCaption += `📦 *Size:* ${sizeMB.toFixed(2)} MB\n\n`;
-        finalCaption += `> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+        finalCaption += `⊱━━━━━━━━━━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
         await sock.sendMessage(from, {
             document: fs.readFileSync(tempFile),
@@ -293,12 +294,13 @@ async function executeDownload(sock, mek, from, url, titleName) {
     } catch (err) {
         console.log("CINEVERSE DOWNLOAD ERROR:", err.message);
 
-        let fallbackMsg = `┏━━━━━━━━━━━\n`;
-        fallbackMsg += `┃ ⚠️ *𝐅𝐈𝐋𝐄 𝐓𝐎𝐎 𝐋𝐀𝐑𝐆𝐄*\n`;
-        fallbackMsg += `┗━━━━━━━━━━━\n`;
+        let fallbackMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+        fallbackMsg += `⚠️ *𝐅𝐈𝐋𝐄 𝐓𝐎𝐎 𝐋𝐀𝐑𝐆𝐄*\n`;
+        fallbackMsg += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
         fallbackMsg += `🎬 *Title:* ${titleName}\n`;
         fallbackMsg += `ℹ️ _File might exceed WhatsApp limits._\n\n`;
-        fallbackMsg += `🔗 *Direct Download Link:*\n${url}`;
+        fallbackMsg += `🔗 *Direct Download Link:*\n${url}\n\n`;
+        fallbackMsg += `⊱━━━━━━━━━━━━━⊰`;
         
         await sock.sendMessage(from, { text: fallbackMsg, contextInfo: channelContextInfo() }, { quoted: mek });
         await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
