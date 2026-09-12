@@ -3,7 +3,7 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -23,6 +23,12 @@ const UA = "Mozilla/5.0 (Linux; Android 11; Redmi Note 8) AppleWebKit/537.36 (KH
 const BASE = "https://apkpure.net";
 const DL_BASE = "https://d.apkpure.net";
 const HEADERS = { "User-Agent": UA, Referer: BASE };
+
+function getQuotedId(m, mek) {
+  return m?.quoted?.id || 
+         mek?.message?.extendedTextMessage?.contextInfo?.stanzaId || 
+         m?.message?.extendedTextMessage?.contextInfo?.stanzaId || null;
+}
 
 function extractPkg(href) {
   const m = href?.match(/\/((?:com|org|net|io|co)\.[a-zA-Z0-9_.]+)(?:\/|$)/i);
@@ -76,7 +82,6 @@ async function sendErrorMsg(sock, from, mek, text) {
   }, { quoted: mek });
 }
 
-// ── Search Command ─────────────
 cmd({
   pattern: "apk",
   alias: ["app", "playstore", "apkpure"],
@@ -97,12 +102,6 @@ cmd({
 
     const results = await apkSearch(q.trim(), 5);
 
-    pendingApkSearch[from] = {
-      results,
-      createdAt: Date.now(),
-      isProcessing: false,
-    };
-
     let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
     text += `📦 *𝐀𝐏𝐊 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n`;
     text += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
@@ -115,7 +114,7 @@ cmd({
       text += `  ├ 👤 ${item.developer || "Unknown"}\n`;
       text += `  ╰ 🆔 \`${item.pkg}\`\n\n`;
     });
-    text += `⊱━━━━━━━━━━━━━━━⊰\n> 👇 *Reply with a Number to Download...*`;
+    text += `⊱━━━━━━━━━━━━━━━⊰\n> 👇 *Swipe & Reply this message with a number to Download...*`;
 
     const iconUrl = results[0]?.icon || "https://i.ibb.co/L9Hpw2B/apkpure.png";
     
@@ -125,10 +124,17 @@ cmd({
         contextInfo: channelContextInfo(),
     }, { quoted: mek });
 
-    await sock.sendMessage(from, { 
+    const menuMsg = await sock.sendMessage(from, { 
         text: text, 
         contextInfo: channelContextInfo() 
     }, { quoted: imgMsg });
+
+    pendingApkSearch[from] = {
+      expectedMsgId: menuMsg.key.id,
+      results,
+      createdAt: Date.now(),
+      isProcessing: false,
+    };
 
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
   } catch (e) {
@@ -137,9 +143,13 @@ cmd({
   }
 });
 
-// ── Number Reply Listener ─────────────
 replyHandlers.push({
-  filter: (text, { from }) => !!pendingApkSearch[from], 
+  filter: (text, { from, m, mek }) => {
+    const pending = pendingApkSearch[from];
+    if (!pending) return false;
+    const quotedId = getQuotedId(m, mek);
+    return quotedId && quotedId === pending.expectedMsgId;
+  },
   function: async (sock, mek, m, { body, from }) => {
     const pending = pendingApkSearch[from];
     if (!pending || pending.isProcessing) return;
@@ -153,13 +163,15 @@ replyHandlers.push({
     await sock.sendMessage(from, { react: { text: "⬇️", key: m.key } });
 
     try {
+      // 🔥 300MB දක්වා බාගත කිරීමේ හැකියාව දුන්නා (කලින් 100MB වලදී Cut වුණා)
       const res = await axios({
         url: selected.dlUrl,
         method: "GET",
         responseType: "arraybuffer",
         headers: HEADERS,
-        timeout: 90000,
-        maxContentLength: 100 * 1024 * 1024, // 100MB limit
+        timeout: 180000, // 3 minutes timeout for larger files
+        maxContentLength: 300 * 1024 * 1024,
+        maxBodyLength: 300 * 1024 * 1024,
       });
 
       const buffer = Buffer.from(res.data);
@@ -168,6 +180,7 @@ replyHandlers.push({
       await sock.sendMessage(from, { react: { text: "⬆️", key: m.key } });
 
       const cleanName = selected.name.replace(/[\\/:*?"<>|]/g, "").trim();
+      const isLargeDoc = sizeMB > 60;
       
       let caption = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
       caption += `✅ *𝐀𝐏𝐊 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
@@ -175,33 +188,33 @@ replyHandlers.push({
       caption += `📦 *App:* ${selected.name}\n`;
       caption += `👤 *Dev:* ${selected.developer}\n`;
       caption += `📊 *Size:* ${sizeMB.toFixed(2)} MB\n`;
-      caption += `📁 *Format:* ${sizeMB > 60 ? "Document (Raw)" : "Standard APK"}\n\n`;
+      caption += `📁 *Format:* ${isLargeDoc ? "Document (Raw Binary)" : "Standard APK"}\n\n`;
       caption += `⊱━━━━━━━━━━━━━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-      // 🔥 60MB ට වැඩි නම් application/octet-stream (Document) විදියටත්, අඩු නම් normal apk විදියටත් යවනවා
-      const mimeType = sizeMB > 60 ? "application/octet-stream" : "application/vnd.android.package-archive";
-
-      await sock.sendMessage(from, {
+      // 60MB ට වඩා වැඩි නම් generic raw binary document විදියටත්, අඩු නම් native apk MIME එකත් දෙනවා
+      const docPayload = {
         document: buffer,
-        mimetype: mimeType,
+        mimetype: isLargeDoc ? "application/octet-stream" : "application/vnd.android.package-archive",
         fileName: `${cleanName}.apk`,
         caption: caption,
         contextInfo: channelContextInfo(),
-      }, { quoted: mek });
+      };
 
+      await sock.sendMessage(from, docPayload, { quoted: mek });
       await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+
     } catch (err) {
       console.log("APK DOWNLOAD ERROR:", err.message);
 
+      // 300MB වලටත් වඩා විශාල නම් පමණක් link එක ලබා දේ
       if (err.message.includes("maxContentLength") || err.code === "ECONNABORTED") {
         let largeFileMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
         largeFileMsg += `⚠️ *𝐅𝐈𝐋𝐄 𝐓𝐎𝐎 𝐋𝐀𝐑𝐆𝐄*\n`;
         largeFileMsg += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
         largeFileMsg += `📦 *App:* ${selected.name}\n`;
-        largeFileMsg += `ℹ️ _Exceeds 100MB limit._\n\n`;
+        largeFileMsg += `ℹ️ _File size exceeds 300MB WhatsApp limit._\n\n`;
         largeFileMsg += `🔗 *Direct Download Link:*\n${selected.dlUrl}\n\n`;
-        largeFileMsg += `⊱━━━━━━━━━━━━━━⊰`;
-        
+        largeFileMsg += `⊱━━━━━━━━━━━━━━━⊰`;
         await sock.sendMessage(from, { text: largeFileMsg, contextInfo: channelContextInfo() }, { quoted: mek });
       } else {
         await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
