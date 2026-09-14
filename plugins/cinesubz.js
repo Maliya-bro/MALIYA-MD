@@ -7,7 +7,22 @@ const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
+
+const SESSION_TIMEOUT = 5 * 60 * 1000;
+const LOOP_COOLDOWN = 3000;
+
+const pendingCineSubz = {};
+const lastProcessedMsg = {};
+
+function keyFor(sender, from) {
+  return `${from || ""}::${(sender || "").split(":")[0]}`;
+}
+
+function clearUserSession(k) {
+  delete pendingCineSubz[k];
+}
 
 function channelContextInfo() {
   return {
@@ -20,15 +35,6 @@ function channelContextInfo() {
     },
   };
 }
-
-const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
-
-// 🔥 සර්ච් කරපු කෙනාට විතරක් වැඩ කරන්න Key එක හදනවා
-function makePendingKey(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
-}
-
-const pendingCineSubz = Object.create(null);
 
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -55,7 +61,7 @@ async function getCineSubzLinks(originalUrl) {
   let serversToTry = [];
   if (baseServerMatch) serversToTry.push(baseServerMatch[1]);
   
-  ['1', '4', '7', '11'].forEach(s => {
+  ['1', '2', '3', '5', '6', '8', '9', '4', '7', '11'].forEach(s => {
     if (!serversToTry.includes(s)) serversToTry.push(s);
   });
 
@@ -69,9 +75,9 @@ async function getCineSubzLinks(originalUrl) {
       const currentPath = parsedUrl.pathname + parsedUrl.search;
       
       const agent = new https.Agent({ 
-        rejectUnauthorized: false,
-        keepAlive: true,
-        secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT
+        rejectUnauthorized: false, 
+        keepAlive: true, 
+        secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT 
       });
 
       const baseHeaders = {
@@ -183,8 +189,6 @@ cmd({
   filename: __filename
 }, async (sock, mek, m, { from, q, sender, sessionId }) => {
   try {
-    const settings = await readSettings(sessionId);
-
     if (!q) {
       return await sock.sendMessage(from, { 
         text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.cinesubz <name>\`\n💡 *Example:* \`.cinesubz avengers\``, 
@@ -202,13 +206,13 @@ cmd({
     }
 
     const topResults = results.slice(0, 10);
+    const k = keyFor(sender, from);
+    clearUserSession(k);
 
-    // User-Specific Session Key
-    const key = makePendingKey(sender, from);
-    pendingCineSubz[key] = {
+    pendingCineSubz[k] = {
       step: 1,
       results: topResults,
-      createdAt: Date.now(),
+      timestamp: Date.now(),
       isProcessing: false,
     };
 
@@ -233,16 +237,12 @@ cmd({
       } catch (e) {}
     }
 
-    const imgMsg = await sock.sendMessage(from, { 
+    // Search Result එක Github Image එකේ Caption එක විදියට තනි මැසේජ් එකකින් යැවීම
+    await sock.sendMessage(from, { 
       image: { url: searchImg }, 
-      caption: `> 🎬 *${topResults[0].title}*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ ᴍᴅ`,
+      caption: text,
       contextInfo: channelContextInfo()
     }, { quoted: mek });
-
-    await sock.sendMessage(from, { 
-      text: text, 
-      contextInfo: channelContextInfo() 
-    }, { quoted: imgMsg });
 
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
 
@@ -254,36 +254,48 @@ cmd({
 });
 
 // ==========================================
-// 2. Number Reply Listener (Settings ක්‍රමයටම)
+// 2. Number Reply Listener
 // ==========================================
-replyHandlers.push({
+const cineSubzReplyHandler = {
   filter: (text, { sender, from }) => {
-    const key = makePendingKey(sender, from);
-    return !!pendingCineSubz[key];
+    if (!text) return false;
+    const k = keyFor(sender, from);
+    const isNumber = /^\d+$/.test(text.trim());
+    return isNumber && Boolean(pendingCineSubz[k]);
   },
   function: async (sock, mek, m, { body, sender, from }) => {
-    const key = makePendingKey(sender, from);
-    const pending = pendingCineSubz[key];
+    const input = body ? body.trim() : "";
+    if (!input) return;
+
+    const k = keyFor(sender, from);
+    const pending = pendingCineSubz[k];
     if (!pending || pending.isProcessing) return;
 
-    const rawInput = String(body || m?.message?.conversation || m?.message?.extendedTextMessage?.text || "").trim();
-    const input = parseInt(rawInput, 10);
-    if (isNaN(input)) return;
+    // Loop Protection
+    const now = Date.now();
+    const lastMsg = lastProcessedMsg[k];
+    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
+      return;
+    }
+    lastProcessedMsg[k] = { text: input, time: now };
 
-    // STEP 1: Movie Selection
+    const choice = parseInt(input, 10);
+    if (isNaN(choice)) return;
+
+    // STEP 1: Movie Selection -> Shows Movie Poster with Qualities
     if (pending.step === 1) {
-      if (input < 1 || input > pending.results.length) return;
+      if (choice < 1 || choice > pending.results.length) return;
 
       pending.isProcessing = true;
       await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
-      const selected = pending.results[input - 1];
+      const selected = pending.results[choice - 1];
 
       try {
         const movieInfo = await scrapeCineSubz(selected.url);
 
         if (!movieInfo || !movieInfo.downloadLinks || movieInfo.downloadLinks.length === 0) {
-          delete pendingCineSubz[key];
+          clearUserSession(k);
           return await sendErrorMsg(sock, from, mek, "No download links available for this movie.");
         }
 
@@ -299,7 +311,7 @@ replyHandlers.push({
         });
 
         if (downloadLinks.length === 0) {
-          delete pendingCineSubz[key];
+          clearUserSession(k);
           return await sendErrorMsg(sock, from, mek, "No download links found below 2GB.");
         }
 
@@ -308,8 +320,7 @@ replyHandlers.push({
         qualityMsg += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
         qualityMsg += `🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
         if (movieInfo.imdb_rate) qualityMsg += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
-        if (movieInfo.duration) qualityMsg += `⏳ *Duration :* ${movieInfo.duration}\n`;
-        qualityMsg += `\n`;
+        if (movieInfo.duration) qualityMsg += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
 
         downloadLinks.forEach((d, i) => {
           const numStr = String(i + 1).padStart(2, "0");
@@ -318,44 +329,46 @@ replyHandlers.push({
 
         qualityMsg += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply with quality number to Download...*`;
 
+        // මෙතැනදී පමණක් Movie Poster එක Caption එකක් සමඟ යැවීම
         if (movieInfo.poster) {
           await sock.sendMessage(from, { 
             image: { url: movieInfo.poster }, 
-            caption: qualityMsg,
-            contextInfo: channelContextInfo()
+            caption: qualityMsg, 
+            contextInfo: channelContextInfo() 
           }, { quoted: mek });
         } else {
           await sock.sendMessage(from, { 
-            text: qualityMsg,
-            contextInfo: channelContextInfo()
+            text: qualityMsg, 
+            contextInfo: channelContextInfo() 
           }, { quoted: mek });
         }
 
         pending.step = 2;
         pending.movie = { metadata: movieInfo, downloadLinks };
+        pending.timestamp = Date.now();
         pending.isProcessing = false;
 
         await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
 
       } catch (error) {
         console.error("CineSubz Scrape Error:", error.message);
-        delete pendingCineSubz[key];
+        clearUserSession(k);
         await sendErrorMsg(sock, from, mek, "Failed to fetch download links for this movie.");
       }
     }
 
-    // STEP 2: Quality Selection & Download
+    // STEP 2: Quality Selection & Direct Download
     else if (pending.step === 2) {
-      if (input < 1 || input > pending.movie.downloadLinks.length) return;
+      if (choice < 1 || choice > pending.movie.downloadLinks.length) return;
 
       pending.isProcessing = true;
       await sock.sendMessage(from, { react: { text: "⬆️", key: m.key } });
 
       const { movie } = pending;
-      const selectedLink = movie.downloadLinks[input - 1];
+      const selectedLink = movie.downloadLinks[choice - 1];
       let targetServerLink = selectedLink.directUrl;
 
-      delete pendingCineSubz[key];
+      clearUserSession(k);
 
       try {
         targetServerLink = targetServerLink.replace(/^https:\/\/[^\/]+/, 'https://drive.csplayer2.space');
@@ -403,8 +416,8 @@ replyHandlers.push({
           }, { quoted: mek });
         } else {
           await sock.sendMessage(from, { 
-            text: captionText,
-            contextInfo: channelContextInfo()
+            text: captionText, 
+            contextInfo: channelContextInfo() 
           }, { quoted: mek });
         }
 
@@ -415,14 +428,20 @@ replyHandlers.push({
         await sendErrorMsg(sock, from, mek, `Failed to download movie: ${error.message}`);
       }
     }
-  },
-});
+  }
+};
 
+if (Array.isArray(replyHandlers)) {
+  replyHandlers.push(cineSubzReplyHandler);
+}
+
+// Cleanup Session
 setInterval(() => {
   const now = Date.now();
-  for (const key of Object.keys(pendingCineSubz)) {
-    if (now - pendingCineSubz[key].createdAt > 10 * 60 * 1000) {
-      delete pendingCineSubz[key];
-    }
+  for (const k in pendingCineSubz) {
+    if (now - pendingCineSubz[k].timestamp > SESSION_TIMEOUT) delete pendingCineSubz[k];
   }
-}, 30000);
+  for (const k in lastProcessedMsg) {
+    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) delete lastProcessedMsg[k];
+  }
+}, 2.5 * 60 * 1000);
