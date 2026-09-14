@@ -20,8 +20,10 @@ const LOOP_COOLDOWN = 3000;
 const pendingCvSearch = {};
 const lastProcessedMsg = {};
 
-function keyFor(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
+// 🔥 Bulletproof Key Generator 🔥
+function makePendingKey(sender, from) {
+  const cleanSender = String(sender || "").split(":")[0];
+  return `${from || ""}::${cleanSender}`;
 }
 
 function clearUserSession(k) {
@@ -31,13 +33,10 @@ function clearUserSession(k) {
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
-  return String(str)
-    .split("")
-    .map((char) => {
-      const idx = normal.indexOf(char);
-      return idx !== -1 ? small[idx] : char;
-    })
-    .join("");
+  return String(str).split("").map((char) => {
+    const idx = normal.indexOf(char);
+    return idx !== -1 ? small[idx] : char;
+  }).join("");
 }
 
 function channelContextInfo() {
@@ -57,25 +56,6 @@ async function sendErrorMsg(sock, from, mek, text) {
     text: `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n🚫 _${text}_`,
     contextInfo: channelContextInfo()
   }, { quoted: mek });
-}
-
-// ── Text Extractor (Fix for all users) ─────────────
-function extractText(body, mek, m) {
-  let texts = [
-    body,
-    m?.body,
-    m?.text,
-    m?.message?.conversation,
-    m?.message?.extendedTextMessage?.text,
-    mek?.message?.conversation,
-    mek?.message?.extendedTextMessage?.text
-  ];
-  for (let t of texts) {
-    if (t && typeof t === 'string' && t.trim()) {
-      return t.trim();
-    }
-  }
-  return "";
 }
 
 async function searchCineverse(query) {
@@ -129,7 +109,7 @@ cmd({
       return await sendErrorMsg(sock, from, mek, `No results found for "${q}" on CineVerse LK.`);
     }
 
-    const k = keyFor(sender, from);
+    const k = makePendingKey(sender, from);
     clearUserSession(k);
 
     pendingCvSearch[k] = {
@@ -153,10 +133,9 @@ cmd({
       text += `  ├ 🏷️ ${type} | ⭐ ${item.imdbRating || "N/A"}\n`;
       text += `  ╰ 💿 ${item.quality || "HD"} | ✍️ ${item.subtitleAuthor || "CineVerse"}\n\n`;
     });
-    text += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n> 👇 *Reply a number tp dl...*`;
+    text += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n> 👇 *Reply with a number to Download...*`;
 
     let poster = results[0].posterImage || results[0].image || results[0].poster || DEFAULT_POSTER;
-
     const posterMsg = await sock.sendMessage(from, { 
       image: { url: poster }, 
       caption: `> 🎬 *${results[0].title}*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ ᴍᴅ`,
@@ -184,33 +163,28 @@ cmd({
   }
 });
 
-// ── Number Reply Handler (Video.js ක්‍රමයට) ─────────────
+// 🔥 Robust Number Reply Handler 🔥
 replyHandlers.push({
-  filter: (_body, { sender, from }) => !!pendingCvSearch[keyFor(sender, from)],
+  filter: (body, { sender, from }) => !!pendingCvSearch[makePendingKey(sender, from)],
   function: async (sock, mek, m, { body, sender, from }) => {
-    const input = extractText(body, mek, m);
+    const input = String(body || "").trim();
     if (!input) return;
 
-    const k = keyFor(sender, from);
+    const k = makePendingKey(sender, from);
     const pending = pendingCvSearch[k];
     if (!pending || pending.isProcessing) return;
 
-    const isSingleNum = /^\d+$/.test(input);
-    const isSeriesFormat = /^\d+\s+\d+$/.test(input);
-
-    if (pending.step === 1 && !isSingleNum) return;
-    if (pending.step === 2 && !isSeriesFormat) return;
-
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
-      return;
-    }
+    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) return;
     lastProcessedMsg[k] = { text: input, time: now };
 
+    const parts = input.split(/\s+/);
+    const choice = parseInt(parts[0], 10);
+    if (isNaN(choice)) return;
+
     if (pending.step === 1) {
-      const choice = parseInt(input, 10);
-      if (isNaN(choice) || choice < 1 || choice > pending.results.length) return;
+      if (choice < 1 || choice > pending.results.length) return;
 
       const selected = pending.results[choice - 1];
 
@@ -222,7 +196,6 @@ replyHandlers.push({
         if (!dlUrl || dlUrl === '#') {
           return await sendErrorMsg(sock, from, mek, "Direct download link is not available for this movie.");
         }
-
         await sendMovieDocument(sock, mek, from, dlUrl, selected);
       } else {
         pending.step = 2;
@@ -249,7 +222,7 @@ replyHandlers.push({
       }
     } 
     else if (pending.step === 2) {
-      const parts = input.split(/\s+/);
+      if (parts.length < 2) return;
       const s = parseInt(parts[0], 10);
       const e = parseInt(parts[1], 10);
       if (isNaN(s) || isNaN(e)) return;
