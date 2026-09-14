@@ -15,13 +15,14 @@ const DEFAULT_POSTER = "https://i.ibb.co/3m1bXvt/cineverse.jpg";
 const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
-const pendingCvSearch = {};
+const LOOP_COOLDOWN = 3000;
 
-// 🔥 FIXED: Bulletproof Session Key Generator for Multi-Device Users 🔥
-function makePendingKey(sender, from) {
-  if (!sender || !from) return null;
-  const cleanSender = String(sender).split("@")[0].split(":")[0];
-  return `${from}::${cleanSender}`;
+const pendingCvSearch = {};
+const lastProcessedMsg = {};
+
+// 🔥 100% Bulletproof Key Generator using senderNumber 🔥
+function makePendingKey(senderNumber, from) {
+  return `${from || ""}::${senderNumber || ""}`;
 }
 
 // 🔥 Video.js Style Text Extractor 🔥
@@ -103,7 +104,7 @@ cmd({
   desc: "Search and download Sinhala Subbed Movies & Series",
   category: "download",
   filename: __filename,
-}, async (sock, mek, m, { from, q, sender, sessionId }) => {
+}, async (sock, mek, m, { from, q, senderNumber, sessionId }) => {
   try {
     if (!q) {
       return await sock.sendMessage(from, {
@@ -120,7 +121,7 @@ cmd({
       return await sendErrorMsg(sock, from, mek, `No results found for "${q}" on CineVerse LK.`);
     }
 
-    const k = makePendingKey(sender, from);
+    const k = makePendingKey(senderNumber, from);
     clearUserSession(k);
 
     pendingCvSearch[k] = {
@@ -176,32 +177,42 @@ cmd({
 
 // ── Number Reply Handler ─────────────
 replyHandlers.push({
-  filter: (_body, { sender, from }) => !!pendingCvSearch[makePendingKey(sender, from)],
-  function: async (sock, mek, m, { body, sender, from }) => {
-    const k = makePendingKey(sender, from);
+  filter: (body, { senderNumber, from }) => !!pendingCvSearch[makePendingKey(senderNumber, from)],
+  function: async (sock, mek, m, { body, senderNumber, from }) => {
+    const k = makePendingKey(senderNumber, from);
     const pending = pendingCvSearch[k];
     if (!pending || pending.isProcessing) return;
 
-    // Use Video.js deep extractor logic
-    const texts = extractTexts(body, mek, m);
-    let input = "";
-
-    if (pending.step === 1) {
-      input = texts.find(t => /^\d+$/.test(t));
-    } else if (pending.step === 2) {
-      input = texts.find(t => /^\d+\s+\d+$/.test(t));
+    let input = String(body || "").trim();
+    if (!input) {
+        const texts = extractTexts(body, mek, m);
+        if (pending.step === 1) input = texts.find(t => /^\d+$/.test(t)) || "";
+        if (pending.step === 2) input = texts.find(t => /^\d+\s+\d+$/.test(t)) || "";
     }
 
     if (!input) return;
 
-    if (pending.step === 1) {
-      const choice = parseInt(input, 10);
-      if (isNaN(choice) || choice < 1 || choice > pending.results.length) return;
+    const isSingleNum = /^\d+$/.test(input);
+    const isSeriesFormat = /^\d+\s+\d+$/.test(input);
 
-      pending.isProcessing = true;
+    if (pending.step === 1 && !isSingleNum) return;
+    if (pending.step === 2 && !isSeriesFormat) return;
+
+    const now = Date.now();
+    const lastMsg = lastProcessedMsg[k];
+    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+    lastProcessedMsg[k] = { text: input, time: now };
+
+    const parts = input.split(/\s+/);
+    const choice = parseInt(parts[0], 10);
+
+    if (pending.step === 1) {
+      if (choice < 1 || choice > pending.results.length) return;
+
       const selected = pending.results[choice - 1];
 
       if (!selected.isSeries) {
+        pending.isProcessing = true;
         const dlUrl = selected.directLink;
         clearUserSession(k);
 
@@ -213,7 +224,6 @@ replyHandlers.push({
         pending.step = 2;
         pending.selectedSeries = selected;
         pending.timestamp = Date.now();
-        pending.isProcessing = false;
 
         let availableSeasons = Object.keys(selected.episodesData || {}).join(", ");
         
@@ -235,7 +245,6 @@ replyHandlers.push({
       }
     } 
     else if (pending.step === 2) {
-      const parts = input.split(/\s+/);
       const s = parseInt(parts[0], 10);
       const e = parseInt(parts[1], 10);
       
@@ -300,4 +309,7 @@ setInterval(() => {
   for (const k in pendingCvSearch) {
     if (now - pendingCvSearch[k].timestamp > SESSION_TIMEOUT) delete pendingCvSearch[k];
   }
-}, 60000);
+  for (const k in lastProcessedMsg) {
+    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) delete lastProcessedMsg[k];
+  }
+}, 2.5 * 60 * 1000);
