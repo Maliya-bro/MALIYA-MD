@@ -3,7 +3,7 @@ const axios = require("axios");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const DL_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
   "Referer": "https://cineverselk.space/",
   "Accept": "application/json, text/plain, */*",
   "Cookie": "cv_auth=true;"
@@ -14,19 +14,34 @@ const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 const DEFAULT_POSTER = "https://i.ibb.co/3m1bXvt/cineverse.jpg";
 const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
 
-const SESSION_TIMEOUT = 5 * 60 * 1000;
-const LOOP_COOLDOWN = 3000;
-
+// Sessions & Locks
 const pendingCvSearch = {};
-const lastProcessedMsg = {};
+const pendingCvSeries = {};
+const actionLocks = {};
 
-// 🔥 video.js / xham.js වල භාවිතා කළ සාර්ථකම Session Key එක 🔥
-function makePendingKey(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
+// 🔥 Universal Session Key (Multi-device safe)
+function makeSessionKey(sender, from) {
+  const cleanSender = String(sender || "").split(":")[0];
+  return `${from || ""}::${cleanSender}`;
 }
 
-function clearUserSession(k) {
-  delete pendingCvSearch[k];
+// 🔥 Deep Text Extractor (From video.js)
+function extractTextFromMessage(body, mek, m) {
+  const direct = [
+    body, m?.body, m?.text, m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text,
+    m?.message?.buttonsResponseMessage?.selectedButtonId,
+    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.interactiveResponseMessage?.body?.text,
+    mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    mek?.message?.interactiveResponseMessage?.body?.text,
+  ];
+  for (const item of direct) {
+    if (item && typeof item === "string" && item.trim()) return item.trim();
+  }
+  return "";
 }
 
 function toSmallCaps(str = "") {
@@ -82,7 +97,7 @@ async function searchCineverse(query) {
   }
 }
 
-// ── Search Command ─────────────
+// ── Search Command ──────────────────────────────────────────
 cmd({
   pattern: "cineverse",
   alias: ["cv", "cvlk", "sinhala"],
@@ -104,24 +119,19 @@ cmd({
     const results = await searchCineverse(q.trim());
     if (results.length === 0) {
       await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
-      return await sendErrorMsg(sock, from, mek, `No results found for "${q}" on CineVerse LK.`);
+      return await sendErrorMsg(sock, from, mek, `No results found for "${q}".`);
     }
 
-    const k = makePendingKey(sender, from);
-    clearUserSession(k);
+    const key = makeSessionKey(sender, from);
+    delete pendingCvSearch[key];
+    delete pendingCvSeries[key];
 
-    pendingCvSearch[k] = {
-      results,
-      step: 1,
-      timestamp: Date.now(),
-      isProcessing: false,
+    pendingCvSearch[key] = {
+      results: results,
+      timestamp: Date.now()
     };
 
-    let text = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n`;
-    text += `🎬 *𝐂𝐕 𝐒𝐄𝐀𝐑𝐂𝐇 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n`;
-    text += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n`;
-    text += `🎀 *Search :* ${q}\n`;
-    text += `🍿 *Results :* ${results.length}\n\n`;
+    let text = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n🎬 *𝐂𝐕 𝐒𝐄𝐀𝐑𝐂𝐇 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${results.length}\n\n`;
 
     results.forEach((item, index) => {
       const numStr = String(index + 1).padStart(2, "0");
@@ -161,53 +171,55 @@ cmd({
   }
 });
 
-// ── Number Reply Handler ─────────────
-const cvReplyHandler = {
-  filter: (text, { sender, from }) => {
-    if (!text) return false;
-    const k = makePendingKey(sender, from);
-    return !!pendingCvSearch[k];
+// ── Broad Filter + Deep Extraction Handler ──────────────────────────
+replyHandlers.push({
+  filter: (_body, { sender, from }) => {
+    // 1. Broad Filter (Just check if session exists, exactly like video.js)
+    const key = makeSessionKey(sender, from);
+    return !!pendingCvSearch[key] || !!pendingCvSeries[key];
   },
+  
   function: async (sock, mek, m, { body, sender, from }) => {
-    const input = String(body || "").trim();
+    const key = makeSessionKey(sender, from);
+
+    // 2. Spam Lock Check
+    if (actionLocks[key]) return;
+
+    // 3. Deep Extraction (Find the real text from buttons/replies)
+    const input = extractTextFromMessage(body, mek, m);
     if (!input) return;
 
-    const k = makePendingKey(sender, from);
-    const pending = pendingCvSearch[k];
-    if (!pending || pending.isProcessing) return;
-
-    // Loop Protection
-    const now = Date.now();
-    const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) return;
-    lastProcessedMsg[k] = { text: input, time: now };
-
-    if (pending.step === 1) {
-      if (!/^\d+$/.test(input)) return;
+    // ─────────────────────────────────────────
+    // MOVIE SELECTION (^\d+$)
+    // ─────────────────────────────────────────
+    if (pendingCvSearch[key] && /^\d+$/.test(input)) {
+      const session = pendingCvSearch[key];
       const choice = parseInt(input, 10);
-      if (choice < 1 || choice > pending.results.length) return;
 
-      const selected = pending.results[choice - 1];
+      // Validate Range
+      if (choice < 1 || choice > session.results.length) return;
+
+      // 4. Early Delete & Action Lock (Loop Protection)
+      delete pendingCvSearch[key];
+      actionLocks[key] = true;
+      setTimeout(() => { delete actionLocks[key]; }, 4000);
+
+      const selected = session.results[choice - 1];
 
       if (!selected.isSeries) {
-        pending.isProcessing = true;
+        // Movie Process
         const dlUrl = selected.directLink;
-        clearUserSession(k);
-
         if (!dlUrl || dlUrl === '#') {
           return await sendErrorMsg(sock, from, mek, "Direct download link is not available for this movie.");
         }
         await sendMovieDocument(sock, mek, from, dlUrl, selected);
+
       } else {
-        pending.step = 2;
-        pending.selectedSeries = selected;
-        pending.timestamp = Date.now();
+        // Series Selected -> Create new Series Session
+        pendingCvSeries[key] = { series: selected, timestamp: Date.now() };
 
         let availableSeasons = Object.keys(selected.episodesData || {}).join(", ");
-        
-        let sText = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n`;
-        sText += `📺 *𝐒𝐄𝐑𝐈𝐄𝐒 𝐒𝐄𝐋𝐄𝐂𝐓𝐄𝐃*\n`;
-        sText += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n`;
+        let sText = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n📺 *𝐒𝐄𝐑𝐈𝐄𝐒 𝐒𝐄𝐋𝐄𝐂𝐓𝐄𝐃*\n⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n`;
         sText += `🎬 *Series:* ${toSmallCaps(selected.title)}\n`;
         sText += `🗂️ *Seasons:* ${availableSeasons || "N/A"}\n\n`;
         sText += `> 👇 *Reply with Season & Episode:*\n`;
@@ -222,18 +234,24 @@ const cvReplyHandler = {
         }
       }
     } 
-    else if (pending.step === 2) {
-      if (!/^\d+\s+\d+$/.test(input)) return;
-      
+    
+    // ─────────────────────────────────────────
+    // EPISODE SELECTION (^\d+\s+\d+$)
+    // ─────────────────────────────────────────
+    else if (pendingCvSeries[key] && /^\d+\s+\d+$/.test(input)) {
+      const session = pendingCvSeries[key];
+
+      // 4. Early Delete & Action Lock (Loop Protection)
+      delete pendingCvSeries[key];
+      actionLocks[key] = true;
+      setTimeout(() => { delete actionLocks[key]; }, 4000);
+
       const parts = input.split(/\s+/);
       const s = parseInt(parts[0], 10);
       const e = parseInt(parts[1], 10);
       
-      pending.isProcessing = true;
-      const series = pending.selectedSeries;
+      const series = session.series;
       const epData = series.episodesData && series.episodesData[s] ? series.episodesData[s][e] : null;
-
-      clearUserSession(k);
 
       if (!epData || !epData.d || epData.d === '#') {
         return await sendErrorMsg(sock, from, mek, `Link not found for S${s} E${e}.`);
@@ -251,22 +269,15 @@ const cvReplyHandler = {
       await sendMovieDocument(sock, mek, from, epData.d, dummyItem);
     }
   }
-};
+});
 
-if (Array.isArray(replyHandlers)) {
-  replyHandlers.push(cvReplyHandler);
-}
-
-// ── Direct Download Execution ─────────────
+// ── Direct Streaming ────────────────────────────────────────
 async function sendMovieDocument(sock, mek, from, url, item) {
   try {
     await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
-
     const cleanTitle = (item.title || "Movie").replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
 
-    let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
-    captionText += `✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
-    captionText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+    let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
     captionText += `🎬 *Movie :* ${toSmallCaps(item.title)}\n`;
     captionText += `📊 *Quality :* ${item.quality || "HD"}\n`;
     if (item.imdbRating) captionText += `⭐ *IMDb :* ${item.imdbRating}\n`;
@@ -290,12 +301,13 @@ async function sendMovieDocument(sock, mek, from, url, item) {
   }
 }
 
+// Memory Cleanup
 setInterval(() => {
   const now = Date.now();
   for (const k in pendingCvSearch) {
-    if (now - pendingCvSearch[k].timestamp > SESSION_TIMEOUT) delete pendingCvSearch[k];
+    if (now - pendingCvSearch[k].timestamp > 10 * 60 * 1000) delete pendingCvSearch[k];
   }
-  for (const k in lastProcessedMsg) {
-    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) delete lastProcessedMsg[k];
+  for (const k in pendingCvSeries) {
+    if (now - pendingCvSeries[k].timestamp > 10 * 60 * 1000) delete pendingCvSeries[k];
   }
-}, 2.5 * 60 * 1000);
+}, 5 * 60 * 1000);
