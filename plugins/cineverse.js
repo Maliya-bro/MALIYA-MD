@@ -1,5 +1,6 @@
 const { cmd, replyHandlers } = require("../command");
 const axios = require("axios");
+const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const DL_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
@@ -11,7 +12,7 @@ const DL_HEADERS = {
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 const DEFAULT_POSTER = "https://i.ibb.co/3m1bXvt/cineverse.jpg";
-const SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
+const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 3000;
@@ -85,7 +86,7 @@ async function searchCineverse(query) {
 }
 
 // ==========================================
-// 1. Search Command (Original Two-Image Layout)
+// 1. Search Command
 // ==========================================
 cmd({
   pattern: "cineverse",
@@ -94,8 +95,10 @@ cmd({
   desc: "Search and download Sinhala Subbed Movies & Series",
   category: "download",
   filename: __filename,
-}, async (sock, mek, m, { from, q, sender }) => {
+}, async (sock, mek, m, { from, q, sender, sessionId }) => {
   try {
+    const settings = await readSettings(sessionId).catch(() => ({}));
+
     if (!q) {
       return await sock.sendMessage(from, {
         text: `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐋*\n⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n📌 *Usage:* \`.cv <name>\`\n💡 *Example:* \`.cv sonic\``,
@@ -147,9 +150,18 @@ cmd({
       contextInfo: channelContextInfo()
     }, { quoted: mek });
 
-    // 2. Movie List with SEARCH_IMAGE
+    // Custom Search Image ලබාගැනීම
+    let searchImg = DEFAULT_SEARCH_IMAGE;
+    if (sessionId) {
+      try {
+        const custom = await getCustomImage(sessionId, "cineverse_header");
+        if (custom && custom.data) searchImg = custom.data;
+      } catch (e) {}
+    }
+
+    // 2. Movie List with Custom/Default Image
     await sock.sendMessage(from, { 
-      image: { url: SEARCH_IMAGE }, 
+      image: { url: searchImg }, 
       caption: text,
       contextInfo: channelContextInfo()
     }, { quoted: posterMsg });
@@ -290,7 +302,6 @@ async function sendMovieDocument(sock, mek, from, url, item) {
     captionText += `\n🌟 *Direct Link :* ${url}\n\n`;
     captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-    // Local Disk එකට නොගෙන URL එක Baileys එකෙන් කෙලින්ම Stream කර යවයි
     await sock.sendMessage(from, {
       document: { url: url },
       mimetype: "video/mp4",
