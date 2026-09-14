@@ -59,6 +59,25 @@ async function sendErrorMsg(sock, from, mek, text) {
   }, { quoted: mek });
 }
 
+// ── Text Extractor (Fix for all users) ─────────────
+function extractText(body, mek, m) {
+  let texts = [
+    body,
+    m?.body,
+    m?.text,
+    m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text,
+    mek?.message?.conversation,
+    mek?.message?.extendedTextMessage?.text
+  ];
+  for (let t of texts) {
+    if (t && typeof t === 'string' && t.trim()) {
+      return t.trim();
+    }
+  }
+  return "";
+}
+
 async function searchCineverse(query) {
   const cb = Date.now();
   try {
@@ -85,9 +104,6 @@ async function searchCineverse(query) {
   }
 }
 
-// ==========================================
-// 1. Search Command
-// ==========================================
 cmd({
   pattern: "cineverse",
   alias: ["cv", "cvlk", "sinhala"],
@@ -97,8 +113,6 @@ cmd({
   filename: __filename,
 }, async (sock, mek, m, { from, q, sender, sessionId }) => {
   try {
-    const settings = await readSettings(sessionId).catch(() => ({}));
-
     if (!q) {
       return await sock.sendMessage(from, {
         text: `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐋*\n⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n📌 *Usage:* \`.cv <name>\`\n💡 *Example:* \`.cv sonic\``,
@@ -139,18 +153,16 @@ cmd({
       text += `  ├ 🏷️ ${type} | ⭐ ${item.imdbRating || "N/A"}\n`;
       text += `  ╰ 💿 ${item.quality || "HD"} | ✍️ ${item.subtitleAuthor || "CineVerse"}\n\n`;
     });
-    text += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n> 👇 *Reply with a number to Download...*`;
+    text += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n> 👇 *Reply a number tp dl...*`;
 
     let poster = results[0].posterImage || results[0].image || results[0].poster || DEFAULT_POSTER;
 
-    // 1. Film Poster
     const posterMsg = await sock.sendMessage(from, { 
       image: { url: poster }, 
       caption: `> 🎬 *${results[0].title}*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ ᴍᴅ`,
       contextInfo: channelContextInfo()
     }, { quoted: mek });
 
-    // Custom Search Image ලබාගැනීම
     let searchImg = DEFAULT_SEARCH_IMAGE;
     if (sessionId) {
       try {
@@ -159,7 +171,6 @@ cmd({
       } catch (e) {}
     }
 
-    // 2. Movie List with Custom/Default Image
     await sock.sendMessage(from, { 
       image: { url: searchImg }, 
       caption: text,
@@ -173,34 +184,23 @@ cmd({
   }
 });
 
-// ==========================================
-// 2. Number Reply Listener
-// ==========================================
-const cvReplyHandler = {
-  filter: (text, { sender, from }) => {
-    if (!text) return false;
-    const k = keyFor(sender, from);
-    const session = pendingCvSearch[k];
-    if (!session) return false;
-
-    const trimmed = text.trim();
-    const isSingleNum = /^\d+$/.test(trimmed);
-    const isSeriesFormat = /^\d+\s+\d+$/.test(trimmed);
-
-    if (session.step === 1 && !isSingleNum) return false;
-    if (session.step === 2 && !isSeriesFormat) return false;
-
-    return true;
-  },
+// ── Number Reply Handler (Video.js ක්‍රමයට) ─────────────
+replyHandlers.push({
+  filter: (_body, { sender, from }) => !!pendingCvSearch[keyFor(sender, from)],
   function: async (sock, mek, m, { body, sender, from }) => {
-    const input = body ? body.trim() : "";
+    const input = extractText(body, mek, m);
     if (!input) return;
 
     const k = keyFor(sender, from);
     const pending = pendingCvSearch[k];
     if (!pending || pending.isProcessing) return;
 
-    // Loop Protection System
+    const isSingleNum = /^\d+$/.test(input);
+    const isSeriesFormat = /^\d+\s+\d+$/.test(input);
+
+    if (pending.step === 1 && !isSingleNum) return;
+    if (pending.step === 2 && !isSeriesFormat) return;
+
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
     if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
@@ -250,8 +250,6 @@ const cvReplyHandler = {
     } 
     else if (pending.step === 2) {
       const parts = input.split(/\s+/);
-      if (parts.length < 2) return;
-
       const s = parseInt(parts[0], 10);
       const e = parseInt(parts[1], 10);
       if (isNaN(s) || isNaN(e)) return;
@@ -278,15 +276,8 @@ const cvReplyHandler = {
       await sendMovieDocument(sock, mek, from, epData.d, dummyItem);
     }
   }
-};
+});
 
-if (Array.isArray(replyHandlers)) {
-  replyHandlers.push(cvReplyHandler);
-}
-
-// ==========================================
-// 3. Direct Streaming Method (No RAM Crash)
-// ==========================================
 async function sendMovieDocument(sock, mek, from, url, item) {
   try {
     await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
@@ -319,7 +310,6 @@ async function sendMovieDocument(sock, mek, from, url, item) {
   }
 }
 
-// Auto Session Cleanup
 setInterval(() => {
   const now = Date.now();
   for (const k in pendingCvSearch) {
