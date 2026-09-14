@@ -15,15 +15,27 @@ const DEFAULT_POSTER = "https://i.ibb.co/3m1bXvt/cineverse.jpg";
 const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
-const LOOP_COOLDOWN = 3000;
-
 const pendingCvSearch = {};
-const lastProcessedMsg = {};
 
-// 🔥 Bulletproof Key Generator 🔥
+// 🔥 FIXED: Bulletproof Session Key Generator for Multi-Device Users 🔥
 function makePendingKey(sender, from) {
-  const cleanSender = String(sender || "").split(":")[0];
-  return `${from || ""}::${cleanSender}`;
+  if (!sender || !from) return null;
+  const cleanSender = String(sender).split("@")[0].split(":")[0];
+  return `${from}::${cleanSender}`;
+}
+
+// 🔥 Video.js Style Text Extractor 🔥
+function extractTexts(body, mek, m) {
+  const texts = [];
+  const direct = [
+    body, m?.body, m?.text, m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text,
+    mek?.message?.conversation, mek?.message?.extendedTextMessage?.text
+  ];
+  for (const item of direct) {
+    if (item && typeof item === "string") texts.push(item.trim());
+  }
+  return [...new Set(texts.filter(Boolean))];
 }
 
 function clearUserSession(k) {
@@ -71,7 +83,6 @@ async function searchCineverse(query) {
     const allData = [...movies, ...series];
 
     if (allData.length === 0) return [];
-
     const queryWords = query.toLowerCase().replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(Boolean);
 
     return allData.filter(item => {
@@ -84,6 +95,7 @@ async function searchCineverse(query) {
   }
 }
 
+// ── Search Command ─────────────
 cmd({
   pattern: "cineverse",
   alias: ["cv", "cvlk", "sinhala"],
@@ -103,7 +115,6 @@ cmd({
     await sock.sendMessage(from, { react: { text: "🔍", key: m.key } });
 
     const results = await searchCineverse(q.trim());
-
     if (results.length === 0) {
       await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
       return await sendErrorMsg(sock, from, mek, `No results found for "${q}" on CineVerse LK.`);
@@ -163,33 +174,34 @@ cmd({
   }
 });
 
-// 🔥 Robust Number Reply Handler 🔥
+// ── Number Reply Handler ─────────────
 replyHandlers.push({
-  filter: (body, { sender, from }) => !!pendingCvSearch[makePendingKey(sender, from)],
+  filter: (_body, { sender, from }) => !!pendingCvSearch[makePendingKey(sender, from)],
   function: async (sock, mek, m, { body, sender, from }) => {
-    const input = String(body || "").trim();
-    if (!input) return;
-
     const k = makePendingKey(sender, from);
     const pending = pendingCvSearch[k];
     if (!pending || pending.isProcessing) return;
 
-    const now = Date.now();
-    const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) return;
-    lastProcessedMsg[k] = { text: input, time: now };
-
-    const parts = input.split(/\s+/);
-    const choice = parseInt(parts[0], 10);
-    if (isNaN(choice)) return;
+    // Use Video.js deep extractor logic
+    const texts = extractTexts(body, mek, m);
+    let input = "";
 
     if (pending.step === 1) {
-      if (choice < 1 || choice > pending.results.length) return;
+      input = texts.find(t => /^\d+$/.test(t));
+    } else if (pending.step === 2) {
+      input = texts.find(t => /^\d+\s+\d+$/.test(t));
+    }
 
+    if (!input) return;
+
+    if (pending.step === 1) {
+      const choice = parseInt(input, 10);
+      if (isNaN(choice) || choice < 1 || choice > pending.results.length) return;
+
+      pending.isProcessing = true;
       const selected = pending.results[choice - 1];
 
       if (!selected.isSeries) {
-        pending.isProcessing = true;
         const dlUrl = selected.directLink;
         clearUserSession(k);
 
@@ -201,6 +213,7 @@ replyHandlers.push({
         pending.step = 2;
         pending.selectedSeries = selected;
         pending.timestamp = Date.now();
+        pending.isProcessing = false;
 
         let availableSeasons = Object.keys(selected.episodesData || {}).join(", ");
         
@@ -222,11 +235,10 @@ replyHandlers.push({
       }
     } 
     else if (pending.step === 2) {
-      if (parts.length < 2) return;
+      const parts = input.split(/\s+/);
       const s = parseInt(parts[0], 10);
       const e = parseInt(parts[1], 10);
-      if (isNaN(s) || isNaN(e)) return;
-
+      
       pending.isProcessing = true;
       const series = pending.selectedSeries;
       const epData = series.episodesData && series.episodesData[s] ? series.episodesData[s][e] : null;
@@ -288,7 +300,4 @@ setInterval(() => {
   for (const k in pendingCvSearch) {
     if (now - pendingCvSearch[k].timestamp > SESSION_TIMEOUT) delete pendingCvSearch[k];
   }
-  for (const k in lastProcessedMsg) {
-    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) delete lastProcessedMsg[k];
-  }
-}, 2.5 * 60 * 1000);
+}, 60000);
