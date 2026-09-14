@@ -1,9 +1,5 @@
 const { cmd, replyHandlers } = require("../command");
 const axios = require("axios");
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
-const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const DL_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
@@ -12,34 +8,44 @@ const DL_HEADERS = {
   "Cookie": "cv_auth=true;"
 };
 
+const CHANNEL_JID = "120363427174988449@newsletter";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 const DEFAULT_POSTER = "https://i.ibb.co/3m1bXvt/cineverse.jpg";
 const SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
 
-const TEMP_DIR = path.join(__dirname, "../temp");
-if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
+const SESSION_TIMEOUT = 5 * 60 * 1000;
+const LOOP_COOLDOWN = 3000;
 
-function makeTempFile(ext = ".mp4") {
-  return path.join(TEMP_DIR, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${ext}`);
-}
+const pendingCvSearch = {};
+const lastProcessedMsg = {};
 
-function safeUnlink(file) {
-  try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
-}
-
-// 🔥 video.js ආකෘතියට අනුව Key එක සෑදීම
-function makePendingKey(sender, from) {
+function keyFor(sender, from) {
   return `${from || ""}::${(sender || "").split(":")[0]}`;
 }
 
-const pendingCvSearch = Object.create(null);
+function clearUserSession(k) {
+  delete pendingCvSearch[k];
+}
+
+function toSmallCaps(str = "") {
+  const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+  return String(str)
+    .split("")
+    .map((char) => {
+      const idx = normal.indexOf(char);
+      return idx !== -1 ? small[idx] : char;
+    })
+    .join("");
+}
 
 function channelContextInfo() {
   return {
     forwardingScore: 999,
     isForwarded: true,
     forwardedNewsletterMessageInfo: {
-      newsletterJid: "120363427174988449@newsletter",
-      newsletterName: "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁",
+      newsletterJid: CHANNEL_JID,
+      newsletterName: CHANNEL_NAME,
       serverMessageId: -1,
     },
   };
@@ -48,6 +54,7 @@ function channelContextInfo() {
 async function sendErrorMsg(sock, from, mek, text) {
   await sock.sendMessage(from, {
     text: `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n🚫 _${text}_`,
+    contextInfo: channelContextInfo()
   }, { quoted: mek });
 }
 
@@ -78,7 +85,7 @@ async function searchCineverse(query) {
 }
 
 // ==========================================
-// 1. Command Trigger
+// 1. Search Command (Original Two-Image Layout)
 // ==========================================
 cmd({
   pattern: "cineverse",
@@ -87,11 +94,12 @@ cmd({
   desc: "Search and download Sinhala Subbed Movies & Series",
   category: "download",
   filename: __filename,
-}, async (sock, mek, m, { from, q, sender, sessionId }) => {
+}, async (sock, mek, m, { from, q, sender }) => {
   try {
     if (!q) {
       return await sock.sendMessage(from, {
         text: `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐋*\n⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n📌 *Usage:* \`.cv <name>\`\n💡 *Example:* \`.cv sonic\``,
+        contextInfo: channelContextInfo()
       }, { quoted: mek });
     }
 
@@ -104,12 +112,13 @@ cmd({
       return await sendErrorMsg(sock, from, mek, `No results found for "${q}" on CineVerse LK.`);
     }
 
-    // 🔥 video.js ක්‍රමයට session එක සෑදීම
-    const key = makePendingKey(sender, from);
-    pendingCvSearch[key] = {
+    const k = keyFor(sender, from);
+    clearUserSession(k);
+
+    pendingCvSearch[k] = {
       results,
       step: 1,
-      createdAt: Date.now(),
+      timestamp: Date.now(),
       isProcessing: false,
     };
 
@@ -134,13 +143,15 @@ cmd({
     // 1. Film Poster
     const posterMsg = await sock.sendMessage(from, { 
       image: { url: poster }, 
-      caption: `> 🎬 *${results[0].title}*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ ᴍᴅ`
+      caption: `> 🎬 *${results[0].title}*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ ᴍᴅ`,
+      contextInfo: channelContextInfo()
     }, { quoted: mek });
 
-    // 2. Movie List
+    // 2. Movie List with SEARCH_IMAGE
     await sock.sendMessage(from, { 
-      image: { url: SEARCH_IMAGE },
-      caption: text 
+      image: { url: SEARCH_IMAGE }, 
+      caption: text,
+      contextInfo: channelContextInfo()
     }, { quoted: posterMsg });
 
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
@@ -151,53 +162,82 @@ cmd({
 });
 
 // ==========================================
-// 2. Number Reply Listener (video.js ආකෘතිය)
+// 2. Number Reply Listener
 // ==========================================
-replyHandlers.push({
-  filter: (_body, { sender, from }) => !!pendingCvSearch[makePendingKey(sender, from)],
+const cvReplyHandler = {
+  filter: (text, { sender, from }) => {
+    if (!text) return false;
+    const k = keyFor(sender, from);
+    const session = pendingCvSearch[k];
+    if (!session) return false;
+
+    const trimmed = text.trim();
+    const isSingleNum = /^\d+$/.test(trimmed);
+    const isSeriesFormat = /^\d+\s+\d+$/.test(trimmed);
+
+    if (session.step === 1 && !isSingleNum) return false;
+    if (session.step === 2 && !isSeriesFormat) return false;
+
+    return true;
+  },
   function: async (sock, mek, m, { body, sender, from }) => {
-    const key = makePendingKey(sender, from);
-    const pending = pendingCvSearch[key];
+    const input = body ? body.trim() : "";
+    if (!input) return;
+
+    const k = keyFor(sender, from);
+    const pending = pendingCvSearch[k];
     if (!pending || pending.isProcessing) return;
 
-    const rawInput = String(body || "").trim();
+    // Loop Protection System
+    const now = Date.now();
+    const lastMsg = lastProcessedMsg[k];
+    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
+      return;
+    }
+    lastProcessedMsg[k] = { text: input, time: now };
 
     if (pending.step === 1) {
-      const input = parseInt(rawInput, 10);
-      if (isNaN(input) || input < 1 || input > pending.results.length) return;
+      const choice = parseInt(input, 10);
+      if (isNaN(choice) || choice < 1 || choice > pending.results.length) return;
 
-      const selected = pending.results[input - 1];
+      const selected = pending.results[choice - 1];
 
       if (!selected.isSeries) {
         pending.isProcessing = true;
         const dlUrl = selected.directLink;
+        clearUserSession(k);
+
         if (!dlUrl || dlUrl === '#') {
-          delete pendingCvSearch[key];
           return await sendErrorMsg(sock, from, mek, "Direct download link is not available for this movie.");
         }
-        delete pendingCvSearch[key];
-        await executeDownload(sock, mek, from, dlUrl, `${selected.title} (${selected.year || "HD"})`);
+
+        await sendMovieDocument(sock, mek, from, dlUrl, selected);
       } else {
         pending.step = 2;
         pending.selectedSeries = selected;
-        pending.isProcessing = false;
+        pending.timestamp = Date.now();
 
         let availableSeasons = Object.keys(selected.episodesData || {}).join(", ");
         
         let sText = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n`;
         sText += `📺 *𝐒𝐄𝐑𝐈𝐄𝐒 𝐒𝐄𝐋𝐄𝐂𝐓𝐄𝐃*\n`;
         sText += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n`;
-        sText += `🎬 *Series:* ${selected.title}\n`;
+        sText += `🎬 *Series:* ${toSmallCaps(selected.title)}\n`;
         sText += `🗂️ *Seasons:* ${availableSeasons || "N/A"}\n\n`;
         sText += `> 👇 *Reply with Season & Episode:*\n`;
         sText += `> 💡 *Example:* \`1 2\` (Season 1, Ep 2)\n\n`;
         sText += `⊱━━• ✿ •━━━━━• ✿ •━━⊰`;
 
-        await sock.sendMessage(from, { text: sText }, { quoted: mek });
+        let poster = selected.posterImage || selected.image || selected.poster;
+        if (poster) {
+          await sock.sendMessage(from, { image: { url: poster }, caption: sText, contextInfo: channelContextInfo() }, { quoted: mek });
+        } else {
+          await sock.sendMessage(from, { text: sText, contextInfo: channelContextInfo() }, { quoted: mek });
+        }
       }
     } 
     else if (pending.step === 2) {
-      const parts = rawInput.split(/\s+/);
+      const parts = input.split(/\s+/);
       if (parts.length < 2) return;
 
       const s = parseInt(parts[0], 10);
@@ -208,8 +248,9 @@ replyHandlers.push({
       const series = pending.selectedSeries;
       const epData = series.episodesData && series.episodesData[s] ? series.episodesData[s][e] : null;
 
+      clearUserSession(k);
+
       if (!epData || !epData.d || epData.d === '#') {
-        delete pendingCvSearch[key];
         return await sendErrorMsg(sock, from, mek, `Link not found for S${s} E${e}.`);
       }
 
@@ -217,85 +258,63 @@ replyHandlers.push({
       const fE = e < 10 ? '0' + e : e;
       const epTitle = `${series.title} S${fS}E${fE}`;
 
-      delete pendingCvSearch[key];
-      await executeDownload(sock, mek, from, epData.d, epTitle);
+      const dummyItem = {
+        title: epTitle,
+        quality: series.quality || "HD",
+      };
+
+      await sendMovieDocument(sock, mek, from, epData.d, dummyItem);
     }
-  },
-});
+  }
+};
+
+if (Array.isArray(replyHandlers)) {
+  replyHandlers.push(cvReplyHandler);
+}
 
 // ==========================================
-// 3. Download Execution
+// 3. Direct Streaming Method (No RAM Crash)
 // ==========================================
-async function executeDownload(sock, mek, from, url, titleName) {
-  let tempFile = makeTempFile(".mp4");
+async function sendMovieDocument(sock, mek, from, url, item) {
   try {
-    await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
-
-    const response = await axios({
-      url: url,
-      method: "GET",
-      responseType: "stream",
-      headers: DL_HEADERS, 
-      timeout: 180000, 
-      maxContentLength: 2000 * 1024 * 1024,
-      maxBodyLength: 2000 * 1024 * 1024
-    });
-
-    const writer = fs.createWriteStream(tempFile);
-    response.data.pipe(writer);
-
-    await new Promise((resolve, reject) => {
-      writer.on('finish', resolve);
-      writer.on('error', reject);
-    });
-
-    const stats = fs.statSync(tempFile);
-    const sizeMB = stats.size / (1024 * 1024);
-
-    if (sizeMB === 0) throw new Error("Downloaded file is empty");
-
     await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
 
-    const cleanName = titleName.replace(/[\\/:*?"<>|]/g, "").trim();
-    const isLargeDoc = sizeMB > 60;
-    
-    let caption = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n`;
-    caption += `✅ *𝐅𝐈𝐋𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
-    caption += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n`;
-    caption += `🎬 *Title:* ${titleName}\n`;
-    caption += `📦 *Size:* ${sizeMB.toFixed(2)} MB\n`;
-    caption += `📁 *Format:* ${isLargeDoc ? "Document (Raw Stream)" : "Standard MP4"}\n\n`;
-    caption += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+    const cleanTitle = (item.title || "Movie").replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
 
+    let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+    captionText += `✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
+    captionText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+    captionText += `🎬 *Movie :* ${toSmallCaps(item.title)}\n`;
+    captionText += `📊 *Quality :* ${item.quality || "HD"}\n`;
+    if (item.imdbRating) captionText += `⭐ *IMDb :* ${item.imdbRating}\n`;
+    captionText += `\n🌟 *Direct Link :* ${url}\n\n`;
+    captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+
+    // Local Disk එකට නොගෙන URL එක Baileys එකෙන් කෙලින්ම Stream කර යවයි
     await sock.sendMessage(from, {
-      document: fs.readFileSync(tempFile),
-      mimetype: isLargeDoc ? "application/octet-stream" : "video/mp4",
-      fileName: `${cleanName} (Sinhala Sub).mp4`,
-      caption: caption
+      document: { url: url },
+      mimetype: "video/mp4",
+      fileName: `MALIYA-MD ${cleanTitle} (Sinhala Sub).mp4`,
+      caption: captionText,
+      contextInfo: channelContextInfo()
     }, { quoted: mek });
 
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+
   } catch (err) {
-    let fallbackMsg = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n`;
-    fallbackMsg += `⚠️ *𝐅𝐈𝐋𝐄 𝐓𝐎𝐎 𝐋𝐀𝐑𝐆𝐄*\n`;
-    fallbackMsg += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n`;
-    fallbackMsg += `🎬 *Title:* ${titleName}\n`;
-    fallbackMsg += `ℹ️ _File might exceed WhatsApp limits or connection timed out._\n\n`;
-    fallbackMsg += `🔗 *Direct Link:*\n${url}\n\n`;
-    fallbackMsg += `⊱━━• ✿ •━━━━━• ✿ •━━⊰`;
-    
-    await sock.sendMessage(from, { text: fallbackMsg }, { quoted: mek });
+    console.error("Cineverse Send Error:", err);
     await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-  } finally {
-    safeUnlink(tempFile);
+    await sendErrorMsg(sock, from, mek, `Failed to send video stream: ${err.message}`);
   }
 }
 
+// Auto Session Cleanup
 setInterval(() => {
   const now = Date.now();
-  for (const key of Object.keys(pendingCvSearch)) {
-    if (now - pendingCvSearch[key].createdAt > 5 * 60 * 1000) {
-      delete pendingCvSearch[key];
-    }
+  for (const k in pendingCvSearch) {
+    if (now - pendingCvSearch[k].timestamp > SESSION_TIMEOUT) delete pendingCvSearch[k];
   }
-}, 30000);
+  for (const k in lastProcessedMsg) {
+    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) delete lastProcessedMsg[k];
+  }
+}, 2.5 * 60 * 1000);
