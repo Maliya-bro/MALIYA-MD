@@ -16,12 +16,22 @@ const LOOP_COOLDOWN = 3000;
 const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
-function keyFor(sender, from) {
+// 🔥 video.js / xham.js වල භාවිතා කළ සාර්ථකම Session Key එක 🔥
+function makePendingKey(sender, from) {
   return `${from || ""}::${(sender || "").split(":")[0]}`;
 }
 
 function clearUserSession(k) {
   delete pendingCineSubz[k];
+}
+
+function toSmallCaps(str = "") {
+  const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+  return String(str).split("").map((char) => {
+    const idx = normal.indexOf(char);
+    return idx !== -1 ? small[idx] : char;
+  }).join("");
 }
 
 function channelContextInfo() {
@@ -34,18 +44,6 @@ function channelContextInfo() {
       serverMessageId: -1,
     },
   };
-}
-
-function toSmallCaps(str = "") {
-  const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
-  return String(str)
-    .split("")
-    .map((char) => {
-      const idx = normal.indexOf(char);
-      return idx !== -1 ? small[idx] : char;
-    })
-    .join("");
 }
 
 async function sendErrorMsg(sock, from, mek, text) {
@@ -61,7 +59,7 @@ async function getCineSubzLinks(originalUrl) {
   let serversToTry = [];
   if (baseServerMatch) serversToTry.push(baseServerMatch[1]);
   
-  ['1', '2', '3', '5', '6', '8', '9', '4', '7', '11'].forEach(s => {
+  ['1', '4', '7', '11'].forEach(s => {
     if (!serversToTry.includes(s)) serversToTry.push(s);
   });
 
@@ -177,9 +175,7 @@ async function getCineSubzLinks(originalUrl) {
   return { error: 'File not found on any server.' };
 }
 
-// ==========================================
-// 1. Search Command
-// ==========================================
+// ── Search Command ─────────────
 cmd({
   pattern: "cinesubz",
   alias: ["cinesub", "cs", "cssearch", "film", "movie"],
@@ -206,7 +202,7 @@ cmd({
     }
 
     const topResults = results.slice(0, 10);
-    const k = keyFor(sender, from);
+    const k = makePendingKey(sender, from);
     clearUserSession(k);
 
     pendingCineSubz[k] = {
@@ -237,7 +233,6 @@ cmd({
       } catch (e) {}
     }
 
-    // Search Result එක Github Image එකේ Caption එක විදියට තනි මැසේජ් එකකින් යැවීම
     await sock.sendMessage(from, { 
       image: { url: searchImg }, 
       caption: text,
@@ -253,36 +248,29 @@ cmd({
   }
 });
 
-// ==========================================
-// 2. Number Reply Listener
-// ==========================================
-const cineSubzReplyHandler = {
+// ── Number Reply Handler ─────────────
+const csReplyHandler = {
   filter: (text, { sender, from }) => {
     if (!text) return false;
-    const k = keyFor(sender, from);
-    const isNumber = /^\d+$/.test(text.trim());
-    return isNumber && Boolean(pendingCineSubz[k]);
+    const k = makePendingKey(sender, from);
+    return !!pendingCineSubz[k];
   },
   function: async (sock, mek, m, { body, sender, from }) => {
-    const input = body ? body.trim() : "";
-    if (!input) return;
+    const input = String(body || "").trim();
+    if (!input || !/^\d+$/.test(input)) return;
 
-    const k = keyFor(sender, from);
+    const k = makePendingKey(sender, from);
     const pending = pendingCineSubz[k];
     if (!pending || pending.isProcessing) return;
 
     // Loop Protection
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
-      return;
-    }
+    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) return;
     lastProcessedMsg[k] = { text: input, time: now };
 
     const choice = parseInt(input, 10);
-    if (isNaN(choice)) return;
 
-    // STEP 1: Movie Selection -> Shows Movie Poster with Qualities
     if (pending.step === 1) {
       if (choice < 1 || choice > pending.results.length) return;
 
@@ -329,7 +317,6 @@ const cineSubzReplyHandler = {
 
         qualityMsg += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply with quality number to Download...*`;
 
-        // මෙතැනදී පමණක් Movie Poster එක Caption එකක් සමඟ යැවීම
         if (movieInfo.poster) {
           await sock.sendMessage(from, { 
             image: { url: movieInfo.poster }, 
@@ -356,8 +343,6 @@ const cineSubzReplyHandler = {
         await sendErrorMsg(sock, from, mek, "Failed to fetch download links for this movie.");
       }
     }
-
-    // STEP 2: Quality Selection & Direct Download
     else if (pending.step === 2) {
       if (choice < 1 || choice > pending.movie.downloadLinks.length) return;
 
@@ -432,10 +417,9 @@ const cineSubzReplyHandler = {
 };
 
 if (Array.isArray(replyHandlers)) {
-  replyHandlers.push(cineSubzReplyHandler);
+  replyHandlers.push(csReplyHandler);
 }
 
-// Cleanup Session
 setInterval(() => {
   const now = Date.now();
   for (const k in pendingCineSubz) {
