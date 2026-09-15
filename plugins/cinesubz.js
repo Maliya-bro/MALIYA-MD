@@ -59,7 +59,7 @@ async function getCineSubzLinks(originalUrl) {
   let serversToTry = [];
   if (baseServerMatch) serversToTry.push(baseServerMatch[1]);
   
-  ['1', '4', '7', '11'].forEach(s => {
+  ['1', '2', '3', '4', '5', '6', '8', '9', '7', '11'].forEach(s => {
     if (!serversToTry.includes(s)) serversToTry.push(s);
   });
 
