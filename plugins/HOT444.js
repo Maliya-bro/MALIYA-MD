@@ -149,35 +149,48 @@ async function fetchXhamVideoDetails(url) {
     return { title, duration, hlsUrl, qualities };
 }
 
+// 🛠️ FIXED: WhatsApp Compatible Encode & Network reconnects
 async function xhamDownloadBuffer(streamUrl, timeOptions = {}) {
     const tmpDir = await mkdtemp(join(tmpdir(), 'xhamdl-'));
     const outPath = join(tmpDir, 'video.mp4');
 
     const ffmpegArgs = [
-        '-v', 'quiet',
+        '-v', 'error',
         '-y',
         '-user_agent', UA,
         '-headers', 'Referer: https://xhamster.com/\r\n',
-        '-i', streamUrl
+        
+        // 🌐 Network drops ආවොත් ආයෙත් connect වෙන්න
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5'
     ];
 
+    // ✂️ Cut කරනවා නම් විතරක් Start Time එක අදාළ වෙනවා
     if (timeOptions.startTimeInSec !== undefined) {
         ffmpegArgs.push('-ss', String(timeOptions.startTimeInSec));
     }
 
+    ffmpegArgs.push('-i', streamUrl);
+
+    // ✂️ Cut කරනවා නම් විතරක් Duration එක අදාළ වෙනවා
     if (timeOptions.durationInSec !== undefined) {
         ffmpegArgs.push('-t', String(timeOptions.durationInSec));
     }
 
+    // 📱 WhatsApp Fix: මේකෙන් තමයි Full වුණත් Cut වුණත් Error එක එන එක නවත්තන්නේ
     ffmpegArgs.push(
-        '-c', 'copy',
-        '-bsf:a', 'aac_adtstoasc',
+        '-c:v', 'libx264',        // H.264 විදියට Video එක හදනවා
+        '-preset', 'fast',        // ඉක්මනින් convert වෙන්න
+        '-c:a', 'aac',            // Audio එක AAC කරනවා
+        '-pix_fmt', 'yuv420p',    // WhatsApp එකට ඕනෙම කරන Pixel format එක
         '-movflags', '+faststart',
         outPath
     );
 
     try {
-        await execFileAsync('ffmpeg', ffmpegArgs, { timeout: 180000 });
+        // Convert වෙන්න වෙලා යන නිසා Timeout එක විනාඩි 10ක් (600000ms) දුන්නා
+        await execFileAsync('ffmpeg', ffmpegArgs, { timeout: 600000 });
         const buffer = await readFile(outPath);
         
         if (buffer.length < 5000) {
@@ -395,7 +408,7 @@ const xhamReplyHandler = {
             optMsg += `├ 👇 *Select Download Mode:*\n│\n`;
             optMsg += `├ 📱 *[ 01 ]* 🎬 Full Video Download\n`;
             optMsg += `├ 📱 *[ 02 ]* ✂️ Custom Time Range\n│\n`;
-            optMsg += `╰───────────────⮞`;
+            optMsg += `╰───────────────>`;
 
             return reply(optMsg);
         }
