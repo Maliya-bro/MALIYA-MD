@@ -14,41 +14,56 @@ const CHANNEL_NAME = "🍁 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 🍁";
 const DEFAULT_POSTER = "https://i.ibb.co/3m1bXvt/cineverse.jpg";
 const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
 
+// 🔥 Global session stores
 const pendingCvSearch = {};
 const pendingCvSeries = {};
 
-// 🔥 MULTIPLE KEY PATTERNS — same user හඳුනගන්න 🔥
-function buildKeys(sender, from) {
-  const raw = String(sender || "");
-  const clean = raw.split(":")[0].split("@")[0];
-  const fromStr = String(from || "");
-  return [
-    `${fromStr}::${clean}`,
-    `${fromStr}::${raw}`,
-    clean,
-    raw,
-    fromStr,
-  ].filter(Boolean);
-}
+console.log("[CV] ✅ cineverse module loaded —", new Date().toISOString());
 
-function findSession(sender, from) {
-  const keys = buildKeys(sender, from);
-  for (const k of keys) {
-    if (pendingCvSearch[k]) return { key: k, type: "search", data: pendingCvSearch[k] };
-  }
-  for (const k of keys) {
-    if (pendingCvSeries[k]) return { key: k, type: "series", data: pendingCvSeries[k] };
-  }
-  return null;
+// ═══════════════════════════════════════════════════════
+// SESSION KEY — Multiple patterns for robustness
+// ═══════════════════════════════════════════════════════
+function makeKey(sender, from) {
+  return `${String(from || "")}::${String(sender || "").split(":")[0]}`;
 }
 
 function storeSession(sender, from, type, data) {
-  const key = buildKeys(sender, from)[0];
-  if (type === "search") pendingCvSearch[key] = data;
-  else if (type === "series") pendingCvSeries[key] = data;
+  const key = makeKey(sender, from);
+  const payload = { ...data, timestamp: Date.now() };
+  if (type === "search") pendingCvSearch[key] = payload;
+  else if (type === "series") pendingCvSeries[key] = payload;
+  console.log(`[CV] 💾 Stored ${type} session: key="${key}"`);
   return key;
 }
 
+function findSession(sender, from) {
+  const exactKey = makeKey(sender, from);
+
+  // 1. Try exact key
+  if (pendingCvSearch[exactKey]) return { key: exactKey, type: "search", data: pendingCvSearch[exactKey] };
+  if (pendingCvSeries[exactKey]) return { key: exactKey, type: "series", data: pendingCvSeries[exactKey] };
+
+  // 2. Fallback — match by `from` only
+  const fromPrefix = String(from || "") + "::";
+  for (const k in pendingCvSearch) {
+    if (k.startsWith(fromPrefix)) return { key: k, type: "search", data: pendingCvSearch[k] };
+  }
+  for (const k in pendingCvSeries) {
+    if (k.startsWith(fromPrefix)) return { key: k, type: "series", data: pendingCvSeries[k] };
+  }
+
+  return null;
+}
+
+function deleteSession(found) {
+  if (!found) return;
+  if (found.type === "search") delete pendingCvSearch[found.key];
+  else if (found.type === "series") delete pendingCvSeries[found.key];
+}
+
+// ═══════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
@@ -70,37 +85,30 @@ function channelContextInfo() {
   };
 }
 
-// 🔥 NUMBER PARSER — හැම format එකක්ම handle කරනවා 🔥
+// 🔥 Parse ANY number format
 function parseInput(text) {
   const t = String(text || "").trim();
   if (!t) return null;
 
-  // Single number: "1", "01", "12"
-  if (/^\d{1,3}$/.test(t)) {
-    return { type: "single", values: [parseInt(t, 10)] };
-  }
-
-  // Two numbers separated by space/dot/x/dash/underscore: "1 2", "1.2", "1x2", "1-2"
-  const twoMatch = t.match(/^(\d{1,3})[\s.\-_xX]+(\d{1,3})$/);
-  if (twoMatch) {
-    return { type: "double", values: [parseInt(twoMatch[1], 10), parseInt(twoMatch[2], 10)] };
-  }
-
-  // S01E02 format
+  // S01E02 format first
   const seMatch = t.match(/^s(\d{1,3})[\s._\-xX]*e(\d{1,3})$/i);
-  if (seMatch) {
-    return { type: "double", values: [parseInt(seMatch[1], 10), parseInt(seMatch[2], 10)] };
-  }
+  if (seMatch) return { type: "double", values: [+seMatch[1], +seMatch[2]] };
+
+  // Two numbers: "1 2", "1.2", "1x2", "1-2", "1_2"
+  const twoMatch = t.match(/^(\d{1,3})[\s.\-_xX]+(\d{1,3})$/);
+  if (twoMatch) return { type: "double", values: [+twoMatch[1], +twoMatch[2]] };
+
+  // Single number
+  if (/^\d{1,3}$/.test(t)) return { type: "single", values: [+t] };
 
   return null;
 }
 
-// 🔥 COLLECT ALL POSSIBLE TEXTS 🔥
+// 🔥 Collect ALL possible texts
 function collectTexts(body, mek, m) {
   const list = [
     body,
-    m?.body,
-    m?.text,
+    m?.body, m?.text,
     m?.message?.conversation,
     m?.message?.extendedTextMessage?.text,
     m?.message?.buttonsResponseMessage?.selectedButtonId,
@@ -112,14 +120,19 @@ function collectTexts(body, mek, m) {
     mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
     mek?.message?.interactiveResponseMessage?.body?.text,
   ];
-  return [...new Set(list.filter(Boolean).map(x => String(x).trim()))];
+  const out = [];
+  for (const x of list) {
+    if (x == null) continue;
+    const s = String(x).trim();
+    if (s && !out.includes(s)) out.push(s);
+  }
+  return out;
 }
 
-// 🔥 FIND THE NUMBER IN ANY TEXT 🔥
 function findNumberInput(texts) {
   for (const t of texts) {
-    const parsed = parseInput(t);
-    if (parsed) return { text: t, parsed };
+    const p = parseInput(t);
+    if (p) return { text: t, parsed: p };
   }
   return null;
 }
@@ -130,7 +143,7 @@ async function sendErrorMsg(sock, from, mek, text) {
       text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`,
       contextInfo: channelContextInfo()
     }, { quoted: mek });
-  } catch (e) {}
+  } catch (e) { console.error("[CV] sendErrorMsg error:", e); }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -145,6 +158,8 @@ cmd({
   filename: __filename,
 }, async (sock, mek, m, { from, q, sender, sessionId }) => {
   try {
+    console.log(`[CV CMD] sender=${sender} from=${from} q=${q}`);
+
     if (!q) {
       return await sock.sendMessage(from, {
         text: `╭─[ 🎬 *𝗖𝗜𝗡𝗘𝗩𝗘𝗥𝗦𝗘 𝗗𝗟* ]\n│\n├ 📌 *Usage:* \`.cv <name>\`\n├ 💡 *Example:* \`.cv sonic\`\n╰──────────────⮞`,
@@ -176,10 +191,8 @@ cmd({
       return await sendErrorMsg(sock, from, mek, `No results found for "${q}".`);
     }
 
-    // ✅ Store session with MULTIPLE keys
-    const primaryKey = buildKeys(sender, from)[0];
-    Object.keys(pendingCvSeries).forEach(k => { if (k.startsWith(from + "::")) {} }); // no-op
-    pendingCvSearch[primaryKey] = { results, timestamp: Date.now() };
+    // Store session
+    storeSession(sender, from, "search", { results });
 
     let text = `╭─[ 🎬 *𝗖𝗩 𝗦𝗘𝗔𝗥𝗖𝗛 𝗥𝗘𝗦𝗨𝗟𝗧𝗦* ]\n│\n`;
     text += `├ 🎯 *Search :* ${q}\n`;
@@ -219,116 +232,138 @@ cmd({
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
 
   } catch (e) {
-    console.error("CineVerse Search Error:", e);
+    console.error("[CV CMD ERROR]", e);
     await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
     await sendErrorMsg(sock, from, mek, "Failed to connect to CineVerse API.");
   }
 });
 
 // ═══════════════════════════════════════════════════════
-// 2. Reply Handler — Numbers + Multi-format
+// 2. Reply Handler
 // ═══════════════════════════════════════════════════════
 replyHandlers.push({
-  // ✅ Filter: session තියෙනවා නම් trigger වෙනවා
-  filter: (_body, { sender, from }) => !!findSession(sender, from),
+  filter: (body, ctx) => {
+    try {
+      console.log("━━━ [CV FILTER] ━━━");
+      console.log("  body      =", JSON.stringify(body));
+      console.log("  sender    =", ctx?.sender);
+      console.log("  from      =", ctx?.from);
+      console.log("  searchKeys=", Object.keys(pendingCvSearch));
+      console.log("  seriesKeys=", Object.keys(pendingCvSeries));
 
-  function: async (sock, mek, m, { body, sender, from }) => {
-    const session = findSession(sender, from);
-    if (!session) return;
+      const found = findSession(ctx?.sender, ctx?.from);
+      console.log("  found     =", !!found);
+      if (found) console.log("  foundType =", found.type);
 
-    // 🔥 Collect ALL texts & find the number one
-    const texts = collectTexts(body, mek, m);
-    const numInput = findNumberInput(texts);
-    if (!numInput) return; // Number නෑ → silent ignore
-
-    console.log(`[CV] user=${sender} from=${from} input=${numInput.text} parsed=${JSON.stringify(numInput.parsed)} type=${session.type}`);
-
-    // React to let user know it's working
-    try { await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } }); } catch {}
-
-    const { type, values } = numInput.parsed;
-
-    // ─────────────────────────────────────────────
-    // SEARCH SESSION (single number)
-    // ─────────────────────────────────────────────
-    if (session.type === "search") {
-      const data = session.data;
-      delete pendingCvSearch[session.key];
-
-      if (type !== "single") {
-        await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-        return sendErrorMsg(sock, from, mek, "Reply with a single number (1, 2, 3...).");
-      }
-
-      const choice = values[0];
-      if (choice < 1 || choice > data.results.length) {
-        await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-        return sendErrorMsg(sock, from, mek, `Invalid number. Choose 1-${data.results.length}.`);
-      }
-
-      const selected = data.results[choice - 1];
-
-      // 🎥 MOVIE
-      if (!selected.isSeries) {
-        const dlUrl = selected.directLink;
-        if (!dlUrl || dlUrl === '#') {
-          await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-          return sendErrorMsg(sock, from, mek, "Direct download link is not available.");
-        }
-        return sendMovieDocument(sock, mek, from, dlUrl, selected);
-      }
-
-      // 📺 SERIES
-      const seriesKey = buildKeys(sender, from)[0];
-      pendingCvSeries[seriesKey] = { series: selected, timestamp: Date.now() };
-
-      const avail = Object.keys(selected.episodesData || {}).join(", ");
-      let sText = `╭─[ 📺 *𝗦𝗘𝗥𝗜𝗘𝗦 𝗦𝗘𝗟𝗘𝗖𝗧𝗘𝗗* ]\n│\n`;
-      sText += `├ 🎬 *Series:* ${toSmallCaps(selected.title)}\n`;
-      sText += `├ 🗂️ *Seasons:* ${avail || "N/A"}\n│\n`;
-      sText += `╰─[ 👇 *Reply: Season & Episode* ]\n\n`;
-      sText += `> 💡 *Examples:*\n`;
-      sText += `> \`1 2\`  →  S01E02\n`;
-      sText += `> \`1.2\`  →  S01E02\n`;
-      sText += `> \`S1E2\` →  S01E02`;
-
-      const poster = selected.posterImage || selected.image || selected.poster;
-      if (poster) {
-        await sock.sendMessage(from, { image: { url: poster }, caption: sText, contextInfo: channelContextInfo() }, { quoted: mek });
-      } else {
-        await sock.sendMessage(from, { text: sText, contextInfo: channelContextInfo() }, { quoted: mek });
-      }
-      await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-      return;
+      return !!found;
+    } catch (e) {
+      console.error("[CV FILTER ERROR]", e);
+      return false;
     }
+  },
 
-    // ─────────────────────────────────────────────
-    // SERIES SESSION (two numbers)
-    // ─────────────────────────────────────────────
-    if (session.type === "series") {
-      const data = session.data;
-      delete pendingCvSeries[session.key];
+  function: async (sock, mek, m, ctx) => {
+    try {
+      const { body, sender, from } = ctx;
+      console.log("━━━ [CV FUNCTION] ━━━");
 
-      if (type !== "double") {
-        await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-        return sendErrorMsg(sock, from, mek, "Reply with Season & Episode (e.g., 1 2 or S1E2).");
+      const found = findSession(sender, from);
+      if (!found) {
+        console.log("  ❌ session not found");
+        return;
       }
 
-      const [s, e] = values;
-      const epData = data.series.episodesData?.[s]?.[e];
+      const texts = collectTexts(body, mek, m);
+      console.log("  texts =", JSON.stringify(texts));
 
-      if (!epData || !epData.d || epData.d === '#') {
-        await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-        return sendErrorMsg(sock, from, mek, `Link not found for S${s} E${e}.`);
+      const numInput = findNumberInput(texts);
+      console.log("  numInput =", JSON.stringify(numInput));
+
+      if (!numInput) {
+        console.log("  ⏭️ no number found → silent return");
+        return;
       }
 
-      const fS = String(s).padStart(2, "0");
-      const fE = String(e).padStart(2, "0");
+      try { await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } }); } catch {}
 
-      return sendMovieDocument(sock, mek, from, epData.d, {
-        title: `${data.series.title} S${fS}E${fE}`,
-        quality: data.series.quality || "HD",
-      });
+      const { type, values } = numInput.parsed;
+
+      // ── SEARCH session ──
+      if (found.type === "search") {
+        const data = found.data;
+        deleteSession(found);
+
+        if (type !== "single") {
+          await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+          return sendErrorMsg(sock, from, mek, "Reply with a single number (1, 2, 3...).");
+        }
+
+        const choice = values[0];
+        if (choice < 1 || choice > data.results.length) {
+          await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+          return sendErrorMsg(sock, from, mek, `Invalid number. Choose 1-${data.results.length}.`);
+        }
+
+        const selected = data.results[choice - 1];
+        console.log("  ✅ selected:", selected.title);
+
+        // 🎥 MOVIE
+        if (!selected.isSeries) {
+          const dlUrl = selected.directLink;
+          if (!dlUrl || dlUrl === '#') {
+            await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+            return sendErrorMsg(sock, from, mek, "Direct download link is not available.");
+          }
+          return sendMovieDocument(sock, mek, from, dlUrl, selected);
+        }
+
+        // 📺 SERIES
+        storeSession(sender, from, "series", { series: selected });
+
+        const avail = Object.keys(selected.episodesData || {}).join(", ");
+        let sText = `╭─[ 📺 *𝗦𝗘𝗥𝗜𝗘𝗦 𝗦𝗘𝗟𝗘𝗖𝗧𝗘𝗗* ]\n│\n`;
+        sText += `├ 🎬 *Series:* ${toSmallCaps(selected.title)}\n`;
+        sText += `├ 🗂️ *Seasons:* ${avail || "N/A"}\n│\n`;
+        sText += `╰─[ 👇 *Reply: Season & Episode* ]\n\n`;
+        sText += `> 💡 *Examples:* \`1 2\`, \`1.2\`, \`S1E2\``;
+
+        const poster = selected.posterImage || selected.image || selected.poster;
+        if (poster) {
+          await sock.sendMessage(from, { image: { url: poster }, caption: sText, contextInfo: channelContextInfo() }, { quoted: mek });
+        } else {
+          await sock.sendMessage(from, { text: sText, contextInfo: channelContextInfo() }, { quoted: mek });
+        }
+        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+        return;
+      }
+
+      // ── SERIES session ──
+      if (found.type === "series") {
+        const data = found.data;
+        deleteSession(found);
+
+        if (type !== "double") {
+          await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+          return sendErrorMsg(sock, from, mek, "Reply with Season & Episode (e.g., 1 2 or S1E2).");
+        }
+
+        const [s, e] = values;
+        const epData = data.series.episodesData?.[s]?.[e];
+
+        if (!epData || !epData.d || epData.d === '#') {
+          await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+          return sendErrorMsg(sock, from, mek, `Link not found for S${s} E${e}.`);
+        }
+
+        const fS = String(s).padStart(2, "0");
+        const fE = String(e).padStart(2, "0");
+        return sendMovieDocument(sock, mek, from, epData.d, {
+          title: `${data.series.title} S${fS}E${fE}`,
+          quality: data.series.quality || "HD",
+        });
+      }
+    } catch (e) {
+      console.error("[CV FUNCTION ERROR]", e);
     }
   }
 });
@@ -339,6 +374,7 @@ replyHandlers.push({
 async function sendMovieDocument(sock, mek, from, url, item) {
   try {
     await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
+    console.log("[CV] Downloading:", item.title);
 
     const cleanTitle = (item.title || "Movie").replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
 
@@ -358,11 +394,12 @@ async function sendMovieDocument(sock, mek, from, url, item) {
     }, { quoted: mek });
 
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+    console.log("[CV] ✅ Sent:", item.title);
 
   } catch (err) {
-    console.error("Cineverse Send Error:", err);
+    console.error("[CV] Send Error:", err);
     await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    await sendErrorMsg(sock, from, mek, `Failed to send video: ${err.message}`);
+    await sendErrorMsg(sock, from, mek, `Failed: ${err.message}`);
   }
 }
 
