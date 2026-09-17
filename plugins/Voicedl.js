@@ -174,7 +174,7 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// 🔥 Direct Buttons Menu (Without list dropdown) 🔥
+// 🔥 Direct Buttons Menu 🔥
 async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
   if (!!settings.btns_enabled && sendInteractiveMessage) {
@@ -231,7 +231,40 @@ async function sendErrorMsg(reply, text) {
   await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`);
 }
 
-// Fallback APIs
+// 📌 1. YTMP3.GE API Integration Function (New Primary Fallback)
+async function downloadFromYTmp3GeAPI(url, outPath) {
+  const requestData = `youtube_url=${encodeURIComponent(url)}&quality=320`;
+  
+  const response = await axios.post("https://ytmp3.ge/api/convert", requestData, {
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    timeout: 300000 // 5 Minutes max wait as per their docs
+  });
+
+  if (response.data && response.data.success && response.data.downloadUrl) {
+    const downloadUrl = response.data.downloadUrl;
+    const writer = fs.createWriteStream(outPath);
+    
+    const fileRes = await axios({ 
+      url: downloadUrl, 
+      method: "GET", 
+      responseType: "stream", 
+      timeout: 120000 
+    });
+    
+    fileRes.data.pipe(writer);
+    
+    return new Promise((resolve, reject) => {
+      writer.on("finish", () => resolve(true));
+      writer.on("error", reject);
+    });
+  } else {
+    throw new Error(response.data?.error || "YTMP3.GE API returned an invalid response.");
+  }
+}
+
+// 📌 2. Old Fallback APIs (Secondary Fallback)
 async function fallbackAudioAPIs(url, outPath) {
   const apis = [
     `https://api.deliriussapi.site/download/ytmp3?url=${encodeURIComponent(url)}`,
@@ -296,7 +329,7 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
   try {
     await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
 
-    // ATTEMPT 1: YT-DLP (Audio Only)
+    // ATTEMPT 1: YT-DLP (Local Download)
     try {
       const ytArgs = {
         format: "bestaudio[ext=m4a]/bestaudio/best",
@@ -318,14 +351,34 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
       console.log("YT-DLP AUDIO ERROR:", ytErr.message.substring(0, 100));
     }
 
-    // ATTEMPT 2: Fallback API
+    // ATTEMPT 2: YTMP3.GE API (First Fallback)
     if (!downloadedSuccessfully) {
-      console.log("Switching to Audio API Fallback...");
-      safeUnlink(rawFile);
-      rawFile = makeTempFile(".mp3");
-      await fallbackAudioAPIs(pending.video.url, rawFile);
-      downloadedSuccessfully = true;
+      console.log("Switching to YTMP3.GE API Fallback...");
+      try {
+        safeUnlink(rawFile);
+        rawFile = makeTempFile(".mp3");
+        await downloadFromYTmp3GeAPI(pending.video.url, rawFile);
+        downloadedSuccessfully = true;
+      } catch (ytgeErr) {
+        console.log("YTMP3.GE API ERROR:", ytgeErr.message);
+      }
     }
+
+    // ATTEMPT 3: Old Fallback APIs (Final Fallback)
+    if (!downloadedSuccessfully) {
+      console.log("Switching to Old Audio API Fallback...");
+      try {
+        safeUnlink(rawFile);
+        rawFile = makeTempFile(".mp3");
+        await fallbackAudioAPIs(pending.video.url, rawFile);
+        downloadedSuccessfully = true;
+      } catch (fbErr) {
+        console.log("OLD FALLBACK API ERROR:", fbErr.message);
+      }
+    }
+
+    // Check if totally failed
+    if (!downloadedSuccessfully) throw new Error("All download methods failed.");
 
     await sock.sendMessage(from, { react: { text: "🛠", key: mek.key } });
     await convertAudio(rawFile, finalFile, type === "ptt");
