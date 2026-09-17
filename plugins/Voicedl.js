@@ -51,6 +51,17 @@ function safeUnlink(file) {
   try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
 }
 
+// 🔥 File Validation Check 🔥
+function isValidMediaFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    const stats = fs.statSync(filePath);
+    return stats.size > 10240; // File size must be > 10KB
+  } catch {
+    return false;
+  }
+}
+
 function formatViews(num) {
   return !num ? "Unknown" : Number(num).toLocaleString();
 }
@@ -124,6 +135,7 @@ function extractTexts(body, mek, m) {
     mek?.message?.buttonsResponseMessage?.selectedButtonId,
     mek?.message?.templateButtonReplyMessage?.selectedId,
     mek?.message?.interactiveResponseMessage?.body?.text,
+    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson
   ];
   for (const item of direct) {
     if (!item) continue;
@@ -186,24 +198,15 @@ async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
         interactiveButtons: [
           {
             name: "quick_reply",
-            buttonParamsJson: JSON.stringify({
-              display_text: "🎵 Audio Format",
-              id: "type:audio"
-            })
+            buttonParamsJson: JSON.stringify({ display_text: "🎵 Audio Format", id: "type:audio" })
           },
           {
             name: "quick_reply",
-            buttonParamsJson: JSON.stringify({
-              display_text: "🎙️ Voice Note",
-              id: "type:ptt"
-            })
+            buttonParamsJson: JSON.stringify({ display_text: "🎙️ Voice Note", id: "type:ptt" })
           },
           {
             name: "quick_reply",
-            buttonParamsJson: JSON.stringify({
-              display_text: "📄 Send Document",
-              id: "type:doc"
-            })
+            buttonParamsJson: JSON.stringify({ display_text: "📄 Send Document", id: "type:doc" })
           }
         ],
       }, { quoted: mek });
@@ -231,28 +234,53 @@ async function sendErrorMsg(reply, text) {
   await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`);
 }
 
-// 📌 1. YTMP3.GE API Integration Function (New Primary Fallback)
+// 📌 1. NEW API INTEGRATION: Download-Lagu-Mp3
+async function downloadFromLaguAPI(videoId, outPath) {
+  const apiUrl = `https://api.download-lagu-mp3.com/@api/json/mp3/${videoId}`;
+  const response = await axios.get(apiUrl, { timeout: 20000 });
+
+  if (response.data && response.data.vidInfo) {
+    // vidInfo "0" contains the highest quality (320kbps usually)
+    const bestFormat = response.data.vidInfo["0"] || Object.values(response.data.vidInfo)[0];
+    
+    if (bestFormat && bestFormat.dloadUrl) {
+      let downloadUrl = bestFormat.dloadUrl;
+      // Prepend https: if the URL starts with //
+      if (downloadUrl.startsWith("//")) {
+        downloadUrl = "https:" + downloadUrl;
+      }
+
+      const writer = fs.createWriteStream(outPath);
+      const fileRes = await axios({ 
+        url: downloadUrl, 
+        method: "GET", 
+        responseType: "stream", 
+        timeout: 120000 
+      });
+      
+      fileRes.data.pipe(writer);
+      
+      return new Promise((resolve, reject) => {
+        writer.on("finish", () => resolve(true));
+        writer.on("error", reject);
+      });
+    }
+  }
+  throw new Error("Lagu API returned invalid JSON structure.");
+}
+
+// 📌 2. YTMP3.GE API Integration Function 
 async function downloadFromYTmp3GeAPI(url, outPath) {
   const requestData = `youtube_url=${encodeURIComponent(url)}&quality=320`;
-  
   const response = await axios.post("https://ytmp3.ge/api/convert", requestData, {
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    timeout: 300000 // 5 Minutes max wait as per their docs
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    timeout: 300000
   });
 
   if (response.data && response.data.success && response.data.downloadUrl) {
     const downloadUrl = response.data.downloadUrl;
     const writer = fs.createWriteStream(outPath);
-    
-    const fileRes = await axios({ 
-      url: downloadUrl, 
-      method: "GET", 
-      responseType: "stream", 
-      timeout: 120000 
-    });
-    
+    const fileRes = await axios({ url: downloadUrl, method: "GET", responseType: "stream", timeout: 120000 });
     fileRes.data.pipe(writer);
     
     return new Promise((resolve, reject) => {
@@ -264,7 +292,7 @@ async function downloadFromYTmp3GeAPI(url, outPath) {
   }
 }
 
-// 📌 2. Old Fallback APIs (Secondary Fallback)
+// 📌 3. Old Fallback APIs
 async function fallbackAudioAPIs(url, outPath) {
   const apis = [
     `https://api.deliriussapi.site/download/ytmp3?url=${encodeURIComponent(url)}`,
@@ -290,24 +318,21 @@ async function fallbackAudioAPIs(url, outPath) {
 
 async function convertAudio(inputPath, outputPath, isPtt = false) {
   return new Promise((resolve, reject) => {
+    if (!isValidMediaFile(inputPath)) {
+      return reject(new Error("Input file is corrupted or empty before conversion."));
+    }
     let command = ffmpeg(inputPath);
     if (isPtt) {
-      command
-        .audioCodec("libopus")
-        .format("ogg")
-        .audioBitrate("64k")
-        .audioChannels(1)
-        .audioFrequency(48000);
+      command.audioCodec("libopus").format("ogg").audioBitrate("64k").audioChannels(1).audioFrequency(48000)
+        .on("end", () => resolve(outputPath))
+        .on("error", (err) => reject(new Error(`FFmpeg Error (PTT): ${err.message}`)))
+        .save(outputPath);
     } else {
-      command
-        .audioCodec("libmp3lame")
-        .format("mp3")
-        .audioBitrate("192k");
+      command.audioCodec("libmp3lame").format("mp3").audioBitrate("192k")
+        .on("end", () => resolve(outputPath))
+        .on("error", (err) => reject(new Error(`FFmpeg Error (MP3): ${err.message}`)))
+        .save(outputPath);
     }
-    command
-      .on("end", () => resolve(outputPath))
-      .on("error", reject)
-      .save(outputPath);
   });
 }
 
@@ -325,6 +350,7 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
   let rawFile = makeTempFile(".m4a");
   let finalFile = makeTempFile(type === "ptt" ? ".opus" : ".mp3");
   let downloadedSuccessfully = false;
+  let videoId = pending.video.videoId; // Getting video ID for the new API
 
   try {
     await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
@@ -346,41 +372,58 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
       if (cookies.exists && cookies.sizeBytes > 0) ytArgs.cookies = COOKIES_PATH;
 
       await ytDlp(pending.video.url, ytArgs);
-      downloadedSuccessfully = true;
+      if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
+      else throw new Error("YT-DLP file is invalid or empty");
     } catch (ytErr) {
       console.log("YT-DLP AUDIO ERROR:", ytErr.message.substring(0, 100));
     }
 
-    // ATTEMPT 2: YTMP3.GE API (First Fallback)
+    // ATTEMPT 2: New Download Lagu API
+    if (!downloadedSuccessfully && videoId) {
+      console.log("Switching to Lagu MP3 API Fallback...");
+      try {
+        safeUnlink(rawFile);
+        rawFile = makeTempFile(".mp3");
+        await downloadFromLaguAPI(videoId, rawFile);
+        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
+        else throw new Error("Lagu MP3 file is invalid or empty");
+      } catch (laguErr) {
+        console.log("LAGU MP3 API ERROR:", laguErr.message);
+      }
+    }
+
+    // ATTEMPT 3: YTMP3.GE API
     if (!downloadedSuccessfully) {
       console.log("Switching to YTMP3.GE API Fallback...");
       try {
         safeUnlink(rawFile);
         rawFile = makeTempFile(".mp3");
         await downloadFromYTmp3GeAPI(pending.video.url, rawFile);
-        downloadedSuccessfully = true;
+        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
+        else throw new Error("YTMP3.GE file is invalid or empty");
       } catch (ytgeErr) {
         console.log("YTMP3.GE API ERROR:", ytgeErr.message);
       }
     }
 
-    // ATTEMPT 3: Old Fallback APIs (Final Fallback)
+    // ATTEMPT 4: Old Fallback APIs
     if (!downloadedSuccessfully) {
       console.log("Switching to Old Audio API Fallback...");
       try {
         safeUnlink(rawFile);
         rawFile = makeTempFile(".mp3");
         await fallbackAudioAPIs(pending.video.url, rawFile);
-        downloadedSuccessfully = true;
+        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
+        else throw new Error("Fallback APIs file is invalid or empty");
       } catch (fbErr) {
         console.log("OLD FALLBACK API ERROR:", fbErr.message);
       }
     }
 
-    // Check if totally failed
-    if (!downloadedSuccessfully) throw new Error("All download methods failed.");
+    if (!downloadedSuccessfully) throw new Error("All download methods failed to provide a valid audio file.");
 
     await sock.sendMessage(from, { react: { text: "🛠", key: mek.key } });
+    
     await convertAudio(rawFile, finalFile, type === "ptt");
 
     const sizeMB = getFileSizeMB(finalFile);
@@ -431,7 +474,7 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
 }
 
 // ==========================================
-// 1. Command Trigger
+// Command Trigger
 // ==========================================
 cmd({
   pattern: "song",
@@ -458,7 +501,7 @@ cmd({
 });
 
 // ==========================================
-// 2. Reply Handler (Buttons & Numbers)
+// Reply Handler (Buttons & Numbers)
 // ==========================================
 replyHandlers.push({
   filter: (_body, { sender, from }) => !!pendingAudioType[makePendingKey(sender, from)],
