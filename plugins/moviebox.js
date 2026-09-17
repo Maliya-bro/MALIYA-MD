@@ -1,414 +1,355 @@
 const { cmd, replyHandlers } = require("../command");
 const axios = require("axios");
+const { getCustomImage } = require("../lib/botSettings");
 
-const API_BASE = "https://chama-movie-api.koyeb.app";
+const CHANNEL_JID = "120363427174988449@newsletter";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const DEFAULT_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
+
+const API_BASE = "https://api.chamindu.site";
 const API_KEY = "chama_api_c18d54f734c23ea0c333d33b7494b3b2";
-//const DEFAULT_IMAGE = "https://chama-movie-api.koyeb.app/logo.png";
-const DEFAULT_FOOTER = `\n\n> 🎭 ᴍᴀʟɪʏᴀ-ᴍᴅ 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ`;
 
-// Store active sessions: messageId -> session data
-const activeMovieboxSessions = new Map();
+const SESSION_TIMEOUT = 5 * 60 * 1000;
+const LOOP_COOLDOWN = 3000;
 
-cmd(
-  {
-    pattern: "moviebox",
-    alias: ["movieboxdl", "mb", "mbdl"],
-    desc: "Search and download movies or TV series from MovieBox",
-    category: "download",
-    react: "🎭",
-    filename: __filename,
-  },
-  async (sock, mek, m, { from, args, reply }) => {
-    try {
-      if (!args.length) {
-        return await reply(
-          `*╭───[ ⚠️ ɪɴᴠᴀʟɪᴅ ᴜsᴀɢᴇ ]───*\n│\n├─ 🎭 *Ex:* .moviebox avatar\n├─ 🎭 *Ex:* .mb avengers\n│\n├─ 📝 _Please provide the Movie or TV Series name!_\n╰────────────────${DEFAULT_FOOTER}`
-        );
-      }
+const pendingMovieBox = {};
+const lastProcessedMsg = {};
 
-      const query = args.join(" ");
-      await reply(
-        `*╭───[ 🔍 sᴇᴀʀᴄʜɪɴɢ ]───*\n│\n├─ 🎭 *Searching MovieBox...*\n├─ ⚡ _Please wait a moment._\n╰────────────────`
-      );
-
-      const searchResponse = await axios.get(
-        `${API_BASE}/api/v1/movie/moviebox/search?q=${encodeURIComponent(query)}&api_key=${API_KEY}`
-      );
-      const searchData = searchResponse.data;
-
-      if (!searchData.status || !searchData.data || searchData.data.length === 0) {
-        return await reply(
-          `*╭───[ 😞 ɴᴏ ʀᴇsᴜʟᴛs ғᴏᴜɴᴅ ]───*\n│\n├─ 🎬 *Query:* _${query}_\n├─ 💡 _Please check spelling and try again!_\n╰────────────────${DEFAULT_FOOTER}`
-        );
-      }
-
-      const results = searchData.data.slice(0, 25);
-      let listText = `*╭───[ 🎭 ᴍᴏᴠɪᴇʙᴏx sᴇᴀʀᴄʜ ʀᴇsᴜʟᴛs ]───*\n│\n├─ 🎯 *Query:* _${query}_\n├─ 📊 *Results:* _${results.length} Items_\n│\n├─ *👇 Reply with a Number:* 👇\n│\n`;
-
-      results.forEach((item, index) => {
-        const num = index + 1 < 10 ? `0${index + 1}` : `${index + 1}`;
-        const typeIcon = item.type === "tvshows" ? "📺" : "🎥";
-        listText += `├─ 📱 *${num}* ➜ ${typeIcon} _${item.title.substring(0, 30)}_\n`;
-      });
-
-      listText += `╰────────────────${DEFAULT_FOOTER}`;
-
-      const sentMsg = await sock.sendMessage(from, { text: listText }, { quoted: mek });
-      const messageID = sentMsg.key.id;
-
-      // Save search state
-      activeMovieboxSessions.set(messageID, {
-        step: "SELECT_SEARCH",
-        results,
-        sender: from,
-        timestamp: Date.now(),
-      });
-
-      setTimeout(() => activeMovieboxSessions.delete(messageID), 300000);
-    } catch (error) {
-      console.error("Moviebox command error:", error);
-      await reply(
-        `*╭───[ ❌ sᴏᴍᴇᴛʜɪɴɢ ᴡʀᴏɴɢ ]───*\n│\n├─ 🚫 _${error.message || "Unknown error"}_\n├─ 🔄 _Please try again later..._\n╰────────────────${DEFAULT_FOOTER}`
-      );
-    }
-  }
-);
-
-// ─── MOVIEBOX REPLY HANDLER ───
-const movieboxReplyHandler = {
-  filter: (body, { sender, from }) => {
-    if (!body) return false;
-    const num = parseInt(body.trim());
-    if (isNaN(num)) return false;
-
-    for (const [key, session] of activeMovieboxSessions) {
-      if (session.sender === from && session.step) {
-        return true;
-      }
-    }
-    return false;
-  },
-  function: async (sock, mek, m, { from, body, reply }) => {
-    const num = parseInt(body.trim());
-
-    let activeKey = null;
-    let sessionData = null;
-    for (const [key, session] of activeMovieboxSessions) {
-      if (session.sender === from && session.step) {
-        activeKey = key;
-        sessionData = session;
-        break;
-      }
-    }
-
-    if (!sessionData) return;
-
-    const choiceNum = num - 1;
-
-    // STEP 1: Search Selection
-    if (sessionData.step === "SELECT_SEARCH") {
-      const { results } = sessionData;
-
-      if (choiceNum < 0 || choiceNum >= results.length) {
-        return await reply(
-          `*╭───[ ⚠️ ɪɴᴠᴀʟɪᴅ ɴᴜᴍʙᴇʀ ]───*\n│\n├─ 🎯 *Range:* _01 - ${results.length}_\n├─ 📝 _Please reply with a valid number!_\n╰────────────────${DEFAULT_FOOTER}`
-        );
-      }
-
-      const selected = results[choiceNum];
-      const isTvShow = selected.type === "tvshows";
-
-      // Clean up search session
-      activeMovieboxSessions.delete(activeKey);
-
-      if (isTvShow) {
-        // ─── TV SERIES FLOW ───
-        await reply(
-          `*╭───[ ⏳ ғᴇᴛᴄʜɪɴɢ ᴛᴠ sᴇʀɪᴇs ]───*\n│\n├─ 📺 *Fetching TV Series details...*\n├─ ⚡ _Please wait a moment..._\n╰────────────────`
-        );
-
-        try {
-          const tvResponse = await axios.get(
-            `${API_BASE}/api/v1/movie/moviebox/tv/info?q=${encodeURIComponent(selected.link)}&api_key=${API_KEY}`
-          );
-          const tvData = tvResponse.data;
-
-          if (!tvData.status || !tvData.data) {
-            throw new Error("Failed to fetch TV show details");
-          }
-
-          const tvInfo = tvData.data;
-          const posterUrl = tvInfo.image || selected.image || DEFAULT_IMAGE;
-
-          let detailsText =
-            `*╭───[ 📺 ᴛᴠ sᴇʀɪᴇs ᴅᴇᴛᴀɪʟs ]───*\n│\n` +
-            `├─ 🖼️ *Title:* ${tvInfo.title}\n` +
-            `├─ ⭐ *IMDB:* ${tvInfo.rating || "N/A"}\n` +
-            `├─ 📅 *Year:* ${tvInfo.year || "N/A"}\n` +
-            `├─ 🕒 *Runtime:* ${tvInfo.duration || "N/A"}\n` +
-            `├─ 🌍 *Country:* ${tvInfo.country || "N/A"}\n` +
-            `├─ 🎬 *Director:* ${tvInfo.directors || "N/A"}\n` +
-            `├─ ⭐ *Stars:* ${tvInfo.stars || "N/A"}\n` +
-            `│\n` +
-            `├─ 💡 *Sinhala AI Sub Available!*\n` +
-            `╰────────────────${DEFAULT_FOOTER}`;
-
-          await sock.sendMessage(
-            from,
-            {
-              image: { url: posterUrl },
-              caption: detailsText,
-            },
-            { quoted: mek }
-          );
-
-          const seasons = tvInfo.seasons || [];
-          if (seasons.length === 0) {
-            throw new Error("No seasons found for this TV Series");
-          }
-
-          const activeSeason = seasons[0];
-          await reply(
-            `*╭───[ 📥 ᴀᴜᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ sᴛᴀʀᴛ ]───*\n│\n├─ 📺 *Season ${activeSeason.season} (${activeSeason.episodes.length} episodes)*\n├─ ⚡ *Downloading consecutively...*\n├─ ⏳ _This may take some time_\n╰────────────────${DEFAULT_FOOTER}`
-          );
-
-          let successCount = 0;
-          let failCount = 0;
-
-          for (let i = 0; i < activeSeason.episodes.length; i++) {
-            const epNum = activeSeason.episodes[i];
-            try {
-              const epDlRes = await axios.get(
-                `${API_BASE}/api/v1/movie/moviebox/tv/dl?q=${encodeURIComponent(selected.link)}&se=${activeSeason.season}&ep=${epNum}&api_key=${API_KEY}`
-              );
-              const epDlData = epDlRes.data;
-
-              if (epDlData.status && epDlData.data && epDlData.data.length > 0) {
-                const videoLinks = epDlData.data.filter((dl) => dl.quality !== "SUB");
-                const subLinks = epDlData.data.filter((dl) => dl.quality === "SUB");
-                const finalLinkObj = videoLinks[0] || epDlData.data[0];
-
-                await sock.sendMessage(
-                  from,
-                  {
-                    document: { url: finalLinkObj.link || finalLinkObj.url },
-                    mimetype: "video/mp4",
-                    fileName: `${tvInfo.title} - S${activeSeason.season}E${epNum}.mp4`,
-                    caption: `🎬 *${tvInfo.title}*\n\n📺 *Episode:* S${activeSeason.season}E${epNum}\n\n${DEFAULT_FOOTER}`,
-                  },
-                  { quoted: mek }
-                );
-
-                // Send subtitles
-                const englishSub = subLinks.find(
-                  (s) =>
-                    s.title.toLowerCase().includes("english") ||
-                    s.title.toLowerCase().includes("en")
-                );
-                const sinhalaSub = subLinks.find(
-                  (s) =>
-                    s.title.toLowerCase().includes("sinhala") ||
-                    s.title.toLowerCase().includes("si")
-                );
-                const subsToSend = [];
-                if (sinhalaSub) subsToSend.push(sinhalaSub);
-                if (englishSub) subsToSend.push(englishSub);
-                if (subsToSend.length === 0 && subLinks.length > 0) {
-                  subsToSend.push(subLinks[0]);
-                }
-
-                for (const sub of subsToSend) {
-                  try {
-                    const subLang = sub.title
-                      .replace("Subtitle - ", "")
-                      .replace(` (S${activeSeason.season}E${epNum})`, "")
-                      .trim();
-                    await sock.sendMessage(
-                      from,
-                      {
-                        document: { url: sub.link || sub.url },
-                        mimetype: "text/plain",
-                        fileName: `${tvInfo.title} - S${activeSeason.season}E${epNum} - ${subLang}.srt`,
-                        caption: `📌 *Subtitle*\n\n🎬 ${tvInfo.title}\n📺 S${activeSeason.season}E${epNum}\n🌐 ${subLang}\n\n${DEFAULT_FOOTER}`,
-                      },
-                      { quoted: mek }
-                    );
-                  } catch (subErr) {
-                    console.error("Subtitle error:", subErr);
-                  }
-                }
-
-                successCount++;
-              } else {
-                failCount++;
-              }
-
-              await new Promise((resolve) => setTimeout(resolve, 2500));
-            } catch (epError) {
-              console.error(`Episode ${epNum} error:`, epError);
-              failCount++;
-            }
-          }
-
-          await reply(
-            `*╭───[ ✅ ᴅᴏᴡɴʟᴏᴀᴅ ᴄᴏᴍᴘʟᴇᴛᴇ ]───*\n│\n├─ ✅ *Success:* ${successCount} episodes\n├─ ❌ *Failed:* ${failCount} episodes\n├─ 📺 *Series:* ${tvInfo.title}\n╰────────────────${DEFAULT_FOOTER}`
-          );
-        } catch (tvError) {
-          console.error("TV Series error:", tvError);
-          await reply(
-            `*╭───[ ❌ ᴇʀʀᴏʀ ]───*\n│\n├─ 🚫 _${tvError.message || "Failed to fetch TV series"}_\n╰────────────────${DEFAULT_FOOTER}`
-          );
-        }
-      } else {
-        // ─── MOVIE FLOW ───
-        await reply(
-          `*╭───[ ⏳ ғᴇᴛᴄʜɪɴɢ ᴍᴏᴠɪᴇ ]───*\n│\n├─ 🎥 *Fetching Movie details...*\n├─ ⚡ _Please wait a moment..._\n╰────────────────`
-        );
-
-        try {
-          const detailsResponse = await axios.get(
-            `${API_BASE}/api/v1/movie/moviebox/info?q=${encodeURIComponent(selected.link)}&api_key=${API_KEY}`
-          );
-          const detailsData = detailsResponse.data;
-
-          if (!detailsData.status || !detailsData.data) {
-            throw new Error("Failed to fetch details");
-          }
-
-          const movieInfo = detailsData.data;
-          const validDownloads = movieInfo.downloads || [];
-
-          if (validDownloads.length === 0) {
-            return await reply(
-              `*╭───[ ⚠️ ɴᴏ ᴅᴏᴡɴʟᴏᴀᴅs ]───*\n│\n├─ 😞 _No downloads available for this movie!_\n╰────────────────${DEFAULT_FOOTER}`
-            );
-          }
-
-          const posterUrl = movieInfo.image || selected.image || DEFAULT_IMAGE;
-
-          let detailsText =
-            `*╭─[ 🎥 ᴍᴏᴠɪᴇ ᴅᴇᴛᴀɪʟs ]─*\n│\n` +
-            `├─ 🖼️ *Title:* ${movieInfo.title}\n` +
-            `├─ ⭐ *IMDB:* ${movieInfo.rating || "N/A"}/10\n` +
-            `├─ 🕒 *Runtime:* ${movieInfo.duration || "N/A"}\n` +
-            `├─ 📅 *Year:* ${movieInfo.year || "N/A"}\n` +
-            `├─ 🌍 *Country:* ${movieInfo.country || "N/A"}\n` +
-            `├─ 🎬 *Director:* ${movieInfo.directors || "N/A"}\n` +
-            `├─ ⭐ *Stars:* ${movieInfo.stars || "N/A"}\n` +
-            `│\n` +
-            `├─ 💡 *Sinhala AI Sub Available!*\n` +
-            `╰────────────────${DEFAULT_FOOTER}`;
-
-          await sock.sendMessage(
-            from,
-            {
-              image: { url: posterUrl },
-              caption: detailsText,
-            },
-            { quoted: mek }
-          );
-
-          let downloadListText = `*╭─[ 📥 ᴅᴏᴡɴʟᴏᴀᴅ ᴏᴘᴛɪᴏɴs ]─*\n│\n`;
-          validDownloads.forEach((dl, index) => {
-            const numStr = index + 1 < 10 ? `0${index + 1}` : `${index + 1}`;
-            downloadListText += `├─ 📱 *${numStr}* ➜ ${dl.quality} (${dl.size || "N/A"})\n`;
-          });
-          downloadListText += `│\n├─ *👇 Reply with number to download:* 👇\n╰────────────────${DEFAULT_FOOTER}`;
-
-          const optionsMsg = await sock.sendMessage(
-            from,
-            { text: downloadListText },
-            { quoted: mek }
-          );
-          const optionsMsgID = optionsMsg.key.id;
-
-          // Save download selection state
-          activeMovieboxSessions.set(optionsMsgID, {
-            step: "SELECT_DOWNLOAD",
-            movieInfo,
-            validDownloads,
-            sender: from,
-            timestamp: Date.now(),
-          });
-
-          setTimeout(() => activeMovieboxSessions.delete(optionsMsgID), 300000);
-        } catch (detailsError) {
-          console.error("Movie details error:", detailsError);
-          await reply(
-            `*╭──[ ❌ ᴇʀʀᴏʀ ]──*\n│\n├─ 🚫 _${detailsError.message || "Failed to fetch movie details"}_\n╰────────────────${DEFAULT_FOOTER}`
-          );
-        }
-      }
-    }
-
-    // STEP 2: Download Selection
-    else if (sessionData.step === "SELECT_DOWNLOAD") {
-      const { movieInfo, validDownloads } = sessionData;
-
-      if (choiceNum < 0 || choiceNum >= validDownloads.length) {
-        return await reply(
-          `*╭─[ ⚠️ ɪɴᴠᴀʟɪᴅ ᴏᴘᴛɪᴏɴ ]─*\n│\n├─ 🎯 *Range:* _01 - ${validDownloads.length}_\n├─ 📝 _Please reply with a valid number!_\n╰────────────────${DEFAULT_FOOTER}`
-        );
-      }
-
-      const selectedDownload = validDownloads[choiceNum];
-      const isSub =
-        selectedDownload.quality === "SUB" ||
-        selectedDownload.title?.toLowerCase().includes("subtitle") ||
-        selectedDownload.quality?.toLowerCase().includes("sub");
-
-      const mimeType = isSub ? "text/plain" : "video/mp4";
-      const fileName = isSub
-        ? `${movieInfo.title} - Subtitle.srt`
-        : `${movieInfo.title} - ${selectedDownload.quality}.mp4`;
-
-      await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
-
-      try {
-        const finalDirectLink = selectedDownload.link || selectedDownload.url;
-
-        if (isSub) {
-          await sock.sendMessage(
-            from,
-            {
-              document: { url: finalDirectLink },
-              mimetype: mimeType,
-              fileName: fileName,
-              caption: `📌 *${movieInfo.title} - Subtitle*\n\n*Quality:* ${selectedDownload.quality}\n*Size:* ${selectedDownload.size || "N/A"}\n\n${DEFAULT_FOOTER}`,
-            },
-            { quoted: mek }
-          );
-        } else {
-          await sock.sendMessage(
-            from,
-            {
-              document: { url: finalDirectLink },
-              mimetype: mimeType,
-              fileName: fileName,
-              caption: `🎬 *${movieInfo.title}*\n\n*Quality:* ${selectedDownload.quality}\n*Size:* ${selectedDownload.size || "N/A"}\n\n${DEFAULT_FOOTER}`,
-            },
-            { quoted: mek }
-          );
-        }
-
-        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-      } catch (downloadError) {
-        console.error("Download error:", downloadError);
-        const fallbackLink = selectedDownload.link || selectedDownload.url;
-        await reply(
-          `🎬 *${movieInfo.title}*\n\n*Quality:* ${selectedDownload.quality}\n*Size:* ${selectedDownload.size || "N/A"}\n\n📥 *DIRECT DOWNLOAD LINK:*\n${fallbackLink}\n\n${DEFAULT_FOOTER}`
-        );
-        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-      } finally {
-        activeMovieboxSessions.delete(activeKey);
-      }
-    }
-  },
-};
-
-// Register reply handler
-if (Array.isArray(replyHandlers)) {
-  replyHandlers.push(movieboxReplyHandler);
+function makePendingKey(sender, from) {
+  return `${from || ""}::${(sender || "").split(":")[0]}`;
 }
 
-module.exports = { activeMovieboxSessions };
+function clearUserSession(k) {
+  delete pendingMovieBox[k];
+}
+
+function toSmallCaps(str = "") {
+  const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+  return String(str).split("").map((char) => {
+    const idx = normal.indexOf(char);
+    return idx !== -1 ? small[idx] : char;
+  }).join("");
+}
+
+function channelContextInfo() {
+  return {
+    forwardingScore: 999,
+    isForwarded: true,
+    forwardedNewsletterMessageInfo: {
+      newsletterJid: CHANNEL_JID,
+      newsletterName: CHANNEL_NAME,
+      serverMessageId: -1,
+    },
+  };
+}
+
+async function getThumbnailBuffer(url) {
+  try {
+    if (!url) return null;
+    const res = await axios.get(url, { responseType: "arraybuffer", timeout: 8000 });
+    return Buffer.from(res.data);
+  } catch (e) {
+    return null;
+  }
+}
+
+async function sendErrorMsg(sock, from, mek, text) {
+  await sock.sendMessage(from, {
+    text: `⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _${text}_`,
+    contextInfo: channelContextInfo(),
+  }, { quoted: mek });
+}
+
+// ── 1. Search Command ──────────────────────────────────────────
+cmd({
+  pattern: "moviebox",
+  alias: ["mb", "mbsearch"],
+  desc: "Direct streaming and subtitle movie downloads",
+  category: "download",
+  react: "🎥",
+  filename: __filename,
+}, async (sock, mek, m, { from, q, sender, sessionId }) => {
+  try {
+    if (!q) {
+      return await sock.sendMessage(from, {
+        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐌𝐎𝐕𝐈𝐄𝐁𝐎𝐗 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.mb <name>\`\n💡 *Example:*\n• \`.mb avatar\`\n• \`.mb game of thrones\``,
+        contextInfo: channelContextInfo()
+      }, { quoted: mek });
+    }
+
+    await sock.sendMessage(from, { react: { text: "🔍", key: m.key } });
+
+    const res = await axios.get(`${API_BASE}/api/v1/movie/moviebox/search?q=${encodeURIComponent(q.trim())}&api_key=${API_KEY}`);
+    const results = res.data.data || res.data.results || [];
+
+    if (!results.length) {
+      await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+      return await sendErrorMsg(sock, from, mek, `No results found for "${q}".`);
+    }
+
+    const topResults = results.slice(0, 15);
+    const k = makePendingKey(sender, from);
+    clearUserSession(k);
+
+    pendingMovieBox[k] = {
+      step: 1,
+      results: topResults,
+      timestamp: Date.now(),
+      isProcessing: false,
+    };
+
+    let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+    text += `🎬 *𝐌𝐎𝐕𝐈𝐄𝐁𝐎𝐗 𝐒𝐄𝐀𝐑𝐂𝐇*\n`;
+    text += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+    text += `🎀 *Search :* ${q}\n`;
+    text += `🍿 *Results :* ${topResults.length}\n\n`;
+
+    topResults.forEach((item, index) => {
+      const numStr = String(index + 1).padStart(2, "0");
+      const typeIcon = (item.type === 'tvshows' || item.type === 'tv') ? '📺' : '🎥';
+      text += `*[ ${numStr} ]* ➔ ${typeIcon} *${(item.title || 'Movie').substring(0, 35)}* (${item.year || 'N/A'})\n`;
+    });
+
+    text += `\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 👇 *Reply with a number to Download...*`;
+
+    let searchImg = DEFAULT_IMAGE;
+    if (sessionId) {
+      try {
+        const custom = await getCustomImage(sessionId, "moviebox_header");
+        if (custom && custom.data) searchImg = custom.data;
+      } catch (e) {}
+    }
+
+    await sock.sendMessage(from, { 
+      image: { url: searchImg }, 
+      caption: text, 
+      contextInfo: channelContextInfo() 
+    }, { quoted: mek });
+
+    await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+
+  } catch (error) {
+    console.error("MovieBox Search Error:", error.message);
+    await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+    await sendErrorMsg(sock, from, mek, "Failed to connect to MovieBox server.");
+  }
+});
+
+// ── 2. Reply Handler ───────────────────────────────────────────
+const mbReplyHandler = {
+  filter: (text, { sender, from }) => {
+    if (!text) return false;
+    const k = makePendingKey(sender, from);
+    return !!pendingMovieBox[k];
+  },
+  function: async (sock, mek, m, { body, sender, from }) => {
+    const input = String(body || "").trim();
+    if (!input || !/^\d+$/.test(input)) return;
+
+    const k = makePendingKey(sender, from);
+    const pending = pendingMovieBox[k];
+    if (!pending || pending.isProcessing) return;
+
+    // Loop & Spam Protection
+    const now = Date.now();
+    const lastMsg = lastProcessedMsg[k];
+    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+    lastProcessedMsg[k] = { text: input, time: now };
+
+    const choice = parseInt(input, 10);
+
+    // ══════════════════════════════════════════════════════════
+    // STEP 1: SELECT MOVIE OR SERIES (From search results)
+    // ══════════════════════════════════════════════════════════
+    if (pending.step === 1) {
+      if (choice < 1 || choice > pending.results.length) return;
+
+      pending.isProcessing = true;
+      await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
+
+      const selectedItem = pending.results[choice - 1];
+      const isTvShow = selectedItem.type === 'tvshows' || selectedItem.type === 'tv';
+
+      try {
+        const detailsRes = await axios.get(`${API_BASE}/api/v1/movie/moviebox/info?q=${encodeURIComponent(selectedItem.link || selectedItem.url)}&api_key=${API_KEY}`);
+        const detailsData = detailsRes.data.data || {};
+        const posterUrl = detailsData.image || selectedItem.image || DEFAULT_IMAGE;
+
+        if (isTvShow) {
+          // ─── 📺 TV SERIES SELECTED ───
+          const episodes = detailsData.episodes || detailsData.downloads || [];
+
+          if (episodes.length === 0) {
+            clearUserSession(k);
+            return await sendErrorMsg(sock, from, mek, "No episodes available for this series.");
+          }
+
+          let tvText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+          tvText += `📺 *𝐓𝐕 𝐒𝐄𝐑𝐈𝐄𝐒 𝐃𝐄𝐓𝐀𝐈𝐋𝐒*\n`;
+          tvText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+          tvText += `🎬 *Series :* ${toSmallCaps(detailsData.title || selectedItem.title)}\n`;
+          tvText += `⭐ *IMDb :* ${detailsData.rating || detailsData.imdb || 'N/A'}\n`;
+          tvText += `📅 *Year :* ${detailsData.year || 'N/A'}\n`;
+          tvText += `🎞️ *Total Eps :* ${episodes.length}\n\n`;
+          
+          episodes.slice(0, 30).forEach((ep, idx) => {
+            const numStr = String(idx + 1).padStart(2, "0");
+            tvText += `*[ ${numStr} ]* ➔ 📺 *${ep.name || ep.title || 'Episode ' + (idx + 1)}*\n`;
+          });
+
+          tvText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply with Episode number to Download...*`;
+
+          await sock.sendMessage(from, { 
+            image: { url: posterUrl }, 
+            caption: tvText, 
+            contextInfo: channelContextInfo() 
+          }, { quoted: mek });
+
+          pending.step = "tv_episode";
+          pending.episodes = episodes;
+          pending.metadata = detailsData;
+          pending.timestamp = Date.now();
+          pending.isProcessing = false;
+
+        } else {
+          // ─── 🎥 MOVIE SELECTED ───
+          const validDownloads = detailsData.downloads || [];
+
+          if (validDownloads.length === 0) {
+            clearUserSession(k);
+            return await sendErrorMsg(sock, from, mek, "No direct downloads available for this movie.");
+          }
+
+          let movieText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+          movieText += `🎬 *𝐌𝐎𝐕𝐈𝐄 𝐃𝐄𝐓𝐀𝐈𝐋𝐒*\n`;
+          movieText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+          movieText += `🎬 *Movie :* ${toSmallCaps(detailsData.title || selectedItem.title)}\n`;
+          movieText += `⭐ *IMDb :* ${detailsData.imdb || detailsData.rating || 'N/A'}\n`;
+          movieText += `📅 *Year :* ${detailsData.year || 'N/A'}\n`;
+          movieText += `⏳ *Duration :* ${detailsData.duration || 'N/A'}\n\n`;
+
+          validDownloads.forEach((dl, i) => {
+            const numStr = String(i + 1).padStart(2, "0");
+            movieText += `*[ ${numStr} ]* 📊 *${dl.quality || 'Direct'}* _(${dl.size || 'N/A'})_\n`;
+          });
+
+          movieText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply with quality number to Download...*`;
+
+          await sock.sendMessage(from, { 
+            image: { url: posterUrl }, 
+            caption: movieText, 
+            contextInfo: channelContextInfo() 
+          }, { quoted: mek });
+
+          pending.step = "movie_quality";
+          pending.downloads = validDownloads;
+          pending.metadata = detailsData;
+          pending.timestamp = Date.now();
+          pending.isProcessing = false;
+        }
+
+        await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+
+      } catch (err) {
+        console.error("MovieBox Fetch Details Error:", err);
+        clearUserSession(k);
+        await sendErrorMsg(sock, from, mek, "Failed to fetch media details from server.");
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // STEP 2: MOVIE QUALITY CHOSEN
+    // ══════════════════════════════════════════════════════════
+    else if (pending.step === "movie_quality") {
+      if (choice < 1 || choice > pending.downloads.length) return;
+
+      pending.isProcessing = true;
+      const selectedDl = pending.downloads[choice - 1];
+      const dlUrl = selectedDl.link || selectedDl.download_link || selectedDl.direct_link;
+      
+      const title = pending.metadata.title || "Movie";
+      const quality = selectedDl.quality || "HD";
+      const poster = pending.metadata.image || DEFAULT_IMAGE;
+
+      clearUserSession(k);
+      await fastSendVideo(sock, mek, from, dlUrl, title, quality, poster);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // STEP 2: TV EPISODE CHOSEN
+    // ══════════════════════════════════════════════════════════
+    else if (pending.step === "tv_episode") {
+      if (choice < 1 || choice > pending.episodes.length) return;
+
+      pending.isProcessing = true;
+      const selectedEp = pending.episodes[choice - 1];
+      const dlUrl = selectedEp.download_link || selectedEp.link || selectedEp.url;
+      
+      const title = `${pending.metadata.title} - ${selectedEp.name || selectedEp.title || 'EP ' + choice}`;
+      const poster = pending.metadata.image || DEFAULT_IMAGE;
+
+      clearUserSession(k);
+      await fastSendVideo(sock, mek, from, dlUrl, title, "HD", poster);
+    }
+  }
+};
+
+// ── Direct Fast Document Upload & Thumbnail (MALIYA-MD Style) ──
+async function fastSendVideo(sock, mek, from, url, rawTitle, quality, posterUrl) {
+  try {
+    await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
+
+    const cleanTitle = (rawTitle || "Movie").replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
+
+    let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+    captionText += `✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
+    captionText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+    captionText += `🎬 *Title :* ${toSmallCaps(rawTitle)}\n`;
+    captionText += `📊 *Quality :* ${quality}\n\n`;
+    captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+
+    // Fetch poster buffer for Thumbnail preview
+    const thumbBuffer = await getThumbnailBuffer(posterUrl);
+
+    const docPayload = {
+      document: { url: url },
+      mimetype: "video/mp4",
+      fileName: `MALIYA-MD ${cleanTitle}.mp4`,
+      caption: captionText,
+      contextInfo: channelContextInfo()
+    };
+
+    // Attach ZANTA-MD style thumbnail if available
+    if (thumbBuffer) {
+      docPayload.jpegThumbnail = thumbBuffer;
+    }
+
+    await sock.sendMessage(from, docPayload, { quoted: mek });
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+
+  } catch (err) {
+    console.error("MovieBox Fast Upload Error:", err.message);
+    await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+    await sendErrorMsg(sock, from, mek, `Failed to upload video directly. Server might be restricting access.`);
+  }
+}
+
+if (Array.isArray(replyHandlers)) {
+  replyHandlers.push(mbReplyHandler);
+}
+
+// Session Cleaner
+setInterval(() => {
+  const now = Date.now();
+  for (const k in pendingMovieBox) {
+    if (now - pendingMovieBox[k].timestamp > SESSION_TIMEOUT) {
+      delete pendingMovieBox[k];
+    }
+  }
+  for (const k in lastProcessedMsg) {
+    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) {
+      delete lastProcessedMsg[k];
+    }
+  }
+}, 2.5 * 60 * 1000);
