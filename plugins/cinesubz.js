@@ -7,7 +7,7 @@ const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
 const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
@@ -16,7 +16,6 @@ const LOOP_COOLDOWN = 3000;
 const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
-// 🔥 video.js / xham.js වල භාවිතා කළ සාර්ථකම Session Key එක 🔥
 function makePendingKey(sender, from) {
   return `${from || ""}::${(sender || "").split(":")[0]}`;
 }
@@ -46,6 +45,16 @@ function channelContextInfo() {
   };
 }
 
+async function getThumbnailBuffer(url) {
+  try {
+    if (!url) return null;
+    const res = await axios.get(url, { responseType: "arraybuffer", timeout: 8000 });
+    return Buffer.from(res.data);
+  } catch (e) {
+    return null;
+  }
+}
+
 async function sendErrorMsg(sock, from, mek, text) {
   await sock.sendMessage(from, {
     text: `⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _${text}_`,
@@ -53,7 +62,6 @@ async function sendErrorMsg(sock, from, mek, text) {
   }, { quoted: mek });
 }
 
-// ── Auto-Server Hopper & Decryption Function ─────────────
 async function getCineSubzLinks(originalUrl) {
   let baseServerMatch = originalUrl.match(/server(\d+)/);
   let serversToTry = [];
@@ -175,7 +183,6 @@ async function getCineSubzLinks(originalUrl) {
   return { error: 'File not found on any server.' };
 }
 
-// ── Search Command ─────────────
 cmd({
   pattern: "cinesubz",
   alias: ["cinesub", "cs", "cssearch", "film", "movie"],
@@ -235,8 +242,8 @@ cmd({
 
     await sock.sendMessage(from, { 
       image: { url: searchImg }, 
-      caption: text,
-      contextInfo: channelContextInfo()
+      caption: text, 
+      contextInfo: channelContextInfo() 
     }, { quoted: mek });
 
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
@@ -248,7 +255,6 @@ cmd({
   }
 });
 
-// ── Number Reply Handler ─────────────
 const csReplyHandler = {
   filter: (text, { sender, from }) => {
     if (!text) return false;
@@ -263,7 +269,6 @@ const csReplyHandler = {
     const pending = pendingCineSubz[k];
     if (!pending || pending.isProcessing) return;
 
-    // Loop Protection
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
     if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) return;
@@ -391,14 +396,22 @@ const csReplyHandler = {
         
         captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
+        const thumbBuffer = await getThumbnailBuffer(movie.metadata.poster);
+
         if (directDownloadUrl) {
-          await sock.sendMessage(from, {
+          const docPayload = {
             document: { url: directDownloadUrl },
             mimetype: "video/mp4",
             fileName: `MALIYA-MD ${cleanTitle}.mp4`,
             caption: captionText,
             contextInfo: channelContextInfo()
-          }, { quoted: mek });
+          };
+
+          if (thumbBuffer) {
+            docPayload.jpegThumbnail = thumbBuffer;
+          }
+
+          await sock.sendMessage(from, docPayload, { quoted: mek });
         } else {
           await sock.sendMessage(from, { 
             text: captionText, 
