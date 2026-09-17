@@ -161,7 +161,6 @@ const cvReplyHandler = {
     const pending = pendingCineVerse[k];
     if (!pending || pending.isProcessing) return;
 
-    // Loop & Spam Protection
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
     if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) return;
@@ -187,7 +186,6 @@ const cvReplyHandler = {
           return await sendErrorMsg(sock, from, mek, "Direct download link is not available for this movie.");
         }
 
-        // 1. Send Poster + Movie Details in one message
         let detailsMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
         detailsMsg += `🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃*\n`;
         detailsMsg += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
@@ -206,14 +204,14 @@ const cvReplyHandler = {
           contextInfo: channelContextInfo() 
         }, { quoted: mek });
 
-        // 2. Immediately start download and stream document
-        await streamAndSendVideo(sock, mek, from, dlUrl, selected.title, selected.quality || "1080p FHD");
+        // Fast Direct Upload
+        await fastSendVideo(sock, mek, from, dlUrl, selected.title, selected.quality || "1080p FHD");
 
       } else {
         // ─── 📺 TV SERIES HANDLING ───
         pending.isProcessing = false;
         pending.series = selected;
-        delete pending.results; // switch mode to episode selection
+        delete pending.results; 
 
         let availableSeasons = Object.keys(selected.episodesData || {}).join(", ");
         let sText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
@@ -259,13 +257,14 @@ const cvReplyHandler = {
       const fE = e < 10 ? '0' + e : e;
       const epTitle = `${series.title} S${fS}E${fE}`;
 
-      await streamAndSendVideo(sock, mek, from, epData.d, epTitle, series.quality || "1080p FHD");
+      // Fast Direct Upload
+      await fastSendVideo(sock, mek, from, epData.d, epTitle, series.quality || "1080p FHD");
     }
   }
 };
 
-// ── Stream And Send Movie Document (RAM Safe up to 2GB) ────────
-async function streamAndSendVideo(sock, mek, from, url, rawTitle, quality) {
+// ── Direct Link Upload (100% Cinesubz Speed Method) ────────────
+async function fastSendVideo(sock, mek, from, url, rawTitle, quality) {
   try {
     await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
 
@@ -278,17 +277,10 @@ async function streamAndSendVideo(sock, mek, from, url, rawTitle, quality) {
     captionText += `📊 *Quality :* ${quality}\n\n`;
     captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-    // Stream download with headers to bypass 403 & RAM crash
-    const res = await axios({
-      url: url,
-      method: "GET",
-      responseType: "stream",
-      headers: DL_HEADERS,
-      timeout: 0,
-    });
-
+    // 🔥 This is exactly what Cinesubz uses. Bypass local buffering. 
+    // It passes the URL directly to Baileys' internal uploader.
     await sock.sendMessage(from, {
-      document: { stream: res.data },
+      document: { url: url },
       mimetype: "video/mp4",
       fileName: `MALIYA-MD ${cleanTitle} (Sinhala Sub).mp4`,
       caption: captionText,
@@ -298,9 +290,9 @@ async function streamAndSendVideo(sock, mek, from, url, rawTitle, quality) {
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
   } catch (err) {
-    console.error("Cineverse Video Stream Error:", err.message);
+    console.error("Cineverse Fast Upload Error:", err.message);
     await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    await sendErrorMsg(sock, from, mek, `Failed to stream video: ${err.message}`);
+    await sendErrorMsg(sock, from, mek, `Failed to upload video directly. Link might be restricted.`);
   }
 }
 
