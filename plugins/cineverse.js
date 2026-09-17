@@ -5,12 +5,12 @@ const { readSettings, getCustomImage } = require("../lib/botSettings");
 const DL_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
   "Referer": "https://cineverselk.space/",
-  "Accept": "application/json, text/plain, */*",
+  "Accept": "*/*",
   "Cookie": "cv_auth=true;"
 };
 
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
 const DEFAULT_POSTER = "https://i.ibb.co/3m1bXvt/cineverse.jpg";
 const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
 
@@ -49,6 +49,16 @@ function channelContextInfo() {
   };
 }
 
+async function getThumbnailBuffer(url) {
+  try {
+    if (!url) return null;
+    const res = await axios.get(url, { responseType: "arraybuffer", timeout: 8000 });
+    return Buffer.from(res.data);
+  } catch (e) {
+    return null;
+  }
+}
+
 async function sendErrorMsg(sock, from, mek, text) {
   await sock.sendMessage(from, {
     text: `⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _${text}_`,
@@ -56,7 +66,6 @@ async function sendErrorMsg(sock, from, mek, text) {
   }, { quoted: mek });
 }
 
-// ── 1. Search Command ──────────────────────────────────────────
 cmd({
   pattern: "cineverse",
   alias: ["cv", "cvlk", "sinhala"],
@@ -77,8 +86,8 @@ cmd({
 
     const cb = Date.now();
     const [mRes, sRes] = await Promise.all([
-      axios.get(`https://cineverselk.space/movies.json?v=${cb}`, { headers: DL_HEADERS }).catch(() => null),
-      axios.get(`https://cineverselk.space/series.json?v=${cb}`, { headers: DL_HEADERS }).catch(() => null)
+      axios.get(`https://cineverselk.space/movies.json?v=${cb}`, { headers: DL_HEADERS, timeout: 15000 }).catch(() => null),
+      axios.get(`https://cineverselk.space/series.json?v=${cb}`, { headers: DL_HEADERS, timeout: 15000 }).catch(() => null)
     ]);
 
     const movies = mRes?.data?.data ? mRes.data.data : (Array.isArray(mRes?.data) ? mRes.data : []);
@@ -146,7 +155,6 @@ cmd({
   }
 });
 
-// ── 2. Reply Handler (Instant Details + Direct Download) ─────────
 const cvReplyHandler = {
   filter: (text, { sender, from }) => {
     if (!text) return false;
@@ -166,9 +174,6 @@ const cvReplyHandler = {
     if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) return;
     lastProcessedMsg[k] = { text: input, time: now };
 
-    // ══════════════════════════════════════════════════════════
-    // 🎥 MOVIE / SERIES SELECTION
-    // ══════════════════════════════════════════════════════════
     if (/^\d+$/.test(input) && pending.results) {
       const choice = parseInt(input, 10);
       if (choice < 1 || choice > pending.results.length) return;
@@ -176,7 +181,6 @@ const cvReplyHandler = {
       pending.isProcessing = true;
       const selected = pending.results[choice - 1];
 
-      // ─── 🎥 MOVIE DIRECT DOWNLOAD ───
       if (!selected.isSeries) {
         clearUserSession(k);
         await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
@@ -196,19 +200,17 @@ const cvReplyHandler = {
         detailsMsg += `💽 *Quality :* ${selected.quality || "1080p FHD"}\n\n`;
         detailsMsg += `⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> ⬇️ *Downloading & Uploading Movie File...*\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ`;
 
-        const poster = selected.posterImage || selected.image || selected.poster || DEFAULT_POSTER;
+        const posterUrl = selected.posterImage || selected.image || selected.poster || DEFAULT_POSTER;
 
         await sock.sendMessage(from, { 
-          image: { url: poster }, 
+          image: { url: posterUrl }, 
           caption: detailsMsg, 
           contextInfo: channelContextInfo() 
         }, { quoted: mek });
 
-        // Fast Direct Upload
-        await fastSendVideo(sock, mek, from, dlUrl, selected.title, selected.quality || "1080p FHD");
+        await fastSendVideo(sock, mek, from, dlUrl, selected.title, selected.quality || "1080p FHD", posterUrl);
 
       } else {
-        // ─── 📺 TV SERIES HANDLING ───
         pending.isProcessing = false;
         pending.series = selected;
         delete pending.results; 
@@ -232,12 +234,7 @@ const cvReplyHandler = {
 
         await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
       }
-    }
-
-    // ══════════════════════════════════════════════════════════
-    // SERIES EPISODE CHOSEN ("1 2")
-    // ══════════════════════════════════════════════════════════
-    else if (pending.series && /^\d+\s+\d+$/.test(input)) {
+    } else if (pending.series && /^\d+\s+\d+$/.test(input)) {
       const parts = input.split(/\s+/);
       const s = parseInt(parts[0], 10);
       const e = parseInt(parts[1], 10);
@@ -256,15 +253,14 @@ const cvReplyHandler = {
       const fS = s < 10 ? '0' + s : s;
       const fE = e < 10 ? '0' + e : e;
       const epTitle = `${series.title} S${fS}E${fE}`;
+      const posterUrl = series.posterImage || series.image || series.poster || DEFAULT_POSTER;
 
-      // Fast Direct Upload
-      await fastSendVideo(sock, mek, from, epData.d, epTitle, series.quality || "1080p FHD");
+      await fastSendVideo(sock, mek, from, epData.d, epTitle, series.quality || "1080p FHD", posterUrl);
     }
   }
 };
 
-// ── Direct Link Upload (100% Cinesubz Speed Method) ────────────
-async function fastSendVideo(sock, mek, from, url, rawTitle, quality) {
+async function fastSendVideo(sock, mek, from, url, rawTitle, quality, posterUrl = null) {
   try {
     await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
 
@@ -277,21 +273,36 @@ async function fastSendVideo(sock, mek, from, url, rawTitle, quality) {
     captionText += `📊 *Quality :* ${quality}\n\n`;
     captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-    // 🔥 This is exactly what Cinesubz uses. Bypass local buffering. 
-    // It passes the URL directly to Baileys' internal uploader.
-    await sock.sendMessage(from, {
-      document: { url: url },
+    const thumbBuffer = await getThumbnailBuffer(posterUrl);
+
+    // Fast direct streaming with persistent headers to eliminate delays
+    const streamRes = await axios({
+      url: url,
+      method: "GET",
+      responseType: "stream",
+      headers: DL_HEADERS,
+      maxRedirects: 5,
+      timeout: 60000,
+    });
+
+    const docPayload = {
+      document: { stream: streamRes.data },
       mimetype: "video/mp4",
       fileName: `MALIYA-MD ${cleanTitle} (Sinhala Sub).mp4`,
       caption: captionText,
       contextInfo: channelContextInfo()
-    }, { quoted: mek });
+    };
 
-    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+    if (thumbBuffer) {
+      docPayload.jpegThumbnail = thumbBuffer;
+    }
+
+    await sock.sendMessage(from, docPayload, { quoted: mek });
+    await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
 
   } catch (err) {
     console.error("Cineverse Fast Upload Error:", err.message);
-    await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+    await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
     await sendErrorMsg(sock, from, mek, `Failed to upload video directly. Link might be restricted.`);
   }
 }
