@@ -163,38 +163,38 @@ replyHandlers.push({
     await sock.sendMessage(from, { react: { text: "⬇️", key: m.key } });
 
     try {
-      // 🔥 300MB දක්වා බාගත කිරීමේ හැකියාව දුන්නා (කලින් 100MB වලදී Cut වුණා)
-      const res = await axios({
-        url: selected.dlUrl,
-        method: "GET",
-        responseType: "arraybuffer",
-        headers: HEADERS,
-        timeout: 180000, // 3 minutes timeout for larger files
-        maxContentLength: 300 * 1024 * 1024,
-        maxBodyLength: 300 * 1024 * 1024,
-      });
-
-      const buffer = Buffer.from(res.data);
-      const sizeMB = buffer.length / (1024 * 1024);
+      // 🔥 1. Get exact file size first
+      const headRes = await axios.head(selected.dlUrl, { headers: HEADERS }).catch(() => null);
+      let sizeMB = 0;
+      if (headRes && headRes.headers['content-length']) {
+        sizeMB = parseInt(headRes.headers['content-length']) / (1024 * 1024);
+      }
 
       await sock.sendMessage(from, { react: { text: "⬆️", key: m.key } });
 
       const cleanName = selected.name.replace(/[\\/:*?"<>|]/g, "").trim();
-      const isLargeDoc = sizeMB > 60;
       
       let caption = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
       caption += `✅ *𝐀𝐏𝐊 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
       caption += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
       caption += `📦 *App:* ${selected.name}\n`;
       caption += `👤 *Dev:* ${selected.developer}\n`;
-      caption += `📊 *Size:* ${sizeMB.toFixed(2)} MB\n`;
-      caption += `📁 *Format:* ${isLargeDoc ? "Document (Raw Binary)" : "Standard APK"}\n\n`;
+      if (sizeMB > 0) caption += `📊 *Size:* ${sizeMB.toFixed(2)} MB\n`;
+      caption += `📁 *Format:* Standard Document APK\n\n`;
       caption += `⊱━━━━━━━━━━━━━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-      // 60MB ට වඩා වැඩි නම් generic raw binary document විදියටත්, අඩු නම් native apk MIME එකත් දෙනවා
+      // 🔥 2. Stream File (This avoids the Node.js memory RAM crash entirely)
+      const res = await axios({
+        url: selected.dlUrl,
+        method: "GET",
+        responseType: "stream",
+        headers: HEADERS,
+        timeout: 0, 
+      });
+
       const docPayload = {
-        document: buffer,
-        mimetype: isLargeDoc ? "application/octet-stream" : "application/vnd.android.package-archive",
+        document: { stream: res.data },
+        mimetype: "application/vnd.android.package-archive", // Standard APK MIME
         fileName: `${cleanName}.apk`,
         caption: caption,
         contextInfo: channelContextInfo(),
@@ -205,21 +205,8 @@ replyHandlers.push({
 
     } catch (err) {
       console.log("APK DOWNLOAD ERROR:", err.message);
-
-      // 300MB වලටත් වඩා විශාල නම් පමණක් link එක ලබා දේ
-      if (err.message.includes("maxContentLength") || err.code === "ECONNABORTED") {
-        let largeFileMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
-        largeFileMsg += `⚠️ *𝐅𝐈𝐋𝐄 𝐓𝐎𝐎 𝐋𝐀𝐑𝐆𝐄*\n`;
-        largeFileMsg += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
-        largeFileMsg += `📦 *App:* ${selected.name}\n`;
-        largeFileMsg += `ℹ️ _File size exceeds 300MB WhatsApp limit._\n\n`;
-        largeFileMsg += `🔗 *Direct Download Link:*\n${selected.dlUrl}\n\n`;
-        largeFileMsg += `⊱━━━━━━━━━━━━━━━⊰`;
-        await sock.sendMessage(from, { text: largeFileMsg, contextInfo: channelContextInfo() }, { quoted: mek });
-      } else {
-        await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
-        await sendErrorMsg(sock, from, mek, "Failed to download the APK file.");
-      }
+      await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+      await sendErrorMsg(sock, from, mek, "Failed to download the APK file.");
     } finally {
       delete pendingApkSearch[from];
     }
