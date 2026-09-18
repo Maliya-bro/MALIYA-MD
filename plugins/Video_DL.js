@@ -130,7 +130,7 @@ function buildVideoDetails(video) {
 }
 
 function buildFinalCaption(video, qualityLabel, sizeMB) {
-  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎞️ *${toSmallCaps("Quality:")}* ${toSmallCaps(qualityLabel)}\n├ 📦 *${toSmallCaps("Size:")}* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎞️ *${toSmallCaps("Quality:")}* ${toSmallCaps(qualityLabel)}\n├ 📦 *${toSmallCaps("Size:")}* ${sizeMB.toFixed(2)} MB\n│\n╰•──────•°•❀•°•─────•┈➤\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 }
 
 async function getYoutube(query) {
@@ -164,7 +164,7 @@ async function sendQualityInteractiveMenu(sock, from, mek, video, sessionId) {
     } catch (e) { console.log("VIDEO BUTTON ERROR:", e); }
   }
   
-  return sock.sendMessage(from, { image: { url: video.thumbnail }, caption: buildVideoDetails(video) + `\n\n╭─[ 🎥 *${toSmallCaps("VIDEO QUALITY")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 360p SD\n├ 📱 *[ 02 ]* ➔ 480p HQ\n├ 📱 *[ 03 ]* ➔ 720p HD\n├ 📱 *[ 04 ]* ➔ 1080p FHD\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`, contextInfo: channelContextInfo() }, { quoted: mek });
+  return sock.sendMessage(from, { image: { url: video.thumbnail }, caption: buildVideoDetails(video) + `\n\n╭─[ 🎥 *${toSmallCaps("VIDEO QUALITY")}* ]•┈➤\n│\n├ 📱 *[ 01 ]* ➔ 360p SD\n├ 📱 *[ 02 ]* ➔ 480p HQ\n├ 📱 *[ 03 ]* ➔ 720p HD\n├ 📱 *[ 04 ]* ➔ 1080p FHD\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`, contextInfo: channelContextInfo() }, { quoted: mek });
 }
 
 function isDuplicateQualityAction(state, quality) {
@@ -176,7 +176,7 @@ function isDuplicateQualityAction(state, quality) {
   return false;
 }
 
-async function sendErrorMsg(reply, text) { await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`); }
+async function sendErrorMsg(reply, text) { await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰•──────•°•❀•°•─────•┈➤`); }
 
 async function fallbackAPIs(url, quality, outPath) {
     try {
