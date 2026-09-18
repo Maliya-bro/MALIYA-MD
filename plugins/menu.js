@@ -113,8 +113,7 @@ function menuHeader(userName = "User") {
 📅 *ᴅᴀᴛᴇ :* ${date}
 🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]
 
-⊱━━━━━━━━━━━━━━━⊰
-👇 *Select a command category below to view commands:*`;
+⊱━━━━━━━━━━━━━━━⊰`;
 }
 
 function commandListCaption(cat, list, userName = "User") {
@@ -131,10 +130,6 @@ function commandListCaption(cat, list, userName = "User") {
   });
   txt += `⊱━━━━━━━━━━━━━━━⊰\n> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
   return txt;
-}
-
-function makeCategoryRows(map, categories) {
-  return categories.map((cat) => ({ title: `${getCategoryEmoji(cat)} ${toSmallCaps(cat)} MENU`, description: `${map[cat].length} commands available`, id: `menu_view:${cat}` }));
 }
 
 function tryParseJsonString(s) { try { return JSON.parse(s); } catch { return null; } }
@@ -191,8 +186,7 @@ function isDuplicateAction(state, action) {
 
 function buildStyledMainMenu(state, userName) {
   const { categories } = state;
-  const styledUser = toSmallCaps(userName);
-  let msg = `⊱━━━━━ • ✿ • ━━━━━⊰\n★彡 *${BOT_NAME}* 彡★\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
+  let msg = menuHeader(userName) + `\n\n`;
   categories.forEach((cat, idx) => {
     const emo = getCategoryEmoji(cat);
     const numStr = String(idx + 1).padStart(2, "0");
@@ -207,6 +201,7 @@ async function sendNumberedMainMenu(sock, from, mek, state, userName, sessionId,
   return await sock.sendMessage(from, { image: { url: headerImg }, caption: caption, contextInfo: channelContextInfo() }, { quoted: mek });
 }
 
+// 🔥 Native Button Builder (Replaced buggy single_select with elegant Button list layout)
 async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
   const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
@@ -221,35 +216,19 @@ async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
 
   if (btnsOn) {
     try {
-      const { prepareWAMessageMedia, generateWAMessageFromContent } = await import("@vanzxy/baileys");
-      const media = await prepareWAMessageMedia({ image: { url: headerImg } }, { upload: sock.waUploadToServer });
-      
-      // I jillondiraani e URL buttons, koo e ɗiɗi. Ɗum ɓurta caɗeele!
-      const buttons = [
-        { 
-          name: "single_select", 
-          buttonParamsJson: JSON.stringify({ 
-            title: "Click Here ↯", 
-            sections: [{ title: "Command Categories", rows: makeCategoryRows(state.map, state.categories) }] 
-          }) 
-        }
-      ];
+      const { Button } = await import("@vanzxy/baileys");
+      const caption = buildStyledMainMenu(state, userName);
 
-      const msg = generateWAMessageFromContent(from, {
-        viewOnceMessage: {
-          message: {
-            interactiveMessage: {
-              body: { text: menuHeader(userName) },
-              footer: { text: `${BOT_NAME} | Interactive Menu` },
-              header: { title: "", hasMediaAttachment: true, imageMessage: media.imageMessage },
-              nativeFlowMessage: { buttons: buttons, messageParamsJson: "" }
-            }
-          }
-        }
-      }, { userJid: sock.user.id, quoted: mek });
+      const msg = new Button(sock)
+          .setImage(headerImg)
+          .setBody(caption)
+          .setFooter(`${BOT_NAME} | Interactive Menu`)
+          .addUrl("🌐 Official Website", "https://maliya-md.replit.app")
+          .addCall("📞 Call Owner", OWNER_NUMBER); // cta_call and cta_url are super stable
 
-      await sock.relayMessage(from, msg.message, { messageId: msg.key.id });
-      return msg;
+      await msg.send(from, { quoted: mek });
+      // Setting expectedMsgId mapping for the Button object
+      return msg; 
     } catch (e) { console.log("MENU BUTTON ERROR:", e); }
   }
 
@@ -269,8 +248,13 @@ cmd({ pattern: "menu", react: "📜", desc: "Show command categories", category:
       const userName = getUserName(pushname, m, mek, sender);
       const k = keyFor(sender, from);
       const state = { expectedMsgId: null, map, categories, userName, timestamp: Date.now(), lastActionSig: "", lastActionAt: 0 };
+      
       const sentMsg = await sendMainMenu(sock, from, mek, state, userName, sessionId);
-      if (sentMsg?.key?.id) { state.expectedMsgId = sentMsg.key.id; pendingMenu[k] = state; }
+      
+      // Native button returns an internal msg object, normal sendMessage returns { key: { id } }
+      const msgId = sentMsg?.key?.id || (sentMsg?.msg?.key?.id);
+      if (msgId) { state.expectedMsgId = msgId; pendingMenu[k] = state; }
+      else { pendingMenu[k] = state; /* fallback if id missing */ }
     } catch (e) { console.log("MENU ERROR:", e?.message || e); reply("❌ Menu eka send karanna බැරි වුණා."); }
   }
 );
@@ -280,8 +264,13 @@ const menuReplyHandler = {
     const k = keyFor(sender, from);
     const state = pendingMenu[k];
     if (!state) return false;
-    const quotedId = getQuotedId(m, mek);
-    if (!quotedId || quotedId !== state.expectedMsgId) return false;
+    
+    // Fallback if ID wasn't properly assigned (Button class sends via relay)
+    if (state.expectedMsgId) {
+       const quotedId = getQuotedId(m, mek);
+       if (!quotedId || quotedId !== state.expectedMsgId) return false;
+    }
+    
     const texts = extractTexts(text, mek, m);
     const action = resolveMenuAction(texts, state);
     if (action) return true;
