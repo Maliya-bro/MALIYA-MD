@@ -41,13 +41,8 @@ function cookiesStatus() {
 const VIDEO_LIMIT_MB = 45;
 const pendingVideoQuality = Object.create(null);
 
-function makeTempFile(ext = ".mp4") {
-  return path.join(TEMP_DIR, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${ext}`);
-}
-
-function safeUnlink(file) {
-  try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
-}
+function makeTempFile(ext = ".mp4") { return path.join(TEMP_DIR, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${ext}`); }
+function safeUnlink(file) { try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {} }
 
 function formatViews(num) { return !num ? "Unknown" : Number(num).toLocaleString(); }
 function formatSeconds(seconds) {
@@ -135,7 +130,7 @@ function buildVideoDetails(video) {
 }
 
 function buildFinalCaption(video, qualityLabel, sizeMB) {
-  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎞️ *${toSmallCaps("Quality:")}* ${toSmallCaps(qualityLabel)}\n├ 📦 *${toSmallCaps("Size:")}* ${sizeMB.toFixed(2)} MB\n│\n╰─· · ─ ·❀· ─ · ·\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎞️ *${toSmallCaps("Quality:")}* ${toSmallCaps(qualityLabel)}\n├ 📦 *${toSmallCaps("Size:")}* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 }
 
 async function getYoutube(query) {
@@ -149,7 +144,6 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// 🔥 Vanzxy / NativeFlow Builder for Lists 🔥
 async function sendQualityInteractiveMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
   if (!!settings.btns_enabled) {
@@ -181,8 +175,8 @@ async function sendQualityInteractiveMenu(sock, from, mek, video, sessionId) {
               body: { text: buildVideoDetails(video) },
               footer: { text: "𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥" },
               header: { title: "", hasMediaAttachment: true, imageMessage: media.imageMessage },
-              nativeFlowMessage: { buttons: buttons, messageParamsJson: "" },
-              contextInfo: channelContextInfo()
+              nativeFlowMessage: { buttons: buttons, messageParamsJson: "" }
+              // 🔥 Channel info ඉවත් කර ඇත (Buttons වැඩ කිරීමට)
             }
           }
         }
@@ -193,6 +187,7 @@ async function sendQualityInteractiveMenu(sock, from, mek, video, sessionId) {
     } catch (e) { console.log("VIDEO BUTTON ERROR:", e); }
   }
   
+  // 🔥 Buttons OFF නම් පරණ විදිහට Channel JID එක්ක යැවේ
   return sock.sendMessage(from, { image: { url: video.thumbnail }, caption: buildVideoDetails(video) + `\n\n╭─[ 🎥 *${toSmallCaps("VIDEO QUALITY")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 360p\n├ 📱 *[ 02 ]* ➔ 480p\n├ 📱 *[ 03 ]* ➔ 720p HD\n├ 📱 *[ 04 ]* ➔ 1080p FHD\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`, contextInfo: channelContextInfo() }, { quoted: mek });
 }
 
@@ -205,9 +200,7 @@ function isDuplicateQualityAction(state, quality) {
   return false;
 }
 
-async function sendErrorMsg(reply, text) {
-  await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰─ · · ─ ·❀· ─ · ·`);
-}
+async function sendErrorMsg(reply, text) { await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`); }
 
 async function fallbackAPIs(url, quality, outPath) {
     try {
@@ -261,7 +254,6 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
   if (!quality || isDuplicateQualityAction(pending, quality)) return;
 
   pending.isProcessing = true;
-
   let rawFile = makeTempFile(".mp4");
   let fixedFile = makeTempFile(".mp4");
   let downloadedSuccessfully = false;
@@ -280,8 +272,7 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
 
     if (!downloadedSuccessfully) {
       console.log("Switching to Y2Mate API Fallback...");
-      safeUnlink(rawFile); 
-      rawFile = makeTempFile(".mp4");
+      safeUnlink(rawFile); rawFile = makeTempFile(".mp4");
       await fallbackAPIs(pending.video.url, quality, rawFile);
       downloadedSuccessfully = true;
     }
@@ -314,22 +305,14 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
   }
 }
 
-cmd({
-  pattern: "video",
-  alias: ["ytmp4", "ytv", "vdl"],
-  react: "🔍",
-  desc: "Download YouTube video with quality selection",
-  category: "download",
-  filename: __filename,
-}, async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
+cmd({ pattern: "video", alias: ["ytmp4", "ytv", "vdl"], react: "🔍", desc: "Download YouTube video", category: "download", filename: __filename },
+  async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
   try {
     if (!q) return await sendErrorMsg(reply, "Please provide a YouTube link or video name.");
     const video = await getYoutube(q);
     if (!video) return await sendErrorMsg(reply, "No results found.");
-
     const key = makePendingKey(sender, from);
     pendingVideoQuality[key] = { video, from, createdAt: Date.now(), isProcessing: false, lastActionSig: "", lastActionAt: 0 };
-
     await sendQualityInteractiveMenu(sock, from, mek, video, sessionId);
   } catch (e) {
     await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
