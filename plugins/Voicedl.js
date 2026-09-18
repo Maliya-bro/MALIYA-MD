@@ -40,19 +40,12 @@ function cookiesStatus() {
 
 const pendingAudioType = Object.create(null);
 
-function makeTempFile(ext = ".mp3") {
-  return path.join(TEMP_DIR, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${ext}`);
-}
-
-function safeUnlink(file) {
-  try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
-}
+function makeTempFile(ext = ".mp3") { return path.join(TEMP_DIR, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${ext}`); }
+function safeUnlink(file) { try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {} }
 
 function isValidMediaFile(filePath) {
-  try {
-    if (!fs.existsSync(filePath)) return false;
-    return fs.statSync(filePath).size > 10240; 
-  } catch { return false; }
+  try { if (!fs.existsSync(filePath)) return false; return fs.statSync(filePath).size > 10240; } 
+  catch { return false; }
 }
 
 function formatViews(num) { return !num ? "Unknown" : Number(num).toLocaleString(); }
@@ -73,10 +66,7 @@ function sanitizeFileName(name = "youtube_audio") { return String(name).replace(
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
-  return String(str).split("").map((char) => {
-    const idx = normal.indexOf(char);
-    return idx !== -1 ? small[idx] : char;
-  }).join("");
+  return String(str).split("").map((char) => { const idx = normal.indexOf(char); return idx !== -1 ? small[idx] : char; }).join("");
 }
 
 function getTypeFromChoice(choice) {
@@ -105,14 +95,11 @@ function extractTexts(body, mek, m) {
   const direct = [
     body, m?.body, m?.text, m?.message?.conversation,
     m?.message?.extendedTextMessage?.text, m?.message?.buttonsResponseMessage?.selectedButtonId,
-    m?.message?.templateButtonReplyMessage?.selectedId,
-    m?.message?.interactiveResponseMessage?.body?.text,
+    m?.message?.templateButtonReplyMessage?.selectedId, m?.message?.interactiveResponseMessage?.body?.text,
     m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
     mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
-    mek?.message?.buttonsResponseMessage?.selectedButtonId,
-    mek?.message?.templateButtonReplyMessage?.selectedId,
-    mek?.message?.interactiveResponseMessage?.body?.text,
-    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson
+    mek?.message?.buttonsResponseMessage?.selectedButtonId, mek?.message?.templateButtonReplyMessage?.selectedId,
+    mek?.message?.interactiveResponseMessage?.body?.text, mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson
   ];
   for (const item of direct) {
     if (!item) continue;
@@ -145,7 +132,7 @@ function buildAudioDetails(video) {
 }
 
 function buildFinalCaption(video, typeLabel, sizeMB) {
-  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎵 *${toSmallCaps("Format:")}* ${toSmallCaps(typeLabel)}\n├ 📦 *${toSmallCaps("Size:")}* ${sizeMB.toFixed(2)} MB\n│\n╰•──────•°•❀•°•──────•>\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎵 *${toSmallCaps("Format:")}* ${toSmallCaps(typeLabel)}\n├ 📦 *${toSmallCaps("Size:")}* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 }
 
 async function getYoutube(query) {
@@ -159,13 +146,11 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// 🔥 Vanzxy / NativeFlow Builder for Direct Buttons (Quick Reply) 🔥
 async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
   if (!!settings.btns_enabled) {
     try {
       const { prepareWAMessageMedia, generateWAMessageFromContent } = await import("@vanzxy/baileys");
-      
       const media = await prepareWAMessageMedia({ image: { url: video.thumbnail } }, { upload: sock.waUploadToServer });
       
       const buttons = [
@@ -181,8 +166,8 @@ async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
               body: { text: buildAudioDetails(video) },
               footer: { text: "𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗠𝗣𝟯 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥" },
               header: { title: "", hasMediaAttachment: true, imageMessage: media.imageMessage },
-              nativeFlowMessage: { buttons: buttons, messageParamsJson: "" },
-              contextInfo: channelContextInfo()
+              nativeFlowMessage: { buttons: buttons, messageParamsJson: "" }
+              // 🔥 Channel info ඉවත් කර ඇත
             }
           }
         }
@@ -193,6 +178,7 @@ async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
     } catch (e) { console.log("AUDIO BUTTON ERROR:", e); }
   }
 
+  // 🔥 Buttons OFF නම් පරණ විදිහට Channel JID එක්ක යැවේ
   return sock.sendMessage(from, { image: { url: video.thumbnail }, caption: buildAudioDetails(video) + `\n\n╭─[ 🎵 *${toSmallCaps("SELECT FORMAT")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 🎵 Audio Format\n├ 📱 *[ 02 ]* ➔ 🎙️ Voice Note (PTT)\n├ 📱 *[ 03 ]* ➔ 📄 Send Document\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`, contextInfo: channelContextInfo() }, { quoted: mek });
 }
 
@@ -205,7 +191,7 @@ function isDuplicateTypeAction(state, type) {
   return false;
 }
 
-async function sendErrorMsg(reply, text) { await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰•──────•°•❀•°•──────•`); }
+async function sendErrorMsg(reply, text) { await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`); }
 
 async function downloadFromLaguAPI(videoId, outPath) {
   const apiUrl = `https://api.download-lagu-mp3.com/@api/json/mp3/${videoId}`;
@@ -290,18 +276,15 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
     } catch (ytErr) { console.log("YT-DLP AUDIO ERROR:", ytErr.message.substring(0, 100)); }
 
     if (!downloadedSuccessfully && videoId) {
-      console.log("Switching to Lagu MP3 API Fallback...");
-      try { safeUnlink(rawFile); rawFile = makeTempFile(".mp3"); await downloadFromLaguAPI(videoId, rawFile); if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; else throw new Error("Lagu MP3 file is invalid or empty"); } catch (laguErr) { console.log("LAGU MP3 API ERROR:", laguErr.message); }
+      try { safeUnlink(rawFile); rawFile = makeTempFile(".mp3"); await downloadFromLaguAPI(videoId, rawFile); if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; else throw new Error("Lagu MP3 file is invalid"); } catch (laguErr) { console.log("LAGU MP3 API ERROR:", laguErr.message); }
     }
 
     if (!downloadedSuccessfully) {
-      console.log("Switching to YTMP3.GE API Fallback...");
-      try { safeUnlink(rawFile); rawFile = makeTempFile(".mp3"); await downloadFromYTmp3GeAPI(pending.video.url, rawFile); if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; else throw new Error("YTMP3.GE file is invalid or empty"); } catch (ytgeErr) { console.log("YTMP3.GE API ERROR:", ytgeErr.message); }
+      try { safeUnlink(rawFile); rawFile = makeTempFile(".mp3"); await downloadFromYTmp3GeAPI(pending.video.url, rawFile); if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; else throw new Error("YTMP3.GE file is invalid"); } catch (ytgeErr) { console.log("YTMP3.GE API ERROR:", ytgeErr.message); }
     }
 
     if (!downloadedSuccessfully) {
-      console.log("Switching to Old Audio API Fallback...");
-      try { safeUnlink(rawFile); rawFile = makeTempFile(".mp3"); await fallbackAudioAPIs(pending.video.url, rawFile); if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; else throw new Error("Fallback APIs file is invalid or empty"); } catch (fbErr) { console.log("OLD FALLBACK API ERROR:", fbErr.message); }
+      try { safeUnlink(rawFile); rawFile = makeTempFile(".mp3"); await fallbackAudioAPIs(pending.video.url, rawFile); if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; else throw new Error("Fallback file is invalid"); } catch (fbErr) { console.log("OLD FALLBACK API ERROR:", fbErr.message); }
     }
 
     if (!downloadedSuccessfully) throw new Error("All download methods failed to provide a valid audio file.");
@@ -339,14 +322,8 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
   }
 }
 
-cmd({
-  pattern: "song", alias: ["ytmp3", "yta", "mp3", "play"],
-  react: "🔍",
-  desc: "Download YouTube audio with multiple options",
-  category: "download",
-  filename: __filename,
-  
-}, async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
+cmd({ pattern: "song", alias: ["ytmp3", "yta", "mp3", "play"], react: "🔍", desc: "Download YouTube audio", category: "download", filename: __filename },
+  async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
   try {
     if (!q) return await sendErrorMsg(reply, "Please provide a YouTube link or song name.");
     const video = await getYoutube(q);
