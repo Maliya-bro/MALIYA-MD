@@ -100,21 +100,20 @@ function buildCommandMapCached() {
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
-  return `┏━━━◥◣◆◢◤━━━━┓
+  return `⊱━━━━━ • ✿ • ━━━━━⊰
 ★彡 *${BOT_NAME}* 彡★
-┗━━━◢◤◆◥◣━━━━┛
+⊱━━━━━ • ✿ • ━━━━━⊰
 
 ✨ 👋 *ʜɪ, ${styledUser}!*
-╔═══·༻𐫱༺·════════╗
+
 🤖 *ʙᴏᴛ ɴᴀᴍᴇ :* ${BOT_NAME}
 👤 *ᴜsᴇʀ :* ${styledUser}
 👑 *ᴏᴡɴᴇʀ :* ${OWNER_NUMBER}
 🕒 *ᴛɪᴍᴇ :* ${time}
 📅 *ᴅᴀᴛᴇ :* ${date}
 🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]
-╚═════════. .★.═══╝
 
-───────✦❘•❘✦───────
+⊱━━━━━━━━━━━━━━━⊰
 👇 *Select a command category below to view commands:*`;
 }
 
@@ -225,10 +224,15 @@ async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
       const { prepareWAMessageMedia, generateWAMessageFromContent } = await import("@vanzxy/baileys");
       const media = await prepareWAMessageMedia({ image: { url: headerImg } }, { upload: sock.waUploadToServer });
       
+      // I jillondiraani e URL buttons, koo e ɗiɗi. Ɗum ɓurta caɗeele!
       const buttons = [
-        { name: "single_select", buttonParamsJson: JSON.stringify({ title: "Click Here ↯", sections: [{ title: "Command Categories", rows: makeCategoryRows(state.map, state.categories) }] }) },
-        { name: "cta_url", buttonParamsJson: JSON.stringify({ display_text: "🌐 Official Website", url: "https://maliya-md.replit.app" }) },
-        { name: "cta_copy", buttonParamsJson: JSON.stringify({ display_text: "📋 Copy Owner Number", copy_code: OWNER_NUMBER }) }
+        { 
+          name: "single_select", 
+          buttonParamsJson: JSON.stringify({ 
+            title: "Click Here ↯", 
+            sections: [{ title: "Command Categories", rows: makeCategoryRows(state.map, state.categories) }] 
+          }) 
+        }
       ];
 
       const msg = generateWAMessageFromContent(from, {
@@ -239,7 +243,6 @@ async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
               footer: { text: `${BOT_NAME} | Interactive Menu` },
               header: { title: "", hasMediaAttachment: true, imageMessage: media.imageMessage },
               nativeFlowMessage: { buttons: buttons, messageParamsJson: "" }
-              // 🔥 Channel info ඉවත් කර ඇත
             }
           }
         }
@@ -250,7 +253,6 @@ async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
     } catch (e) { console.log("MENU BUTTON ERROR:", e); }
   }
 
-  // 🔥 Buttons OFF නම් පරණ විදිහට Channel JID එක්ක යැවේ
   return await sendNumberedMainMenu(sock, from, mek, state, userName, sessionId, headerImg);
 }
 
