@@ -80,8 +80,8 @@ function getQualityFromChoice(choice) {
 
 function getQualityLabel(choice) {
   switch (String(choice).trim().toLowerCase()) {
-    case "1": case "360": case "360p": case "quality:360": return "360p";
-    case "2": case "480": case "480p": case "quality:480": return "480p";
+    case "1": case "360": case "360p": case "quality:360": return "360p SD";
+    case "2": case "480": case "480p": case "quality:480": return "480p HQ";
     case "3": case "720": case "720p": case "quality:720": return "720p HD";
     case "4": case "1080": case "1080p": case "quality:1080": return "1080p FHD";
     default: return "Unknown";
@@ -144,51 +144,27 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
+// 🔥 Native Button Builder (Direct Buttons, max 3)
 async function sendQualityInteractiveMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
+  
   if (!!settings.btns_enabled) {
     try {
-      const { prepareWAMessageMedia, generateWAMessageFromContent } = await import("@vanzxy/baileys");
-      
-      const media = await prepareWAMessageMedia({ image: { url: video.thumbnail } }, { upload: sock.waUploadToServer });
-      
-      const buttons = [{
-        name: "single_select",
-        buttonParamsJson: JSON.stringify({
-          title: "Select Quality ↯",
-          sections: [{
-            title: "Video Qualities",
-            rows: [
-              { title: "📹 360p", description: "Fast & smaller size", id: "quality:360" },
-              { title: "📺 480p", description: "Standard quality", id: "quality:480" },
-              { title: "✨ 720p HD", description: "High Definition", id: "quality:720" },
-              { title: "🔥 1080p FHD", description: "Full High Definition", id: "quality:1080" },
-            ]
-          }]
-        })
-      }];
+      const { Button } = await import("@vanzxy/baileys");
+      const msg = new Button(sock)
+          .setImage(video.thumbnail)
+          .setBody(buildVideoDetails(video))
+          .setFooter("𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥")
+          .addReply("📹 360p", "quality:360")
+          .addReply("📺 480p", "quality:480")
+          .addReply("✨ 720p HD", "quality:720");
 
-      const msg = generateWAMessageFromContent(from, {
-        viewOnceMessage: {
-          message: {
-            interactiveMessage: {
-              body: { text: buildVideoDetails(video) },
-              footer: { text: "𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥" },
-              header: { title: "", hasMediaAttachment: true, imageMessage: media.imageMessage },
-              nativeFlowMessage: { buttons: buttons, messageParamsJson: "" }
-              // 🔥 Channel info ඉවත් කර ඇත (Buttons වැඩ කිරීමට)
-            }
-          }
-        }
-      }, { userJid: sock.user.id, quoted: mek });
-
-      await sock.relayMessage(from, msg.message, { messageId: msg.key.id });
+      await msg.send(from, { quoted: mek });
       return;
     } catch (e) { console.log("VIDEO BUTTON ERROR:", e); }
   }
   
-  // 🔥 Buttons OFF නම් පරණ විදිහට Channel JID එක්ක යැවේ
-  return sock.sendMessage(from, { image: { url: video.thumbnail }, caption: buildVideoDetails(video) + `\n\n╭─[ 🎥 *${toSmallCaps("VIDEO QUALITY")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 360p\n├ 📱 *[ 02 ]* ➔ 480p\n├ 📱 *[ 03 ]* ➔ 720p HD\n├ 📱 *[ 04 ]* ➔ 1080p FHD\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`, contextInfo: channelContextInfo() }, { quoted: mek });
+  return sock.sendMessage(from, { image: { url: video.thumbnail }, caption: buildVideoDetails(video) + `\n\n╭─[ 🎥 *${toSmallCaps("VIDEO QUALITY")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 360p SD\n├ 📱 *[ 02 ]* ➔ 480p HQ\n├ 📱 *[ 03 ]* ➔ 720p HD\n├ 📱 *[ 04 ]* ➔ 1080p FHD\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`, contextInfo: channelContextInfo() }, { quoted: mek });
 }
 
 function isDuplicateQualityAction(state, quality) {
