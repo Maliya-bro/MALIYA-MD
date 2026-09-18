@@ -47,7 +47,7 @@
     "tesseract.js": "latest",
     "pdf-parse": "latest",
     "gifted-btns": "latest",
-    "mongodb": "latest",
+    "mongodb": "^6.10.0",
     "xnxx-scraper": "latest",
     "@soyaxell09/zenbot-scraper": "latest",
     "qrcode": "latest",
