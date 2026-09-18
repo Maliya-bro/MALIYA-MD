@@ -71,18 +71,18 @@ function toSmallCaps(str = "") {
 
 function getTypeFromChoice(choice) {
   switch (String(choice).trim().toLowerCase()) {
-    case "1": case "audio": case "type:audio": return "audio";
-    case "2": case "ptt": case "voice": case "type:ptt": return "ptt";
-    case "3": case "doc": case "document": case "type:doc": return "doc";
+    case "1": case "audio": return "audio";
+    case "2": case "ptt": case "voice": return "ptt";
+    case "3": case "doc": case "document": return "doc";
     default: return null;
   }
 }
 
 function getTypeLabel(choice) {
   switch (String(choice).trim().toLowerCase()) {
-    case "1": case "audio": case "type:audio": return "Audio (Standard)";
-    case "2": case "ptt": case "voice": case "type:ptt": return "Voice Note (PTT)";
-    case "3": case "doc": case "document": case "type:doc": return "Document (Audio)";
+    case "1": case "audio": return "Audio (Standard)";
+    case "2": case "ptt": case "voice": return "Voice Note (PTT)";
+    case "3": case "doc": case "document": return "Document (Audio)";
     default: return "Unknown";
   }
 }
@@ -96,11 +96,16 @@ function extractTexts(body, mek, m) {
     body, m?.body, m?.text, m?.message?.conversation,
     m?.message?.extendedTextMessage?.text, m?.message?.buttonsResponseMessage?.selectedButtonId,
     m?.message?.templateButtonReplyMessage?.selectedId, m?.message?.interactiveResponseMessage?.body?.text,
-    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
     mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
     mek?.message?.buttonsResponseMessage?.selectedButtonId, mek?.message?.templateButtonReplyMessage?.selectedId,
-    mek?.message?.interactiveResponseMessage?.body?.text, mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson
+    mek?.message?.interactiveResponseMessage?.body?.text
   ];
+  
+  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  if (p1) direct.push(p1);
+  if (p2) direct.push(p2);
+
   for (const item of direct) {
     if (!item) continue;
     if (typeof item === "string" && item.startsWith("{")) {
@@ -111,12 +116,13 @@ function extractTexts(body, mek, m) {
   return [...new Set(texts.filter(Boolean))];
 }
 
+// 🔥 Bug Fix: Button triggers matching
 function extractTypeFromTexts(texts) {
   const normalized = texts.map((t) => normalizeText(t));
   for (const text of normalized) {
-    if (text.includes("TYPE:AUDIO") || text === "AUDIO" || text === "1") return "audio";
-    if (text.includes("TYPE:PTT") || text === "VOICE" || text === "2") return "ptt";
-    if (text.includes("TYPE:DOC") || text === "DOCUMENT" || text === "3") return "doc";
+    if (text.includes("AUDIO") || text === "1") return "audio";
+    if (text.includes("PTT") || text.includes("VOICE") || text === "2") return "ptt";
+    if (text.includes("DOC") || text.includes("DOCUMENT") || text === "3") return "doc";
   }
   return null;
 }
@@ -151,15 +157,14 @@ async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
   
   if (!!settings.btns_enabled) {
     try {
-      // ɓuri moƴƴude ko Button mo @vanzxy/baileys
       const { Button } = await import("@vanzxy/baileys");
       const msg = new Button(sock)
           .setImage(video.thumbnail)
           .setBody(buildAudioDetails(video))
           .setFooter("𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗠𝗣𝟯 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥")
-          .addReply("🎵 Audio Format", "type:audio")
-          .addReply("🎙️ Voice Note", "type:ptt")
-          .addReply("📄 Send Document", "type:doc");
+          .addReply("🎵 Audio Format", "audio")
+          .addReply("🎙️ Voice Note", "ptt")
+          .addReply("📄 Send Document", "doc");
 
       await msg.send(from, { quoted: mek });
       return;
@@ -224,14 +229,19 @@ async function fallbackAudioAPIs(url, outPath) {
   throw new Error("All Backup APIs Failed");
 }
 
+// 🔥 Bug Fix: Added ["-vn", "-map", "0:a"] to strip hidden video/image tracks & prevent filter graph crashes
 async function convertAudio(inputPath, outputPath, isPtt = false) {
   return new Promise((resolve, reject) => {
     if (!isValidMediaFile(inputPath)) return reject(new Error("Input file is corrupted or empty before conversion."));
     let command = ffmpeg(inputPath);
     if (isPtt) {
-      command.audioCodec("libopus").format("ogg").audioBitrate("64k").audioChannels(1).audioFrequency(48000).on("end", () => resolve(outputPath)).on("error", (err) => reject(new Error(`FFmpeg Error (PTT): ${err.message}`))).save(outputPath);
+      command.audioCodec("libopus").format("ogg").audioBitrate("64k").audioChannels(1).audioFrequency(48000)
+        .outputOptions(["-vn", "-map", "0:a"]) // Explicitly map audio only
+        .on("end", () => resolve(outputPath)).on("error", (err) => reject(new Error(`FFmpeg Error (PTT): ${err.message}`))).save(outputPath);
     } else {
-      command.audioCodec("libmp3lame").format("mp3").audioBitrate("192k").on("end", () => resolve(outputPath)).on("error", (err) => reject(new Error(`FFmpeg Error (MP3): ${err.message}`))).save(outputPath);
+      command.audioCodec("libmp3lame").format("mp3").audioBitrate("192k")
+        .outputOptions(["-vn", "-map", "0:a"]) // Explicitly map audio only
+        .on("end", () => resolve(outputPath)).on("error", (err) => reject(new Error(`FFmpeg Error (MP3): ${err.message}`))).save(outputPath);
     }
   });
 }
