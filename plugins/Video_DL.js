@@ -8,7 +8,6 @@ const crypto = require("crypto");
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 const ffprobePath = require("@ffprobe-installer/ffprobe").path;
-const { sendInteractiveMessage } = require("gifted-btns");
 const { readSettings } = require("../lib/botSettings");
 
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -17,11 +16,9 @@ ffmpeg.setFfprobePath(ffprobePath);
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-// 🔥 Cookies File Path 🔥
 const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
-
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 Ｍ𝗔𝗟𝗜𝗬𝗔-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -52,10 +49,7 @@ function safeUnlink(file) {
   try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
 }
 
-function formatViews(num) {
-  return !num ? "Unknown" : Number(num).toLocaleString();
-}
-
+function formatViews(num) { return !num ? "Unknown" : Number(num).toLocaleString(); }
 function formatSeconds(seconds) {
   if (!seconds || isNaN(seconds)) return "Unknown";
   seconds = Number(seconds);
@@ -66,19 +60,10 @@ function formatSeconds(seconds) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function generateProgressBar(duration = "0:00") {
-  return `▰▰▰▰▰▰▰ *${duration}*`;
-}
+function generateProgressBar(duration = "0:00") { return `▰▰▰▰▰▰▰ *${duration}*`; }
+function getFileSizeMB(filePath) { return fs.statSync(filePath).size / (1024 * 1024); }
+function sanitizeFileName(name = "youtube_video") { return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_video"; }
 
-function getFileSizeMB(filePath) {
-  return fs.statSync(filePath).size / (1024 * 1024);
-}
-
-function sanitizeFileName(name = "youtube_video") {
-  return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_video";
-}
-
-// ── Small Caps Font Effect ─────────────
 function toSmallCaps(str = "") {
     const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
@@ -108,17 +93,8 @@ function getQualityLabel(choice) {
   }
 }
 
-function normalizeText(s = "") {
-  return String(s).replace(/\r/g, "").replace(/\n+/g, "\n").replace(/\s+/g, " ").trim().toUpperCase();
-}
-
-function tryParseJsonString(s) {
-  try { return JSON.parse(s); } catch { return null; }
-}
-
-function makePendingKey(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
-}
+function normalizeText(s = "") { return String(s).replace(/\r/g, "").replace(/\n+/g, "\n").replace(/\s+/g, " ").trim().toUpperCase(); }
+function makePendingKey(sender, from) { return `${from || ""}::${(sender || "").split(":")[0]}`; }
 
 function extractTexts(body, mek, m) {
   const texts = [];
@@ -147,7 +123,6 @@ function extractQualityFromTexts(texts) {
   return null;
 }
 
-// 🔥 Single-Sided Layouts with Small Caps Effect 🔥
 function buildVideoDetails(video) {
   const title = toSmallCaps(video.title || "Unknown Title");
   const channel = toSmallCaps(video.author?.name || "Unknown Channel");
@@ -160,7 +135,7 @@ function buildVideoDetails(video) {
 }
 
 function buildFinalCaption(video, qualityLabel, sizeMB) {
-  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎞️ *${toSmallCaps("Quality:")}* ${toSmallCaps(qualityLabel)}\n├ 📦 *${toSmallCaps("Size:")}* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎞️ *${toSmallCaps("Quality:")}* ${toSmallCaps(qualityLabel)}\n├ 📦 *${toSmallCaps("Size:")}* ${sizeMB.toFixed(2)} MB\n│\n╰─· · ─ ·❀· ─ · ·\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 }
 
 async function getYoutube(query) {
@@ -174,35 +149,50 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
+// 🔥 Vanzxy / NativeFlow Builder for Lists 🔥
 async function sendQualityInteractiveMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
-  if (!!settings.btns_enabled && sendInteractiveMessage) {
+  if (!!settings.btns_enabled) {
     try {
-      return await sendInteractiveMessage(sock, from, {
-          image: { url: video.thumbnail },
-          text: buildVideoDetails(video),
-          footer: "𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥",
-          interactiveButtons: [
-            {
-              name: "single_select",
-              buttonParamsJson: JSON.stringify({
-                title: "Select Quality ↯",
-                sections: [{
-                    title: "Video Qualities",
-                    rows: [
-                      { title: "📹 360p", description: "Fast & smaller size", id: "quality:360" },
-                      { title: "📺 480p", description: "Standard quality", id: "quality:480" },
-                      { title: "✨ 720p HD", description: "High Definition", id: "quality:720" },
-                      { title: "🔥 1080p FHD", description: "Full High Definition", id: "quality:1080" },
-                    ],
-                }],
-              }),
-            },
-          ],
-        }, { quoted: mek }
-      );
+      const { prepareWAMessageMedia, generateWAMessageFromContent } = await import("@vanzxy/baileys");
+      
+      const media = await prepareWAMessageMedia({ image: { url: video.thumbnail } }, { upload: sock.waUploadToServer });
+      
+      const buttons = [{
+        name: "single_select",
+        buttonParamsJson: JSON.stringify({
+          title: "Select Quality ↯",
+          sections: [{
+            title: "Video Qualities",
+            rows: [
+              { title: "📹 360p", description: "Fast & smaller size", id: "quality:360" },
+              { title: "📺 480p", description: "Standard quality", id: "quality:480" },
+              { title: "✨ 720p HD", description: "High Definition", id: "quality:720" },
+              { title: "🔥 1080p FHD", description: "Full High Definition", id: "quality:1080" },
+            ]
+          }]
+        })
+      }];
+
+      const msg = generateWAMessageFromContent(from, {
+        viewOnceMessage: {
+          message: {
+            interactiveMessage: {
+              body: { text: buildVideoDetails(video) },
+              footer: { text: "𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥" },
+              header: { title: "", hasMediaAttachment: true, imageMessage: media.imageMessage },
+              nativeFlowMessage: { buttons: buttons, messageParamsJson: "" },
+              contextInfo: channelContextInfo()
+            }
+          }
+        }
+      }, { userJid: sock.user.id, quoted: mek });
+
+      await sock.relayMessage(from, msg.message, { messageId: msg.key.id });
+      return;
     } catch (e) { console.log("VIDEO BUTTON ERROR:", e); }
   }
+  
   return sock.sendMessage(from, { image: { url: video.thumbnail }, caption: buildVideoDetails(video) + `\n\n╭─[ 🎥 *${toSmallCaps("VIDEO QUALITY")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 360p\n├ 📱 *[ 02 ]* ➔ 480p\n├ 📱 *[ 03 ]* ➔ 720p HD\n├ 📱 *[ 04 ]* ➔ 1080p FHD\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`, contextInfo: channelContextInfo() }, { quoted: mek });
 }
 
@@ -216,42 +206,30 @@ function isDuplicateQualityAction(state, quality) {
 }
 
 async function sendErrorMsg(reply, text) {
-  await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`);
+  await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰─ · · ─ ·❀· ─ · ·`);
 }
 
-// 🔥 FALLBACK: Y2MATE (SAVENOW.TO) & OTHER APIs 🔥
 async function fallbackAPIs(url, quality, outPath) {
-    // 1. Try Y2Mate / Loader.to API
     try {
         const startRes = await axios.get(`https://p.savenow.to/ajax/download.php?format=${quality}&url=${encodeURIComponent(url)}`);
         if (startRes.data && startRes.data.id) {
             const jobId = startRes.data.id;
             let dlUrl = null;
             for (let i = 0; i < 20; i++) {
-                await new Promise(r => setTimeout(r, 3000)); // Poll every 3 seconds
+                await new Promise(r => setTimeout(r, 3000));
                 const prog = await axios.get(`https://p.savenow.to/ajax/progress.php?id=${jobId}`);
-                if (prog.data && prog.data.success === 1 && prog.data.download_url) {
-                    dlUrl = prog.data.download_url;
-                    break;
-                }
+                if (prog.data && prog.data.success === 1 && prog.data.download_url) { dlUrl = prog.data.download_url; break; }
             }
             if (dlUrl) {
                 const writer = fs.createWriteStream(outPath);
                 const res = await axios({ url: dlUrl, method: 'GET', responseType: 'stream', timeout: 120000 });
                 res.data.pipe(writer);
-                return new Promise((resolve, reject) => {
-                    writer.on('finish', () => resolve(true));
-                    writer.on('error', reject);
-                });
+                return new Promise((resolve, reject) => { writer.on('finish', () => resolve(true)); writer.on('error', reject); });
             }
         }
     } catch (e) { console.log("Y2Mate Fallback Failed:", e.message); }
 
-    // 2. Try Standard Direct APIs (Default to normal mp4 if quality specific fails)
-    const apis = [
-        `https://api.deliriussapi.site/download/ytmp4?url=${encodeURIComponent(url)}`,
-        `https://bk9.fun/download/ytmp4?url=${encodeURIComponent(url)}`
-    ];
+    const apis = [`https://api.deliriussapi.site/download/ytmp4?url=${encodeURIComponent(url)}`, `https://bk9.fun/download/ytmp4?url=${encodeURIComponent(url)}`];
     for (let api of apis) {
         try {
             const res = await axios.get(api, { timeout: 15000 });
@@ -260,10 +238,7 @@ async function fallbackAPIs(url, quality, outPath) {
                 const writer = fs.createWriteStream(outPath);
                 const fileRes = await axios({ url: dlUrl, method: 'GET', responseType: 'stream', timeout: 120000 });
                 fileRes.data.pipe(writer);
-                return new Promise((resolve, reject) => {
-                    writer.on('finish', () => resolve(true));
-                    writer.on('error', reject);
-                });
+                return new Promise((resolve, reject) => { writer.on('finish', () => resolve(true)); writer.on('error', reject); });
             }
         } catch (e) { continue; }
     }
@@ -272,14 +247,7 @@ async function fallbackAPIs(url, quality, outPath) {
 
 async function reencodeForWhatsApp(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
-      .videoCodec("libx264")
-      .audioCodec("aac")
-      .outputOptions(["-movflags +faststart", "-pix_fmt yuv420p", "-profile:v main", "-level 3.1", "-preset fast", "-crf 26", "-vf scale='min(1280,iw)':-2"])
-      .format("mp4")
-      .on("end", () => resolve(outputPath))
-      .on("error", reject)
-      .save(outputPath);
+    ffmpeg(inputPath).videoCodec("libx264").audioCodec("aac").outputOptions(["-movflags +faststart", "-pix_fmt yuv420p", "-profile:v main", "-level 3.1", "-preset fast", "-crf 26", "-vf scale='min(1280,iw)':-2"]).format("mp4").on("end", () => resolve(outputPath)).on("error", reject).save(outputPath);
   });
 }
 
@@ -301,35 +269,19 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
   try {
     await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
 
-    // 🔥 ATTEMPT 1: YT-DLP 🔥
     try {
       const formatStr = `bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}]/best`;
-      const ytArgs = {
-        format: formatStr,
-        output: rawFile,
-        ffmpegLocation: ffmpegPath,
-        noWarnings: true,
-        noCheckCertificates: true,
-        noPlaylist: true,
-        extractorArgs: "youtube:player_client=android,web",
-        addHeader: ["referer:youtube.com"],
-      };
-
+      const ytArgs = { format: formatStr, output: rawFile, ffmpegLocation: ffmpegPath, noWarnings: true, noCheckCertificates: true, noPlaylist: true, extractorArgs: "youtube:player_client=android,web", addHeader: ["referer:youtube.com"] };
       const cookies = cookiesStatus();
       if (cookies.exists && cookies.sizeBytes > 0) ytArgs.cookies = COOKIES_PATH;
-
       await ytDlp(pending.video.url, ytArgs);
       downloadedSuccessfully = true;
-    } catch (ytErr) {
-      console.log("YT-DLP ERROR:", ytErr.message.substring(0, 100));
-    }
+    } catch (ytErr) { console.log("YT-DLP ERROR:", ytErr.message.substring(0, 100)); }
 
-    // 🔥 ATTEMPT 2: Y2MATE API FALLBACK 🔥
     if (!downloadedSuccessfully) {
       console.log("Switching to Y2Mate API Fallback...");
       safeUnlink(rawFile); 
       rawFile = makeTempFile(".mp4");
-      
       await fallbackAPIs(pending.video.url, quality, rawFile);
       downloadedSuccessfully = true;
     }
@@ -343,12 +295,8 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
     await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
 
     const msgPayload = { mimetype: "video/mp4", fileName: `${cleanTitle}_${quality}p.mp4`, caption: buildFinalCaption(pending.video, qualityLabel, sizeMB), contextInfo: channelContextInfo() };
-    if (sizeMB > VIDEO_LIMIT_MB) {
-        msgPayload.document = fs.readFileSync(fixedFile);
-    } else {
-        msgPayload.video = fs.readFileSync(fixedFile);
-        msgPayload.gifPlayback = false;
-    }
+    if (sizeMB > VIDEO_LIMIT_MB) msgPayload.document = fs.readFileSync(fixedFile);
+    else { msgPayload.video = fs.readFileSync(fixedFile); msgPayload.gifPlayback = false; }
 
     await sock.sendMessage(from, msgPayload, { quoted: mek });
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
@@ -360,8 +308,7 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
     const cleanErr = String(errText).replace(/\n/g, " ").trim();
     await sendErrorMsg(reply, `Video Download Failed: ${cleanErr.substring(0, 100)}`);
   } finally {
-    safeUnlink(rawFile);
-    safeUnlink(fixedFile);
+    safeUnlink(rawFile); safeUnlink(fixedFile);
     if (pendingVideoQuality[key]) pendingVideoQuality[key].isProcessing = false;
     delete pendingVideoQuality[key];
   }
@@ -377,7 +324,6 @@ cmd({
 }, async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
   try {
     if (!q) return await sendErrorMsg(reply, "Please provide a YouTube link or video name.");
-
     const video = await getYoutube(q);
     if (!video) return await sendErrorMsg(reply, "No results found.");
 
