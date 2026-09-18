@@ -148,37 +148,24 @@ async function getYoutube(query) {
 
 async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
+  
   if (!!settings.btns_enabled) {
     try {
-      const { prepareWAMessageMedia, generateWAMessageFromContent } = await import("@vanzxy/baileys");
-      const media = await prepareWAMessageMedia({ image: { url: video.thumbnail } }, { upload: sock.waUploadToServer });
-      
-      const buttons = [
-        { name: "quick_reply", buttonParamsJson: JSON.stringify({ display_text: "🎵 Audio Format", id: "type:audio" }) },
-        { name: "quick_reply", buttonParamsJson: JSON.stringify({ display_text: "🎙️ Voice Note", id: "type:ptt" }) },
-        { name: "quick_reply", buttonParamsJson: JSON.stringify({ display_text: "📄 Send Document", id: "type:doc" }) }
-      ];
+      // ɓuri moƴƴude ko Button mo @vanzxy/baileys
+      const { Button } = await import("@vanzxy/baileys");
+      const msg = new Button(sock)
+          .setImage(video.thumbnail)
+          .setBody(buildAudioDetails(video))
+          .setFooter("𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗠𝗣𝟯 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥")
+          .addReply("🎵 Audio Format", "type:audio")
+          .addReply("🎙️ Voice Note", "type:ptt")
+          .addReply("📄 Send Document", "type:doc");
 
-      const msg = generateWAMessageFromContent(from, {
-        viewOnceMessage: {
-          message: {
-            interactiveMessage: {
-              body: { text: buildAudioDetails(video) },
-              footer: { text: "𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗠𝗣𝟯 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥" },
-              header: { title: "", hasMediaAttachment: true, imageMessage: media.imageMessage },
-              nativeFlowMessage: { buttons: buttons, messageParamsJson: "" }
-              // 🔥 Channel info ඉවත් කර ඇත
-            }
-          }
-        }
-      }, { userJid: sock.user.id, quoted: mek });
-
-      await sock.relayMessage(from, msg.message, { messageId: msg.key.id });
+      await msg.send(from, { quoted: mek });
       return;
     } catch (e) { console.log("AUDIO BUTTON ERROR:", e); }
   }
 
-  // 🔥 Buttons OFF නම් පරණ විදිහට Channel JID එක්ක යැවේ
   return sock.sendMessage(from, { image: { url: video.thumbnail }, caption: buildAudioDetails(video) + `\n\n╭─[ 🎵 *${toSmallCaps("SELECT FORMAT")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 🎵 Audio Format\n├ 📱 *[ 02 ]* ➔ 🎙️ Voice Note (PTT)\n├ 📱 *[ 03 ]* ➔ 📄 Send Document\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`, contextInfo: channelContextInfo() }, { quoted: mek });
 }
 
