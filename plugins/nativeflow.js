@@ -1,35 +1,40 @@
-import { Button } from '@vanzxy/baileys';
+const { cmd } = require("../command");
 
-/**
- * Command: .testbtn / .nativeflow
- * Description: Native flow buttons test කිරීම සඳහා
- */
-export default {
-    name: 'testbtn',
-    alias: ['nativeflow', 'btncheck'],
-    category: 'test',
-    async execute({ sock, msg, from }) {
-        try {
-            // Button class එකෙන් Native Flow message එකක් build කිරීම
-            const flowMessage = new Button(sock)
-                .setTitle('🚀 Native Flow Test Panel')
-                .setBody('Native Flow buttons WhatsApp mobile app එකේ render වෙන විදිහ පහතින් බලන්න.')
-                .setFooter('Powered by @vanzxy/baileys')
-                // 1. Quick Reply Button (Click කරපු ගමන් message එකක් bot ට යවනවා)
-                .addReply('Ping Bot 🏓', '.ping')
-                // 2. Direct URL Link Button
-                .addUrl('GitHub Repo 🌐', 'https://github.com/vanzxysenpai/vanzxybaileys')
-                // 3. Direct Phone Call Button
-                .addCall('Developer Call 📞', '94712345678');
+cmd(
+  {
+    pattern: "testbtn",
+    alias: ["nativeflow", "btncheck"],
+    react: "🚀",
+    desc: "Test Native Flow buttons using @vanzxy/baileys",
+    category: "main",
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, reply, pushname }) => {
+    try {
+      // @vanzxy/baileys එකෙන් Button builder එක dynamically load කරගැනීම
+      const { Button } = await import("@vanzxy/baileys");
 
-            // Message එක අදාළ JID (chat) එකට send කිරීම
-            await flowMessage.send(from);
+      const userName = pushname || m?.pushName || "User";
 
-        } catch (error) {
-            console.error('Native Flow Button Error:', error);
-            await sock.sendMessage(from, { 
-                text: '❌ Buttons send කිරීමේදී දෝෂයක් ආවා: ' + error.message 
-            }, { quoted: msg });
-        }
+      // Button instance එකක් හදලා Native Flow buttons add කිරීම
+      const flowMessage = new Button(sock)
+        .setTitle("🚀 Native Flow Test Panel")
+        .setBody(`👋 Hey *${userName}*,\n\nNative Flow buttons WhatsApp mobile app එකේ render වෙන විදිහ පහතින් බලන්න.`)
+        .setFooter("🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁")
+        // 1. Quick Reply Button
+        .addReply("📜 Menu", ".menu")
+        .addReply("👤 Owner", ".owner")
+        // 2. Direct URL Link Button
+        .addUrl("🌐 GitHub", "https://github.com")
+        // 3. Direct Phone Call Button
+        .addCall("📞 Call", "94712345678");
+
+      // Chat එකට send කිරීම (Channel forwarding contextInfo සම්පූර්ණයෙන්ම ඉවත් කර ඇත)
+      await flowMessage.send(from, { quoted: mek });
+
+    } catch (err) {
+      console.log("TESTBTN ERROR:", err);
+      reply(`❌ Button Error: ${err.message}`);
     }
-};
+  }
+);
