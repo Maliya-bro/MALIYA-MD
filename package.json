@@ -81,7 +81,8 @@
     "liyanaarachchi-animeheavenme": "latest",
     "crypto-js": "latest",
     "https": "latest",
-    "crypto": "latest"
+    "crypto": "latest",
+    "@vanzxy/baileys": "latest"
   
     
 
