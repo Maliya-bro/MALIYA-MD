@@ -8,7 +8,6 @@ const crypto = require("crypto");
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 const ffprobePath = require("@ffprobe-installer/ffprobe").path;
-const { sendInteractiveMessage } = require("gifted-btns");
 const { readSettings } = require("../lib/botSettings");
 
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -17,11 +16,9 @@ ffmpeg.setFfprobePath(ffprobePath);
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-// Cookies File Path
 const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
-
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 
 function channelContextInfo() {
   return {
@@ -51,21 +48,14 @@ function safeUnlink(file) {
   try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
 }
 
-// 🔥 File Validation Check 🔥
 function isValidMediaFile(filePath) {
   try {
     if (!fs.existsSync(filePath)) return false;
-    const stats = fs.statSync(filePath);
-    return stats.size > 10240; // File size must be > 10KB
-  } catch {
-    return false;
-  }
+    return fs.statSync(filePath).size > 10240; 
+  } catch { return false; }
 }
 
-function formatViews(num) {
-  return !num ? "Unknown" : Number(num).toLocaleString();
-}
-
+function formatViews(num) { return !num ? "Unknown" : Number(num).toLocaleString(); }
 function formatSeconds(seconds) {
   if (!seconds || isNaN(seconds)) return "Unknown";
   seconds = Number(seconds);
@@ -76,17 +66,9 @@ function formatSeconds(seconds) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function generateProgressBar(duration = "0:00") {
-  return `▰▰▰▰▰▰▰ *${duration}*`;
-}
-
-function getFileSizeMB(filePath) {
-  return fs.statSync(filePath).size / (1024 * 1024);
-}
-
-function sanitizeFileName(name = "youtube_audio") {
-  return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_audio";
-}
+function generateProgressBar(duration = "0:00") { return `▰▰▰▰▰▰▰ *${duration}*`; }
+function getFileSizeMB(filePath) { return fs.statSync(filePath).size / (1024 * 1024); }
+function sanitizeFileName(name = "youtube_audio") { return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_audio"; }
 
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -115,13 +97,8 @@ function getTypeLabel(choice) {
   }
 }
 
-function normalizeText(s = "") {
-  return String(s).replace(/\r/g, "").replace(/\n+/g, "\n").replace(/\s+/g, " ").trim().toUpperCase();
-}
-
-function makePendingKey(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
-}
+function normalizeText(s = "") { return String(s).replace(/\r/g, "").replace(/\n+/g, "\n").replace(/\s+/g, " ").trim().toUpperCase(); }
+function makePendingKey(sender, from) { return `${from || ""}::${(sender || "").split(":")[0]}`; }
 
 function extractTexts(body, mek, m) {
   const texts = [];
@@ -140,10 +117,7 @@ function extractTexts(body, mek, m) {
   for (const item of direct) {
     if (!item) continue;
     if (typeof item === "string" && item.startsWith("{")) {
-      try {
-        const parsed = JSON.parse(item);
-        if (parsed.id) texts.push(String(parsed.id).trim());
-      } catch {}
+      try { const parsed = JSON.parse(item); if (parsed.id) texts.push(String(parsed.id).trim()); } catch {}
     }
     texts.push(String(item).trim());
   }
@@ -167,12 +141,11 @@ function buildAudioDetails(video) {
   const views = formatViews(video.views);
   const uploaded = video.ago || "Unknown";
   const url = video.url || "Unavailable";
-
   return `╭─[ 🎵 *${toSmallCaps("AUDIO DETAILS")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${title}\n├ 👤 *${toSmallCaps("Channel:")}* ${channel}\n├ ⏱️ *${toSmallCaps("Duration:")}* ${duration}\n├ 👀 *${toSmallCaps("Views:")}* ${views}\n├ 📅 *${toSmallCaps("Uploaded:")}* ${uploaded}\n├ 🔗 *${toSmallCaps("Link:")}* ${url}\n│\n╰─[ ${generateProgressBar(duration)} ]`;
 }
 
 function buildFinalCaption(video, typeLabel, sizeMB) {
-  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎵 *${toSmallCaps("Format:")}* ${toSmallCaps(typeLabel)}\n├ 📦 *${toSmallCaps("Size:")}* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎵 *${toSmallCaps("Format:")}* ${toSmallCaps(typeLabel)}\n├ 📦 *${toSmallCaps("Size:")}* ${sizeMB.toFixed(2)} MB\n│\n╰•──────•°•❀•°•──────•>\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 }
 
 async function getYoutube(query) {
@@ -186,39 +159,41 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// 🔥 Direct Buttons Menu 🔥
+// 🔥 Vanzxy / NativeFlow Builder for Direct Buttons (Quick Reply) 🔥
 async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
-  if (!!settings.btns_enabled && sendInteractiveMessage) {
+  if (!!settings.btns_enabled) {
     try {
-      return await sendInteractiveMessage(sock, from, {
-        image: { url: video.thumbnail },
-        text: buildAudioDetails(video),
-        footer: "𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗠𝗣𝟯 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥",
-        interactiveButtons: [
-          {
-            name: "quick_reply",
-            buttonParamsJson: JSON.stringify({ display_text: "🎵 Audio Format", id: "type:audio" })
-          },
-          {
-            name: "quick_reply",
-            buttonParamsJson: JSON.stringify({ display_text: "🎙️ Voice Note", id: "type:ptt" })
-          },
-          {
-            name: "quick_reply",
-            buttonParamsJson: JSON.stringify({ display_text: "📄 Send Document", id: "type:doc" })
+      const { prepareWAMessageMedia, generateWAMessageFromContent } = await import("@vanzxy/baileys");
+      
+      const media = await prepareWAMessageMedia({ image: { url: video.thumbnail } }, { upload: sock.waUploadToServer });
+      
+      const buttons = [
+        { name: "quick_reply", buttonParamsJson: JSON.stringify({ display_text: "🎵 Audio Format", id: "type:audio" }) },
+        { name: "quick_reply", buttonParamsJson: JSON.stringify({ display_text: "🎙️ Voice Note", id: "type:ptt" }) },
+        { name: "quick_reply", buttonParamsJson: JSON.stringify({ display_text: "📄 Send Document", id: "type:doc" }) }
+      ];
+
+      const msg = generateWAMessageFromContent(from, {
+        viewOnceMessage: {
+          message: {
+            interactiveMessage: {
+              body: { text: buildAudioDetails(video) },
+              footer: { text: "𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗠𝗣𝟯 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥" },
+              header: { title: "", hasMediaAttachment: true, imageMessage: media.imageMessage },
+              nativeFlowMessage: { buttons: buttons, messageParamsJson: "" },
+              contextInfo: channelContextInfo()
+            }
           }
-        ],
-      }, { quoted: mek });
+        }
+      }, { userJid: sock.user.id, quoted: mek });
+
+      await sock.relayMessage(from, msg.message, { messageId: msg.key.id });
+      return;
     } catch (e) { console.log("AUDIO BUTTON ERROR:", e); }
   }
 
-  // Non-button / Fallback Menu
-  return sock.sendMessage(from, { 
-    image: { url: video.thumbnail }, 
-    caption: buildAudioDetails(video) + `\n\n╭─[ 🎵 *${toSmallCaps("SELECT FORMAT")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 🎵 Audio Format\n├ 📱 *[ 02 ]* ➔ 🎙️ Voice Note (PTT)\n├ 📱 *[ 03 ]* ➔ 📄 Send Document\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`, 
-    contextInfo: channelContextInfo() 
-  }, { quoted: mek });
+  return sock.sendMessage(from, { image: { url: video.thumbnail }, caption: buildAudioDetails(video) + `\n\n╭─[ 🎵 *${toSmallCaps("SELECT FORMAT")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 🎵 Audio Format\n├ 📱 *[ 02 ]* ➔ 🎙️ Voice Note (PTT)\n├ 📱 *[ 03 ]* ➔ 📄 Send Document\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`, contextInfo: channelContextInfo() }, { quoted: mek });
 }
 
 function isDuplicateTypeAction(state, type) {
@@ -230,74 +205,37 @@ function isDuplicateTypeAction(state, type) {
   return false;
 }
 
-async function sendErrorMsg(reply, text) {
-  await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`);
-}
+async function sendErrorMsg(reply, text) { await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰•──────•°•❀•°•──────•`); }
 
-// 📌 1. NEW API INTEGRATION: Download-Lagu-Mp3
 async function downloadFromLaguAPI(videoId, outPath) {
   const apiUrl = `https://api.download-lagu-mp3.com/@api/json/mp3/${videoId}`;
   const response = await axios.get(apiUrl, { timeout: 20000 });
-
   if (response.data && response.data.vidInfo) {
-    // vidInfo "0" contains the highest quality (320kbps usually)
     const bestFormat = response.data.vidInfo["0"] || Object.values(response.data.vidInfo)[0];
-    
     if (bestFormat && bestFormat.dloadUrl) {
-      let downloadUrl = bestFormat.dloadUrl;
-      // Prepend https: if the URL starts with //
-      if (downloadUrl.startsWith("//")) {
-        downloadUrl = "https:" + downloadUrl;
-      }
-
+      let downloadUrl = bestFormat.dloadUrl.startsWith("//") ? "https:" + bestFormat.dloadUrl : bestFormat.dloadUrl;
       const writer = fs.createWriteStream(outPath);
-      const fileRes = await axios({ 
-        url: downloadUrl, 
-        method: "GET", 
-        responseType: "stream", 
-        timeout: 120000 
-      });
-      
+      const fileRes = await axios({ url: downloadUrl, method: "GET", responseType: "stream", timeout: 120000 });
       fileRes.data.pipe(writer);
-      
-      return new Promise((resolve, reject) => {
-        writer.on("finish", () => resolve(true));
-        writer.on("error", reject);
-      });
+      return new Promise((resolve, reject) => { writer.on("finish", () => resolve(true)); writer.on("error", reject); });
     }
   }
   throw new Error("Lagu API returned invalid JSON structure.");
 }
 
-// 📌 2. YTMP3.GE API Integration Function 
 async function downloadFromYTmp3GeAPI(url, outPath) {
   const requestData = `youtube_url=${encodeURIComponent(url)}&quality=320`;
-  const response = await axios.post("https://ytmp3.ge/api/convert", requestData, {
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    timeout: 300000
-  });
-
+  const response = await axios.post("https://ytmp3.ge/api/convert", requestData, { headers: { "Content-Type": "application/x-www-form-urlencoded" }, timeout: 300000 });
   if (response.data && response.data.success && response.data.downloadUrl) {
-    const downloadUrl = response.data.downloadUrl;
     const writer = fs.createWriteStream(outPath);
-    const fileRes = await axios({ url: downloadUrl, method: "GET", responseType: "stream", timeout: 120000 });
+    const fileRes = await axios({ url: response.data.downloadUrl, method: "GET", responseType: "stream", timeout: 120000 });
     fileRes.data.pipe(writer);
-    
-    return new Promise((resolve, reject) => {
-      writer.on("finish", () => resolve(true));
-      writer.on("error", reject);
-    });
-  } else {
-    throw new Error(response.data?.error || "YTMP3.GE API returned an invalid response.");
-  }
+    return new Promise((resolve, reject) => { writer.on("finish", () => resolve(true)); writer.on("error", reject); });
+  } else throw new Error(response.data?.error || "YTMP3.GE API returned an invalid response.");
 }
 
-// 📌 3. Old Fallback APIs
 async function fallbackAudioAPIs(url, outPath) {
-  const apis = [
-    `https://api.deliriussapi.site/download/ytmp3?url=${encodeURIComponent(url)}`,
-    `https://bk9.fun/download/ytmp3?url=${encodeURIComponent(url)}`
-  ];
+  const apis = [`https://api.deliriussapi.site/download/ytmp3?url=${encodeURIComponent(url)}`, `https://bk9.fun/download/ytmp3?url=${encodeURIComponent(url)}`];
   for (let api of apis) {
     try {
       const res = await axios.get(api, { timeout: 15000 });
@@ -306,10 +244,7 @@ async function fallbackAudioAPIs(url, outPath) {
         const writer = fs.createWriteStream(outPath);
         const fileRes = await axios({ url: dlUrl, method: 'GET', responseType: 'stream', timeout: 120000 });
         fileRes.data.pipe(writer);
-        return new Promise((resolve, reject) => {
-          writer.on('finish', () => resolve(true));
-          writer.on('error', reject);
-        });
+        return new Promise((resolve, reject) => { writer.on('finish', () => resolve(true)); writer.on('error', reject); });
       }
     } catch (e) { continue; }
   }
@@ -318,20 +253,12 @@ async function fallbackAudioAPIs(url, outPath) {
 
 async function convertAudio(inputPath, outputPath, isPtt = false) {
   return new Promise((resolve, reject) => {
-    if (!isValidMediaFile(inputPath)) {
-      return reject(new Error("Input file is corrupted or empty before conversion."));
-    }
+    if (!isValidMediaFile(inputPath)) return reject(new Error("Input file is corrupted or empty before conversion."));
     let command = ffmpeg(inputPath);
     if (isPtt) {
-      command.audioCodec("libopus").format("ogg").audioBitrate("64k").audioChannels(1).audioFrequency(48000)
-        .on("end", () => resolve(outputPath))
-        .on("error", (err) => reject(new Error(`FFmpeg Error (PTT): ${err.message}`)))
-        .save(outputPath);
+      command.audioCodec("libopus").format("ogg").audioBitrate("64k").audioChannels(1).audioFrequency(48000).on("end", () => resolve(outputPath)).on("error", (err) => reject(new Error(`FFmpeg Error (PTT): ${err.message}`))).save(outputPath);
     } else {
-      command.audioCodec("libmp3lame").format("mp3").audioBitrate("192k")
-        .on("end", () => resolve(outputPath))
-        .on("error", (err) => reject(new Error(`FFmpeg Error (MP3): ${err.message}`)))
-        .save(outputPath);
+      command.audioCodec("libmp3lame").format("mp3").audioBitrate("192k").on("end", () => resolve(outputPath)).on("error", (err) => reject(new Error(`FFmpeg Error (MP3): ${err.message}`))).save(outputPath);
     }
   });
 }
@@ -346,84 +273,40 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
   if (!type || isDuplicateTypeAction(pending, type)) return;
 
   pending.isProcessing = true;
-
   let rawFile = makeTempFile(".m4a");
   let finalFile = makeTempFile(type === "ptt" ? ".opus" : ".mp3");
   let downloadedSuccessfully = false;
-  let videoId = pending.video.videoId; // Getting video ID for the new API
+  let videoId = pending.video.videoId;
 
   try {
     await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
-
-    // ATTEMPT 1: YT-DLP (Local Download)
     try {
-      const ytArgs = {
-        format: "bestaudio[ext=m4a]/bestaudio/best",
-        output: rawFile,
-        ffmpegLocation: ffmpegPath,
-        noWarnings: true,
-        noCheckCertificates: true,
-        noPlaylist: true,
-        extractorArgs: "youtube:player_client=android,web",
-        addHeader: ["referer:youtube.com"],
-      };
-
+      const ytArgs = { format: "bestaudio[ext=m4a]/bestaudio/best", output: rawFile, ffmpegLocation: ffmpegPath, noWarnings: true, noCheckCertificates: true, noPlaylist: true, extractorArgs: "youtube:player_client=android,web", addHeader: ["referer:youtube.com"] };
       const cookies = cookiesStatus();
       if (cookies.exists && cookies.sizeBytes > 0) ytArgs.cookies = COOKIES_PATH;
-
       await ytDlp(pending.video.url, ytArgs);
       if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
       else throw new Error("YT-DLP file is invalid or empty");
-    } catch (ytErr) {
-      console.log("YT-DLP AUDIO ERROR:", ytErr.message.substring(0, 100));
-    }
+    } catch (ytErr) { console.log("YT-DLP AUDIO ERROR:", ytErr.message.substring(0, 100)); }
 
-    // ATTEMPT 2: New Download Lagu API
     if (!downloadedSuccessfully && videoId) {
       console.log("Switching to Lagu MP3 API Fallback...");
-      try {
-        safeUnlink(rawFile);
-        rawFile = makeTempFile(".mp3");
-        await downloadFromLaguAPI(videoId, rawFile);
-        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
-        else throw new Error("Lagu MP3 file is invalid or empty");
-      } catch (laguErr) {
-        console.log("LAGU MP3 API ERROR:", laguErr.message);
-      }
+      try { safeUnlink(rawFile); rawFile = makeTempFile(".mp3"); await downloadFromLaguAPI(videoId, rawFile); if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; else throw new Error("Lagu MP3 file is invalid or empty"); } catch (laguErr) { console.log("LAGU MP3 API ERROR:", laguErr.message); }
     }
 
-    // ATTEMPT 3: YTMP3.GE API
     if (!downloadedSuccessfully) {
       console.log("Switching to YTMP3.GE API Fallback...");
-      try {
-        safeUnlink(rawFile);
-        rawFile = makeTempFile(".mp3");
-        await downloadFromYTmp3GeAPI(pending.video.url, rawFile);
-        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
-        else throw new Error("YTMP3.GE file is invalid or empty");
-      } catch (ytgeErr) {
-        console.log("YTMP3.GE API ERROR:", ytgeErr.message);
-      }
+      try { safeUnlink(rawFile); rawFile = makeTempFile(".mp3"); await downloadFromYTmp3GeAPI(pending.video.url, rawFile); if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; else throw new Error("YTMP3.GE file is invalid or empty"); } catch (ytgeErr) { console.log("YTMP3.GE API ERROR:", ytgeErr.message); }
     }
 
-    // ATTEMPT 4: Old Fallback APIs
     if (!downloadedSuccessfully) {
       console.log("Switching to Old Audio API Fallback...");
-      try {
-        safeUnlink(rawFile);
-        rawFile = makeTempFile(".mp3");
-        await fallbackAudioAPIs(pending.video.url, rawFile);
-        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
-        else throw new Error("Fallback APIs file is invalid or empty");
-      } catch (fbErr) {
-        console.log("OLD FALLBACK API ERROR:", fbErr.message);
-      }
+      try { safeUnlink(rawFile); rawFile = makeTempFile(".mp3"); await fallbackAudioAPIs(pending.video.url, rawFile); if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; else throw new Error("Fallback APIs file is invalid or empty"); } catch (fbErr) { console.log("OLD FALLBACK API ERROR:", fbErr.message); }
     }
 
     if (!downloadedSuccessfully) throw new Error("All download methods failed to provide a valid audio file.");
 
     await sock.sendMessage(from, { react: { text: "🛠", key: mek.key } });
-    
     await convertAudio(rawFile, finalFile, type === "ptt");
 
     const sizeMB = getFileSizeMB(finalFile);
@@ -435,30 +318,14 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
     const buffer = fs.readFileSync(finalFile);
 
     if (type === "doc") {
-      await sock.sendMessage(from, {
-        document: buffer,
-        mimetype: "audio/mpeg",
-        fileName: `${cleanTitle}.mp3`,
-        caption: caption,
-        contextInfo: channelContextInfo()
-      }, { quoted: mek });
+      await sock.sendMessage(from, { document: buffer, mimetype: "audio/mpeg", fileName: `${cleanTitle}.mp3`, caption: caption, contextInfo: channelContextInfo() }, { quoted: mek });
     } else if (type === "ptt") {
-      await sock.sendMessage(from, {
-        audio: buffer,
-        mimetype: "audio/ogg; codecs=opus",
-        ptt: true,
-        contextInfo: channelContextInfo()
-      }, { quoted: mek });
+      await sock.sendMessage(from, { audio: buffer, mimetype: "audio/ogg; codecs=opus", ptt: true, contextInfo: channelContextInfo() }, { quoted: mek });
     } else {
-      await sock.sendMessage(from, {
-        audio: buffer,
-        mimetype: "audio/mpeg",
-        contextInfo: channelContextInfo()
-      }, { quoted: mek });
+      await sock.sendMessage(from, { audio: buffer, mimetype: "audio/mpeg", contextInfo: channelContextInfo() }, { quoted: mek });
     }
 
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-
   } catch (e) {
     const errText = (e && (e.stderr || e.message)) || "Unknown Error";
     console.log("ALL AUDIO DOWNLOAD METHODS FAILED:", errText);
@@ -466,33 +333,26 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
     const cleanErr = String(errText).replace(/\n/g, " ").trim();
     await sendErrorMsg(reply, `Audio Download Failed: ${cleanErr.substring(0, 100)}`);
   } finally {
-    safeUnlink(rawFile);
-    safeUnlink(finalFile);
+    safeUnlink(rawFile); safeUnlink(finalFile);
     if (pendingAudioType[key]) pendingAudioType[key].isProcessing = false;
     delete pendingAudioType[key];
   }
 }
 
-// ==========================================
-// Command Trigger
-// ==========================================
 cmd({
-  pattern: "song",
-  alias: ["ytmp3", "yta", "mp3", "play"],
+  pattern: "song", alias: ["ytmp3", "yta", "mp3", "play"],
   react: "🔍",
   desc: "Download YouTube audio with multiple options",
   category: "download",
   filename: __filename,
+  
 }, async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
   try {
     if (!q) return await sendErrorMsg(reply, "Please provide a YouTube link or song name.");
-
     const video = await getYoutube(q);
     if (!video) return await sendErrorMsg(reply, "No results found.");
-
     const key = makePendingKey(sender, from);
     pendingAudioType[key] = { video, from, createdAt: Date.now(), isProcessing: false, lastActionSig: "", lastActionAt: 0 };
-
     await sendAudioInteractiveMenu(sock, from, mek, video, sessionId);
   } catch (e) {
     await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
@@ -500,9 +360,6 @@ cmd({
   }
 });
 
-// ==========================================
-// Reply Handler (Buttons & Numbers)
-// ==========================================
 replyHandlers.push({
   filter: (_body, { sender, from }) => !!pendingAudioType[makePendingKey(sender, from)],
   function: async (sock, mek, m, { from, body, sender, reply }) => {
@@ -512,7 +369,6 @@ replyHandlers.push({
   },
 });
 
-// Auto-cleanup session
 setInterval(() => {
   const now = Date.now();
   for (const key of Object.keys(pendingAudioType)) {
