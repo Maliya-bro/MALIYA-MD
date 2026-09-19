@@ -11,6 +11,8 @@ try {
   ({ sendInteractiveMessage } = require("gifted-btns"));
 } catch {}
 
+console.log("✅ settings plugin loaded");
+
 const SETTINGS_IMAGE =
   "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/ChatGPT%20Image%20Mar%2022,%202026,%2008_42_52%20AM.png?raw=true";
 
