@@ -2,9 +2,9 @@ const { cmd } = require('../command');
 const axios = require('axios');
 
 cmd({
-    pattern: "videopro",
-    alias: ["text2video", "genvideo", "videogen", "videopro", "txt2video"],
-    desc: "Generate AI videos using OmegaTech Txt2Video API",
+    pattern: "videogen",
+    alias: ["text2video", "genvideo", "videogen", "videopro"],
+    desc: "Generate AI videos using MALIYA-MD AI Txt2Video API",
     category: "ai",
     react: "🎬",
     filename: __filename
@@ -17,22 +17,23 @@ async (conn, mek, m, { from, q, reply }) => {
 
         // Loading React 
         await conn.sendMessage(from, { react: { text: "⏳", key: mek.key } });
-        await reply(`_⏳ Video එක Generate වෙමින් පවතී. කරුණාකර විනාඩි 2-3ක් රැඳී සිටින්න..._`);
+        await reply(`_⏳ Genarating Your Video Please Wait!..._`);
 
         const encodedPrompt = encodeURIComponent(q.trim());
         const apiUrl = `https://omegatech-api.dixonomega.tech/api/ai/Txt2video?action=generate&prompt=${encodedPrompt}&ratio=auto&sound=true`;
 
-        // 1. API Request එක (Timeout එක විනාඩි 3ක් දක්වා වැඩි කළා)
+        // API Request (Timeout එක විනාඩි 3ක්)
         const apiRes = await axios.get(apiUrl, { timeout: 180000 });
 
-        let videoUrl = apiRes.data?.data?.resultVideoUrl || 
+        // 🛠️ FIX: JSON Response එකෙන් 'videoUrl' හරියටම අල්ලා ගැනීම
+        let videoUrl = apiRes.data?.data?.videoUrl || 
+                       apiRes.data?.data?.resultVideoUrl || 
                        apiRes.data?.data?.url || 
-                       apiRes.data?.url || 
-                       apiRes.data?.result;
+                       apiRes.data?.url;
 
         if (videoUrl) {
             
-            // 2. Video Buffer Download කිරීම (Timeout එක විනාඩි 3ක්)
+            // Video Buffer Download කිරීම
             const vidRes = await axios.get(videoUrl, {
                 responseType: 'arraybuffer',
                 timeout: 180000,
@@ -56,13 +57,11 @@ async (conn, mek, m, { from, q, reply }) => {
             await conn.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
         } else {
-            // API එකෙන් ආපු අවුල Terminal එකේ පෙන්නන්න
             console.log("❌ Txt2Video API Error / Full Response:", apiRes.data);
             throw new Error("Invalid API Response or Video generation failed.");
         }
 
     } catch (error) {
-        // Terminal එකේ Error එක හරියටම බලාගන්න Logs එකතු කළා
         console.error("❌ Text2Video Catch Error:", error.message);
         if (error.response) console.error("❌ API Error Data:", error.response.data);
 
