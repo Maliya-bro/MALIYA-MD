@@ -181,7 +181,7 @@ function menuHeader(userName = "User") {
 ★彡 *${BOT_NAME}* 彡★
 ┗━━━◢◤◆◥◣━━━━┛
 
-✨ 👋 *ʜɪ, ${styledUser}!* /n
+✨ 👋 *ʜɪ, ${styledUser}!* \n
 ╔═══·༻𐫱༺·════════╗
 🤖 *ʙᴏᴛ ɴᴀᴍᴇ :* ${BOT_NAME}
 👤 *ᴜsᴇʀ :* ${styledUser}
