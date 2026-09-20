@@ -100,8 +100,12 @@ const port = process.env.PORT || 8000;
 
 /* ==================== MIDDLEWARES ==================== */
 // ✅ Web එකෙන් එන requests වලට ඉඩ දෙන්න CORS වෙනස් කළා (x-settings-token add කළා)
+// ✅ Web එකෙන් එන requests වලට ඉඩ දෙන්න CORS වෙනස් කළා (Credentials එක්ක)
 app.use(cors({ 
-  origin: "*", 
+  origin: function(origin, callback) {
+    callback(null, true); // ඕනෑම තැනකින් එන request එකකට අවසර දෙනවා
+  },
+  credentials: true, // HTML එකෙන් එවන credentials වලට ඉඩ දෙනවා
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "x-settings-token"]
 }));
