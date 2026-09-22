@@ -1,4 +1,4 @@
-const { cmd } = require("../command");
+const { cmd, replyHandlers } = require("../command");
 const scraper = require("liyanaarachchi-animeheavenme");
 
 // State Management per Session & User
@@ -8,9 +8,12 @@ const lastProcessedMsg = {};
 const SESSION_TIMEOUT = 10 * 60 * 1000; // 10 Minutes
 const LOOP_COOLDOWN = 3000;
 
-function clearUserSession(sessionId, sender) {
-  const key = `${sessionId}_${sender}`;
-  delete pendingAnimeSearch[key];
+function makePendingKey(sender, from) {
+  return `${from || ""}::${(sender || "").split(":")[0]}`;
+}
+
+function clearUserSession(k) {
+  delete pendingAnimeSearch[k];
 }
 
 function toSmallCaps(str = "") {
@@ -40,7 +43,7 @@ cmd(
     react: "🎌",
     filename: __filename,
   },
-  async (bot, mek, m, { from, q, sender, reply, sessionId }) => {
+  async (bot, mek, m, { from, q, sender, reply }) => {
     if (!q) {
       return reply(
         "📱 *ᴜsᴀɢᴇ:* `.animedl [anime name]`\n💡 *ᴇxᴀᴍᴘʟᴇ:* `.animedl naruto`"
@@ -58,14 +61,15 @@ cmd(
         return reply(`❌ *ɴᴏ ᴀɴɪᴍᴇ ғᴏᴜɴᴅ ғᴏʀ:* _${q}_`);
       }
 
-      const userSessionKey = `${sessionId}_${sender}`;
-      clearUserSession(sessionId, sender);
+      const k = makePendingKey(sender, from);
+      clearUserSession(k);
 
       // Store up to 10 Search Results
       const topResults = searchResults.slice(0, 10);
-      pendingAnimeSearch[userSessionKey] = {
+      pendingAnimeSearch[k] = {
         results: topResults,
         timestamp: Date.now(),
+        isProcessing: false,
       };
 
       let text = `╭━━━〔 🎌 *ᴀɴɪᴍᴇ sᴇᴀʀᴄʜ (ᴍᴀx 10 ʀᴇsᴜʟᴛs)* 〕━━━\n┃\n`;
@@ -94,42 +98,46 @@ cmd(
 
 // ============================================================
 // 2. NUMBER REPLIES SELECTION HANDLER (URL STREAMING AS DOCUMENT)
+//    Cinesubz-style replyHandlers entry instead of a cmd filter.
 // ============================================================
-cmd(
-  {
-    filter: (text, { sender, key }) => {
-      if (!sender || (key && key.fromMe)) return false;
-      return /^[\d\s,]+$/.test(text ? text.trim() : "");
-    },
+const animeReplyHandler = {
+  filter: (text, { sender, from }) => {
+    if (!text) return false;
+    const k = makePendingKey(sender, from);
+    if (!pendingAnimeSearch[k]) return false;
+    return /^[\d\s,]+$/.test(text.trim());
   },
-  async (bot, mek, m, { body, sender, reply, from, sessionId }) => {
-    const userSessionKey = `${sessionId}_${sender}`;
-    const session = pendingAnimeSearch[userSessionKey];
-    if (!session) return;
+  function: async (sock, mek, m, { body, sender, from, reply }) => {
+    const k = makePendingKey(sender, from);
+    const session = pendingAnimeSearch[k];
+    if (!session || session.isProcessing) return;
 
-    const input = body ? body.trim() : "";
-    
+    const input = String(body || "").trim();
+    if (!input) return;
+
     // Parse selected indices
     const chosenIndices = input
       .split(/[\s,]+/)
-      .map((n) => parseInt(n))
+      .map((n) => parseInt(n, 10))
       .filter((n) => !isNaN(n) && n >= 1 && n <= session.results.length);
 
     if (chosenIndices.length === 0) return;
 
-    // Limit selection to maximum 4 Anime
-    const finalSelectionIndices = [...new Set(chosenIndices)].slice(0, 4);
-
     // Loop & Spam Guard
     const now = Date.now();
-    const lastMsg = lastProcessedMsg[userSessionKey];
+    const lastMsg = lastProcessedMsg[k];
     if (lastMsg && lastMsg.text === input && now - lastMsg.time < LOOP_COOLDOWN) {
       return;
     }
-    lastProcessedMsg[userSessionKey] = { text: input, time: now };
+    lastProcessedMsg[k] = { text: input, time: now };
+
+    session.isProcessing = true;
+
+    // Limit selection to maximum 4 Anime
+    const finalSelectionIndices = [...new Set(chosenIndices)].slice(0, 4);
 
     const searchResults = session.results;
-    clearUserSession(sessionId, sender);
+    clearUserSession(k);
 
     const selectedAnimeList = finalSelectionIndices.map((idx) => searchResults[idx - 1]);
 
@@ -181,7 +189,7 @@ cmd(
               continue;
             }
 
-            await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
+            await sock.sendMessage(from, { react: { text: "📥", key: m.key } });
 
             // File Name Formatting
             const cleanTitle = anime.title.replace(/[^\w\s.-]/gi, "").substring(0, 50);
@@ -194,7 +202,7 @@ cmd(
               `👑 *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ*`;
 
             // Direct URL Streaming Document Sending (No Axios Buffer to avoid RAM crash)
-            await bot.sendMessage(
+            await sock.sendMessage(
               from,
               {
                 document: { url: videoUrl },
@@ -205,7 +213,7 @@ cmd(
               { quoted: mek }
             );
 
-            await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+            await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
 
             // Garbage Collection
             videoUrl = null;
@@ -226,8 +234,10 @@ cmd(
     }
 
     await reply(`🎉 *All Selected Anime Document Downloads Completed Successfully!*`);
-  }
-);
+  },
+};
+
+if (Array.isArray(replyHandlers)) replyHandlers.push(animeReplyHandler);
 
 // Automatic Session Garbage Collector
 setInterval(() => {
