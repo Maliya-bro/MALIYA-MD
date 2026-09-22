@@ -16,7 +16,7 @@ const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
 function makePendingKey(sender, from) {
-  return `${from \vert{}\vert{} ""}::${(sender || "").split(":")[0]}`;
+  return `${from || ""}::${(sender || "").split(":")[0]}`;
 }
 
 function clearUserSession(k) {
@@ -44,6 +44,7 @@ function channelContextInfo() {
   };
 }
 
+// Returns a raw JPEG Buffer (NOT base64) — Baileys' jpegThumbnail field expects a Buffer.
 async function getThumbnailBuffer(url) {
   const tryUrl = url || DEFAULT_SEARCH_IMAGE;
   try {
@@ -56,9 +57,7 @@ async function getThumbnailBuffer(url) {
     image.cover(320, 320);
     image.quality(70);
     const resizedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
-    
-    return resizedBuffer.toString('base64');
-    
+    return resizedBuffer;
   } catch (e) {
     if (tryUrl !== DEFAULT_SEARCH_IMAGE) {
       try {
@@ -66,9 +65,7 @@ async function getThumbnailBuffer(url) {
         const image2 = await Jimp.read(Buffer.from(res2.data));
         image2.cover(320, 320);
         image2.quality(70);
-        const resizedBuffer2 = await image2.getBufferAsync(Jimp.MIME_JPEG);
-        
-        return resizedBuffer2.toString('base64');
+        return await image2.getBufferAsync(Jimp.MIME_JPEG);
       } catch (e2) {
         return null;
       }
@@ -375,8 +372,7 @@ const csReplyHandler = {
 
           const thumbBuffer = await getThumbnailBuffer(movie.metadata.poster);
           if (thumbBuffer) {
-             // We pass base64 to jpegThumbnail even here to ensure support if needed
-             await sock.sendMessage(from, { image: Buffer.from(thumbBuffer, 'base64'), caption: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
+             await sock.sendMessage(from, { image: thumbBuffer, caption: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
           } else {
              await sock.sendMessage(from, { text: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
           }
@@ -408,7 +404,7 @@ const csReplyHandler = {
             contextInfo: channelContextInfo()
           };
           if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
-          
+
           await sock.sendMessage(from, docPayload, { quoted: mek });
         } else {
           await sock.sendMessage(from, { text: captionText, contextInfo: channelContextInfo() }, { quoted: mek });
