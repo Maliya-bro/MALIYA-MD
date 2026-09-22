@@ -3,6 +3,7 @@ const axios = require("axios");
 const CryptoJS = require("crypto-js");
 const https = require("https");
 const crypto = require("crypto");
+const sharp = require("sharp"); // 🛠️ Thumbnail එක ෆෝන් එකට හදන්න Sharp එකතු කළා
 const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
@@ -17,7 +18,7 @@ const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
 function makePendingKey(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
+  return `${from \vert{}\vert{} ""}::${(sender || "").split(":")[0]}`;
 }
 
 function clearUserSession(k) {
@@ -45,12 +46,21 @@ function channelContextInfo() {
   };
 }
 
+// 🛠️ FIX: Mobile App එකට support කරන විදියට Thumbnail එක Resize කරලා Base64 කිරීම
 async function getThumbnailBuffer(url) {
   try {
     if (!url) return null;
     const res = await axios.get(url, { responseType: "arraybuffer", timeout: 8000 });
-    return Buffer.from(res.data);
+    
+    // Sharp මගින් Size එක පොඩි කර WhatsApp Mobile වලට ගැළපෙන ලෙස Base64 string එකක් සෑදීම
+    const resizedBuffer = await sharp(Buffer.from(res.data))
+      .resize({ width: 320 }) // ෆෝන් එකේ පේන්න තරම් පොඩි කරයි
+      .jpeg({ quality: 60 })  // File size එක 50KB වලට වඩා අඩුවෙන් තබා ගනී
+      .toBuffer();
+      
+    return resizedBuffer.toString("base64");
   } catch (e) {
+    console.error("Thumbnail generation error:", e.message);
     return null;
   }
 }
@@ -376,7 +386,6 @@ const csReplyHandler = {
         const allLinks = finalResult.links;
         const skylineLinks = allLinks.filter(link => link.includes('skylines'));
         const pixeldrainLinks = allLinks.filter(link => link.includes('pixeldrain'));
-        const telegramLinks = allLinks.filter(link => link.includes('telegram'));
 
         let directDownloadUrl = null;
         if (skylineLinks.length > 0) directDownloadUrl = skylineLinks[0];
@@ -389,14 +398,10 @@ const csReplyHandler = {
         captionText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
         captionText += `🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n`;
         captionText += `📊 *Quality :* ${selectedLink.quality}\n\n`;
-        
-        //if (skylineLinks.length > 0) captionText += `🌟 *Direct Link :* ${skylineLinks[0]}\n\n`;
-       // if (pixeldrainLinks.length > 0) captionText += `⚡ *Pixeldrain :* ${pixeldrainLinks[0]}\n\n`;
-       // if (telegramLinks.length > 0) captionText += `✈️ *Telegram :* ${telegramLinks[0]}\n\n`;
-        
         captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-        const thumbBuffer = await getThumbnailBuffer(movie.metadata.poster);
+        // 🛠️ FIX: Mobile Supported Base64 Thumbnail
+        const thumbBase64 = await getThumbnailBuffer(movie.metadata.poster);
 
         if (directDownloadUrl) {
           const docPayload = {
@@ -407,8 +412,9 @@ const csReplyHandler = {
             contextInfo: channelContextInfo()
           };
 
-          if (thumbBuffer) {
-            docPayload.jpegThumbnail = thumbBuffer;
+          // Base64 Thumbnail එක යෙදීම
+          if (thumbBase64) {
+            docPayload.jpegThumbnail = thumbBase64;
           }
 
           await sock.sendMessage(from, docPayload, { quoted: mek });
