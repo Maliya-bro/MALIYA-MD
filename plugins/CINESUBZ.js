@@ -15,15 +15,33 @@ const LOOP_COOLDOWN = 3000;
 const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
-function makePendingKey(sender, from) { return `${from \vert{}\vert{} ""}::${(sender || "").split(":")[0]}`; }
-function clearUserSession(k) { delete pendingCineSubz[k]; }
+function makePendingKey(sender, from) { 
+  return `${from \vert{}\vert{} ""}::${(sender || "").split(":")[0]}`; 
+}
+
+function clearUserSession(k) { 
+  delete pendingCineSubz[k]; 
+}
+
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
-  return String(str).split("").map((char) => { const idx = normal.indexOf(char); return idx !== -1 ? small[idx] : char; }).join("");
+  return String(str).split("").map((char) => { 
+    const idx = normal.indexOf(char); 
+    return idx !== -1 ? small[idx] : char; 
+  }).join("");
 }
+
 function channelContextInfo() {
-  return { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: CHANNEL_JID, newsletterName: CHANNEL_NAME, serverMessageId: -1 } };
+  return { 
+    forwardingScore: 999, 
+    isForwarded: true, 
+    forwardedNewsletterMessageInfo: { 
+      newsletterJid: CHANNEL_JID, 
+      newsletterName: CHANNEL_NAME, 
+      serverMessageId: -1 
+    } 
+  };
 }
 
 async function getThumbnailBuffer(url) {
@@ -35,19 +53,25 @@ async function getThumbnailBuffer(url) {
     image.quality(60);
     const resizedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
     return resizedBuffer.toString("base64");
-  } catch (e) { return null; }
+  } catch (e) { 
+    return null; 
+  }
 }
 
 async function sendErrorMsg(sock, from, mek, text) {
-  await sock.sendMessage(from, { text: `⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _${text}_`, contextInfo: channelContextInfo() }, { quoted: mek });
+  await sock.sendMessage(from, { 
+    text: `⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _${text}_`, 
+    contextInfo: channelContextInfo() 
+  }, { quoted: mek });
 }
 
-// 🚀 සම්පූර්ණයෙන්ම සාර්ථක වූ Ultimate Bypass Extractor
 async function getCineSubzLinks(originalUrl) {
   let baseServerMatch = originalUrl.match(/server(\d+)/);
   let serversToTry = [];
   if (baseServerMatch) serversToTry.push(baseServerMatch[1]);
-  ['1', '2', '3', '4', '5', '6', '8', '9', '7', '11'].forEach(s => { if (!serversToTry.includes(s)) serversToTry.push(s); });
+  ['1', '2', '3', '4', '5', '6', '8', '9', '7', '11'].forEach(s => { 
+    if (!serversToTry.includes(s)) serversToTry.push(s); 
+  });
 
   for (let serverNum of serversToTry) {
     let movieUrl = originalUrl;
@@ -161,17 +185,29 @@ async function getCineSubzLinks(originalUrl) {
       const finalLinks = [...new Set(results)];
       if (finalLinks.length > 0) return { success: true, links: finalLinks };
 
-    } catch (error) { continue; }
+    } catch (error) { 
+      continue; 
+    }
   }
   return { error: 'File not found on any server.' };
 }
 
 cmd({
-  pattern: "cinesubz", alias: ["cinesub", "cs", "cssearch", "film", "movie"], react: "🎬",
-  desc: "Search and send movies from Cinesubz.co", category: "download", filename: __filename
+  pattern: "cinesubz", 
+  alias: ["cinesub", "cs", "cssearch", "film", "movie"], 
+  react: "🎬",
+  desc: "Search and send movies from Cinesubz.co", 
+  category: "download", 
+  filename: __filename
 }, async (sock, mek, m, { from, q, sender, sessionId }) => {
   try {
-    if (!q) return await sock.sendMessage(from, { text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.cinesubz <name>\`\n💡 *Example:* \`.cinesubz avengers\``, contextInfo: channelContextInfo() }, { quoted: mek });
+    if (!q) {
+      return await sock.sendMessage(from, { 
+        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.cinesubz <name>\`\n💡 *Example:* \`.cinesubz avengers\``, 
+        contextInfo: channelContextInfo() 
+      }, { quoted: mek });
+    }
+
     await sock.sendMessage(from, { react: { text: "🔍", key: m.key } });
     
     const results = await searchCineSubz(q.trim());
@@ -185,12 +221,24 @@ cmd({
     clearUserSession(k);
     pendingCineSubz[k] = { step: 1, results: topResults, timestamp: Date.now(), isProcessing: false };
 
-    let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n`;
-    topResults.forEach((item, index) => { text += `*[ ${String(index + 1).padStart(2, "0")} ]* ➔ *${item.title}*\n`; });
+    let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+    text += `🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n`;
+    text += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+    text += `🎀 *Search :* ${q}\n`;
+    text += `🍿 *Results :* ${topResults.length}\n\n`;
+
+    topResults.forEach((item, index) => { 
+      text += `*[ ${String(index + 1).padStart(2, "0")} ]* ➔ *${item.title}*\n`; 
+    });
     text += `\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 👇 *Reply with a number to Download...*`;
 
     let searchImg = DEFAULT_SEARCH_IMAGE;
-    if (sessionId) { try { const custom = await getCustomImage(sessionId, "cinesubz_header"); if (custom && custom.data) searchImg = custom.data; } catch (e) {} }
+    if (sessionId) { 
+      try { 
+        const custom = await getCustomImage(sessionId, "cinesubz_header"); 
+        if (custom && custom.data) searchImg = custom.data; 
+      } catch (e) {} 
+    }
     
     await sock.sendMessage(from, { image: { url: searchImg }, caption: text, contextInfo: channelContextInfo() }, { quoted: mek });
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
@@ -236,7 +284,13 @@ const csReplyHandler = {
         
         const downloadLinks = movieInfo.downloadLinks.filter(d => {
           const match = d.quality.match(/([\d.]+)\s*(MB|GB)/i);
-          if (match) { const size = parseFloat(match[1]); const unit = match[2].toUpperCase(); if (unit === 'GB') return size < 2.0; if (unit === 'MB') return true; } return true;
+          if (match) { 
+            const size = parseFloat(match[1]); 
+            const unit = match[2].toUpperCase(); 
+            if (unit === 'GB') return size < 2.0; 
+            if (unit === 'MB') return true; 
+          } 
+          return true;
         });
         
         if (downloadLinks.length === 0) { 
@@ -244,11 +298,16 @@ const csReplyHandler = {
           return await sendErrorMsg(sock, from, mek, "No download links found below 2GB."); 
         }
 
-        let qualityMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
+        let qualityMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+        qualityMsg += `📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n`;
+        qualityMsg += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+        qualityMsg += `🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
         if (movieInfo.imdb_rate) qualityMsg += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
         if (movieInfo.duration) qualityMsg += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
         
-        downloadLinks.forEach((d, i) => { qualityMsg += `*[ ${String(i + 1).padStart(2, "0")} ]* 📊 *${d.quality}*\n`; });
+        downloadLinks.forEach((d, i) => { 
+          qualityMsg += `*[ ${String(i + 1).padStart(2, "0")} ]* 📊 *${d.quality}*\n`; 
+        });
         qualityMsg += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply with quality number to Download...*`;
 
         if (movieInfo.poster) { 
@@ -286,9 +345,10 @@ const csReplyHandler = {
 
         const finalResult = await getCineSubzLinks(targetServerLink);
         
-        // Fallback System if link extraction fails
         if (!finalResult.success || !finalResult.links || finalResult.links.length === 0) {
-          let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+          let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+          fallbackText += `⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n`;
+          fallbackText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
           fallbackText += `🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n`;
           fallbackText += `📊 *Quality :* ${selectedLink.quality}\n\n`;
           fallbackText += `ℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය. කරුණාකර පහත Link එකෙන් ලබාගන්න:_\n\n`;
@@ -311,11 +371,23 @@ const csReplyHandler = {
         let directDownloadUrl = terracloudLinks.length > 0 ? terracloudLinks[0] : (pixeldrainLinks.length > 0 ? pixeldrainLinks[0] : null);
         const cleanTitle = movie.metadata.title.replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
 
-        let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\n⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+        let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
+        captionText += `✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
+        captionText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+        captionText += `🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n`;
+        captionText += `📊 *Quality :* ${selectedLink.quality}\n\n`;
+        captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+        
         const thumbBase64 = await getThumbnailBuffer(movie.metadata.poster);
 
         if (directDownloadUrl) {
-          const docPayload = { document: { url: directDownloadUrl }, mimetype: "video/mp4", fileName: `MALIYA-MD ${cleanTitle}.mp4`, caption: captionText, contextInfo: channelContextInfo() };
+          const docPayload = { 
+            document: { url: directDownloadUrl }, 
+            mimetype: "video/mp4", 
+            fileName: `MALIYA-MD ${cleanTitle}.mp4`, 
+            caption: captionText, 
+            contextInfo: channelContextInfo() 
+          };
           if (thumbBase64) docPayload.jpegThumbnail = thumbBase64;
           await sock.sendMessage(from, docPayload, { quoted: mek });
         } else {
@@ -334,6 +406,10 @@ if (Array.isArray(replyHandlers)) replyHandlers.push(csReplyHandler);
 
 setInterval(() => {
   const now = Date.now();
-  for (const k in pendingCineSubz) { if (now - pendingCineSubz[k].timestamp > SESSION_TIMEOUT) delete pendingCineSubz[k]; }
-  for (const k in lastProcessedMsg) { if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) delete lastProcessedMsg[k]; }
+  for (const k in pendingCineSubz) { 
+    if (now - pendingCineSubz[k].timestamp > SESSION_TIMEOUT) delete pendingCineSubz[k]; 
+  }
+  for (const k in lastProcessedMsg) { 
+    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) delete lastProcessedMsg[k]; 
+  }
 }, 2.5 * 60 * 1000);
