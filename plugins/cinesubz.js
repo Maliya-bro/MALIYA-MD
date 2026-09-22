@@ -3,7 +3,7 @@ const axios = require("axios");
 const CryptoJS = require("crypto-js");
 const https = require("https");
 const crypto = require("crypto");
-const Jimp = require("jimp"); // 🛠️ Sharp වෙනුවට Jimp භාවිතා කිරීම
+const Jimp = require("jimp");
 const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
@@ -46,20 +46,17 @@ function channelContextInfo() {
   };
 }
 
-// 🛠️ FIX: Jimp භාවිතා කර Thumbnail එක Resize කර Base64 කිරීම
 async function getThumbnailBuffer(url) {
   try {
     if (!url) return null;
     const res = await axios.get(url, { responseType: "arraybuffer", timeout: 8000 });
     
-    // Jimp මගින් Image එක කියවා, Resize කර, Quality එක හදා Buffer එකක් ගැනීම
     const image = await Jimp.read(Buffer.from(res.data));
-    image.resize(320, Jimp.AUTO); // පළල 320px කරයි, උස auto adjust වේ
-    image.quality(60);            // File size එක අඩු කිරීමට Quality එක 60% කරයි
+    image.resize(320, Jimp.AUTO);
+    image.quality(60);
     
     const resizedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
     return resizedBuffer.toString("base64");
-    
   } catch (e) {
     console.error("Thumbnail generation error (Jimp):", e.message);
     return null;
