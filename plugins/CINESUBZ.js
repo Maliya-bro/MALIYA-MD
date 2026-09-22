@@ -45,15 +45,32 @@ function channelContextInfo() {
 }
 
 async function getThumbnailBuffer(url) {
+  const tryUrl = url || DEFAULT_SEARCH_IMAGE;
   try {
-    if (!url) return null;
-    const res = await axios.get(url, { responseType: "arraybuffer", timeout: 8000 });
+    const res = await axios.get(tryUrl, {
+      responseType: "arraybuffer",
+      timeout: 8000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
+    });
     const image = await Jimp.read(Buffer.from(res.data));
-    image.resize(320, Jimp.AUTO);
-    image.quality(60);
+    // WhatsApp document thumbnails render best close to square (cover-crop).
+    image.cover(320, 320);
+    image.quality(70);
     const resizedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
-    return resizedBuffer.toString("base64");
+    return resizedBuffer;
   } catch (e) {
+    // Fallback: try the default bot image if the poster itself failed
+    if (tryUrl !== DEFAULT_SEARCH_IMAGE) {
+      try {
+        const res2 = await axios.get(DEFAULT_SEARCH_IMAGE, { responseType: "arraybuffer", timeout: 8000 });
+        const image2 = await Jimp.read(Buffer.from(res2.data));
+        image2.cover(320, 320);
+        image2.quality(70);
+        return await image2.getBufferAsync(Jimp.MIME_JPEG);
+      } catch (e2) {
+        return null;
+      }
+    }
     return null;
   }
 }
@@ -355,9 +372,9 @@ const csReplyHandler = {
           fallbackText += `ℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය. කරුණාකර පසුව නැවත උත්සාහ කරන්න._\n\n`;
           fallbackText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-          const thumbBase64 = await getThumbnailBuffer(movie.metadata.poster);
-          if (thumbBase64) {
-             await sock.sendMessage(from, { image: Buffer.from(thumbBase64, 'base64'), caption: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
+          const thumbBuffer = await getThumbnailBuffer(movie.metadata.poster);
+          if (thumbBuffer) {
+             await sock.sendMessage(from, { image: thumbBuffer, caption: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
           } else {
              await sock.sendMessage(from, { text: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
           }
@@ -379,7 +396,7 @@ const csReplyHandler = {
         captionText += `📊 *Quality :* ${selectedLink.quality}\n\n`;
         captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-        const thumbBase64 = await getThumbnailBuffer(movie.metadata.poster);
+        const thumbBuffer = await getThumbnailBuffer(movie.metadata.poster);
 
         if (directDownloadUrl) {
           const docPayload = {
@@ -389,7 +406,7 @@ const csReplyHandler = {
             caption: captionText,
             contextInfo: channelContextInfo()
           };
-          if (thumbBase64) docPayload.jpegThumbnail = thumbBase64;
+          if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
           await sock.sendMessage(from, docPayload, { quoted: mek });
         } else {
           await sock.sendMessage(from, { text: captionText, contextInfo: channelContextInfo() }, { quoted: mek });
