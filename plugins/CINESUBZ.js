@@ -16,7 +16,7 @@ const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
 function makePendingKey(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
+  return `${from \vert{}\vert{} ""}::${(sender || "").split(":")[0]}`;
 }
 
 function clearUserSession(k) {
@@ -44,7 +44,6 @@ function channelContextInfo() {
   };
 }
 
-// Returns a raw JPEG Buffer (NOT base64) — Baileys' jpegThumbnail field expects a Buffer.
 async function getThumbnailBuffer(url) {
   const tryUrl = url || DEFAULT_SEARCH_IMAGE;
   try {
@@ -53,18 +52,26 @@ async function getThumbnailBuffer(url) {
       timeout: 8000,
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
     });
+    
     const image = await Jimp.read(Buffer.from(res.data));
-    image.cover(320, 320);
-    image.quality(70);
-    const resizedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
-    return resizedBuffer;
+    
+    // CRITICAL FIX: WhatsApp strictly drops document thumbnails larger than ~64KB.
+    // Reducing to 150x150 square and quality 40 guarantees a very tiny file size.
+    image.cover(150, 150);
+    image.quality(40);
+    
+    // Return Buffer directly (prevents double base64 encoding errors in Baileys)
+    return await image.getBufferAsync(Jimp.MIME_JPEG);
+    
   } catch (e) {
     if (tryUrl !== DEFAULT_SEARCH_IMAGE) {
       try {
         const res2 = await axios.get(DEFAULT_SEARCH_IMAGE, { responseType: "arraybuffer", timeout: 8000 });
         const image2 = await Jimp.read(Buffer.from(res2.data));
-        image2.cover(320, 320);
-        image2.quality(70);
+        
+        image2.cover(150, 150);
+        image2.quality(40);
+        
         return await image2.getBufferAsync(Jimp.MIME_JPEG);
       } catch (e2) {
         return null;
@@ -404,7 +411,7 @@ const csReplyHandler = {
             contextInfo: channelContextInfo()
           };
           if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
-
+          
           await sock.sendMessage(from, docPayload, { quoted: mek });
         } else {
           await sock.sendMessage(from, { text: captionText, contextInfo: channelContextInfo() }, { quoted: mek });
