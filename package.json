@@ -30,6 +30,7 @@
     "pm2": "latest",
     "qrcode-terminal": "latest",
     "tmp": "latest",
+    "sharp": "latest",
     "@mrnima/tiktok-downloader": "latest",
     "jimp": "latest",
     "genius-lyrics": "latest",
