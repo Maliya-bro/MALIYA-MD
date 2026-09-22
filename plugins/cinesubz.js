@@ -3,9 +3,16 @@ const axios = require("axios");
 const CryptoJS = require("crypto-js");
 const https = require("https");
 const crypto = require("crypto");
-const sharp = require("sharp"); // 🛠️ Thumbnail එක ෆෝන් එකට හදන්න Sharp එකතු කළා
 const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
+
+// 🛠️ Safe Require: Sharp නැතත් මුළු Bot එකම Crash වෙන්නේ නෑ
+let sharp;
+try {
+  sharp = require("sharp");
+} catch (e) {
+  console.log("⚠️ Sharp package is missing! Mobile thumbnails will be disabled.");
+}
 
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
@@ -49,13 +56,14 @@ function channelContextInfo() {
 // 🛠️ FIX: Mobile App එකට support කරන විදියට Thumbnail එක Resize කරලා Base64 කිරීම
 async function getThumbnailBuffer(url) {
   try {
-    if (!url) return null;
+    // sharp හරියට install වෙලා නැත්නම් කෙලින්ම null return කරයි (Crash වීම වළක්වයි)
+    if (!url || !sharp) return null; 
+    
     const res = await axios.get(url, { responseType: "arraybuffer", timeout: 8000 });
     
-    // Sharp මගින් Size එක පොඩි කර WhatsApp Mobile වලට ගැළපෙන ලෙස Base64 string එකක් සෑදීම
     const resizedBuffer = await sharp(Buffer.from(res.data))
-      .resize({ width: 320 }) // ෆෝන් එකේ පේන්න තරම් පොඩි කරයි
-      .jpeg({ quality: 60 })  // File size එක 50KB වලට වඩා අඩුවෙන් තබා ගනී
+      .resize({ width: 320 }) 
+      .jpeg({ quality: 60 })  
       .toBuffer();
       
     return resizedBuffer.toString("base64");
@@ -400,7 +408,6 @@ const csReplyHandler = {
         captionText += `📊 *Quality :* ${selectedLink.quality}\n\n`;
         captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-        // 🛠️ FIX: Mobile Supported Base64 Thumbnail
         const thumbBase64 = await getThumbnailBuffer(movie.metadata.poster);
 
         if (directDownloadUrl) {
@@ -412,7 +419,6 @@ const csReplyHandler = {
             contextInfo: channelContextInfo()
           };
 
-          // Base64 Thumbnail එක යෙදීම
           if (thumbBase64) {
             docPayload.jpegThumbnail = thumbBase64;
           }
