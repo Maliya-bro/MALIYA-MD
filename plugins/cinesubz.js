@@ -3,16 +3,9 @@ const axios = require("axios");
 const CryptoJS = require("crypto-js");
 const https = require("https");
 const crypto = require("crypto");
+const Jimp = require("jimp"); // 🛠️ Sharp වෙනුවට Jimp භාවිතා කිරීම
 const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
-
-// 🛠️ Safe Require: Sharp නැතත් මුළු Bot එකම Crash වෙන්නේ නෑ
-let sharp;
-try {
-  sharp = require("sharp");
-} catch (e) {
-  console.log("⚠️ Sharp package is missing! Mobile thumbnails will be disabled.");
-}
 
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
@@ -53,22 +46,22 @@ function channelContextInfo() {
   };
 }
 
-// 🛠️ FIX: Mobile App එකට support කරන විදියට Thumbnail එක Resize කරලා Base64 කිරීම
+// 🛠️ FIX: Jimp භාවිතා කර Thumbnail එක Resize කර Base64 කිරීම
 async function getThumbnailBuffer(url) {
   try {
-    // sharp හරියට install වෙලා නැත්නම් කෙලින්ම null return කරයි (Crash වීම වළක්වයි)
-    if (!url || !sharp) return null; 
-    
+    if (!url) return null;
     const res = await axios.get(url, { responseType: "arraybuffer", timeout: 8000 });
     
-    const resizedBuffer = await sharp(Buffer.from(res.data))
-      .resize({ width: 320 }) 
-      .jpeg({ quality: 60 })  
-      .toBuffer();
-      
+    // Jimp මගින් Image එක කියවා, Resize කර, Quality එක හදා Buffer එකක් ගැනීම
+    const image = await Jimp.read(Buffer.from(res.data));
+    image.resize(320, Jimp.AUTO); // පළල 320px කරයි, උස auto adjust වේ
+    image.quality(60);            // File size එක අඩු කිරීමට Quality එක 60% කරයි
+    
+    const resizedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
     return resizedBuffer.toString("base64");
+    
   } catch (e) {
-    console.error("Thumbnail generation error:", e.message);
+    console.error("Thumbnail generation error (Jimp):", e.message);
     return null;
   }
 }
