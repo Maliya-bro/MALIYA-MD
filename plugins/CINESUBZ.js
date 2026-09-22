@@ -16,7 +16,7 @@ const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
 function makePendingKey(sender, from) {
-  return `${from \vert{}\vert{} ""}::${(sender || "").split(":")[0]}`;
+  return `${from || ""}::${(sender || "").split(":")[0]}`;
 }
 
 function clearUserSession(k) {
@@ -44,6 +44,7 @@ function channelContextInfo() {
   };
 }
 
+// Fixed Thumbnail Buffer for WhatsApp (150x150 and Quality 40)
 async function getThumbnailBuffer(url) {
   const tryUrl = url || DEFAULT_SEARCH_IMAGE;
   try {
@@ -52,26 +53,17 @@ async function getThumbnailBuffer(url) {
       timeout: 8000,
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
     });
-    
     const image = await Jimp.read(Buffer.from(res.data));
-    
-    // CRITICAL FIX: WhatsApp strictly drops document thumbnails larger than ~64KB.
-    // Reducing to 150x150 square and quality 40 guarantees a very tiny file size.
     image.cover(150, 150);
     image.quality(40);
-    
-    // Return Buffer directly (prevents double base64 encoding errors in Baileys)
     return await image.getBufferAsync(Jimp.MIME_JPEG);
-    
   } catch (e) {
     if (tryUrl !== DEFAULT_SEARCH_IMAGE) {
       try {
         const res2 = await axios.get(DEFAULT_SEARCH_IMAGE, { responseType: "arraybuffer", timeout: 8000 });
         const image2 = await Jimp.read(Buffer.from(res2.data));
-        
         image2.cover(150, 150);
         image2.quality(40);
-        
         return await image2.getBufferAsync(Jimp.MIME_JPEG);
       } catch (e2) {
         return null;
@@ -83,7 +75,7 @@ async function getThumbnailBuffer(url) {
 
 async function sendErrorMsg(sock, from, mek, text) {
   await sock.sendMessage(from, {
-    text: `⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _${text}_`,
+    text: "⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _" + text + "_",
     contextInfo: channelContextInfo()
   }, { quoted: mek });
 }
@@ -226,7 +218,7 @@ cmd({
   try {
     if (!q) {
       return await sock.sendMessage(from, {
-        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.cinesubz <name>\`\n💡 *Example:* \`.cinesubz avengers\``,
+        text: "⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* `.cinesubz <name>`\n💡 *Example:* `.cinesubz avengers`",
         contextInfo: channelContextInfo()
       }, { quoted: mek });
     }
@@ -244,16 +236,16 @@ cmd({
     clearUserSession(k);
     pendingCineSubz[k] = { step: 1, results: topResults, timestamp: Date.now(), isProcessing: false };
 
-    let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
-    text += `🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n`;
-    text += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+    let text = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
+    text += "🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n";
+    text += "⊱━━━━━ • ✿ • ━━━━━⊰\n\n";
     text += `🎀 *Search :* ${q}\n`;
     text += `🍿 *Results :* ${topResults.length}\n\n`;
 
     topResults.forEach((item, index) => {
       text += `*[ ${String(index + 1).padStart(2, "0")} ]* ➔ *${item.title}*\n`;
     });
-    text += `\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 👇 *Reply with a number to Download...*`;
+    text += "\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 👇 *Reply with a number to Download...*";
 
     let searchImg = DEFAULT_SEARCH_IMAGE;
     if (sessionId) {
@@ -321,9 +313,9 @@ const csReplyHandler = {
           return await sendErrorMsg(sock, from, mek, "No download links found below 2GB.");
         }
 
-        let qualityMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
-        qualityMsg += `📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n`;
-        qualityMsg += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+        let qualityMsg = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
+        qualityMsg += "📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n";
+        qualityMsg += "⊱━━━━━ • ✿ • ━━━━━⊰\n\n";
         qualityMsg += `🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
         if (movieInfo.imdb_rate) qualityMsg += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
         if (movieInfo.duration) qualityMsg += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
@@ -331,7 +323,7 @@ const csReplyHandler = {
         downloadLinks.forEach((d, i) => {
           qualityMsg += `*[ ${String(i + 1).padStart(2, "0")} ]* 📊 *${d.quality}*\n`;
         });
-        qualityMsg += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply with quality number to Download...*`;
+        qualityMsg += "\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply with quality number to Download...*";
 
         if (movieInfo.poster) {
           await sock.sendMessage(from, { image: { url: movieInfo.poster }, caption: qualityMsg, contextInfo: channelContextInfo() }, { quoted: mek });
@@ -369,13 +361,13 @@ const csReplyHandler = {
         const finalResult = await getCineSubzLinks(targetServerLink);
 
         if (!finalResult.success || !finalResult.links || finalResult.links.length === 0) {
-          let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
-          fallbackText += `⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n`;
-          fallbackText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+          let fallbackText = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
+          fallbackText += "⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n";
+          fallbackText += "⊱━━━━━ • ✿ • ━━━━━⊰\n\n";
           fallbackText += `🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n`;
           fallbackText += `📊 *Quality :* ${selectedLink.quality}\n\n`;
-          fallbackText += `ℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය. කරුණාකර පසුව නැවත උත්සාහ කරන්න._\n\n`;
-          fallbackText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+          fallbackText += "ℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය. කරුණාකර පසුව නැවත උත්සාහ කරන්න._\n\n";
+          fallbackText += "⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
 
           const thumbBuffer = await getThumbnailBuffer(movie.metadata.poster);
           if (thumbBuffer) {
@@ -393,12 +385,12 @@ const csReplyHandler = {
         let directDownloadUrl = terracloudLinks.length > 0 ? terracloudLinks[0] : (pixeldrainLinks.length > 0 ? pixeldrainLinks[0] : null);
         const cleanTitle = movie.metadata.title.replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
 
-        let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
-        captionText += `✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
-        captionText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+        let captionText = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
+        captionText += "✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n";
+        captionText += "⊱━━━━━ • ✿ • ━━━━━⊰\n\n";
         captionText += `🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n`;
         captionText += `📊 *Quality :* ${selectedLink.quality}\n\n`;
-        captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+        captionText += "⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
 
         const thumbBuffer = await getThumbnailBuffer(movie.metadata.poster);
 
