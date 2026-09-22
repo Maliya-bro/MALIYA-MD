@@ -390,9 +390,9 @@ const csReplyHandler = {
         captionText += `🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n`;
         captionText += `📊 *Quality :* ${selectedLink.quality}\n\n`;
         
-        if (skylineLinks.length > 0) captionText += `🌟 *Direct Link :* ${skylineLinks[0]}\n\n`;
-        if (pixeldrainLinks.length > 0) captionText += `⚡ *Pixeldrain :* ${pixeldrainLinks[0]}\n\n`;
-        if (telegramLinks.length > 0) captionText += `✈️ *Telegram :* ${telegramLinks[0]}\n\n`;
+        //if (skylineLinks.length > 0) captionText += `🌟 *Direct Link :* ${skylineLinks[0]}\n\n`;
+       // if (pixeldrainLinks.length > 0) captionText += `⚡ *Pixeldrain :* ${pixeldrainLinks[0]}\n\n`;
+       // if (telegramLinks.length > 0) captionText += `✈️ *Telegram :* ${telegramLinks[0]}\n\n`;
         
         captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
