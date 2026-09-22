@@ -99,13 +99,12 @@ const app  = express();
 const port = process.env.PORT || 8000;
 
 /* ==================== MIDDLEWARES ==================== */
-// ✅ Web එකෙන් එන requests වලට ඉඩ දෙන්න CORS වෙනස් කළා (x-settings-token add කළා)
-// ✅ Web එකෙන් එන requests වලට ඉඩ දෙන්න CORS වෙනස් කළා (Credentials එක්ක)
+// ✅ Web එකෙන් එන requests වලට ඉඩ දෙන්න CORS වෙනස් කළා
 app.use(cors({ 
   origin: function(origin, callback) {
     callback(null, true); // ඕනෑම තැනකින් එන request එකකට අවසර දෙනවා
   },
-  credentials: true, // HTML එකෙන් එවන credentials වලට ඉඩ දෙනවා
+  credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "x-settings-token"]
 }));
@@ -238,18 +237,37 @@ let pluginsLoaded = false;
 function loadCommandPluginsOnce() {
   if (pluginsLoaded) return;
   pluginsLoaded = true;
+  
+  let successCount = 0;
+  let errorCount = 0;
+
   try {
     fs.readdirSync("./plugins/").forEach((plugin) => {
       if (plugin === "auto_msg.js")   return;
       if (plugin === "antidelete.js") return;
       if (plugin === "anti-spam.js")  return; // Loaded manually
+      
       if (plugin.endsWith(".js")) {
-        require(`./plugins/${plugin}`);
+        try {
+          // 🛠️ මෙතනින් තමයි file එක load කරන්නේ
+          require(`./plugins/${plugin}`);
+          successCount++;
+        } catch (e) {
+          // 🚨 Error එකක් ආවොත් හරියටම File එකේ නමත් එක්කම පෙන්වයි!
+          console.log(`\n❌ [PLUGIN ERROR] අවුල තියෙන ෆයිල් එක: ${plugin}`);
+          console.log(`⚠️ Error Message:`, e?.message || e, `\n`);
+          errorCount++;
+        }
       }
     });
-    console.log("✅ Command plugins loaded");
-  } catch (e) {
-    console.log("⚠️ Plugin load error:", e?.message || e);
+
+    if (errorCount === 0) {
+      console.log(`✅ Command plugins loaded successfully (${successCount} plugins)`);
+    } else {
+      console.log(`⚠️ Command plugins loaded with ${errorCount} errors.`);
+    }
+  } catch (err) {
+    console.log("⚠️ Failed to read plugins directory:", err?.message || err);
   }
 }
 
