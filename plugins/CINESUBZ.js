@@ -16,7 +16,7 @@ const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
 function makePendingKey(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
+  return `${from \vert{}\vert{} ""}::${(sender || "").split(":")[0]}`;
 }
 
 function clearUserSession(k) {
@@ -53,20 +53,22 @@ async function getThumbnailBuffer(url) {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
     });
     const image = await Jimp.read(Buffer.from(res.data));
-    // WhatsApp document thumbnails render best close to square (cover-crop).
     image.cover(320, 320);
     image.quality(70);
     const resizedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
-    return resizedBuffer;
+    
+    return resizedBuffer.toString('base64');
+    
   } catch (e) {
-    // Fallback: try the default bot image if the poster itself failed
     if (tryUrl !== DEFAULT_SEARCH_IMAGE) {
       try {
         const res2 = await axios.get(DEFAULT_SEARCH_IMAGE, { responseType: "arraybuffer", timeout: 8000 });
         const image2 = await Jimp.read(Buffer.from(res2.data));
         image2.cover(320, 320);
         image2.quality(70);
-        return await image2.getBufferAsync(Jimp.MIME_JPEG);
+        const resizedBuffer2 = await image2.getBufferAsync(Jimp.MIME_JPEG);
+        
+        return resizedBuffer2.toString('base64');
       } catch (e2) {
         return null;
       }
@@ -363,7 +365,6 @@ const csReplyHandler = {
         const finalResult = await getCineSubzLinks(targetServerLink);
 
         if (!finalResult.success || !finalResult.links || finalResult.links.length === 0) {
-          // Direct download failed and no raw link is exposed to the user.
           let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
           fallbackText += `⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n`;
           fallbackText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
@@ -374,7 +375,8 @@ const csReplyHandler = {
 
           const thumbBuffer = await getThumbnailBuffer(movie.metadata.poster);
           if (thumbBuffer) {
-             await sock.sendMessage(from, { image: thumbBuffer, caption: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
+             // We pass base64 to jpegThumbnail even here to ensure support if needed
+             await sock.sendMessage(from, { image: Buffer.from(thumbBuffer, 'base64'), caption: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
           } else {
              await sock.sendMessage(from, { text: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
           }
@@ -388,7 +390,6 @@ const csReplyHandler = {
         let directDownloadUrl = terracloudLinks.length > 0 ? terracloudLinks[0] : (pixeldrainLinks.length > 0 ? pixeldrainLinks[0] : null);
         const cleanTitle = movie.metadata.title.replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
 
-        // Caption intentionally contains no raw download link/URL.
         let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
         captionText += `✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
         captionText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
@@ -407,6 +408,7 @@ const csReplyHandler = {
             contextInfo: channelContextInfo()
           };
           if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
+          
           await sock.sendMessage(from, docPayload, { quoted: mek });
         } else {
           await sock.sendMessage(from, { text: captionText, contextInfo: channelContextInfo() }, { quoted: mek });
