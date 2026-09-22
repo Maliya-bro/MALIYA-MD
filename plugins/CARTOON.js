@@ -31,6 +31,7 @@ function getChannelContext() {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// FIXED: Using standard || operator without latex formatting errors
 function keyFor(sender, from) {
     return `${from || ""}::${(sender || "").split(":")[0]}`;
 }
@@ -112,87 +113,72 @@ async function getSearchResults(searchTerm) {
     return results.slice(0, 15);
 }
 
-// 2. Fetch Detailed Cartoon Information
-async function getMovieDetails(moviePageUrl) {
+// Helper to extract Base64 encoded direct link from sc_data
+function extractLinkFromScData(urlStr) {
+    if (!urlStr) return null;
+    try {
+        const cleanUrl = urlStr.replace(/&#038;/g, '&').replace(/&amp;/g, '&');
+        const urlObj = new URL(cleanUrl, 'https://sinhalacartoons.com');
+        const scData = urlObj.searchParams.get('sc_data');
+        if (scData) {
+            const decodedStr = Buffer.from(scData, 'base64').toString('utf-8');
+            const jsonObj = JSON.parse(decodedStr);
+            return jsonObj.direct || null;
+        }
+    } catch(e) {
+        // Silent catch for parse errors
+    }
+    return null;
+}
+
+// 2. Fetch Detailed Cartoon Information & Direct Links
+async function getMovieAndEpisodes(moviePageUrl) {
     const { data } = await axios.get(moviePageUrl, { headers: { 'User-Agent': UA } });
     const $ = cheerio.load(data);
 
     const details = {
-        poster: '',
-        title: '',
-        director: 'N/A',
+        title: $('h1.movie-title').text().trim() \vert{}\vert{}$('title').text().trim(),
+        poster: $('.info-poster img').attr('src') || '',
         year: 'N/A',
         rating: 'N/A',
         quality: 'N/A',
-        description: 'N/A',
         isSeries: false
     };
 
-    details.poster = $('.info-poster img').attr('src') || '';
-    details.title = $('h1.movie-title').text().trim() || $('title').text().trim();
-
-    const descDiv = $('h2.cast-header:contains("Description")').next('div');
-    if (descDiv.length) {
-        details.description = descDiv.text().trim().replace(/\s+/g, ' ').substring(0, 300) + '...';
-    } else {
-        const firstP = $('.main-content p').first();
-        if (firstP.length) {
-            details.description = firstP.text().trim().replace(/\s+/g, ' ').substring(0, 300) + '...';
-        }
-    }
-
     $('.details-list li').each((i, el) => {
         const text = $(el).text().trim();
-        if (text.includes('Director:')) {
-            details.director = text.replace('Director:', '').trim();
-        } else if (text.includes('Release Year:')) {
-            details.year = text.replace('Release Year:', '').trim();
-        } else if (text.includes('IMDb Rating:')) {
-            details.rating = text.replace('IMDb Rating:', '').trim();
-        } else if (text.includes('Quality:')) {
-            details.quality = text.replace('Quality:', '').trim();
-        }
+        if (text.includes('Release Year:')) details.year = text.replace('Release Year:', '').trim();
+        if (text.includes('IMDb Rating:')) details.rating = text.replace('IMDb Rating:', '').trim();
+        if (text.includes('Quality:')) details.quality = text.replace('Quality:', '').trim();
     });
 
-    if ($('#episode-section').length > 0 || $('.episode-row').length > 0) {
+    const items = [];
+
+    // Check if it's a TV Series with Episode Rows
+    if ($('.episode-row').length > 0) {
         details.isSeries = true;
-    }
-
-    return details;
-}
-
-// 3. Extract "Bulk Download" Page Link
-async function getDownloadPageUrl(moviePageUrl) {
-    const { data } = await axios.get(moviePageUrl, { headers: { 'User-Agent': UA } });
-    const $ = cheerio.load(data);
-    
-    let downloadLink = $('a.dl-card[href*="bulk="]').attr('href');
-    if (!downloadLink) {
-        downloadLink = $('a[href*="bulk="]').attr('href');
-    }
-    return downloadLink;
-}
-
-// 4. Extract Episode Links from Download Page
-async function getEpisodeLinksFromDownloadPage(downloadPageUrl) {
-    const { data } = await axios.get(downloadPageUrl, { headers: { 'User-Agent': UA } });
-    const $ = cheerio.load(data);
-    
-    const episodeLinks = [];
-    
-    $('a.dl-card-landing.force-download-btn').each((i, el) => {
-        const href = $(el).attr('href');
-        const text = $(el).find('.dl-text-l strong').text().trim() || `Episode ${i + 1}`;
+        $('.episode-row').each((i, el) => {
+            const dlUrlAttr = $(el).attr('data-download-url');
+            const epTitle = $(el).find('.ep-title').text().trim() || `Episode ${i + 1}`;
+            const directLink = extractLinkFromScData(dlUrlAttr);
+            
+            if (directLink) {
+                items.push({ title: epTitle, url: directLink });
+            }
+        });
+    } else {
+        // It's a Movie
+        details.isSeries = false;
+        let dlHref = $('a.sc-download-links-btn[href*="sc_data="]').attr('href');
+        if (!dlHref) dlHref = $('a[href*="sc_data="]').attr('href'); // Fallback
         
-        if (href && href.includes('dl.sinhalacartoons.com')) {
-            episodeLinks.push({
-                title: text,
-                url: href
-            });
+        const directLink = extractLinkFromScData(dlHref);
+        if (directLink) {
+            items.push({ title: "Full Movie", url: directLink });
         }
-    });
-    
-    return episodeLinks;
+    }
+
+    return { details, items };
 }
 
 function generateResultText(results) {
@@ -214,7 +200,7 @@ function generateResultText(results) {
 // ===== 1. MAIN SEARCH COMMAND =====
 cmd({
     pattern: "sinhalacartoon",
-    alias: ["scartoon", "sc", "cartoon"],
+    alias: ["scartoon", "sc", "cartoon", "cartoons"],
     desc: "Search and download cartoons from SinhalaCartoons.com",
     category: "download",
     react: "🎬",
@@ -295,21 +281,14 @@ const cartoonReplyHandler = {
             const selectedMovie = session.results[num - 1];
             delete pendingCartoonSearch[k]; // Clear search state
 
-            await reply(`*╭─[ ⏳ 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 𝗘𝗣𝗜𝗦𝗢𝗗𝗘𝗦 ]─╮*\n│\n├─ 🎬 *Parsing cartoon details...*\n├─ ⚡ _Please wait a moment..._\n╰───────────────────╯`);
+            await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
             try {
-                // Fetch Details and Download Links
-                const details = await getMovieDetails(selectedMovie.href);
-                const downloadPageUrl = await getDownloadPageUrl(selectedMovie.href);
-
-                if (!downloadPageUrl) {
-                    return reply(`*╭───[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]───╮*\n│\n├─ 🚫 _Could not find download page!_\n╰──────────────────╯`);
-                }
-
-                const items = await getEpisodeLinksFromDownloadPage(downloadPageUrl);
+                // Fetch Details and Decode Download Links Directly
+                const { details, items } = await getMovieAndEpisodes(selectedMovie.href);
 
                 if (!items || items.length === 0) {
-                    return reply(`*╭───[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]───╮*\n│\n├─ 🚫 _No download episodes found!_\n╰───────────────────╯`);
+                    return reply(`*╭───[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]───╮*\n│\n├─ 🚫 _No direct download links found!_\n╰───────────────────╯`);
                 }
 
                 // Store in Selection Pending State
@@ -327,18 +306,26 @@ const cartoonReplyHandler = {
                 captionText += `├─ ⭐ *𝗥𝗮𝘁𝗶𝗻𝗴:* ${details.rating}\n`;
                 captionText += `├─ 🎥 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${details.quality}\n`;
                 captionText += `├─ 📺 *𝗧𝘆𝗽𝗲:* ${details.isSeries ? 'TV Series' : 'Movie'}\n│\n`;
-                captionText += `├─ 📥 *𝗔𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲 𝗘𝗽𝗶𝘀𝗼𝗱𝗲𝘀:* ${items.length}\n│\n`;
-                captionText += `├─ *👇 Reply to Select Download:* 👇\n│\n`;
-                captionText += `├─ 📱 *[ 01 ]* 📦 Download ALL Episodes\n`;
+                
+                if (details.isSeries) {
+                    captionText += `├─ 📥 *𝗔𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲 𝗘𝗽𝗶𝘀𝗼𝗱𝗲𝘀:* ${items.length}\n│\n`;
+                    captionText += `├─ *👇 Reply to Select Download:* 👇\n│\n`;
+                    captionText += `├─ 📱 *[ 01 ]* 📦 Download ALL Episodes\n`;
 
-                items.forEach((item, idx) => {
-                    const numStr = String(idx + 2).padStart(2, "0");
-                    captionText += `├─ 📱 *[ ${numStr} ]* 📌 ${item.title}\n`;
-                });
+                    items.forEach((item, idx) => {
+                        const numStr = String(idx + 2).padStart(2, "0");
+                        captionText += `├─ 📱 *[ ${numStr} ]* 📌 ${item.title}\n`;
+                    });
 
-                captionText += `│\n╰──────────────────╯\n\n`;
-                captionText += `💡 *Reply "01" or "all" for ALL episodes.*\n`;
-                captionText += `💡 *Or reply with numbers (e.g., "2,3,5") for specific episodes.*`;
+                    captionText += `│\n╰──────────────────╯\n\n`;
+                    captionText += `💡 *Reply "01" or "all" for ALL episodes.*\n`;
+                    captionText += `💡 *Or reply with numbers (e.g., "2,3,5") for specific episodes.*`;
+                } else {
+                    captionText += `├─ *👇 Reply to Select Download:* 👇\n│\n`;
+                    captionText += `├─ 📱 *[ 01 ]* 📌 Download Movie\n`;
+                    captionText += `│\n╰──────────────────╯\n\n`;
+                    captionText += `💡 *Reply "1" or "01" to download.*`;
+                }
 
                 if (details.poster) {
                     await bot.sendMessage(from, {
@@ -361,43 +348,46 @@ const cartoonReplyHandler = {
             return;
         }
 
-        // --- STEP 2: MULTI-EPISODE SELECTION & DOWNLOAD (FIXED INDEX MATCHING) ---
+        // --- STEP 2: MULTI-EPISODE SELECTION & DOWNLOAD ---
         if (pendingCartoonSelection[k]) {
             const { details, items } = pendingCartoonSelection[k];
 
             let selectedIndices = [];
             const lowerInput = input.toLowerCase();
 
-            if (lowerInput === "01" || lowerInput === "1" || lowerInput === "all") {
-                // Select All Episodes (Array indices 0 to end)
-                selectedIndices = items.map((_, idx) => idx);
+            if (details.isSeries) {
+                if (lowerInput === "01" || lowerInput === "1" || lowerInput === "all") {
+                    // Select All Episodes
+                    selectedIndices = items.map((_, idx) => idx);
+                } else {
+                    // Parse numbers like "2,3,5"
+                    const numbers = input.split(/[\s,]+/).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
+                    
+                    numbers.forEach(num => {
+                        if (num === 1) {
+                            items.forEach((_, idx) => selectedIndices.push(idx));
+                        } else if (num >= 2 && num <= items.length + 1) {
+                            selectedIndices.push(num - 2);
+                        }
+                    });
+                }
             } else {
-                // Parse numbers like "2,3,5,7"
-                const numbers = input.split(/[\s,]+/).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
-                
-                numbers.forEach(num => {
-                    // Option 01 or 1 means ALL
-                    if (num === 1) {
-                        items.forEach((_, idx) => selectedIndices.push(idx));
-                    } 
-                    // Option 02 maps to Array Index 0 (Episode 1)
-                    // Option 03 maps to Array Index 1 (Episode 2) ...
-                    else if (num >= 2 && num <= items.length + 1) {
-                        selectedIndices.push(num - 2);
-                    }
-                });
+                // It's a Movie, only option 1 is valid
+                if (lowerInput === "01" || lowerInput === "1") {
+                    selectedIndices = [0];
+                }
             }
 
             // Remove duplicates and sort numerically
             selectedIndices = [...new Set(selectedIndices)].sort((a, b) => a - b);
 
             if (selectedIndices.length === 0) {
-                return reply(`*╭──[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗦𝗘𝗟𝗘𝗖𝗧𝗜𝗢𝗡 ]──╮*\n│\n├─ 📌 *Valid Range:* 01 - ${String(items.length + 1).padStart(2, '0')}\n╰──────────────────╯`);
+                return reply(`*╭──[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗦𝗘𝗟𝗘𝗖𝗧𝗜𝗢𝗡 ]──╮*\n│\n├─ 📌 *Please select a valid option.*\n╰──────────────────╯`);
             }
 
             delete pendingCartoonSelection[k]; // Clear selection state
 
-            await reply(`*╭──[ ⬇️ 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚 ]──╮*\n│\n├─ 🚀 *Starting Batch Download...*\n├─ 📦 *Selected Items:* ${selectedIndices.length}\n╰───────────────────╯`);
+            await reply(`*╭──[ ⬇️ 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚 ]──╮*\n│\n├─ 🚀 *Starting Download...*\n├─ 📦 *Selected Items:* ${selectedIndices.length}\n╰───────────────────╯`);
 
             const channelMeta = getChannelContext();
 
@@ -411,6 +401,7 @@ const cartoonReplyHandler = {
 
                     const cleanTitle = (details.title || "Cartoon").replace(/[^\w\s.-]/gi, "").substring(0, 40);
                     const cleanSubTitle = (selectedItem.title || "").replace(/[^\w\s.-]/gi, "").substring(0, 20);
+                    const finalFileName = details.isSeries ? `MALIYA-MD ${cleanTitle} - ${cleanSubTitle}.mp4` : `MALIYA-MD ${cleanTitle}.mp4`;
 
                     await reply(`⚙️ *[${i + 1}/${selectedIndices.length}] Uploading ${selectedItem.title}...*`);
 
@@ -418,8 +409,8 @@ const cartoonReplyHandler = {
                     await bot.sendMessage(from, {
                         document: { url: selectedItem.url },
                         mimetype: "video/mp4",
-                        fileName: `MALIYA-MD ${cleanTitle} - ${cleanSubTitle}.mp4`,
-                        caption: `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡 ]─╮*\n│\n├─ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(details.title)}\n├─ 📌 *𝗘𝗽𝗶𝘀𝗼𝗱𝗲:* ${selectedItem.title}\n├─ 📊 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${details.quality}\n├─ ⭐ *𝗥𝗮𝘁𝗶𝗻𝗴:* ${details.rating}\n│\n╰──────────────────╯\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`,
+                        fileName: finalFileName,
+                        caption: `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡 ]─╮*\n│\n├─ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(details.title)}\n├─ 📌 *𝗜𝘁𝗲𝗺:* ${selectedItem.title}\n├─ 📊 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${details.quality}\n├─ ⭐ *𝗥𝗮𝘁𝗶𝗻𝗴:* ${details.rating}\n│\n╰──────────────────╯\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`,
                         ...channelMeta
                     }, { quoted: mek });
 
@@ -427,7 +418,7 @@ const cartoonReplyHandler = {
                     await delay(3000);
 
                 } catch (error) {
-                    console.error(`SinhalaCartoon Ep Send Error (${selectedItem.title}):`, error);
+                    console.error(`SinhalaCartoon File Send Error (${selectedItem.title}):`, error);
                     await reply(`*╭───[ ❌ 𝗙𝗔𝗜𝗟𝗘𝗗 ]───╮*\n│\n├─ 🚫 _Failed to send ${selectedItem.title}_\n╰─────────────────╯`);
                 }
             }
