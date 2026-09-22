@@ -4,10 +4,11 @@ const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const Jimp = require("jimp"); // 🛠️ Mobile Thumbnail සඳහා Jimp එකතු කළා
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
 const DEFAULT_IMAGE = "https://github.com/Maliya-bro/web-pair/blob/main/Gemini_Generated_Image_xmzfzfxmzfzfxmzf.jpg?raw=true";
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
@@ -56,12 +57,20 @@ function channelContextInfo() {
   };
 }
 
+// 🛠️ FIX: Mobile App එකට support කරන විදියට Thumbnail එක Resize කර Base64 කිරීම
 async function getThumbnailBuffer(url) {
   try {
     if (!url || url === 'No Image') return null;
     const res = await axios.get(url, { responseType: "arraybuffer", timeout: 8000 });
-    return Buffer.from(res.data);
+    
+    const image = await Jimp.read(Buffer.from(res.data));
+    image.resize(320, Jimp.AUTO);
+    image.quality(60);
+    
+    const resizedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+    return resizedBuffer.toString("base64");
   } catch (e) {
+    console.error("Thumbnail generation error:", e.message);
     return null;
   }
 }
@@ -156,6 +165,7 @@ async function getDownloadLinks(pageUrl) {
   }
 }
 
+// 🛠️ FIX: \vert{}\vert{} ඉවත් කර සාමාන්‍ය || (OR) සංකේතය යෙදීම
 async function getMediaFireLink(url) {
   if (!url.includes('mediafire.com')) return url;
   try {
