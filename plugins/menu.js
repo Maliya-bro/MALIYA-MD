@@ -451,7 +451,7 @@ async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId)
 cmd(
   {
     pattern: "menu",
-    alias: "list", "botmenu", "
+    alias: "list", "botmenu",
     react: "📜",
     desc: "Show command categories",
     category: "main",
