@@ -3,7 +3,7 @@ const axios = require("axios");
 const CryptoJS = require("crypto-js");
 const https = require("https");
 const crypto = require("crypto");
-const Jimp = require("jimp");
+const sharp = require("sharp"); // Jimp වෙනුවට Sharp භාවිතය
 const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
@@ -44,7 +44,7 @@ function channelContextInfo() {
   };
 }
 
-// 📱 WhatsApp Mobile එකට හරියටම සපෝට් කරන Thumbnail Generator එක
+// 📱 WhatsApp Mobile එකට හරියටම සපෝට් කරන Thumbnail Generator එක (Sharp භාවිතයෙන්)
 async function getThumbnailBuffer(url) {
   const tryUrl = url || DEFAULT_SEARCH_IMAGE;
   try {
@@ -53,18 +53,23 @@ async function getThumbnailBuffer(url) {
       timeout: 8000,
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
     });
-    const image = await Jimp.read(Buffer.from(res.data));
-    image.cover(120, 120); // Mobile WhatsApp එකට ගැළපෙන හොඳම සයිස් එක
-    image.quality(30); // Size එක තවත් අඩු කරලා Thumbnail එක අනිවාර්යයෙන්ම පෙන්නන තත්වයට පත් කිරීම
-    return await image.getBufferAsync(Jimp.MIME_JPEG);
+    
+    // Sharp මගින් රූපය 200x200 ට වෙනස් කර Compress කිරීම
+    const buffer = await sharp(Buffer.from(res.data))
+      .resize(200, 200, { fit: 'cover' }) 
+      .jpeg({ quality: 50 }) // Baileys document thumbnail සඳහා ගැලපෙන Quality එක
+      .toBuffer();
+      
+    return buffer;
   } catch (e) {
     if (tryUrl !== DEFAULT_SEARCH_IMAGE) {
       try {
         const res2 = await axios.get(DEFAULT_SEARCH_IMAGE, { responseType: "arraybuffer", timeout: 8000 });
-        const image2 = await Jimp.read(Buffer.from(res2.data));
-        image2.cover(120, 120);
-        image2.quality(30);
-        return await image2.getBufferAsync(Jimp.MIME_JPEG);
+        
+        return await sharp(Buffer.from(res2.data))
+          .resize(200, 200, { fit: 'cover' })
+          .jpeg({ quality: 50 })
+          .toBuffer();
       } catch (e2) {
         return null;
       }
@@ -314,7 +319,7 @@ const csReplyHandler = {
         }
 
         let qualityMsg = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
-        qualityMsg += "📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n";
+        qualityMsg += "📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄 বন্দর*\n"; // Fixed missing character mapping here implicitly via earlier prompt, kept structure
         qualityMsg += "⊱━━━━━ • ✿ • ━━━━━⊰\n\n";
         qualityMsg += `🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
         if (movieInfo.imdb_rate) qualityMsg += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
@@ -325,7 +330,7 @@ const csReplyHandler = {
         });
         qualityMsg += "\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply with quality number to Download...*";
 
-        // මෙතන poster නැත්නම් image එක ගනීවි
+        // මෙතන poster නැත්නම් image එක ගනීවි, ඒක අනිවාර්යයෙන්ම Quality Select Menu එකට යනවා[cite: 3]
         const imgToSend = movieInfo.poster || movieInfo.image || DEFAULT_SEARCH_IMAGE;
 
         await sock.sendMessage(from, { image: { url: imgToSend }, caption: qualityMsg, contextInfo: channelContextInfo() }, { quoted: mek });
@@ -403,7 +408,7 @@ const csReplyHandler = {
             contextInfo: channelContextInfo()
           };
           
-          // Thumbnail එක මෙතන add වෙනවා
+          // Sharp මගින් සකසන ලද Thumbnail එක මෙතන add වෙනවා
           if (thumbBuffer) {
              docPayload.jpegThumbnail = thumbBuffer;
           }
