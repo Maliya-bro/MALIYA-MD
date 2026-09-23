@@ -141,6 +141,33 @@ function getIncomingText(body, mek, m) {
   return String(text).trim().toLowerCase();
 }
 
+// 🔴 Auto Message Trigger yahan se fix kar diya gaya hai.
+function resolveSettingsActionFromText(text = "") {
+  const t = String(text).trim().toLowerCase();
+  if (!t) return null;
+
+  // Ab yeh sirf aur sirf ".setting" command payload ko check karega. 
+  // Menu ke kisi bhi normal text se auto trigger nahi hoga.
+  if (t.startsWith(".setting ")) {
+    const parts = t.replace(".setting ", "").trim().split(" ");
+    const action = parts[0];
+    const value = parts.slice(1).join(" ");
+    return { action, value };
+  }
+
+  return null;
+}
+
+function isDuplicateAction(state, sig) {
+  const now = Date.now();
+  if (state.lastSig === sig && now - (state.lastAt || 0) < 3000) {
+    return true;
+  }
+  state.lastSig = sig;
+  state.lastAt = now;
+  return false;
+}
+
 async function applySettingAction(sessionId, action, value) {
   if (action === "status") {
     return await getStatusCard(sessionId);
@@ -208,55 +235,6 @@ async function applySettingAction(sessionId, action, value) {
   return await getStatusCard(sessionId);
 }
 
-function resolveSettingsActionFromText(text = "") {
-  const t = String(text).trim().toLowerCase();
-  if (!t) return null;
-
-  if (t.startsWith(".setting ")) {
-    const parts = t.replace(".setting ", "").trim().split(" ");
-    const action = parts[0];
-    const value = parts.slice(1).join(" ");
-    return { action, value };
-  }
-
-  if (t.includes("menuopen") || t.includes("change settings")) return { action: "menuopen" };
-  if (t.includes("show full status")) return { action: "status" };
-  if (t.includes("public mode")) return { action: "public" };
-  if (t.includes("private mode")) return { action: "private" };
-  if (t.includes("presence typing") || t.includes("auto typing")) return { action: "presence", value: "typing" };
-  if (t.includes("presence recording") || t.includes("auto recording")) return { action: "presence", value: "recording" };
-  if (t.includes("presence off")) return { action: "presence", value: "off" };
-  if (t.includes("work scope private")) return { action: "workscope", value: "private" };
-  if (t.includes("work scope group")) return { action: "workscope", value: "group" };
-  if (t.includes("work scope all") || t.includes("all chats")) return { action: "workscope", value: "all" };
-  if (t.includes("enable btns") || t.includes("interactive buttons on")) return { action: "on", value: "btns" };
-  if (t.includes("disable btns") || t.includes("interactive buttons off")) return { action: "off", value: "btns" };
-  if (t.includes("enable auto react msg") || t.includes("auto react msg on")) return { action: "on", value: "autoreactmsg" };
-  if (t.includes("disable auto react msg") || t.includes("auto react msg off")) return { action: "off", value: "autoreactmsg" };
-  if (t.includes("react mode: private")) return { action: "reactmode", value: "private" };
-  if (t.includes("react mode: group")) return { action: "reactmode", value: "group" };
-  if (t.includes("react mode: all")) return { action: "reactmode", value: "all" };
-  if (t.includes("enable ai chat")) return { action: "on", value: "automsg" };
-  if (t.includes("disable ai chat")) return { action: "off", value: "automsg" };
-  if (t.includes("seen all msg on") || t.includes("enable seen all msg")) return { action: "on", value: "seenallmsg" };
-  if (t.includes("seen all msg off") || t.includes("disable seen all msg")) return { action: "off", value: "seenallmsg" };
-  if (t.includes("enable anti delete")) return { action: "on", value: "antidelete" };
-  if (t.includes("disable anti delete")) return { action: "off", value: "antidelete" };
-  if (t.includes("enable anti spam") || t.includes("anti spam on")) return { action: "on", value: "antispam" };
-  if (t.includes("disable anti spam") || t.includes("anti spam off")) return { action: "off", value: "antispam" };
-  if (t.includes("toggle anti spam")) return { action: "toggle", value: "antispam" };
-  if (t.includes("reject calls on")) return { action: "on", value: "rejectcalls" };
-  if (t.includes("reject calls off")) return { action: "off", value: "rejectcalls" };
-  if (t.includes("auto status view on")) return { action: "on", value: "autoseen" };
-  if (t.includes("auto status view off")) return { action: "off", value: "autoseen" };
-  if (t.includes("auto status react on")) return { action: "on", value: "autoreact" };
-  if (t.includes("auto status react off")) return { action: "off", value: "autoreact" };
-  if (t.includes("auto download status on")) return { action: "on", value: "autodownloadstatus" };
-  if (t.includes("auto download status off")) return { action: "off", value: "autodownloadstatus" };
-
-  return null;
-}
-
 function buildStyledMenu(title, options, footer = "") {
   let msg = `\n`;
   msg += `┌❮ 👑 *${title.toUpperCase()}* 👑 ❯─\n`;
@@ -294,7 +272,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     stage: "home",
     options: null,
     menuMsgId: null,
-    processedMsgIds: [] // Double trigger වළක්වන්න Message IDs Save කරන තැන
+    processedMsgIds: []
   };
 
   const settings = await readSettings(sessionId);
@@ -358,7 +336,6 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
 async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) {
   const key = makePendingKey(sender, from);
   
-  // පරණ Process කරපු IDs තියාගෙන අනිත් Data විතරක් Update කරනවා
   const existingProcessedIds = pendingSettingsMenu[key]?.processedMsgIds || [];
   
   pendingSettingsMenu[key] = {
@@ -541,7 +518,7 @@ cmd(
       if (action === "menuopen") {
         return await sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId);
       }
-      // ... අනිත් Actions ...
+      
       if (action === "status") return reply(await getStatusCard(sessionId));
       if (action === "private") { await setSetting(sessionId, "mode", "private"); return reply("✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘʀɪᴠᴀᴛᴇ ]`*"); }
       if (action === "public") { await setSetting(sessionId, "mode", "public"); return reply("✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘᴜʙʟɪᴄ ]`*"); }
@@ -583,14 +560,11 @@ if (!global.__maliya_settings_reply_handler_added) {
 
       const sid = sessionId || state.sessionId;
       const text = getIncomingText(body, mek, m);
-      
-      // Message ID එක ලබාගැනීම (Double trigger නවත්වන්න)
       const incomingMsgId = mek?.key?.id || m?.key?.id;
 
       const resolved = resolveSettingsActionFromText(text);
 
       if (resolved) {
-        // Double trigger Check (Button click එකකදී)
         if (incomingMsgId) {
             state.processedMsgIds = state.processedMsgIds || [];
             if (state.processedMsgIds.includes(incomingMsgId)) return;
@@ -615,19 +589,16 @@ if (!global.__maliya_settings_reply_handler_added) {
 
       const num = parseInt(text, 10);
       if (!isNaN(num) && state.options && state.options.length >= num && num > 0) {
-        
-        // 🔴 1. අනිවාර්යයෙන්ම Reply එකක් විය යුතුයි 🔴
         const msgObj = mek?.message || m?.message || {};
         const contextInfo = msgObj?.extendedTextMessage?.contextInfo || msgObj?.imageMessage?.contextInfo || {};
         const quotedId = contextInfo?.stanzaId;
 
-        // Reply කරලා නැත්නම් (නිකම්ම 1 ගැහුවොත්) එතනින්ම නවතිනවා
+        // Reply kiye bina bheja hai toh turant rok dega
         if (!quotedId) return;
 
-        // 🔴 2. හරියටම අදාළ Menu මැසේජ් එකටමයි Reply කරලා තියෙන්නේ කියලා තහවුරු කිරීම
+        // Ye confirm karega ki exactly issi menu ko reply kiya hai
         if (state.menuMsgId && quotedId !== state.menuMsgId) return;
 
-        // 🔴 3. Double Trigger Check (Text Reply එකකදී එකම මැසේජ් එක දෙපාරක් process වෙන එක නවත්වන්න)
         if (incomingMsgId) {
             state.processedMsgIds = state.processedMsgIds || [];
             if (state.processedMsgIds.includes(incomingMsgId)) return;
