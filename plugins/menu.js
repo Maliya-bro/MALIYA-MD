@@ -183,13 +183,13 @@ function buildCommandMapCached() {
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
-  return `┏━━━◥◣◆◢◤━━━━┓
-★彡 *${BOT_NAME}* 彡★
-┗━━━◢◤◆◥◣━━━━┛
+  return `ㅤㅤ┏━━━◥◣◆◢◤━━━━┓
+ㅤㅤ★彡 *${BOT_NAME}* 彡★
+ㅤㅤ┗━━━◢◤◆◥◣━━━━┛
 
 ✨ 👋 *ʜɪ, ${styledUser}!*
 
-╔══════════════════╗
+╔═══. .★.═════════╗
 🤖 *ʙᴏᴛ ɴᴀᴍᴇ :* ${BOT_NAME}
 👤 *ᴜsᴇʀ :* ${styledUser}
 👑 *ᴏᴡɴᴇʀ :* ${OWNER_NUMBER}
