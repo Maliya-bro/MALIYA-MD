@@ -1,6 +1,7 @@
 const { cmd, replyHandlers } = require('../command');
 const axios = require('axios');
 const cheerio = require('cheerio');
+const sharp = require('sharp'); // Thumbnail එක හදන්න Sharp එකතු කර ඇත
 
 // State Management
 const pendingCartoonSearch = {};
@@ -14,6 +15,7 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 // Channel Forwarding Meta Data
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
+const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
 
 function getChannelContext() {
     return {
@@ -54,6 +56,47 @@ function toSmallCaps(str) {
 function clearUserSession(k) {
     delete pendingCartoonSearch[k];
     delete pendingCartoonSelection[k];
+}
+
+// 📱 WhatsApp Mobile එකට හරියටම සපෝට් කරන Thumbnail Generator එක
+async function getThumbnailBuffer(url) {
+    let tryUrl = url;
+    if (!tryUrl) {
+        tryUrl = DEFAULT_SEARCH_IMAGE;
+    }
+    
+    try {
+        const res = await axios.get(tryUrl, {
+            responseType: "arraybuffer",
+            timeout: 8000,
+            headers: { 'User-Agent': UA }
+        });
+        
+        const buffer = await sharp(Buffer.from(res.data))
+            .resize(200, 200, { fit: 'cover' }) 
+            .jpeg({ quality: 50 }) 
+            .toBuffer();
+            
+        return buffer;
+    } catch (e) {
+        if (tryUrl !== DEFAULT_SEARCH_IMAGE) {
+            try {
+                const res2 = await axios.get(DEFAULT_SEARCH_IMAGE, { 
+                    responseType: "arraybuffer", 
+                    timeout: 8000 
+                });
+                
+                const buffer2 = await sharp(Buffer.from(res2.data))
+                    .resize(200, 200, { fit: 'cover' })
+                    .jpeg({ quality: 50 })
+                    .toBuffer();
+                return buffer2;
+            } catch (e2) {
+                return null;
+            }
+        }
+        return null;
+    }
 }
 
 // 1. Search Results Scraper
@@ -171,7 +214,7 @@ async function getFinalDownloadLink(landingUrl) {
     return null;
 }
 
-// 3. Details Fetcher (Only fetches Landing URLs, NOT Final Links)
+// 3. Details Fetcher
 async function getMovieAndEpisodes(moviePageUrl) {
     const { data } = await axios.get(moviePageUrl, { headers: { 'User-Agent': UA } });
     const $ = cheerio.load(data);
@@ -350,7 +393,6 @@ const cartoonReplyHandler = {
             await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
             try {
-                // මෙතනදී ලින්ක් ඔක්කොම Download කරන්නේ නෑ, Menu එක ඉක්මනටම පෙන්නනවා.
                 const { details, items } = await getMovieAndEpisodes(selectedMovie.href);
 
                 if (items.length === 0) {
@@ -466,7 +508,9 @@ const cartoonReplyHandler = {
 
             const channelMeta = getChannelContext();
 
-            // 🟢 මෙතන තමයි එකින් එක (One by One) Download වෙන්නේ
+            // 🟢 Thumbnail එක අරගන්නවා
+            const thumbBuffer = await getThumbnailBuffer(details.poster);
+
             for (let i = 0; i < selectedIndices.length; i++) {
                 const epIndex = selectedIndices[i];
                 const selectedItem = items[epIndex];
@@ -475,12 +519,11 @@ const cartoonReplyHandler = {
                     await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
                     await reply(`⚙️ *[${i + 1}/${selectedIndices.length}] Fetching & Uploading ${selectedItem.title}...*`);
 
-                    // Send කරන්න කලින් විතරයි Final Direct Link එක Scrape කරගන්නේ.
                     const finalDirectLink = await getFinalDownloadLink(selectedItem.landingUrl);
                     
                     if (!finalDirectLink) {
                         await reply(`*╭───[ ❌ 𝗙𝗔𝗜𝗟𝗘𝗗 ]───╮*\n│\n├─ 🚫 _Failed to extract link for ${selectedItem.title}_\n╰─────────────────╯`);
-                        continue; // මේක fail වුණොත් ඊළඟ Episode එකට යනවා
+                        continue;
                     }
 
                     let rawTitle = details.title;
@@ -497,16 +540,23 @@ const cartoonReplyHandler = {
                         finalFileName = `MALIYA-MD ${cleanTitle} - ${cleanSubTitle}.mp4`;
                     }
 
-                    await bot.sendMessage(from, {
+                    // 🟢 Document Payload එක සකස් කිරීම
+                    const docPayload = {
                         document: { url: finalDirectLink },
                         mimetype: "video/mp4",
                         fileName: finalFileName,
                         caption: `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡 ]─╮*\n│\n├─ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(details.title)}\n├─ 📌 *𝗜𝘁𝗲𝗺:* ${selectedItem.title}\n├─ 📊 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${details.quality}\n├─ ⭐ *𝗥𝗮𝘁𝗶𝗻𝗴:* ${details.rating}\n│\n╰──────────────────╯\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`,
                         ...channelMeta
-                    }, { quoted: mek });
+                    };
 
+                    // Thumbnail එක ඇතුළත් කිරීම
+                    if (thumbBuffer) {
+                        docPayload.jpegThumbnail = thumbBuffer;
+                    }
+
+                    await bot.sendMessage(from, docPayload, { quoted: mek });
                     await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-                    await delay(3000); // ඊළඟ Episode එක යවන්න කලින් පොඩි වෙලාවක් ඉන්නවා
+                    await delay(3000); 
 
                 } catch (error) {
                     console.error(`SinhalaCartoon File Send Error (${selectedItem.title}):`, error);
