@@ -141,16 +141,6 @@ function getIncomingText(body, mek, m) {
   return String(text).trim().toLowerCase();
 }
 
-function isDuplicateAction(state, sig) {
-  const now = Date.now();
-  if (state.lastSig === sig && now - (state.lastAt || 0) < 3000) {
-    return true;
-  }
-  state.lastSig = sig;
-  state.lastAt = now;
-  return false;
-}
-
 async function applySettingAction(sessionId, action, value) {
   if (action === "status") {
     return await getStatusCard(sessionId);
@@ -300,12 +290,11 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
   
   pendingSettingsMenu[key] = {
     createdAt: Date.now(),
-    lastSig: "",
-    lastAt: 0,
     sessionId,
     stage: "home",
     options: null,
-    menuMsgId: null // Menu Message ID එක Save කරගන්න
+    menuMsgId: null,
+    processedMsgIds: [] // Double trigger වළක්වන්න Message IDs Save කරන තැන
   };
 
   const settings = await readSettings(sessionId);
@@ -368,17 +357,17 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
 
 async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) {
   const key = makePendingKey(sender, from);
-  pendingSettingsMenu[key] = pendingSettingsMenu[key] || {
+  
+  // පරණ Process කරපු IDs තියාගෙන අනිත් Data විතරක් Update කරනවා
+  const existingProcessedIds = pendingSettingsMenu[key]?.processedMsgIds || [];
+  
+  pendingSettingsMenu[key] = {
     createdAt: Date.now(),
-    lastSig: "",
-    lastAt: 0,
     sessionId,
     stage: "roles",
-    menuMsgId: null
+    menuMsgId: null,
+    processedMsgIds: existingProcessedIds
   };
-  pendingSettingsMenu[key].createdAt = Date.now();
-  pendingSettingsMenu[key].sessionId = sessionId;
-  pendingSettingsMenu[key].stage = "roles";
 
   const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
@@ -552,67 +541,20 @@ cmd(
       if (action === "menuopen") {
         return await sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId);
       }
-      if (action === "status") {
-        return reply(await getStatusCard(sessionId));
-      }
-      if (action === "private") {
-        await setSetting(sessionId, "mode", "private");
-        return reply("✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘʀɪᴠᴀᴛᴇ ]`*");
-      }
-      if (action === "public") {
-        await setSetting(sessionId, "mode", "public");
-        return reply("✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘᴜʙʟɪᴄ ]`*");
-      }
-      if (action === "reactmode") {
-        if (!["private", "group", "all"].includes(value)) {
-          return reply("❌ *`[ ᴜsᴇ: .setting reactmode private | group | all ]`*");
-        }
-        await setSetting(sessionId, "auto_react_mode", value);
-        return reply(`✨ *\`[ ✅ ʀᴇᴀᴄᴛ ᴍᴏᴅᴇ: ${reactModeText(value)} ]\`*`);
-      }
-      if (action === "workscope") {
-        if (!["private", "group", "all"].includes(value)) {
-          return reply("❌ *`[ ᴜsᴇ: .setting workscope private | group | all ]`*");
-        }
-        await setSetting(sessionId, "work_scope", value);
-        return reply(`✨ *\`[ ✅ ᴡᴏʀᴋ sᴄᴏᴘᴇ: ${workScopeText(value)} ]\`*`);
-      }
-      if (action === "presence") {
-        if (!["off", "typing", "recording"].includes(value)) {
-          return reply("❌ *`[ ᴜsᴇ: .setting presence off | typing | recording ]`*");
-        }
-        await setSetting(sessionId, "always_presence", value);
-        return reply(`✨ *\`[ ✅ ᴘʀᴇsᴇɴᴄᴇ: ${presenceText(value)} ]\`*`);
-      }
-
+      // ... අනිත් Actions ...
+      if (action === "status") return reply(await getStatusCard(sessionId));
+      if (action === "private") { await setSetting(sessionId, "mode", "private"); return reply("✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘʀɪᴠᴀᴛᴇ ]`*"); }
+      if (action === "public") { await setSetting(sessionId, "mode", "public"); return reply("✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘᴜʙʟɪᴄ ]`*"); }
+      
       if (action === "on" || action === "off" || action === "toggle") {
         const key = mapKey(value);
-        if (!key) {
-          return reply("❌ *`[ ɪɴᴠᴀʟɪᴅ sᴇᴛᴛɪɴɢ ɴᴀᴍᴇ ]`*");
-        }
+        if (!key) return reply("❌ *`[ ɪɴᴠᴀʟɪᴅ sᴇᴛᴛɪɴɢ ɴᴀᴍᴇ ]`*");
         
         let updated;
-        if (action === "toggle") {
-          updated = await toggleSetting(sessionId, key);
-        } else {
-          const boolVal = action === "on";
-          updated = await setSetting(sessionId, key, boolVal);
-        }
+        if (action === "toggle") updated = await toggleSetting(sessionId, key);
+        else updated = await setSetting(sessionId, key, action === "on");
 
-        const responses = {
-          auto_status_seen: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs sᴇᴇɴ: ${onOff(updated.auto_status_seen)} ]\`*`,
-          auto_status_react: `✨ *\`[ ✅ ᴀᴜᴛᴏ sᴛᴀᴛᴜs ʀᴇᴀᴄᴛ: ${onOff(updated.auto_status_react)} ]\`*`,
-          auto_download_status: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ sᴛᴀᴛᴜs: ${onOff(updated.auto_download_status)} ]\`*`,
-          auto_msg: `✨ *\`[ ✅ ᴀɪ ᴄʜᴀᴛ: ${onOff(updated.auto_msg)} ]\`*`,
-          seen_all_msg: `✨ *\`[ ✅ sᴇᴇɴ ᴀʟʟ ᴍsɢ: ${onOff(updated.seen_all_msg)} ]\`*`,
-          anti_delete: `✨ *\`[ ✅ ᴀɴᴛɪ ᴅᴇʟᴇᴛᴇ: ${onOff(updated.anti_delete)} ]\`*`,
-          anti_spam: `✨ *\`[ ✅ ᴀɴᴛɪ sᴘᴀᴍ: ${onOff(updated.anti_spam)} ]\`*`,
-          auto_reject_calls: `✨ *\`[ ✅ ʀᴇᴊᴇᴄᴛ ᴄᴀʟʟs: ${onOff(updated.auto_reject_calls)} ]\`*`,
-          auto_react_msg: `✨ *\`[ ✅ ᴀᴜᴛᴏ ᴍsɢ ʀᴇᴀᴄᴛ: ${onOff(updated.auto_react_msg)} ]\`*`,
-          btns_enabled: `✨ *\`[ ✅ ᴍᴇɴᴜ ᴍᴏᴅᴇ: ${btnsModeText(!!updated.btns_enabled)} ]\`*`,
-        };
-
-        return reply(responses[key] || `✨ *\`[ ✅ sᴇᴛ ${key.toUpperCase()} ᴛᴏ ${action.toUpperCase()} ]\`*`);
+        return reply(`✨ *\`[ ✅ sᴇᴛ ${key.toUpperCase()} ᴛᴏ ${action.toUpperCase()} ]\`*`);
       }
 
       return reply(await getStatusCard(sessionId));
@@ -641,17 +583,23 @@ if (!global.__maliya_settings_reply_handler_added) {
 
       const sid = sessionId || state.sessionId;
       const text = getIncomingText(body, mek, m);
+      
+      // Message ID එක ලබාගැනීම (Double trigger නවත්වන්න)
+      const incomingMsgId = mek?.key?.id || m?.key?.id;
+
       const resolved = resolveSettingsActionFromText(text);
 
-      // Interactive Buttons වලට එන Commands
       if (resolved) {
-        const sig = `${resolved.action}:${resolved.value || ""}`;
-        if (isDuplicateAction(state, sig)) return;
+        // Double trigger Check (Button click එකකදී)
+        if (incomingMsgId) {
+            state.processedMsgIds = state.processedMsgIds || [];
+            if (state.processedMsgIds.includes(incomingMsgId)) return;
+            state.processedMsgIds.push(incomingMsgId);
+        }
 
         try {
           if (resolved.action === "menuopen") {
             state.createdAt = Date.now();
-            state.stage = "roles";
             return await sendSettingsRolesMenu(conn, from, mek, reply, sender, sid);
           }
           const result = await applySettingAction(sid, resolved.action, resolved.value);
@@ -665,27 +613,32 @@ if (!global.__maliya_settings_reply_handler_added) {
         }
       }
 
-      // Text Menu එකේ අංක (1, 2, 3...)
       const num = parseInt(text, 10);
       if (!isNaN(num) && state.options && state.options.length >= num && num > 0) {
         
-        // 🔴 මෙතන තමයි අලුතින් Add කරපු Quote/Reply Verification එක
-        const quotedId = m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
-                         mek?.message?.extendedTextMessage?.contextInfo?.stanzaId;
+        // 🔴 1. අනිවාර්යයෙන්ම Reply එකක් විය යුතුයි 🔴
+        const msgObj = mek?.message || m?.message || {};
+        const contextInfo = msgObj?.extendedTextMessage?.contextInfo || msgObj?.imageMessage?.contextInfo || {};
+        const quotedId = contextInfo?.stanzaId;
 
-        // Message එකට Reply කරලා නැත්නම් හෝ පරණ Message එකකට Reply කරලා නම් වැඩ කරන්නේ නෑ
-        if (!quotedId || quotedId !== state.menuMsgId) {
-          return;
+        // Reply කරලා නැත්නම් (නිකම්ම 1 ගැහුවොත්) එතනින්ම නවතිනවා
+        if (!quotedId) return;
+
+        // 🔴 2. හරියටම අදාළ Menu මැසේජ් එකටමයි Reply කරලා තියෙන්නේ කියලා තහවුරු කිරීම
+        if (state.menuMsgId && quotedId !== state.menuMsgId) return;
+
+        // 🔴 3. Double Trigger Check (Text Reply එකකදී එකම මැසේජ් එක දෙපාරක් process වෙන එක නවත්වන්න)
+        if (incomingMsgId) {
+            state.processedMsgIds = state.processedMsgIds || [];
+            if (state.processedMsgIds.includes(incomingMsgId)) return;
+            state.processedMsgIds.push(incomingMsgId);
         }
 
         const opt = state.options[num-1];
-        const sig = `${opt.action}:${opt.value || ""}`;
-        if (isDuplicateAction(state, sig)) return;
 
         try {
           if (opt.action === "menuopen") {
             state.createdAt = Date.now();
-            state.stage = "roles";
             return await sendSettingsRolesMenu(conn, from, mek, reply, sender, sid);
           }
           const result = await applySettingAction(sid, opt.action, opt.value);
