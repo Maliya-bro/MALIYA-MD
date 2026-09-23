@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
-const { getCustomImage } = require("../lib/botSettings");
+const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 // ── Context Info (Channel Details) ─────────────
 const CHANNEL_JID = "120363427174988449@newsletter";
@@ -25,11 +25,10 @@ function channelContextInfo() {
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Accept-Language": "en-US,en;q=0.9"
+  "Accept-Language": "en-US,en;q=0.9",
 };
 
 const DEFAULT_THUMB = "https://i.ibb.co/3m1bXvt/cineverse.jpg"; 
-// 🔥 ඔයා දීපු අලුත් Search Menu Image එක මෙතනට දැම්මා
 const SEARCH_IMAGE = "https://github.com/Maliya-bro/web-pair/blob/main/Gemini_Generated_Image_xmzfzfxmzfzfxmzf.jpg?raw=true";
 
 const TEMP_DIR = path.join(os.tmpdir(), "maliya_an1_temp");
@@ -43,9 +42,24 @@ function safeUnlink(file) {
   try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
 }
 
-// 🔥 සර්ච් කරපු කෙනාට විතරක් වැඩ කරන්න Key එක හදනවා
+// ✅ Group එකේ ඕනෑම කෙනෙකුට reply කළ හැකි වන පරිදි 'from' පමණක් භාවිතය
 function makePendingKey(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
+  return `${from || ""}`;
+}
+
+function clearUserSession(k) {
+  delete pendingAn1Search[k];
+}
+
+// ✅ Quoted Message ID extract කරගැනීම
+function getQuotedStanzaId(mek, m) {
+  return (
+    m?.quoted?.id ||
+    mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+    null
+  );
 }
 
 const pendingAn1Search = Object.create(null);
@@ -53,7 +67,6 @@ const lastProcessedMsg = {};
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 3000;
 
-// 🔥 Thumbnail Image Buffer එක හදන Function එක (Document Preview එකට)
 async function getThumbnailBuffer(url) {
   try {
     if (!url) return null;
@@ -83,13 +96,13 @@ async function searchAN1(query) {
     
     const results = [];
     
-    $('.item_app').each((i, el) => {
-      if (i >= 10) return false; // ප්‍රතිඵල 10ක් ගමු
+    $(".item_app").each((i, el) => {
+      if (i >= 10) return false;
       
-      const title = $(el).find('.name a span').text().trim() || $(el).find('.name a').text().trim();
-      const appUrl = $(el).find('.name a').attr('href');
-      const img = $(el).find('.img img').attr('src');
-      const developer = $(el).find('.developer').text().trim();
+      const title = $(el).find(".name a span").text().trim() || $(el).find(".name a").text().trim();
+      const appUrl = $(el).find(".name a").attr("href");
+      const img = $(el).find(".img img").attr("src");
+      const developer = $(el).find(".developer").text().trim();
       
       if (title && appUrl) {
         results.push({ title, url: appUrl, img, developer });
@@ -110,10 +123,10 @@ async function getAppDetails(appUrl) {
     
     const version = $('span[itemprop="softwareVersion"]').text().trim() || "Unknown";
     const size = $('span[itemprop="fileSize"]').text().trim() || "Unknown";
-    let dlPagePath = $('a.btn-green[href*="file_"]').attr('href');
+    let dlPagePath = $('a.btn-green[href*="file_"]').attr("href");
     
     if (!dlPagePath) return null;
-    const dlPageUrl = dlPagePath.startsWith('http') ? dlPagePath : `https://an1.com${dlPagePath}`;
+    const dlPageUrl = dlPagePath.startsWith("http") ? dlPagePath : `https://an1.com${dlPagePath}`;
     
     return { version, size, dlPageUrl };
   } catch (error) {
@@ -126,7 +139,7 @@ async function getDirectDownloadLink(dlPageUrl) {
   try {
     const { data } = await axios.get(dlPageUrl, { headers: HEADERS });
     const $ = cheerio.load(data);
-    return $('#pre_download').attr('href');
+    return $("#pre_download").attr("href");
   } catch (error) {
     console.error("AN1 Direct Link Error:", error.message);
     return null;
@@ -161,13 +174,8 @@ cmd({
       return await sendErrorMsg(sock, from, mek, `No MOD apps found for "${q}" on AN1.com.`);
     }
 
-    // 🔥 User-Specific Session එක හදනවා
     const key = makePendingKey(sender, from);
-    pendingAn1Search[key] = {
-      results,
-      createdAt: Date.now(),
-      isProcessing: false,
-    };
+    clearUserSession(key);
 
     let text = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n`;
     text += `👾 *𝐀𝐍𝟏 𝐒𝐄𝐀𝐑𝐂𝐇 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n`;
@@ -181,9 +189,8 @@ cmd({
       text += `  ├ 👤 ${item.developer || "Unknown"}\n`;
       text += `  ╰ 🔗 \`an1.com\`\n\n`;
     });
-    text += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n> 👇 *Reply with a number to Download...*`;
+    text += `━ ━ ━ ⋆ ━ ━ ━\n> 💬 *Please reply to this message with a number to Download...*`;
 
-    // ඔයා ඉල්ලපු අලුත් පින්තූරය මෙතනින් සෙට් වෙනවා
     let finalSearchImg = SEARCH_IMAGE;
     if (sessionId) {
       try {
@@ -192,12 +199,18 @@ cmd({
       } catch (e) {}
     }
 
-    // 🔥 පින්තූරය සහ Text එක එකට යවනවා
-    await sock.sendMessage(from, { 
+    const menuMsg = await sock.sendMessage(from, { 
       image: { url: finalSearchImg }, 
       caption: text,
-      contextInfo: channelContextInfo()
+      contextInfo: channelContextInfo(),
     }, { quoted: mek });
+
+    pendingAn1Search[key] = {
+      expectedMsgId: menuMsg.key.id,
+      results,
+      timestamp: Date.now(),
+      isProcessing: false,
+    };
 
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
   } catch (e) {
@@ -209,10 +222,11 @@ cmd({
 // ==========================================
 // 3. Number Reply Listener
 // ==========================================
-replyHandlers.push({
+const an1ReplyHandler = {
   filter: (text, { sender, from }) => {
     if (!text) return false;
-    return !!pendingAn1Search[makePendingKey(sender, from)];
+    const key = makePendingKey(sender, from);
+    return !!pendingAn1Search[key];
   },
   function: async (sock, mek, m, { body, sender, from }) => {
     const key = makePendingKey(sender, from);
@@ -220,9 +234,11 @@ replyHandlers.push({
     if (!pending || pending.isProcessing) return;
 
     const rawInput = String(body || "").trim();
-    const input = parseInt(rawInput, 10);
-    
-    if (isNaN(input) || input < 1 || input > pending.results.length) return;
+    if (!rawInput || !/^\d+$/.test(rawInput)) return;
+
+    // 🔥 User reply කර ඇත්තේ Bot එවූ Menu message එකටම දැයි පරීක්ෂා කිරීම
+    const quotedId = getQuotedStanzaId(mek, m);
+    if (!quotedId || quotedId !== pending.expectedMsgId) return;
 
     // Spam Cooldown Protection
     const now = Date.now();
@@ -230,39 +246,44 @@ replyHandlers.push({
     if (lastMsg && lastMsg.text === rawInput && (now - lastMsg.time) < LOOP_COOLDOWN) return;
     lastProcessedMsg[key] = { text: rawInput, time: now };
 
+    const input = parseInt(rawInput, 10);
+    if (isNaN(input) || input < 1 || input > pending.results.length) return;
+
     pending.isProcessing = true;
     const selected = pending.results[input - 1];
 
     await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
     try {
-      // 1. App Details ගන්නවා (Version & Download Page)
+      // 1. App Details ලබා ගැනීම
       const details = await getAppDetails(selected.url);
       
       if (!details || !details.dlPageUrl) {
-        delete pendingAn1Search[key];
+        clearUserSession(key);
         return await sendErrorMsg(sock, from, mek, "Failed to find the download page for this app.");
       }
 
-      // 2. Direct Link එක ගන්නවා
+      // 2. Direct Link එක ලබා ගැනීම
       const directLink = await getDirectDownloadLink(details.dlPageUrl);
       
       if (!directLink) {
-        delete pendingAn1Search[key];
+        clearUserSession(key);
         return await sendErrorMsg(sock, from, mek, "Failed to extract the direct download link.");
       }
 
-      // 3. Download Process එකට යවනවා
-      delete pendingAn1Search[key];
+      // 3. Download Process එකට යැවීම
+      clearUserSession(key);
       await executeDownload(sock, mek, from, directLink, selected, details);
 
     } catch (error) {
+      clearUserSession(key);
       console.error("AN1 Extraction Error:", error.message);
-      delete pendingAn1Search[key];
       await sendErrorMsg(sock, from, mek, "An error occurred while fetching the download link.");
     }
   },
-});
+};
+
+if (Array.isArray(replyHandlers)) replyHandlers.push(an1ReplyHandler);
 
 // ==========================================
 // 4. Download Execution (With Document Thumbnail)
@@ -272,7 +293,6 @@ async function executeDownload(sock, mek, from, url, selectedApp, details) {
   try {
     await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
 
-    // 300MB දක්වා Download කිරීමට ඉඩ දීම
     const response = await axios({
       url: url,
       method: "GET",
@@ -280,15 +300,15 @@ async function executeDownload(sock, mek, from, url, selectedApp, details) {
       headers: HEADERS, 
       timeout: 180000, 
       maxContentLength: 300 * 1024 * 1024,
-      maxBodyLength: 300 * 1024 * 1024
+      maxBodyLength: 300 * 1024 * 1024,
     });
 
     const writer = fs.createWriteStream(tempFile);
     response.data.pipe(writer);
 
     await new Promise((resolve, reject) => {
-      writer.on('finish', resolve);
-      writer.on('error', reject);
+      writer.on("finish", resolve);
+      writer.on("error", reject);
     });
 
     const stats = fs.statSync(tempFile);
@@ -301,7 +321,7 @@ async function executeDownload(sock, mek, from, url, selectedApp, details) {
     const cleanName = selectedApp.title.replace(/[\\/:*?"<>|]/g, "").trim();
     const isLargeDoc = sizeMB > 60;
     
-    let caption = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n`;
+    let caption = `⊱╔════·༻𐫱༺·═══════╗⊰\n`;
     caption += `✅ *𝐀𝐏𝐊 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
     caption += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n`;
     caption += `📦 *App:* ${selectedApp.title}\n`;
@@ -309,21 +329,18 @@ async function executeDownload(sock, mek, from, url, selectedApp, details) {
     caption += `🏷️ *Version:* ${details.version}\n`;
     caption += `📊 *Size:* ${sizeMB.toFixed(2)} MB\n`;
     caption += `📁 *Format:* ${isLargeDoc ? "Document (Raw Binary)" : "Standard APK"}\n\n`;
-    caption += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+    caption += `⊱╚═══════·༻𐫱༺·════╝⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-    // 🔥 Download වෙන App එකේ Thumbnail එක ගන්නවා (ZANTA-MD Style එකට)
     const thumbBuffer = await getThumbnailBuffer(selectedApp.img || DEFAULT_THUMB);
 
-    // 🔥 fs.createReadStream හරහා RAM එක Crash වෙන්නේ නැතුව Send කරනවා
     const docPayload = {
       document: { stream: fs.createReadStream(tempFile) },
       mimetype: isLargeDoc ? "application/octet-stream" : "application/vnd.android.package-archive",
       fileName: `${cleanName}.apk`,
       caption: caption,
-      contextInfo: channelContextInfo()
+      contextInfo: channelContextInfo(),
     };
 
-    // Thumbnail එක ඇතුලත් කිරීම
     if (thumbBuffer) {
       docPayload.jpegThumbnail = thumbBuffer;
     }
@@ -332,9 +349,9 @@ async function executeDownload(sock, mek, from, url, selectedApp, details) {
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
   } catch (err) {
-    let fallbackMsg = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n`;
+    let fallbackMsg = `⊱─────── ⋆⋅ ♰ ⋅⋆ ───────⊰\n`;
     fallbackMsg += `⚠️ *𝐅𝐈𝐋𝐄 𝐓𝐎𝐎 𝐋𝐀𝐑𝐆𝐄 𝐎𝐑 𝐄𝐑𝐑𝐎𝐑*\n`;
-    fallbackMsg += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n`;
+    fallbackMsg += `⊱─────── ⋆⋅ ♰ ⋅⋆ ───────⊰\n\n`;
     fallbackMsg += `📦 *App:* ${selectedApp.title}\n`;
     fallbackMsg += `ℹ️ _File size exceeds limits or connection timed out._\n\n`;
     fallbackMsg += `🔗 *Direct Download Link:*\n${url}\n\n`;
@@ -351,7 +368,7 @@ async function executeDownload(sock, mek, from, url, selectedApp, details) {
 setInterval(() => {
   const now = Date.now();
   for (const key of Object.keys(pendingAn1Search)) {
-    if (now - pendingAn1Search[key].createdAt > SESSION_TIMEOUT) {
+    if (now - pendingAn1Search[key].timestamp > SESSION_TIMEOUT) {
       delete pendingAn1Search[key];
     }
   }
