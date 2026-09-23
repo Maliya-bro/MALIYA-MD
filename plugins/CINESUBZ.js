@@ -44,7 +44,7 @@ function channelContextInfo() {
   };
 }
 
-// Fixed Thumbnail Buffer for WhatsApp (150x150 and Quality 40)
+// 📱 WhatsApp Mobile එකට හරියටම සපෝට් කරන Thumbnail Generator එක
 async function getThumbnailBuffer(url) {
   const tryUrl = url || DEFAULT_SEARCH_IMAGE;
   try {
@@ -54,16 +54,16 @@ async function getThumbnailBuffer(url) {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
     });
     const image = await Jimp.read(Buffer.from(res.data));
-    image.cover(150, 150);
-    image.quality(40);
+    image.cover(120, 120); // Mobile WhatsApp එකට ගැළපෙන හොඳම සයිස් එක
+    image.quality(30); // Size එක තවත් අඩු කරලා Thumbnail එක අනිවාර්යයෙන්ම පෙන්නන තත්වයට පත් කිරීම
     return await image.getBufferAsync(Jimp.MIME_JPEG);
   } catch (e) {
     if (tryUrl !== DEFAULT_SEARCH_IMAGE) {
       try {
         const res2 = await axios.get(DEFAULT_SEARCH_IMAGE, { responseType: "arraybuffer", timeout: 8000 });
         const image2 = await Jimp.read(Buffer.from(res2.data));
-        image2.cover(150, 150);
-        image2.quality(40);
+        image2.cover(120, 120);
+        image2.quality(30);
         return await image2.getBufferAsync(Jimp.MIME_JPEG);
       } catch (e2) {
         return null;
@@ -325,11 +325,10 @@ const csReplyHandler = {
         });
         qualityMsg += "\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply with quality number to Download...*";
 
-        if (movieInfo.poster) {
-          await sock.sendMessage(from, { image: { url: movieInfo.poster }, caption: qualityMsg, contextInfo: channelContextInfo() }, { quoted: mek });
-        } else {
-          await sock.sendMessage(from, { text: qualityMsg, contextInfo: channelContextInfo() }, { quoted: mek });
-        }
+        // මෙතන poster නැත්නම් image එක ගනීවි
+        const imgToSend = movieInfo.poster || movieInfo.image || DEFAULT_SEARCH_IMAGE;
+
+        await sock.sendMessage(from, { image: { url: imgToSend }, caption: qualityMsg, contextInfo: channelContextInfo() }, { quoted: mek });
 
         pending.step = 2;
         pending.movie = { metadata: movieInfo, downloadLinks };
@@ -359,6 +358,10 @@ const csReplyHandler = {
         if (targetServerLink.endsWith('.mp4') && !targetServerLink.includes('?ext=')) targetServerLink = targetServerLink.replace('.mp4', '?ext=mp4');
 
         const finalResult = await getCineSubzLinks(targetServerLink);
+        
+        // අදාළ ෆොටෝ එක හරියටම ගැනීම
+        const correctPosterUrl = movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE;
+        const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
 
         if (!finalResult.success || !finalResult.links || finalResult.links.length === 0) {
           let fallbackText = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
@@ -369,7 +372,6 @@ const csReplyHandler = {
           fallbackText += "ℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය. කරුණාකර පසුව නැවත උත්සාහ කරන්න._\n\n";
           fallbackText += "⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
 
-          const thumbBuffer = await getThumbnailBuffer(movie.metadata.poster);
           if (thumbBuffer) {
              await sock.sendMessage(from, { image: thumbBuffer, caption: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
           } else {
@@ -382,7 +384,7 @@ const csReplyHandler = {
         const terracloudLinks = allLinks.filter(link => link.includes('terracloud') || link.includes('skylines'));
         const pixeldrainLinks = allLinks.filter(link => link.includes('pixeldrain'));
 
-        let directDownloadUrl = terracloudLinks.length > 0 ? terracloudLinks[0] : (pixeldrainLinks.length > 0 ? pixeldrainLinks[0] : null);
+        let directDownloadUrl = terracloudLinks[0] || pixeldrainLinks[0] || null;
         const cleanTitle = movie.metadata.title.replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
 
         let captionText = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
@@ -392,8 +394,6 @@ const csReplyHandler = {
         captionText += `📊 *Quality :* ${selectedLink.quality}\n\n`;
         captionText += "⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
 
-        const thumbBuffer = await getThumbnailBuffer(movie.metadata.poster);
-
         if (directDownloadUrl) {
           const docPayload = {
             document: { url: directDownloadUrl },
@@ -402,7 +402,11 @@ const csReplyHandler = {
             caption: captionText,
             contextInfo: channelContextInfo()
           };
-          if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
+          
+          // Thumbnail එක මෙතන add වෙනවා
+          if (thumbBuffer) {
+             docPayload.jpegThumbnail = thumbBuffer;
+          }
           
           await sock.sendMessage(from, docPayload, { quoted: mek });
         } else {
