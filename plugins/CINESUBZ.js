@@ -3,7 +3,7 @@ const axios = require("axios");
 const CryptoJS = require("crypto-js");
 const https = require("https");
 const crypto = require("crypto");
-const sharp = require("sharp"); // Jimp වෙනුවට Sharp භාවිතය
+const sharp = require("sharp");
 const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
@@ -16,7 +16,7 @@ const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
 function makePendingKey(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
+  return `${from || ""}`;
 }
 
 function clearUserSession(k) {
@@ -44,7 +44,17 @@ function channelContextInfo() {
   };
 }
 
-// 📱 WhatsApp Mobile එකට හරියටම සපෝට් කරන Thumbnail Generator එක (Sharp භාවිතයෙන්)
+// WhatsApp Baileys Quoted Message ID extract කරගන්න helper එක
+function getQuotedStanzaId(mek) {
+  return (
+    mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+    mek?.message?.videoMessage?.contextInfo?.stanzaId ||
+    mek?.message?.documentMessage?.contextInfo?.stanzaId ||
+    null
+  );
+}
+
 async function getThumbnailBuffer(url) {
   const tryUrl = url || DEFAULT_SEARCH_IMAGE;
   try {
@@ -54,18 +64,14 @@ async function getThumbnailBuffer(url) {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
     });
     
-    // Sharp මගින් රූපය 200x200 ට වෙනස් කර Compress කිරීම
-    const buffer = await sharp(Buffer.from(res.data))
-      .resize(200, 200, { fit: 'cover' }) 
-      .jpeg({ quality: 50 }) // Baileys document thumbnail සඳහා ගැලපෙන Quality එක
+    return await sharp(Buffer.from(res.data))
+      .resize(200, 200, { fit: 'cover' })
+      .jpeg({ quality: 50 })
       .toBuffer();
-      
-    return buffer;
   } catch (e) {
     if (tryUrl !== DEFAULT_SEARCH_IMAGE) {
       try {
         const res2 = await axios.get(DEFAULT_SEARCH_IMAGE, { responseType: "arraybuffer", timeout: 8000 });
-        
         return await sharp(Buffer.from(res2.data))
           .resize(200, 200, { fit: 'cover' })
           .jpeg({ quality: 50 })
@@ -239,7 +245,6 @@ cmd({
     const topResults = results.slice(0, 10);
     const k = makePendingKey(sender, from);
     clearUserSession(k);
-    pendingCineSubz[k] = { step: 1, results: topResults, timestamp: Date.now(), isProcessing: false };
 
     let text = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
     text += "🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n";
@@ -250,7 +255,7 @@ cmd({
     topResults.forEach((item, index) => {
       text += `*[ ${String(index + 1).padStart(2, "0")} ]* ➔ *${item.title}*\n`;
     });
-    text += "\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 👇 *Reply with a number to Download...*";
+    text += "\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 💬 *Please reply to this message with a number...*";
 
     let searchImg = DEFAULT_SEARCH_IMAGE;
     if (sessionId) {
@@ -260,7 +265,17 @@ cmd({
       } catch (e) {}
     }
 
-    await sock.sendMessage(from, { image: { url: searchImg }, caption: text, contextInfo: channelContextInfo() }, { quoted: mek });
+    const sentMsg = await sock.sendMessage(from, { image: { url: searchImg }, caption: text, contextInfo: channelContextInfo() }, { quoted: mek });
+    
+    // Bot යැවූ message එකේ ID එක session එකේ තබා ගනී
+    pendingCineSubz[k] = { 
+      step: 1, 
+      results: topResults, 
+      timestamp: Date.now(), 
+      isProcessing: false,
+      expectedMsgId: sentMsg.key.id 
+    };
+
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
   } catch (error) {
     await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
@@ -281,6 +296,12 @@ const csReplyHandler = {
     const k = makePendingKey(sender, from);
     const pending = pendingCineSubz[k];
     if (!pending || pending.isProcessing) return;
+
+    // 🔥 Check if the incoming message is a quoted reply to the bot's sent message
+    const quotedId = getQuotedStanzaId(mek);
+    if (!quotedId || quotedId !== pending.expectedMsgId) {
+      return; // Normal numbers හෝ වෙනත් messages වලට reply කර ඒවා reject කරයි
+    }
 
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
@@ -319,7 +340,7 @@ const csReplyHandler = {
         }
 
         let qualityMsg = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
-        qualityMsg += "📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄 বন্দর*\n"; // Fixed missing character mapping here implicitly via earlier prompt, kept structure
+        qualityMsg += "📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n"; 
         qualityMsg += "⊱━━━━━ • ✿ • ━━━━━⊰\n\n";
         qualityMsg += `🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
         if (movieInfo.imdb_rate) qualityMsg += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
@@ -328,17 +349,17 @@ const csReplyHandler = {
         downloadLinks.forEach((d, i) => {
           qualityMsg += `*[ ${String(i + 1).padStart(2, "0")} ]* 📊 *${d.quality}*\n`;
         });
-        qualityMsg += "\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply with quality number to Download...*";
+        qualityMsg += "\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Please reply to this message with a quality number...*";
 
-        // මෙතන poster නැත්නම් image එක ගනීවි, ඒක අනිවාර්යයෙන්ම Quality Select Menu එකට යනවා[cite: 3]
         const imgToSend = movieInfo.poster || movieInfo.image || DEFAULT_SEARCH_IMAGE;
 
-        await sock.sendMessage(from, { image: { url: imgToSend }, caption: qualityMsg, contextInfo: channelContextInfo() }, { quoted: mek });
+        const sentQualityMsg = await sock.sendMessage(from, { image: { url: imgToSend }, caption: qualityMsg, contextInfo: channelContextInfo() }, { quoted: mek });
 
         pending.step = 2;
         pending.movie = { metadata: movieInfo, downloadLinks };
         pending.timestamp = Date.now();
         pending.isProcessing = false;
+        pending.expectedMsgId = sentQualityMsg.key.id; // Quality menu එකේ ID එක update කරයි
 
         await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
       } catch (error) {
@@ -364,7 +385,6 @@ const csReplyHandler = {
 
         const finalResult = await getCineSubzLinks(targetServerLink);
         
-        // අදාළ ෆොටෝ එක හරියටම ගැනීම
         const correctPosterUrl = movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE;
         const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
 
@@ -408,7 +428,6 @@ const csReplyHandler = {
             contextInfo: channelContextInfo()
           };
           
-          // Sharp මගින් සකසන ලද Thumbnail එක මෙතන add වෙනවා
           if (thumbBuffer) {
              docPayload.jpegThumbnail = thumbBuffer;
           }
