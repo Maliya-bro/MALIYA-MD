@@ -4,6 +4,8 @@ const config = require("../config");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const pendingMenu = Object.create(null);
+const lastProcessedMsg = {};
+const LOOP_COOLDOWN = 2500;
 
 /* ============ CONFIG ============ */
 const BOT_NAME = "𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻";
@@ -44,8 +46,9 @@ let cacheTime = 0;
 const MENU_CACHE_MS = 60 * 1000;
 
 /* ================= HELPERS ================= */
+// ✅ Group එකේ ඕනෑම කෙනෙකුට reply කළ හැකි වන පරිදි 'from' පමණක් භාවිතය
 function keyFor(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
+  return `${from || ""}`;
 }
 
 function getQuotedId(m, mek) {
@@ -53,6 +56,8 @@ function getQuotedId(m, mek) {
     m?.quoted?.id ||
     mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
     m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.imageMessage?.contextInfo?.stanzaId ||
+    mek?.message?.imageMessage?.contextInfo?.stanzaId ||
     m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
     mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
     null
@@ -174,6 +179,7 @@ function buildCommandMapCached() {
   return cachedMenu;
 }
 
+// ✅ Fix: WhatsApp Text layout එක කැඩෙන්නේ නැති පරිදි border එක කෙලින් සකස් කර ඇත
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
@@ -181,8 +187,9 @@ function menuHeader(userName = "User") {
 ★彡 *${BOT_NAME}* 彡★
 ┗━━━◢◤◆◥◣━━━━┛
 
-✨ 👋 *ʜɪ, ${styledUser}!* \n
-╔═══·༻𐫱༺·════════╗
+✨ 👋 *ʜɪ, ${styledUser}!*
+
+╔══════════════════╗
 🤖 *ʙᴏᴛ ɴᴀᴍᴇ :* ${BOT_NAME}
 👤 *ᴜsᴇʀ :* ${styledUser}
 👑 *ᴏᴡɴᴇʀ :* ${OWNER_NUMBER}
@@ -331,7 +338,7 @@ function buildStyledMainMenu(state, userName) {
   });
 
   msg += `\n⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n`;
-  msg += `> 👇 *Swipe & Reply this message with a number...*`;
+  msg += `> 💬 *Swipe & Reply this message with a number...*`;
   return msg;
 }
 
@@ -366,11 +373,19 @@ async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
 
   if (btnsOn && sendInteractiveMessage) {
     try {
+      let headerImg = DEFAULT_HEADER_IMAGE;
+      if (sessionId) {
+        try {
+          const custom = await getCustomImage(sessionId, "menu_header");
+          if (custom && custom.data) headerImg = custom.data;
+        } catch (e) {}
+      }
+
       return await sendInteractiveMessage(
         sock,
         from,
         {
-          image: { url: DEFAULT_HEADER_IMAGE },
+          image: { url: headerImg },
           text: menuHeader(userName),
           footer: `${BOT_NAME} | Interactive Menu`,
           interactiveButtons: [
@@ -412,11 +427,19 @@ async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
   return await sendNumberedMainMenu(sock, from, mek, state, userName, sessionId);
 }
 
-async function sendCommandsList(sock, from, mek, cat, list, userName) {
+async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId) {
+  let headerImg = DEFAULT_HEADER_IMAGE;
+  if (sessionId) {
+    try {
+      const custom = await getCustomImage(sessionId, "menu_header");
+      if (custom && custom.data) headerImg = custom.data;
+    } catch (e) {}
+  }
+
   return await sock.sendMessage(
     from,
     {
-      image: { url: DEFAULT_HEADER_IMAGE },
+      image: { url: headerImg },
       caption: commandListCaption(cat, list, userName),
       contextInfo: channelContextInfo(),
     },
@@ -428,6 +451,7 @@ async function sendCommandsList(sock, from, mek, cat, list, userName) {
 cmd(
   {
     pattern: "menu",
+    alias: "list", "botmenu", "
     react: "📜",
     desc: "Show command categories",
     category: "main",
@@ -448,6 +472,7 @@ cmd(
         map,
         categories,
         userName,
+        sessionId,
         timestamp: Date.now(),
         lastActionSig: "",
         lastActionAt: 0,
@@ -473,6 +498,7 @@ const menuReplyHandler = {
     const state = pendingMenu[k];
     if (!state) return false;
 
+    // 🔥 Check if incoming message is a quoted reply to the bot's sent menu message
     const quotedId = getQuotedId(m, mek);
     if (!quotedId || quotedId !== state.expectedMsgId) return false;
 
@@ -489,10 +515,16 @@ const menuReplyHandler = {
       const state = pendingMenu[k];
       if (!state) return;
 
+      const inputStr = String(body || "").trim();
+      const now = Date.now();
+      const lastMsg = lastProcessedMsg[k];
+      if (lastMsg && lastMsg.text === inputStr && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+      lastProcessedMsg[k] = { text: inputStr, time: now };
+
       const texts = extractTexts(body, mek, m);
       let action = resolveMenuAction(texts, state);
       if (!action) {
-        const num = parseInt(String(body || "").trim(), 10);
+        const num = parseInt(inputStr, 10);
         if (!isNaN(num) && num > 0 && num <= state.categories.length) {
           action = { type: "view", cat: state.categories[num - 1] };
         }
@@ -514,7 +546,7 @@ const menuReplyHandler = {
         react: { text: getCategoryEmoji(cat), key: mek.key },
       });
 
-      return await sendCommandsList(sock, from, mek, cat, list, userName);
+      return await sendCommandsList(sock, from, mek, cat, list, userName, state.sessionId);
     } catch (e) {
       console.log("MENU ACTION ERROR:", e?.message || e);
     }
@@ -532,6 +564,11 @@ setInterval(() => {
   for (const k of Object.keys(pendingMenu)) {
     if (now - pendingMenu[k].timestamp > timeout) {
       delete pendingMenu[k];
+    }
+  }
+  for (const k in lastProcessedMsg) {
+    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) {
+      delete lastProcessedMsg[k];
     }
   }
 }, 30 * 1000);
