@@ -276,7 +276,7 @@ function buildStyledMenu(title, options, footer = "") {
     msg += `├► *[ ${num} ]* ➔ \`${opt.label}\`\n`;
   });
   msg += `│\n`;
-  msg += `└❮ 💬 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ* ❯─\n`;
+  msg += `└❮ 💬 *ʀᴇᴘʟʏ ᴛᴏ ᴛʜɪs ᴍᴇssᴀɢᴇ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ* ❯─\n`;
   if (footer) msg += `\n*${footer}*`;
 
   return msg;
@@ -284,7 +284,7 @@ function buildStyledMenu(title, options, footer = "") {
 
 async function sendNumberedMenu(conn, from, mek, title, options, footer = "", imageUrl = SETTINGS_IMAGE) {
   const caption = buildStyledMenu(title, options, footer);
-  return conn.sendMessage(
+  return await conn.sendMessage(
     from,
     {
       image: { url: imageUrl },
@@ -297,6 +297,7 @@ async function sendNumberedMenu(conn, from, mek, title, options, footer = "", im
 async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
   const text = await getStatusCard(sessionId);
   const key = makePendingKey(sender, from);
+  
   pendingSettingsMenu[key] = {
     createdAt: Date.now(),
     lastSig: "",
@@ -304,6 +305,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     sessionId,
     stage: "home",
     options: null,
+    menuMsgId: null // Menu Message ID එක Save කරගන්න
   };
 
   const settings = await readSettings(sessionId);
@@ -311,7 +313,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
 
   if (btnsOn && sendInteractiveMessage) {
     try {
-      return await sendInteractiveMessage(
+      const sentMsg = await sendInteractiveMessage(
         conn,
         from,
         {
@@ -337,6 +339,8 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
         },
         { quoted: mek }
       );
+      if (sentMsg?.key?.id) pendingSettingsMenu[key].menuMsgId = sentMsg.key.id;
+      return sentMsg;
     } catch (e) {
       console.log("SETTINGS HOME ERROR:", e);
     }
@@ -347,7 +351,8 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     { label: "📊 Show Full Status", action: "status" },
   ];
   pendingSettingsMenu[key].options = options;
-  return sendNumberedMenu(
+  
+  const sentMsg = await sendNumberedMenu(
     conn,
     from,
     mek,
@@ -356,6 +361,9 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     "© MALIYA-MD",
     SETTINGS_IMAGE
   );
+  
+  if (sentMsg?.key?.id) pendingSettingsMenu[key].menuMsgId = sentMsg.key.id;
+  return sentMsg;
 }
 
 async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) {
@@ -366,6 +374,7 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
     lastAt: 0,
     sessionId,
     stage: "roles",
+    menuMsgId: null
   };
   pendingSettingsMenu[key].createdAt = Date.now();
   pendingSettingsMenu[key].sessionId = sessionId;
@@ -376,7 +385,7 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
 
   if (btnsOn && sendInteractiveMessage) {
     try {
-      return await sendInteractiveMessage(
+      const sentMsg = await sendInteractiveMessage(
         conn,
         from,
         {
@@ -469,6 +478,8 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
         },
         { quoted: mek }
       );
+      if (sentMsg?.key?.id) pendingSettingsMenu[key].menuMsgId = sentMsg.key.id;
+      return sentMsg;
     } catch (e) {
       console.log("SETTINGS ROLES MENU ERROR:", e);
     }
@@ -512,7 +523,10 @@ async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) 
 
   pendingSettingsMenu[key].options = allOptions;
   const header = "⚙️ *sᴇᴛᴛɪɴɢs ᴄᴏɴғɪɢᴜʀᴀᴛɪᴏɴ ᴍᴇɴᴜ*";
-  return sendNumberedMenu(conn, from, mek, header, allOptions, "© MALIYA-MD", SETTINGS_IMAGE);
+  
+  const sentMsg = await sendNumberedMenu(conn, from, mek, header, allOptions, "© MALIYA-MD", SETTINGS_IMAGE);
+  if (sentMsg?.key?.id) pendingSettingsMenu[key].menuMsgId = sentMsg.key.id;
+  return sentMsg;
 }
 
 cmd(
@@ -626,9 +640,10 @@ if (!global.__maliya_settings_reply_handler_added) {
       if (!state) return;
 
       const sid = sessionId || state.sessionId;
-
       const text = getIncomingText(body, mek, m);
       const resolved = resolveSettingsActionFromText(text);
+
+      // Interactive Buttons වලට එන Commands
       if (resolved) {
         const sig = `${resolved.action}:${resolved.value || ""}`;
         if (isDuplicateAction(state, sig)) return;
@@ -642,10 +657,7 @@ if (!global.__maliya_settings_reply_handler_added) {
           const result = await applySettingAction(sid, resolved.action, resolved.value);
           state.createdAt = Date.now();
           
-          await conn.sendMessage(from, {
-            react: { text: "✅", key: mek.key }
-          });
-          
+          await conn.sendMessage(from, { react: { text: "✅", key: mek.key } });
           return reply(result);
         } catch (e) {
           console.log("SETTINGS REPLY HANDLER ERROR:", e);
@@ -653,8 +665,19 @@ if (!global.__maliya_settings_reply_handler_added) {
         }
       }
 
+      // Text Menu එකේ අංක (1, 2, 3...)
       const num = parseInt(text, 10);
       if (!isNaN(num) && state.options && state.options.length >= num && num > 0) {
+        
+        // 🔴 මෙතන තමයි අලුතින් Add කරපු Quote/Reply Verification එක
+        const quotedId = m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+                         mek?.message?.extendedTextMessage?.contextInfo?.stanzaId;
+
+        // Message එකට Reply කරලා නැත්නම් හෝ පරණ Message එකකට Reply කරලා නම් වැඩ කරන්නේ නෑ
+        if (!quotedId || quotedId !== state.menuMsgId) {
+          return;
+        }
+
         const opt = state.options[num-1];
         const sig = `${opt.action}:${opt.value || ""}`;
         if (isDuplicateAction(state, sig)) return;
@@ -668,10 +691,7 @@ if (!global.__maliya_settings_reply_handler_added) {
           const result = await applySettingAction(sid, opt.action, opt.value);
           state.createdAt = Date.now();
           
-          await conn.sendMessage(from, {
-            react: { text: "✅", key: mek.key }
-          });
-          
+          await conn.sendMessage(from, { react: { text: "✅", key: mek.key } });
           return reply(result);
         } catch (e) {
           console.log("SETTINGS NUMERIC ERROR:", e);
