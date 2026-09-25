@@ -1,7 +1,6 @@
 const os = require("os");
 const { cmd } = require("../command");
 
-// Uptime formatter
 function formatUptime(seconds) {
   seconds = Math.floor(seconds);
   const d = Math.floor(seconds / 86400);
@@ -44,22 +43,60 @@ cmd(
         `🧩 *Node:* ${nodeV}\n` +
         `💻 *Platform:* ${platform}`;
 
-      // ButtonV2 (Text + Quick Reply Buttons පමණයි)
-      const { ButtonV2 } = await import("@vanzxy/baileys");
-
-      const msg = new ButtonV2(conn)
-        .setBody(text)
-        .setFooter("© MALIYA-MD BOT SYSTEM")
-        .addReply("📜 Main Menu", ".menu")
-        .addReply("👤 Owner Info", ".owner")
-        .addReply("📊 System Info", ".systeminfo");
-
-      await msg.send(m.chat, { quoted: mek });
+      // Builder methods නොමැතිව සෘජුවම Quick Reply Buttons යැවීම
+      await conn.relayMessage(
+        m.chat,
+        {
+          viewOnceMessage: {
+            message: {
+              interactiveMessage: {
+                body: {
+                  text: text,
+                },
+                footer: {
+                  text: "© MALIYA-MD BOT SYSTEM",
+                },
+                nativeFlowMessage: {
+                  buttons: [
+                    {
+                      name: "quick_reply",
+                      buttonParamsJson: JSON.stringify({
+                        display_text: "📜 Main Menu",
+                        id: ".menu",
+                      }),
+                    },
+                    {
+                      name: "quick_reply",
+                      buttonParamsJson: JSON.stringify({
+                        display_text: "👤 Owner Info",
+                        id: ".owner",
+                      }),
+                    },
+                    {
+                      name: "quick_reply",
+                      buttonParamsJson: JSON.stringify({
+                        display_text: "📊 System Info",
+                        id: ".systeminfo",
+                      }),
+                    },
+                  ],
+                },
+                contextInfo: {
+                  stanzaId: mek.key.id,
+                  participant: mek.key.participant || mek.key.remoteJid,
+                  quotedMessage: mek.message,
+                },
+              },
+            },
+          },
+        },
+        {}
+      );
 
       await conn.sendMessage(m.chat, { react: { text: "🏓", key: mek.key } });
 
     } catch (e) {
-      console.log("PING BUTTONV2 ERROR:", e);
+      console.log("PING DIRECT ERROR:", e);
       await reply("❌ Ping error: " + (e?.message || e));
     }
   }
