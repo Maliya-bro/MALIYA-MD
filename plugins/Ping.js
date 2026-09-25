@@ -1,4 +1,5 @@
 const os = require("os");
+const axios = require("axios");
 const { cmd } = require("../command");
 
 function formatUptime(seconds) {
@@ -9,7 +10,7 @@ function formatUptime(seconds) {
   seconds %= 3600;
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
-  return `${d}d ${h}h ${m}m ${s}s`;
+  return `${d}d ${h}h ${m}s ${s}s`;
 }
 
 cmd(
@@ -43,17 +44,51 @@ cmd(
         `🧩 *Node:* ${nodeV}\n` +
         `💻 *Platform:* ${platform}`;
 
-      // කෙලින්ම @vanzxy/baileys වල ButtonV2 භාවිතා කිරීම (luna-lib අවශ්‍ය නැත)
-      const { ButtonV2 } = await import("@vanzxy/baileys");
+      // 1. Phone එකේ පේන Thumbnail Buffer එක
+      const imgUrl = "https://i.ibb.co/4pDNDk1/avatar.png"; 
+      const response = await axios.get(imgUrl, { responseType: "arraybuffer" });
+      const thumbBuffer = Buffer.from(response.data, "binary");
 
-      await new ButtonV2(conn)
-        .setBody(text)
-        .setFooter("© MALIYA-MD BOT SYSTEM")
-        .setThumbnail("https://i.ibb.co/4pDNDk1/avatar.png")
-        .addButton("📜 Main Menu", ".menu")
-        .addButton("👤 Owner Info", ".owner")
-        .addButton("📊 System Info", ".systeminfo")
-        .send(m.chat, { quoted: mek });
+      // 2. viewOnceMessage සම්පූර්ණයෙන්ම ඉවත් කළ සැබෑ Template Payload එක
+      const templatePayload = {
+        templateMessage: {
+          hydratedTemplate: {
+            locationMessage: {
+              degreesLatitude: 0,
+              degreesLongitude: 0,
+              jpegThumbnail: thumbBuffer,
+            },
+            hydratedContentText: text,
+            hydratedFooterText: "© MALIYA-MD BOT SYSTEM",
+            hydratedButtons: [
+              {
+                quickReplyButton: {
+                  displayText: "Main Menu",
+                  id: ".menu",
+                },
+                index: 1,
+              },
+              {
+                quickReplyButton: {
+                  displayText: "Owner Info",
+                  id: ".owner",
+                },
+                index: 2,
+              },
+              {
+                quickReplyButton: {
+                  displayText: "System Info",
+                  id: ".systeminfo",
+                },
+                index: 3,
+              },
+            ],
+          },
+        },
+      };
+
+      // 3. conn.relayMessage මඟින් කෙලින්ම යැවීම
+      await conn.relayMessage(m.chat, templatePayload, {});
 
       await conn.sendMessage(m.chat, { react: { text: "🏓", key: mek.key } });
 
