@@ -1,6 +1,7 @@
 const { cmd, commands, replyHandlers } = require("../command");
 const { sendInteractiveMessage } = require("gifted-btns");
 const config = require("../config");
+const axios = require("axios");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const pendingMenu = Object.create(null);
@@ -38,7 +39,7 @@ const OWNER_NAME =
   String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
 
 const DEFAULT_HEADER_IMAGE =
-  "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
+  "https://i.ibb.co/4pDNDk1/avatar.png";
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
@@ -46,7 +47,6 @@ let cacheTime = 0;
 const MENU_CACHE_MS = 60 * 1000;
 
 /* ================= HELPERS ================= */
-// ✅ Group එකේ ඕනෑම කෙනෙකුට reply කළ හැකි වන පරිදි 'from' පමණක් භාවිතය
 function keyFor(sender, from) {
   return `${from || ""}`;
 }
@@ -179,7 +179,6 @@ function buildCommandMapCached() {
   return cachedMenu;
 }
 
-// ✅ Fix: WhatsApp Text layout එක කැඩෙන්නේ නැති පරිදි border එක කෙලින් සකස් කර ඇත
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
@@ -248,22 +247,11 @@ function extractTexts(body, mek, m) {
     m?.message?.extendedTextMessage?.text,
     m?.message?.buttonsResponseMessage?.selectedButtonId,
     m?.message?.buttonsResponseMessage?.selectedDisplayText,
-    m?.message?.templateButtonReplyMessage?.selectedId,
-    m?.message?.templateButtonReplyMessage?.selectedDisplayText,
     m?.message?.listResponseMessage?.title,
     m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
     m?.message?.interactiveResponseMessage?.body?.text,
-    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
     mek?.message?.conversation,
     mek?.message?.extendedTextMessage?.text,
-    mek?.message?.buttonsResponseMessage?.selectedButtonId,
-    mek?.message?.buttonsResponseMessage?.selectedDisplayText,
-    mek?.message?.templateButtonReplyMessage?.selectedId,
-    mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    mek?.message?.listResponseMessage?.title,
-    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
-    mek?.message?.interactiveResponseMessage?.body?.text,
-    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
   ];
   for (const item of direct) {
     if (item) texts.push(String(item).trim());
@@ -281,7 +269,6 @@ function extractTexts(body, mek, m) {
       parsed.title,
       parsed.display_text,
       parsed.text,
-      parsed.name,
     ];
     for (const v of vals) {
       if (v) texts.push(String(v).trim());
@@ -342,6 +329,22 @@ function buildStyledMainMenu(state, userName) {
   return msg;
 }
 
+async function getSafeBuffer(url) {
+  try {
+    const res = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 5000,
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    return Buffer.from(res.data);
+  } catch (err) {
+    return Buffer.from(
+      "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
+      "base64"
+    );
+  }
+}
+
 async function sendNumberedMainMenu(sock, from, mek, state, userName, sessionId) {
   let headerImg = DEFAULT_HEADER_IMAGE;
   if (sessionId) {
@@ -367,6 +370,7 @@ async function sendNumberedMainMenu(sock, from, mek, state, userName, sessionId)
   );
 }
 
+// 🔥 Location Header සහිත Side-by-Side Interactive Menu
 async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
   const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
@@ -381,41 +385,57 @@ async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
         } catch (e) {}
       }
 
+      const thumbBuffer = await getSafeBuffer(headerImg);
+
+      // Side-by-Side: 1 Single Select (List) + 1 Quick Reply (Ping)
+      const interactiveButtons = [
+        {
+          name: "single_select",
+          buttonParamsJson: JSON.stringify({
+            title: "≡ List Menu",
+            sections: [
+              {
+                title: "📁 Categories",
+                rows: makeCategoryRows(state.map, state.categories),
+              },
+            ],
+          }),
+        },
+        {
+          name: "quick_reply",
+          buttonParamsJson: JSON.stringify({
+            display_text: "📊 Ping",
+            id: ".ping",
+          }),
+        },
+      ];
+
+      // gifted-btns වෙත locationMessage header සහිත raw interactiveMessage එකක් ලබාදීම
       return await sendInteractiveMessage(
         sock,
         from,
         {
-          image: { url: headerImg },
-          text: menuHeader(userName),
-          footer: `${BOT_NAME} | Interactive Menu`,
-          interactiveButtons: [
-            {
-              name: "single_select",
-              buttonParamsJson: JSON.stringify({
-                title: "Click Here ↯",
-                sections: [
-                  {
-                    title: "Command Categories",
-                    rows: makeCategoryRows(state.map, state.categories),
-                  },
-                ],
-              }),
+          interactiveMessage: {
+            header: {
+              title: "",
+              hasMediaAttachment: true,
+              locationMessage: {
+                degreesLatitude: 0,
+                degreesLongitude: 0,
+                jpegThumbnail: thumbBuffer,
+              },
             },
-            {
-              name: "cta_url",
-              buttonParamsJson: JSON.stringify({
-                display_text: "🌐 Official Website",
-                url: "https://maliya-md.replit.app",
-              }),
+            body: {
+              text: menuHeader(userName),
             },
-            {
-              name: "cta_copy",
-              buttonParamsJson: JSON.stringify({
-                display_text: "📋 Copy Owner Number",
-                copy_code: OWNER_NUMBER,
-              }),
+            footer: {
+              text: `${BOT_NAME} | 2026 SYSTEM`,
             },
-          ],
+            nativeFlowMessage: {
+              buttons: interactiveButtons,
+            },
+            contextInfo: channelContextInfo(),
+          },
         },
         { quoted: mek }
       );
@@ -453,7 +473,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Show command categories",
+    desc: "Show command categories with Asitha-MD layout",
     category: "main",
     filename: __filename,
   },
@@ -498,16 +518,17 @@ const menuReplyHandler = {
     const state = pendingMenu[k];
     if (!state) return false;
 
-    // 🔥 Check if incoming message is a quoted reply to the bot's sent menu message
-    const quotedId = getQuotedId(m, mek);
-    if (!quotedId || quotedId !== state.expectedMsgId) return false;
-
     const texts = extractTexts(text, mek, m);
     const action = resolveMenuAction(texts, state);
     if (action) return true;
 
     const num = parseInt(String(text || "").trim(), 10);
-    return !isNaN(num) && num > 0 && num <= state.categories.length;
+    const isNum = !isNaN(num) && num > 0 && num <= state.categories.length;
+
+    const quotedId = getQuotedId(m, mek);
+    const isQuoted = quotedId && quotedId === state.expectedMsgId;
+
+    return isQuoted || isNum;
   },
   function: async (sock, mek, m, { from, body, sender, pushname, reply }) => {
     try {
