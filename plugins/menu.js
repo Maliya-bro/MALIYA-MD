@@ -308,7 +308,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Show command categories with Asitha-MD layout",
+    desc: "Show command categories with 2 side-by-side buttons",
     category: "main",
     filename: __filename,
   },
@@ -349,7 +349,6 @@ cmd(
           const response = await axios.get(headerImg, { responseType: "arraybuffer" });
           const thumbBuffer = Buffer.from(response.data, "binary");
 
-          // Asitha-MD List Sections
           const listRows = categories.map((cat) => ({
             header: "",
             title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
@@ -357,12 +356,12 @@ cmd(
             id: `.menu_view ${cat}`,
           }));
 
-          // Asitha-MD Side-by-Side Buttons (single_select + quick_reply)
+          // 🔥 Side-by-Side (තනි පේළියට) වැටෙන්න බටන් 2ක් පමණක් යොදා ඇත
           const buttons = [
             {
               name: "single_select",
               buttonParamsJson: JSON.stringify({
-                title: "Click Here!",
+                title: "≡ List Menu",
                 sections: [
                   {
                     title: "📁 Categories",
@@ -380,7 +379,6 @@ cmd(
             },
           ];
 
-          // Location Header සහිත interactiveMessage (Web එකෙත් Phone එකෙත් වැඩකරන ආකෘතිය)
           const sentMsg = await sock.relayMessage(
             from,
             {
@@ -421,7 +419,7 @@ cmd(
         }
       }
 
-      // Buttons Off විට Numbered Menu එක යැවීම
+      // Buttons Off විට Numbered Menu එක ක්‍රියාත්මක වීම
       const sentMsg = await sock.sendMessage(
         from,
         {
@@ -443,7 +441,7 @@ cmd(
   }
 );
 
-/* ================= COMMAND: .menu_view (List එකෙන් Category එකක් Click කළ විට) ================= */
+/* ================= COMMAND: .menu_view ================= */
 cmd(
   {
     pattern: "menu_view",
@@ -469,7 +467,7 @@ cmd(
   }
 );
 
-/* ================= REPLY HANDLER (NUMBER + LIST PICKER HANDLER) ================= */
+/* ================= REPLY HANDLER (NUMBER + LIST HANDLER) ================= */
 const menuReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
