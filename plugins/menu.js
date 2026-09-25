@@ -346,8 +346,12 @@ cmd(
 
       if (btnsOn) {
         try {
+          // Baileys functions ලබා ගැනීම
+          const baileys = await import("@whiskeysockets/baileys").catch(() => import("@vanzxy/baileys"));
+          const { generateWAMessageFromContent, proto } = baileys;
+
           const response = await axios.get(headerImg, { responseType: "arraybuffer" });
-          const thumbBuffer = Buffer.from(response.data, "binary");
+          const thumbBuffer = Buffer.from(response.data);
 
           const listRows = categories.map((cat) => ({
             header: "",
@@ -356,7 +360,6 @@ cmd(
             id: `.menu_view ${cat}`,
           }));
 
-          // 🔥 Side-by-Side (තනි පේළියට) වැටෙන්න බටන් 2ක් පමණක් යොදා ඇත
           const buttons = [
             {
               name: "single_select",
@@ -379,39 +382,46 @@ cmd(
             },
           ];
 
-          const sentMsg = await sock.relayMessage(
+          // නිවැරදි WAMessage Content එකක් generate කිරීම
+          const msg = generateWAMessageFromContent(
             from,
             {
-              interactiveMessage: {
-                header: {
-                  title: "",
-                  hasMediaAttachment: true,
-                  locationMessage: {
-                    degreesLatitude: 0,
-                    degreesLongitude: 0,
-                    jpegThumbnail: thumbBuffer,
-                  },
-                },
-                body: {
-                  text: menuHeader(userName),
-                },
-                footer: {
-                  text: "© 2026 MALIYA-MD BOT SYSTEM",
-                },
-                nativeFlowMessage: {
-                  buttons: buttons,
-                },
-                contextInfo: {
-                  stanzaId: mek.key.id,
-                  participant: mek.key.participant || mek.key.remoteJid,
-                  quotedMessage: mek.message,
+              viewOnceMessage: {
+                message: {
+                  interactiveMessage: proto.Message.InteractiveMessage.create({
+                    header: proto.Message.InteractiveMessage.Header.create({
+                      title: "",
+                      hasMediaAttachment: true,
+                      locationMessage: {
+                        degreesLatitude: 0,
+                        degreesLongitude: 0,
+                        jpegThumbnail: thumbBuffer,
+                      },
+                    }),
+                    body: proto.Message.InteractiveMessage.Body.create({
+                      text: menuHeader(userName),
+                    }),
+                    footer: proto.Message.InteractiveMessage.Footer.create({
+                      text: "© 2026 MALIYA-MD BOT SYSTEM",
+                    }),
+                    nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+                      buttons: buttons,
+                    }),
+                    contextInfo: {
+                      stanzaId: mek.key.id,
+                      participant: mek.key.participant || mek.key.remoteJid,
+                      quotedMessage: mek.message,
+                    },
+                  }),
                 },
               },
             },
-            {}
+            { quoted: mek }
           );
 
-          if (sentMsg) state.expectedMsgId = sentMsg;
+          await sock.relayMessage(from, msg.message, { messageId: msg.key.id });
+
+          if (msg.key?.id) state.expectedMsgId = msg.key.id;
           pendingMenu[k] = state;
           return;
         } catch (err) {
@@ -419,7 +429,7 @@ cmd(
         }
       }
 
-      // Buttons Off විට Numbered Menu එක ක්‍රියාත්මක වීම
+      // Buttons Off විට Numbered Menu එක යැවීම
       const sentMsg = await sock.sendMessage(
         from,
         {
@@ -467,7 +477,7 @@ cmd(
   }
 );
 
-/* ================= REPLY HANDLER (NUMBER + LIST HANDLER) ================= */
+/* ================= REPLY HANDLER ================= */
 const menuReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
