@@ -38,7 +38,7 @@ const OWNER_NAME =
   String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
 
 const DEFAULT_HEADER_IMAGE =
-  "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
+  "https://i.ibb.co/4pDNDk1/avatar.png"; // ECONNRESET නිරාකරණය සඳහා ස්ථාවර CDN එකක්
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
@@ -302,13 +302,31 @@ async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId)
   );
 }
 
+// Fallback buffer ලබාගැනීමේ function එක
+async function getSafeBuffer(url) {
+  try {
+    const res = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 5000,
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    return Buffer.from(res.data);
+  } catch (err) {
+    // Connection drop වුවහොත් 1x1 Pixel Transparent Fallback Buffer එකක් ලබා දීම
+    return Buffer.from(
+      "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
+      "base64"
+    );
+  }
+}
+
 /* ================= COMMAND: .menu ================= */
 cmd(
   {
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Show command categories with 2 side-by-side buttons",
+    desc: "Show command categories with Asitha-MD layout",
     category: "main",
     filename: __filename,
   },
@@ -346,12 +364,7 @@ cmd(
 
       if (btnsOn) {
         try {
-          // Baileys functions ලබා ගැනීම
-          const baileys = await import("@whiskeysockets/baileys").catch(() => import("@vanzxy/baileys"));
-          const { generateWAMessageFromContent, proto } = baileys;
-
-          const response = await axios.get(headerImg, { responseType: "arraybuffer" });
-          const thumbBuffer = Buffer.from(response.data);
+          const thumbBuffer = await getSafeBuffer(headerImg);
 
           const listRows = categories.map((cat) => ({
             header: "",
@@ -360,6 +373,7 @@ cmd(
             id: `.menu_view ${cat}`,
           }));
 
+          // Asitha-MD ආකෘතිය: Single Select (List) + Quick Reply (Ping)
           const buttons = [
             {
               name: "single_select",
@@ -382,7 +396,9 @@ cmd(
             },
           ];
 
-          // නිවැරදි WAMessage Content එකක් generate කිරීම
+          const baileys = await import("@whiskeysockets/baileys").catch(() => import("@vanzxy/baileys"));
+          const { generateWAMessageFromContent, proto } = baileys;
+
           const msg = generateWAMessageFromContent(
             from,
             {
@@ -425,7 +441,7 @@ cmd(
           pendingMenu[k] = state;
           return;
         } catch (err) {
-          console.log("ASITHA STYLE MENU ERROR:", err);
+          console.log("ASITHA STYLE MENU ERROR:", err?.message || err);
         }
       }
 
