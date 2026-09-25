@@ -1,5 +1,6 @@
 const { cmd, commands, replyHandlers } = require("../command");
 const config = require("../config");
+const axios = require("axios");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const pendingMenu = Object.create(null);
@@ -32,6 +33,9 @@ const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
   : OWNER_NUMBER_RAW
   ? `+${OWNER_NUMBER_RAW}`
   : "Not Set";
+
+const OWNER_NAME =
+  String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
 
 const DEFAULT_HEADER_IMAGE =
   "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
@@ -159,43 +163,33 @@ function buildCommandMapCached() {
 
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
-  const styledUser = toSmallCaps(userName);
-  return `ㅤㅤ┏━━━◥◣◆◢◤━━━━┓
-ㅤㅤ★彡 *${BOT_NAME}* 彡★
-ㅤㅤ┗━━━◢◤◆◥◣━━━━┛
+  return `👋 *HI ${userName}*
 
-✨ 👋 *ʜɪ, ${styledUser}!*
+╭─ 「 *BOT'S MENU* 」
+│ 👾 *Bot :* ${BOT_NAME}
+│ 👤 *User :* ${userName}
+│ ☎️ *Owner :* ${OWNER_NAME}
+│ 🕒 *Time :* ${time}
+│ 📅 *Date :* ${date}
+│ 🎯 *Prefix :* [ ${PREFIX} ]
+╰───────────────┈➤
 
-╔═══. .★.═════════╗
-🤖 *ʙᴏᴛ ɴᴀᴍᴇ :* ${BOT_NAME}
-👤 *ᴜsᴇʀ :* ${styledUser}
-👑 *ᴏᴡɴᴇʀ :* ${OWNER_NUMBER}
-🕒 *ᴛɪᴍᴇ :* ${time}
-📅 *ᴅᴀᴛᴇ :* ${date}
-🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]
-╚═════════. .★.═══╝
+🎀 *≡ Select a Command List: ≡*
 
-╰─────✦❘•❘✦────•┈➤
-👇 *Select a command category below to view commands:*`;
+🌐 *Web:* https://maliya-md.replit.app`;
 }
 
 function buildStyledMainMenu(state, userName) {
   const { categories } = state;
   const styledUser = toSmallCaps(userName);
-  let msg = `┏━━━◥◣◆◢◤━━━━┓\n`;
-  msg += `★彡 *${BOT_NAME}* 彡★\n`;
-  msg += `┗━━━◢◤◆◥◣━━━━┛\n\n`;
+  let msg = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
   msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
-
   categories.forEach((cat, idx) => {
     const emo = getCategoryEmoji(cat);
     const numStr = String(idx + 1).padStart(2, "0");
-    const styledCat = toSmallCaps(cat);
-    msg += `*[ ${numStr} ]*  ${emo}  *${styledCat}*  _(${state.map[cat].length})_\n`;
+    msg += `*[ ${numStr} ]*  ${emo}  *${toSmallCaps(cat)}*  _(${state.map[cat].length})_\n`;
   });
-
-  msg += `\n⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n`;
-  msg += `> 💬 *Swipe & Reply this message with a number...*`;
+  msg += `\n⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n> 💬 *Swipe & Reply this message with a number...*`;
   return msg;
 }
 
@@ -203,12 +197,8 @@ function commandListCaption(cat, list, userName = "User") {
   const emo = getCategoryEmoji(cat);
   const styledCat = toSmallCaps(cat);
   const styledUser = toSmallCaps(userName);
-  let txt = `╭⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n`;
-  txt += `${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n`;
-  txt += `╰⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n\n`;
-  txt += `👤 *ᴜsᴇʀ :* ${styledUser}\n`;
-  txt += `📦 *ᴛᴏᴛᴀʟ :* ${list.length} Commands\n`;
-  txt += `🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]\n\n`;
+  let txt = `╭⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n╰⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n\n`;
+  txt += `👤 *ᴜsᴇʀ :* ${styledUser}\n📦 *ᴛᴏᴛᴀʟ :* ${list.length} Commands\n🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]\n\n`;
 
   list.forEach((c) => {
     const primary = c.pattern ? `${PREFIX}${toSmallCaps(c.pattern)}` : "No Pattern";
@@ -218,8 +208,7 @@ function commandListCaption(cat, list, userName = "User") {
     txt += `  ╰ 📌 *ᴅᴇsᴄ:* _${c.desc || "No description"}_\n\n`;
   });
 
-  txt += `──────✦❘•❘✦──────\n`;
-  txt += `> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
+  txt += `──────✦❘•❘✦──────\n> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
   return txt;
 }
 
@@ -233,20 +222,11 @@ function extractTexts(body, mek, m) {
     m?.message?.extendedTextMessage?.text,
     m?.message?.buttonsResponseMessage?.selectedButtonId,
     m?.message?.buttonsResponseMessage?.selectedDisplayText,
-    m?.message?.templateButtonReplyMessage?.selectedId,
-    m?.message?.templateButtonReplyMessage?.selectedDisplayText,
     m?.message?.listResponseMessage?.title,
     m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
     m?.message?.interactiveResponseMessage?.body?.text,
     mek?.message?.conversation,
     mek?.message?.extendedTextMessage?.text,
-    mek?.message?.buttonsResponseMessage?.selectedButtonId,
-    mek?.message?.buttonsResponseMessage?.selectedDisplayText,
-    mek?.message?.templateButtonReplyMessage?.selectedId,
-    mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    mek?.message?.listResponseMessage?.title,
-    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
-    mek?.message?.interactiveResponseMessage?.body?.text,
   ];
   for (const item of direct) {
     if (item) texts.push(String(item).trim());
@@ -261,6 +241,7 @@ function extractTexts(body, mek, m) {
       if (parsed.id) texts.push(String(parsed.id).trim());
       if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
       if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+      if (parsed.title) texts.push(String(parsed.title).trim());
     } catch {}
   }
   return [...new Set(texts.filter(Boolean))];
@@ -278,9 +259,9 @@ function resolveMenuAction(texts, state) {
     for (const cat of state.categories || []) {
       const catText = normalizeText(cat);
       if (
-        text === `${catText} MENU` ||
-        text.includes(`${catText} MENU`) ||
+        text === catText ||
         text === `${catText} COMMANDS` ||
+        text === `${catText} MENU` ||
         text.includes(`${catText} COMMANDS`)
       ) {
         return { type: "view", cat };
@@ -321,35 +302,13 @@ async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId)
   );
 }
 
-// 🔥 අමතර Text කිසිවක් නැතිව පිරිසිදු List Button එක පමණක් යැවීම
-async function sendPureListMenu(sock, from, mek) {
-  const { map, categories } = buildCommandMapCached();
-  const { Button } = await import("@vanzxy/baileys");
-
-  const btnMsg = new Button(sock)
-    .setBody("\u200E") // හිස් අකුරක් භාවිතයෙන් Text එක සම්පූර්ණයෙන්ම සඟවා ඇත
-    .addSelection("📑 Click Here to Select Category");
-
-  const section = btnMsg.makeSection("COMMAND CATEGORIES", "ALL");
-  for (const cat of categories) {
-    section.makeRow(
-      getCategoryEmoji(cat),
-      `${toSmallCaps(cat)} MENU`,
-      `${map[cat].length} commands available`,
-      `.menu_view ${cat}`
-    );
-  }
-
-  await btnMsg.send(from, { quoted: mek });
-}
-
-/* ================= COMMAND: .menu (ButtonV2) ================= */
+/* ================= COMMAND: .menu ================= */
 cmd(
   {
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Show command categories",
+    desc: "Show command categories with Asitha-MD layout",
     category: "main",
     filename: __filename,
   },
@@ -387,28 +346,82 @@ cmd(
 
       if (btnsOn) {
         try {
-          const { ButtonV2 } = await import("@vanzxy/baileys");
+          const response = await axios.get(headerImg, { responseType: "arraybuffer" });
+          const thumbBuffer = Buffer.from(response.data, "binary");
 
-          const sentMsg = await new ButtonV2(sock)
-            .setBody(menuHeader(userName))
-            .setFooter(`${BOT_NAME} | 2026 SYSTEM`)
-            .setThumbnail(headerImg)
-            .addButton("📑 List Menu", ".listmenu")
-            .addButton("🏓 Ping Latency", ".ping")
-            .addButton("👤 Owner Info", ".owner")
-            .send(from, { quoted: mek });
+          // Asitha-MD List Sections
+          const listRows = categories.map((cat) => ({
+            header: "",
+            title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
+            description: `Show ${cat.toLowerCase()} command list`,
+            id: `.menu_view ${cat}`,
+          }));
 
-          if (sentMsg?.key?.id) {
-            state.expectedMsgId = sentMsg.key.id;
-          }
+          // Asitha-MD Side-by-Side Buttons (single_select + quick_reply)
+          const buttons = [
+            {
+              name: "single_select",
+              buttonParamsJson: JSON.stringify({
+                title: "Click Here!",
+                sections: [
+                  {
+                    title: "📁 Categories",
+                    rows: listRows,
+                  },
+                ],
+              }),
+            },
+            {
+              name: "quick_reply",
+              buttonParamsJson: JSON.stringify({
+                display_text: "📊 Ping",
+                id: ".ping",
+              }),
+            },
+          ];
+
+          // Location Header සහිත interactiveMessage (Web එකෙත් Phone එකෙත් වැඩකරන ආකෘතිය)
+          const sentMsg = await sock.relayMessage(
+            from,
+            {
+              interactiveMessage: {
+                header: {
+                  title: "",
+                  hasMediaAttachment: true,
+                  locationMessage: {
+                    degreesLatitude: 0,
+                    degreesLongitude: 0,
+                    jpegThumbnail: thumbBuffer,
+                  },
+                },
+                body: {
+                  text: menuHeader(userName),
+                },
+                footer: {
+                  text: "© 2026 MALIYA-MD BOT SYSTEM",
+                },
+                nativeFlowMessage: {
+                  buttons: buttons,
+                },
+                contextInfo: {
+                  stanzaId: mek.key.id,
+                  participant: mek.key.participant || mek.key.remoteJid,
+                  quotedMessage: mek.message,
+                },
+              },
+            },
+            {}
+          );
+
+          if (sentMsg) state.expectedMsgId = sentMsg;
           pendingMenu[k] = state;
           return;
-        } catch (btnErr) {
-          console.log("BUTTON V2 SEND ERROR:", btnErr);
+        } catch (err) {
+          console.log("ASITHA STYLE MENU ERROR:", err);
         }
       }
 
-      // Buttons Off නම් Numbered Menu එක යැවීම
+      // Buttons Off විට Numbered Menu එක යැවීම
       const sentMsg = await sock.sendMessage(
         from,
         {
@@ -430,24 +443,7 @@ cmd(
   }
 );
 
-/* ================= COMMAND: .listmenu ================= */
-cmd(
-  {
-    pattern: "listmenu",
-    alias: ["📑 List Menu", "List Menu", "list_menu"],
-    dontAddCommandList: true,
-    filename: __filename,
-  },
-  async (sock, mek, m, { from }) => {
-    try {
-      await sendPureListMenu(sock, from, mek);
-    } catch (e) {
-      console.log("LIST MENU ERROR:", e?.message || e);
-    }
-  }
-);
-
-/* ================= COMMAND: .menu_view ================= */
+/* ================= COMMAND: .menu_view (List එකෙන් Category එකක් Click කළ විට) ================= */
 cmd(
   {
     pattern: "menu_view",
@@ -473,53 +469,32 @@ cmd(
   }
 );
 
-/* ================= REPLY HANDLER (BUTTON CLICK + NUMBER REPLY) ================= */
+/* ================= REPLY HANDLER (NUMBER + LIST PICKER HANDLER) ================= */
 const menuReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
-    const raw = String(text || "").trim();
-    if (
-      raw === "📑 List Menu" ||
-      raw === "List Menu" ||
-      raw === ".listmenu" ||
-      raw.toLowerCase().includes("list menu")
-    ) {
-      return true;
-    }
-
     const k = keyFor(sender, from);
     const state = pendingMenu[k];
     if (!state) return false;
-
-    const quotedId = getQuotedId(m, mek);
-    const isQuoted = quotedId && quotedId === state.expectedMsgId;
 
     const texts = extractTexts(text, mek, m);
     const action = resolveMenuAction(texts, state);
     if (action) return true;
 
-    const num = parseInt(raw, 10);
+    const num = parseInt(String(text || "").trim(), 10);
     const isNum = !isNaN(num) && num > 0 && num <= state.categories.length;
+
+    const quotedId = getQuotedId(m, mek);
+    const isQuoted = quotedId && quotedId === state.expectedMsgId;
 
     return isQuoted || isNum;
   },
   function: async (sock, mek, m, { from, body, sender, pushname, reply }) => {
     try {
-      const inputStr = String(body || "").trim();
-
-      // List Menu Button එක ක්ලික් කිරීම Handle කිරීම
-      if (
-        inputStr === "📑 List Menu" ||
-        inputStr === "List Menu" ||
-        inputStr === ".listmenu" ||
-        inputStr.toLowerCase().includes("list menu")
-      ) {
-        return await sendPureListMenu(sock, from, mek);
-      }
-
       const k = keyFor(sender, from);
       const state = pendingMenu[k];
       if (!state) return;
 
+      const inputStr = String(body || "").trim();
       const now = Date.now();
       const lastMsg = lastProcessedMsg[k];
       if (lastMsg && lastMsg.text === inputStr && (now - lastMsg.time) < LOOP_COOLDOWN) return;
