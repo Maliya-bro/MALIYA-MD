@@ -85,7 +85,8 @@
     "crypto": "latest",
     "@vanzxy/baileys": "latest",
     "got-scraping": "latest",
-    "tough-cookie": "latest"
+    "tough-cookie": "latest",
+    "@ryuu-reinzz/luna-lib": "latest"
   
     
 
