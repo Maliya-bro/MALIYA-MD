@@ -38,7 +38,7 @@ const OWNER_NAME =
   String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
 
 const DEFAULT_HEADER_IMAGE =
-  "https://i.ibb.co/4pDNDk1/avatar.png";
+  "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
@@ -346,6 +346,10 @@ cmd(
 
       if (btnsOn) {
         try {
+          const response = await axios.get(headerImg, { responseType: "arraybuffer" });
+          const thumbBuffer = Buffer.from(response.data, "binary");
+
+          // Asitha-MD List Sections
           const listRows = categories.map((cat) => ({
             header: "",
             title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
@@ -353,11 +357,12 @@ cmd(
             id: `.menu_view ${cat}`,
           }));
 
+          // Asitha-MD Side-by-Side Buttons (single_select + quick_reply)
           const buttons = [
             {
               name: "single_select",
               buttonParamsJson: JSON.stringify({
-                title: "≡ List Menu",
+                title: "Click Here!",
                 sections: [
                   {
                     title: "📁 Categories",
@@ -375,38 +380,48 @@ cmd(
             },
           ];
 
-          // Direct standard interactive message (drop aaguvudilla)
-          const interactiveContent = {
-            body: { text: menuHeader(userName) },
-            footer: { text: "© 2026 MALIYA-MD BOT SYSTEM" },
-            header: {
-              title: "",
-              hasMediaAttachment: true,
-              imageMessage: (await sock.prepareWAMessageMedia({ image: { url: headerImg } }, { upload: sock.waUploadToServer })).imageMessage,
-            },
-            nativeFlowMessage: {
-              buttons: buttons,
-            },
-            contextInfo: channelContextInfo(),
-          };
-
-          const sentMsg = await sock.sendMessage(
+          // Location Header සහිත interactiveMessage (Web එකෙත් Phone එකෙත් වැඩකරන ආකෘතිය)
+          const sentMsg = await sock.relayMessage(
             from,
             {
-              interactiveMessage: interactiveContent,
+              interactiveMessage: {
+                header: {
+                  title: "",
+                  hasMediaAttachment: true,
+                  locationMessage: {
+                    degreesLatitude: 0,
+                    degreesLongitude: 0,
+                    jpegThumbnail: thumbBuffer,
+                  },
+                },
+                body: {
+                  text: menuHeader(userName),
+                },
+                footer: {
+                  text: "© 2026 MALIYA-MD BOT SYSTEM",
+                },
+                nativeFlowMessage: {
+                  buttons: buttons,
+                },
+                contextInfo: {
+                  stanzaId: mek.key.id,
+                  participant: mek.key.participant || mek.key.remoteJid,
+                  quotedMessage: mek.message,
+                },
+              },
             },
-            { quoted: mek }
+            {}
           );
 
-          if (sentMsg?.key?.id) state.expectedMsgId = sentMsg.key.id;
+          if (sentMsg) state.expectedMsgId = sentMsg;
           pendingMenu[k] = state;
           return;
         } catch (err) {
-          console.log("INTERACTIVE MENU ERROR:", err?.message || err);
+          console.log("ASITHA STYLE MENU ERROR:", err);
         }
       }
 
-      // Buttons disabled iddhaaga numbered menu
+      // Buttons Off විට Numbered Menu එක යැවීම
       const sentMsg = await sock.sendMessage(
         from,
         {
@@ -428,7 +443,7 @@ cmd(
   }
 );
 
-/* ================= COMMAND: .menu_view ================= */
+/* ================= COMMAND: .menu_view (List එකෙන් Category එකක් Click කළ විට) ================= */
 cmd(
   {
     pattern: "menu_view",
@@ -454,7 +469,7 @@ cmd(
   }
 );
 
-/* ================= REPLY HANDLER ================= */
+/* ================= REPLY HANDLER (NUMBER + LIST PICKER HANDLER) ================= */
 const menuReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
