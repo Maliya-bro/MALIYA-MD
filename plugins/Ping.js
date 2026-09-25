@@ -1,5 +1,4 @@
 const os = require("os");
-const axios = require("axios");
 const { cmd } = require("../command");
 
 function formatUptime(seconds) {
@@ -44,62 +43,25 @@ cmd(
         `🧩 *Node:* ${nodeV}\n` +
         `💻 *Platform:* ${platform}`;
 
-      // 1. Phone එකේ පේන Thumbnail එක
-      const imgUrl = "https://i.ibb.co/4pDNDk1/avatar.png"; 
-      const response = await axios.get(imgUrl, { responseType: "arraybuffer" });
-      const thumbBuffer = Buffer.from(response.data, "binary");
+      // luna-lib ESM library එකක් බැවින් Dynamic import භාවිතා කරයි
+      const { ButtonV2 } = await import("@ryuu-reinzz/luna-lib");
 
-      // 2. Asitha-MD Legacy Hydrated Template Message Payload
-      const templateMessagePayload = {
-        viewOnceMessage: {
-          message: {
-            templateMessage: {
-              hydratedTemplate: {
-                locationMessage: {
-                  degreesLatitude: 0,
-                  degreesLongitude: 0,
-                  jpegThumbnail: thumbBuffer,
-                },
-                hydratedContentText: text,
-                hydratedFooterText: "© MALIYA-MD BOT SYSTEM",
-                hydratedButtons: [
-                  {
-                    quickReplyButton: {
-                      displayText: "📜 Main Menu",
-                      id: ".menu",
-                    },
-                    index: 1,
-                  },
-                  {
-                    quickReplyButton: {
-                      displayText: "👤 Owner Info",
-                      id: ".owner",
-                    },
-                    index: 2,
-                  },
-                  {
-                    quickReplyButton: {
-                      displayText: "📊 System Info",
-                      id: ".systeminfo",
-                    },
-                    index: 3,
-                  },
-                ],
-              },
-            },
-          },
-        },
-      };
-
-      // 3. conn.relayMessage හරහා යැවීම
-      await conn.relayMessage(m.chat, templateMessagePayload, {
-        messageId: mek.key.id,
-      });
+      // Asitha-MD හී භාවිතා වන ButtonV2 Builder එක
+      await new ButtonV2(conn)
+        .setTitle("MALIYA-MD SYSTEM")
+        .setSubtitle("SPEED TEST")
+        .setBody(text)
+        .setFooter("© MALIYA-MD BOT SYSTEM")
+        .setThumbnail("https://i.ibb.co/4pDNDk1/avatar.png") // Phone එකේ Image එකක් ලෙස හා Web හි Location fallback ලෙස පෙන්වයි
+        .addButton("📜 Main Menu", ".menu")
+        .addButton("👤 Owner Info", ".owner")
+        .addButton("📊 System Info", ".systeminfo")
+        .send(m.chat, { quoted: mek });
 
       await conn.sendMessage(m.chat, { react: { text: "🏓", key: mek.key } });
 
     } catch (e) {
-      console.log("PING ASITHA STYLE ERROR:", e);
+      console.log("PING LUNA-LIB ERROR:", e);
       await reply("❌ Ping error: " + (e?.message || e));
     }
   }
