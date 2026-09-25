@@ -1,6 +1,5 @@
 const { cmd, commands, replyHandlers } = require("../command");
 const config = require("../config");
-const axios = require("axios");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const pendingMenu = Object.create(null);
@@ -38,7 +37,7 @@ const OWNER_NAME =
   String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
 
 const DEFAULT_HEADER_IMAGE =
-  "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
+  "https://i.ibb.co/4pDNDk1/avatar.png";
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
@@ -84,6 +83,8 @@ function getUserName(pushname, m, mek, sender = "") {
     mek?.name,
     m?.notifyName,
     mek?.notifyName,
+    m?.chatName,
+    mek?.chatName,
   ];
   for (const item of candidates) {
     if (item && String(item).trim()) return String(item).trim();
@@ -228,6 +229,8 @@ function extractTexts(body, mek, m) {
     m?.message?.interactiveResponseMessage?.body?.text,
     mek?.message?.conversation,
     mek?.message?.extendedTextMessage?.text,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
   ];
   for (const item of direct) {
     if (item) texts.push(String(item).trim());
@@ -283,22 +286,6 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
-async function getSafeBuffer(url) {
-  try {
-    const res = await axios.get(url, {
-      responseType: "arraybuffer",
-      timeout: 8000,
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
-    return Buffer.from(res.data);
-  } catch (err) {
-    return Buffer.from(
-      "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
-      "base64"
-    );
-  }
-}
-
 async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId) {
   let headerImg = DEFAULT_HEADER_IMAGE;
   if (sessionId) {
@@ -308,12 +295,10 @@ async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId)
     } catch (e) {}
   }
 
-  const imgBuf = await getSafeBuffer(headerImg);
-
   return await sock.sendMessage(
     from,
     {
-      image: imgBuf,
+      image: { url: headerImg },
       caption: commandListCaption(cat, list, userName),
       contextInfo: channelContextInfo(),
     },
@@ -327,7 +312,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Show command categories with Location Thumbnail & List Buttons",
+    desc: "Show command categories with ButtonV2 Location & List",
     category: "main",
     filename: __filename,
   },
@@ -363,72 +348,62 @@ cmd(
         } catch (e) {}
       }
 
-      const thumbBuffer = await getSafeBuffer(headerImg);
-
       if (btnsOn) {
         try {
-          // @vanzxy/baileys හෝ @ryuu-reinzz/luna-lib හරහා Button class එක ගැනීම
-          const pkg = await import("@vanzxy/baileys").catch(() =>
-            import("@ryuu-reinzz/luna-lib")
-          );
-          const Button = pkg.Button || pkg.default?.Button;
+          // Ping එකේ වගේම @vanzxy/baileys හි ButtonV2 භාවිතා කිරීම
+          const { ButtonV2 } = await import("@vanzxy/baileys");
 
-          if (Button) {
-            // Thumbnail එක 300x300 ට resize කර ගැනීම (ButtonV2 එකේ කරන විදිහටම)
-            let finalThumb = thumbBuffer;
-            if (typeof Button.resize === "function") {
-              try {
-                finalThumb = await Button.resize(thumbBuffer, 300, 300);
-              } catch {}
-            }
+          const listRows = categories.map((cat) => ({
+            header: "",
+            title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
+            description: `Total ${state.map[cat].length} commands available`,
+            id: `.menu_view ${cat}`,
+          }));
 
-            const btn = new Button(sock)
-              .setTitle(BOT_NAME)
-              .setSubtitle("MALIYA-MD MENU SYSTEM")
-              .setBody(menuHeader(userName))
-              .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
-              // 🔥 ButtonV2 එකේ වගේම Location Header එක set කිරීම:
-              .setMedia({
-                locationMessage: {
-                  degreesLatitude: 0,
-                  degreesLongitude: 0,
-                  name: BOT_NAME,
-                  address: "Sri Lanka",
-                  jpegThumbnail: finalThumb,
-                },
-              })
-              .addSelection("≡ List Menu")
-              .makeSection("📁 Command Categories", "POPULAR");
+          const btn = new ButtonV2(sock)
+            .setTitle(BOT_NAME)
+            .setSubtitle("BOT MENU SYSTEM")
+            .setBody(menuHeader(userName))
+            .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
+            .setThumbnail(headerImg); // මෙයින් ඉබේම Location Thumbnail එක වැටේ
 
-            categories.forEach((cat) => {
-              const emo = getCategoryEmoji(cat);
-              const count = state.map[cat].length;
-              btn.makeRow(
-                "",
-                `${emo} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
-                `Total ${count} commands available`,
-                `.menu_view ${cat}`
-              );
-            });
+          // 1. ButtonV2 ඇතුළට List Menu (single_select) බටන් එක addRawButton මඟින් එක් කිරීම
+          btn.addRawButton({
+            buttonId: "list_menu",
+            buttonText: { displayText: "≡ List Menu" },
+            type: 4,
+            nativeFlowInfo: {
+              name: "single_select",
+              paramsJson: JSON.stringify({
+                title: "≡ List Menu",
+                sections: [
+                  {
+                    title: "📁 Command Categories",
+                    highlight_label: "MALIYA-MD",
+                    rows: listRows,
+                  },
+                ],
+              }),
+            },
+          });
 
-            // දෙවෙනි බටන් එක (Quick Reply Ping)
-            btn.addReply("📊 Ping", ".ping");
+          // 2. දෙවෙනි බටන් එක (Side-by-Side වැටෙන Ping බටන් එක)
+          btn.addButton("📊 Ping", ".ping");
 
-            const sentMsg = await btn.send(from, { quoted: mek });
-            if (sentMsg?.key?.id) state.expectedMsgId = sentMsg.key.id;
-            pendingMenu[k] = state;
-            return;
-          }
+          const sentMsg = await btn.send(from, { quoted: mek });
+          if (sentMsg?.key?.id) state.expectedMsgId = sentMsg.key.id;
+          pendingMenu[k] = state;
+          return;
         } catch (err) {
-          console.log("BUTTON MENU ERROR:", err);
+          console.log("BUTTONV2 LIST MENU ERROR:", err);
         }
       }
 
-      // Fallback: Buttons Off නම් Buffer එකක් ලෙස Image එක යැවීම (එවිට අළු පාට රවුම වැටෙන්නේ නැත)
+      // Fallback: Buttons Off නම් සාමාන්‍ය Numbered Menu එක
       const sentMsg = await sock.sendMessage(
         from,
         {
-          image: thumbBuffer,
+          image: { url: headerImg },
           caption: buildStyledMainMenu(state, userName),
           contextInfo: channelContextInfo(),
         },
