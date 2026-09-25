@@ -1,7 +1,5 @@
 const { cmd, commands, replyHandlers } = require("../command");
-const { sendInteractiveMessage } = require("gifted-btns");
 const config = require("../config");
-const axios = require("axios");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const pendingMenu = Object.create(null);
@@ -64,14 +62,6 @@ function getQuotedId(m, mek) {
   );
 }
 
-function cleanPhone(num = "") {
-  return String(num).replace(/[^\d]/g, "");
-}
-
-function sameNumber(a = "", b = "") {
-  return cleanPhone(a) === cleanPhone(b);
-}
-
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
@@ -97,12 +87,7 @@ function getUserName(pushname, m, mek, sender = "") {
     mek?.chatName,
   ];
   for (const item of candidates) {
-    if (item && String(item).trim()) {
-      return String(item).trim();
-    }
-  }
-  if (sameNumber(sender.split("@")[0].split(":")[0], OWNER_NUMBER)) {
-    return OWNER_NAME;
+    if (item && String(item).trim()) return String(item).trim();
   }
   const num = String(sender || "").split("@")[0].split(":")[0];
   return num || "User";
@@ -161,9 +146,7 @@ function getCategoryEmoji(cat) {
 
 function buildCommandMapCached() {
   const now = Date.now();
-  if (cachedMenu && now - cacheTime < MENU_CACHE_MS) {
-    return cachedMenu;
-  }
+  if (cachedMenu && now - cacheTime < MENU_CACHE_MS) return cachedMenu;
   const map = Object.create(null);
   for (const c of commands) {
     if (c.dontAddCommandList) continue;
@@ -182,35 +165,28 @@ function buildCommandMapCached() {
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
-  return `ㅤㅤ┏━━━◥◣◆◢◤━━━━┓
-ㅤㅤ★彡 *${BOT_NAME}* 彡★
-ㅤㅤ┗━━━◢◤◆◥◣━━━━┛
+  return `👋 *HI ${styledUser}*
 
-✨ 👋 *ʜɪ, ${styledUser}!*
+╭─ 「 *BOT'S MENU* 」
+│ 👾 *Bot :* ${BOT_NAME}
+│ 👤 *User :* ${styledUser}
+│ ☎️ *Owner :* ${OWNER_NUMBER}
+│ 🕒 *Time :* ${time}
+│ 📅 *Date :* ${date}
+│ 🎯 *Prefix :* [ ${PREFIX} ]
+╰───────────────┈➤
 
-╔═══. .★.═════════╗
-🤖 *ʙᴏᴛ ɴᴀᴍᴇ :* ${BOT_NAME}
-👤 *ᴜsᴇʀ :* ${styledUser}
-👑 *ᴏᴡɴᴇʀ :* ${OWNER_NUMBER}
-🕒 *ᴛɪᴍᴇ :* ${time}
-📅 *ᴅᴀᴛᴇ :* ${date}
-🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]
-╚═════════. .★.═══╝
+🎀 *≡ Select a Command List: ≡*
 
-╰─────✦❘•❘✦────•┈➤
-👇 *Select a command category below to view commands:*`;
+🌐 *Web:* https://maliya-md.replit.app`;
 }
 
 function commandListCaption(cat, list, userName = "User") {
   const emo = getCategoryEmoji(cat);
   const styledCat = toSmallCaps(cat);
   const styledUser = toSmallCaps(userName);
-  let txt = `╭⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n`;
-  txt += `${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n`;
-  txt += `╰⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n\n`;
-  txt += `👤 *ᴜsᴇʀ :* ${styledUser}\n`;
-  txt += `📦 *ᴛᴏᴛᴀʟ :* ${list.length} Commands\n`;
-  txt += `🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]\n\n`;
+  let txt = `╭⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n╰⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n\n`;
+  txt += `👤 *ᴜsᴇʀ :* ${styledUser}\n📦 *ᴛᴏᴛᴀʟ :* ${list.length} Commands\n🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]\n\n`;
 
   list.forEach((c) => {
     const primary = c.pattern ? `${PREFIX}${toSmallCaps(c.pattern)}` : "No Pattern";
@@ -220,21 +196,22 @@ function commandListCaption(cat, list, userName = "User") {
     txt += `  ╰ 📌 *ᴅᴇsᴄ:* _${c.desc || "No description"}_\n\n`;
   });
 
-  txt += `──────✦❘•❘✦──────\n`;
-  txt += `> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
+  txt += `──────✦❘•❘✦──────\n> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
   return txt;
 }
 
-function makeCategoryRows(map, categories) {
-  return categories.map((cat) => ({
-    title: `${getCategoryEmoji(cat)} ${toSmallCaps(cat)} MENU`,
-    description: `${map[cat].length} commands available`,
-    id: `menu_view:${cat}`,
-  }));
-}
-
-function tryParseJsonString(s) {
-  try { return JSON.parse(s); } catch { return null; }
+function buildStyledMainMenu(state, userName) {
+  const { categories } = state;
+  const styledUser = toSmallCaps(userName);
+  let msg = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
+  msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
+  categories.forEach((cat, idx) => {
+    const emo = getCategoryEmoji(cat);
+    const numStr = String(idx + 1).padStart(2, "0");
+    msg += `*[ ${numStr} ]*  ${emo}  *${toSmallCaps(cat)}*  _(${state.map[cat].length})_\n`;
+  });
+  msg += `\n⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n> 💬 *Swipe & Reply this message with a number...*`;
+  return msg;
 }
 
 function extractTexts(body, mek, m) {
@@ -256,23 +233,18 @@ function extractTexts(body, mek, m) {
   for (const item of direct) {
     if (item) texts.push(String(item).trim());
   }
+
   const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   for (const raw of [p1, p2]) {
     if (!raw) continue;
-    const parsed = tryParseJsonString(raw);
-    if (!parsed) continue;
-    const vals = [
-      parsed.id,
-      parsed.selectedId,
-      parsed.selectedRowId,
-      parsed.title,
-      parsed.display_text,
-      parsed.text,
-    ];
-    for (const v of vals) {
-      if (v) texts.push(String(v).trim());
-    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.id) texts.push(String(parsed.id).trim());
+      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+      if (parsed.title) texts.push(String(parsed.title).trim());
+    } catch {}
   }
   return [...new Set(texts.filter(Boolean))];
 }
@@ -283,12 +255,15 @@ function resolveMenuAction(texts, state) {
     if (text.startsWith("MENU_VIEW:")) {
       return { type: "view", cat: text.replace("MENU_VIEW:", "").trim() };
     }
+    if (text.startsWith(".MENU_VIEW")) {
+      return { type: "view", cat: text.replace(".MENU_VIEW", "").trim() };
+    }
     for (const cat of state.categories || []) {
       const catText = normalizeText(cat);
       if (
-        text === `${catText} MENU` ||
-        text.includes(`${catText} MENU`) ||
+        text === catText ||
         text === `${catText} COMMANDS` ||
+        text === `${catText} MENU` ||
         text.includes(`${catText} COMMANDS`)
       ) {
         return { type: "view", cat };
@@ -307,144 +282,6 @@ function isDuplicateAction(state, action) {
   state.lastActionSig = sig;
   state.lastActionAt = now;
   return false;
-}
-
-function buildStyledMainMenu(state, userName) {
-  const { categories } = state;
-  const styledUser = toSmallCaps(userName);
-  let msg = `┏━━━◥◣◆◢◤━━━━┓\n`;
-  msg += `★彡 *${BOT_NAME}* 彡★\n`;
-  msg += `┗━━━◢◤◆◥◣━━━━┛\n\n`;
-  msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
-
-  categories.forEach((cat, idx) => {
-    const emo = getCategoryEmoji(cat);
-    const numStr = String(idx + 1).padStart(2, "0");
-    const styledCat = toSmallCaps(cat);
-    msg += `*[ ${numStr} ]*  ${emo}  *${styledCat}*  _(${state.map[cat].length})_\n`;
-  });
-
-  msg += `\n⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n`;
-  msg += `> 💬 *Swipe & Reply this message with a number...*`;
-  return msg;
-}
-
-async function getSafeBuffer(url) {
-  try {
-    const res = await axios.get(url, {
-      responseType: "arraybuffer",
-      timeout: 5000,
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
-    return Buffer.from(res.data);
-  } catch (err) {
-    return Buffer.from(
-      "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
-      "base64"
-    );
-  }
-}
-
-async function sendNumberedMainMenu(sock, from, mek, state, userName, sessionId) {
-  let headerImg = DEFAULT_HEADER_IMAGE;
-  if (sessionId) {
-    try {
-      const custom = await getCustomImage(sessionId, "menu_header");
-      if (custom && custom.data) {
-        headerImg = custom.data;
-      }
-    } catch (e) {
-      console.log("⚠️ Failed to load custom menu image:", e.message);
-    }
-  }
-
-  const caption = buildStyledMainMenu(state, userName);
-  return await sock.sendMessage(
-    from,
-    {
-      image: { url: headerImg },
-      caption: caption,
-      contextInfo: channelContextInfo(),
-    },
-    { quoted: mek }
-  );
-}
-
-// 🔥 Location Header සහිත Side-by-Side Interactive Menu
-async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
-  const settings = await readSettings(sessionId);
-  const btnsOn = !!settings.btns_enabled;
-
-  if (btnsOn && sendInteractiveMessage) {
-    try {
-      let headerImg = DEFAULT_HEADER_IMAGE;
-      if (sessionId) {
-        try {
-          const custom = await getCustomImage(sessionId, "menu_header");
-          if (custom && custom.data) headerImg = custom.data;
-        } catch (e) {}
-      }
-
-      const thumbBuffer = await getSafeBuffer(headerImg);
-
-      // Side-by-Side: 1 Single Select (List) + 1 Quick Reply (Ping)
-      const interactiveButtons = [
-        {
-          name: "single_select",
-          buttonParamsJson: JSON.stringify({
-            title: "≡ List Menu",
-            sections: [
-              {
-                title: "📁 Categories",
-                rows: makeCategoryRows(state.map, state.categories),
-              },
-            ],
-          }),
-        },
-        {
-          name: "quick_reply",
-          buttonParamsJson: JSON.stringify({
-            display_text: "📊 Ping",
-            id: ".ping",
-          }),
-        },
-      ];
-
-      // gifted-btns වෙත locationMessage header සහිත raw interactiveMessage එකක් ලබාදීම
-      return await sendInteractiveMessage(
-        sock,
-        from,
-        {
-          interactiveMessage: {
-            header: {
-              title: "",
-              hasMediaAttachment: true,
-              locationMessage: {
-                degreesLatitude: 0,
-                degreesLongitude: 0,
-                jpegThumbnail: thumbBuffer,
-              },
-            },
-            body: {
-              text: menuHeader(userName),
-            },
-            footer: {
-              text: `${BOT_NAME} | 2026 SYSTEM`,
-            },
-            nativeFlowMessage: {
-              buttons: interactiveButtons,
-            },
-            contextInfo: channelContextInfo(),
-          },
-        },
-        { quoted: mek }
-      );
-    } catch (e) {
-      console.log("MENU BUTTON ERROR:", e);
-    }
-  }
-
-  return await sendNumberedMainMenu(sock, from, mek, state, userName, sessionId);
 }
 
 async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId) {
@@ -498,7 +335,63 @@ cmd(
         lastActionAt: 0,
       };
 
-      const sentMsg = await sendMainMenu(sock, from, mek, state, userName, sessionId);
+      const settings = await readSettings(sessionId);
+      const btnsOn = !!settings.btns_enabled;
+
+      let headerImg = DEFAULT_HEADER_IMAGE;
+      if (sessionId) {
+        try {
+          const custom = await getCustomImage(sessionId, "menu_header");
+          if (custom && custom.data) headerImg = custom.data;
+        } catch (e) {}
+      }
+
+      if (btnsOn) {
+        try {
+          // @vanzxy/baileys ButtonV2 හරහා Header + Side-by-Side Buttons
+          const { ButtonV2 } = await import("@vanzxy/baileys");
+
+          const listRows = categories.map((cat) => ({
+            title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
+            description: `Show ${cat.toLowerCase()} command list`,
+            id: `.menu_view ${cat}`,
+          }));
+
+          const btn = new ButtonV2(sock);
+          btn.setBody(menuHeader(userName));
+          btn.setFooter("© 2026 MALIYA-MD BOT SYSTEM");
+          btn.setThumbnail(headerImg);
+
+          // 1. Popup List Button
+          btn.addSelection("≡ List Menu", [
+            {
+              title: "📁 Categories",
+              rows: listRows,
+            },
+          ]);
+
+          // 2. Quick Reply Ping Button (Side-by-side සඳහා අකුරු කෙටි කර ඇත)
+          btn.addButton("📊 Ping", ".ping");
+
+          const sentMsg = await btn.send(from, { quoted: mek });
+          if (sentMsg?.key?.id) state.expectedMsgId = sentMsg.key.id;
+          pendingMenu[k] = state;
+          return;
+        } catch (err) {
+          console.log("BUTTON MENU ERROR:", err?.message || err);
+        }
+      }
+
+      // Buttons Off නම් Numbered Text Menu එක යැවීම
+      const sentMsg = await sock.sendMessage(
+        from,
+        {
+          image: { url: headerImg },
+          caption: buildStyledMainMenu(state, userName),
+          contextInfo: channelContextInfo(),
+        },
+        { quoted: mek }
+      );
 
       if (sentMsg?.key?.id) {
         state.expectedMsgId = sentMsg.key.id;
@@ -507,6 +400,32 @@ cmd(
     } catch (e) {
       console.log("MENU ERROR:", e?.message || e);
       reply("❌ Cannot send menu");
+    }
+  }
+);
+
+/* ================= COMMAND: .menu_view ================= */
+cmd(
+  {
+    pattern: "menu_view",
+    dontAddCommandList: true,
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, q, sender, pushname, reply, sessionId }) => {
+    try {
+      const cat = String(q || "").trim().toUpperCase();
+      const { map } = buildCommandMapCached();
+      const list = map[cat] || [];
+      if (!list.length) return reply("❌ No commands found in this category.");
+
+      const userName = getUserName(pushname, m, mek, sender);
+      await sock.sendMessage(from, {
+        react: { text: getCategoryEmoji(cat), key: mek.key },
+      });
+
+      await sendCommandsList(sock, from, mek, cat, list, userName, sessionId);
+    } catch (e) {
+      console.log("MENU VIEW ERROR:", e);
     }
   }
 );
@@ -544,6 +463,7 @@ const menuReplyHandler = {
 
       const texts = extractTexts(body, mek, m);
       let action = resolveMenuAction(texts, state);
+
       if (!action) {
         const num = parseInt(inputStr, 10);
         if (!isNaN(num) && num > 0 && num <= state.categories.length) {
