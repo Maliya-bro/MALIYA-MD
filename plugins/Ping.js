@@ -9,7 +9,7 @@ function formatUptime(seconds) {
   seconds %= 3600;
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
-  return `${d}d ${h}h ${m}s ${s}s`;
+  return `${d}d ${h}h ${m}m ${s}s`;
 }
 
 cmd(
@@ -43,13 +43,18 @@ cmd(
         `🧩 *Node:* ${nodeV}\n` +
         `💻 *Platform:* ${platform}`;
 
-      // 1. luna-lib හි default export හරහා ButtonV2 ලබාගැනීම
+      // 1. luna-lib සහ Baileys import කර socket එකට addProperty inject කිරීම
       const lunaModule = await import("@ryuu-reinzz/luna-lib");
       const luna = lunaModule.default || lunaModule;
-      const ButtonV2 = luna.ButtonV2;
+      const baileys = await import("@whiskeysockets/baileys");
 
-      // 2. ButtonV2 Builder එක හරහා මැසේජ් එක යැවීම
-      await new ButtonV2(conn)
+      if (!conn.messageBuilder) {
+        luna.addProperty(conn, baileys);
+      }
+
+      // 2. luna-lib හි නිල messageBuilder හරහා ButtonV2 යැවීම
+      await conn.messageBuilder(m.chat, { quoted: mek })
+        .setType("ButtonV2")
         .setTitle("MALIYA-MD SYSTEM")
         .setSubtitle("SPEED TEST")
         .setBody(text)
@@ -58,7 +63,7 @@ cmd(
         .addButton("📜 Main Menu", ".menu")
         .addButton("👤 Owner Info", ".owner")
         .addButton("📊 System Info", ".systeminfo")
-        .send(m.chat, { quoted: mek });
+        .send();
 
       await conn.sendMessage(m.chat, { react: { text: "🏓", key: mek.key } });
 
