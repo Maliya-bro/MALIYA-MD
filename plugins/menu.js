@@ -1,5 +1,6 @@
 const { cmd, commands, replyHandlers } = require("../command");
 const config = require("../config");
+const axios = require("axios");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const pendingMenu = Object.create(null);
@@ -37,7 +38,7 @@ const OWNER_NAME =
   String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
 
 const DEFAULT_HEADER_IMAGE =
-  "https://i.ibb.co/4pDNDk1/avatar.png";
+  "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
@@ -282,6 +283,22 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
+async function getSafeBuffer(url) {
+  try {
+    const res = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 8000,
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    return Buffer.from(res.data);
+  } catch (err) {
+    return Buffer.from(
+      "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
+      "base64"
+    );
+  }
+}
+
 async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId) {
   let headerImg = DEFAULT_HEADER_IMAGE;
   if (sessionId) {
@@ -291,10 +308,12 @@ async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId)
     } catch (e) {}
   }
 
+  const imgBuf = await getSafeBuffer(headerImg);
+
   return await sock.sendMessage(
     from,
     {
-      image: { url: headerImg },
+      image: imgBuf,
       caption: commandListCaption(cat, list, userName),
       contextInfo: channelContextInfo(),
     },
@@ -308,7 +327,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Show command categories with Asitha-MD layout using Luna-lib",
+    desc: "Show command categories with Location Thumbnail & List Buttons",
     category: "main",
     filename: __filename,
   },
@@ -344,22 +363,43 @@ cmd(
         } catch (e) {}
       }
 
+      const thumbBuffer = await getSafeBuffer(headerImg);
+
       if (btnsOn) {
         try {
-          // @ryuu-reinzz/luna-lib හි Button class එක භාවිත කිරීම
-          const luna = await import("@ryuu-reinzz/luna-lib");
-          const Button = luna.Button || luna.default?.Button;
+          // @vanzxy/baileys හෝ @ryuu-reinzz/luna-lib හරහා Button class එක ගැනීම
+          const pkg = await import("@vanzxy/baileys").catch(() =>
+            import("@ryuu-reinzz/luna-lib")
+          );
+          const Button = pkg.Button || pkg.default?.Button;
 
           if (Button) {
+            // Thumbnail එක 300x300 ට resize කර ගැනීම (ButtonV2 එකේ කරන විදිහටම)
+            let finalThumb = thumbBuffer;
+            if (typeof Button.resize === "function") {
+              try {
+                finalThumb = await Button.resize(thumbBuffer, 300, 300);
+              } catch {}
+            }
+
             const btn = new Button(sock)
-              .setImage(headerImg)
+              .setTitle(BOT_NAME)
+              .setSubtitle("MALIYA-MD MENU SYSTEM")
               .setBody(menuHeader(userName))
               .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
-              .addReply("📊 Ping", ".ping") // Side-by-Side Ping button
-              .addSelection("≡ List Menu")  // Popup List ආරම්භය
-              .makeSection("📁 Command Categories"); // Categories Section
+              // 🔥 ButtonV2 එකේ වගේම Location Header එක set කිරීම:
+              .setMedia({
+                locationMessage: {
+                  degreesLatitude: 0,
+                  degreesLongitude: 0,
+                  name: BOT_NAME,
+                  address: "Sri Lanka",
+                  jpegThumbnail: finalThumb,
+                },
+              })
+              .addSelection("≡ List Menu")
+              .makeSection("📁 Command Categories", "POPULAR");
 
-            // Categories ලැයිස්තුව rows ලෙස එකතු කිරීම
             categories.forEach((cat) => {
               const emo = getCategoryEmoji(cat);
               const count = state.map[cat].length;
@@ -371,21 +411,24 @@ cmd(
               );
             });
 
+            // දෙවෙනි බටන් එක (Quick Reply Ping)
+            btn.addReply("📊 Ping", ".ping");
+
             const sentMsg = await btn.send(from, { quoted: mek });
             if (sentMsg?.key?.id) state.expectedMsgId = sentMsg.key.id;
             pendingMenu[k] = state;
             return;
           }
         } catch (err) {
-          console.log("LUNA-LIB MENU ERROR:", err?.message || err);
+          console.log("BUTTON MENU ERROR:", err);
         }
       }
 
-      // Buttons Off නම් Numbered Text Menu එක යැවීම
+      // Fallback: Buttons Off නම් Buffer එකක් ලෙස Image එක යැවීම (එවිට අළු පාට රවුම වැටෙන්නේ නැත)
       const sentMsg = await sock.sendMessage(
         from,
         {
-          image: { url: headerImg },
+          image: thumbBuffer,
           caption: buildStyledMainMenu(state, userName),
           contextInfo: channelContextInfo(),
         },
