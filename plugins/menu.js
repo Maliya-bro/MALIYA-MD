@@ -350,7 +350,6 @@ cmd(
 
       if (btnsOn) {
         try {
-          // Ping එකේ වගේම @vanzxy/baileys හි ButtonV2 භාවිතා කිරීම
           const { ButtonV2 } = await import("@vanzxy/baileys");
 
           const listRows = categories.map((cat) => ({
@@ -360,18 +359,17 @@ cmd(
             id: `.menu_view ${cat}`,
           }));
 
+          // .ping එකේ විදිහටම ButtonV2 සැකසීම
           const btn = new ButtonV2(sock)
-            .setTitle(BOT_NAME)
-            .setSubtitle("BOT MENU SYSTEM")
             .setBody(menuHeader(userName))
             .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
-            .setThumbnail(headerImg); // මෙයින් ඉබේම Location Thumbnail එක වැටේ
+            .setThumbnail(headerImg);
 
-          // 1. ButtonV2 ඇතුළට List Menu (single_select) බටන් එක addRawButton මඟින් එක් කිරීම
+          // 1. Native Flow List Menu Button (type: 2 විය යුතුයි!)
           btn.addRawButton({
             buttonId: "list_menu",
             buttonText: { displayText: "≡ List Menu" },
-            type: 4,
+            type: 2,
             nativeFlowInfo: {
               name: "single_select",
               paramsJson: JSON.stringify({
@@ -379,7 +377,6 @@ cmd(
                 sections: [
                   {
                     title: "📁 Command Categories",
-                    highlight_label: "MALIYA-MD",
                     rows: listRows,
                   },
                 ],
@@ -387,7 +384,7 @@ cmd(
             },
           });
 
-          // 2. දෙවෙනි බටන් එක (Side-by-Side වැටෙන Ping බටන් එක)
+          // 2. Quick Reply Ping Button (Side-by-Side සඳහා)
           btn.addButton("📊 Ping", ".ping");
 
           const sentMsg = await btn.send(from, { quoted: mek });
