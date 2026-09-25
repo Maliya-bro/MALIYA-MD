@@ -189,13 +189,55 @@ async function searchMovies(query) {
 
 /**
  * 2. Post ID එකෙන් PIXELDRAIN, GDRIVE සහ MEGA ලින්ක් ලබාගැනීම
- *    🔥 2GB FILTER එක අයින් කළා 🔥
+ *    🔥 Cookie Jar + Browser Headers + Nonce Support 🔥
  */
 async function getMovieDownloadData(movieUrl, postId) {
   const cheerio = require("cheerio");
   const { gotScraping } = await import("got-scraping");
 
-  let pageRes = await gotScraping({ url: movieUrl, ...REQUEST_OPTIONS });
+  // ─── Cookie jar for session persistence ───
+  let cookieJar;
+  try {
+    const tough = require("tough-cookie");
+    cookieJar = new tough.CookieJar();
+  } catch (e) {
+    console.log("[CINERU] tough-cookie not installed, using manual cookies");
+  }
+
+  // ─── Browser-like headers (Cloudflare-friendly) ───
+  const BROWSER_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+  };
+
+  console.log(`[CINERU] 🚀 Fetching movie page: ${movieUrl}`);
+
+  // ═══ STEP 1: Fetch the movie page to get cookies + poster ═══
+  let pageRes;
+  try {
+    pageRes = await gotScraping({
+      url: movieUrl,
+      ...REQUEST_OPTIONS,
+      headers: BROWSER_HEADERS,
+      cookieJar: cookieJar,
+      throwHttpErrors: false,
+      retry: { limit: 2 }
+    });
+  } catch (e) {
+    console.log("[CINERU] Page fetch failed:", e.message);
+    throw new Error("Cineru.lk server එකට සම්බන්ධ විය නොහැක.");
+  }
+
+  console.log(`[CINERU] Page status: ${pageRes.statusCode}`);
+
   let $ = cheerio.load(pageRes.body);
 
   if (!postId) {
@@ -208,31 +250,114 @@ async function getMovieDownloadData(movieUrl, postId) {
     throw new Error("Post ID එක සොයාගත නොහැකි විය.");
   }
 
-  console.log(`[CINERU] Fetching downloads for postId=${postId}`);
+  console.log(`[CINERU] postId=${postId} | poster=${poster ? "✓" : "✗"}`);
 
-  const ajaxRes = await gotScraping.post("https://cineru.lk/wp-admin/admin-ajax.php", {
-    ...REQUEST_OPTIONS,
-    form: {
-      action: "cs_download_data",
-      post_id: postId
-    },
-    headers: {
-      "Referer": movieUrl,
-      "Origin": "https://cineru.lk",
-      "X-Requested-With": "XMLHttpRequest"
+  // ─── Get cookies from jar as a string ───
+  let cookieString = "";
+  try {
+    if (cookieJar) {
+      const cookies = await cookieJar.getCookies("https://cineru.lk");
+      cookieString = cookies.map(c => `${c.key}=${c.value}`).join("; ");
+      console.log(`[CINERU] 🍪 Cookies: ${cookieString.substring(0, 120)}${cookieString.length > 120 ? "..." : ""}`);
     }
-  });
+  } catch (e) {
+    console.log("[CINERU] Cookie extraction failed:", e.message);
+  }
+
+  // ─── Extract nonce from page if exists ───
+  let nonce = "";
+  const nonceMatch = pageRes.body.match(/cs_download_data['"]?\s*[:,]\s*['"]([a-f0-9]+)['"]/i)
+    || pageRes.body.match(/"nonce"\s*:\s*"([a-f0-9]+)"/i)
+    || pageRes.body.match(/var\s+\w*nonce\w*\s*=\s*['"]([a-f0-9]+)['"]/i);
+  if (nonceMatch) {
+    nonce = nonceMatch[1];
+    console.log(`[CINERU] 🔑 Found nonce: ${nonce}`);
+  }
+
+  // ═══ STEP 2: POST to admin-ajax.php with same session ═══
+  const ajaxHeaders = {
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "X-Requested-With": "XMLHttpRequest",
+    "Origin": "https://cineru.lk",
+    "Referer": movieUrl,
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+  };
+
+  if (cookieString) {
+    ajaxHeaders["Cookie"] = cookieString;
+  }
+
+  const formData = {
+    action: "cs_download_data",
+    post_id: postId
+  };
+
+  if (nonce) {
+    formData.nonce = nonce;
+    formData._wpnonce = nonce;
+  }
+
+  console.log(`[CINERU] 📡 POST admin-ajax.php (postId=${postId})...`);
+
+  let ajaxRes;
+  try {
+    ajaxRes = await gotScraping.post("https://cineru.lk/wp-admin/admin-ajax.php", {
+      ...REQUEST_OPTIONS,
+      headers: ajaxHeaders,
+      form: formData,
+      cookieJar: cookieJar,
+      throwHttpErrors: false,
+      retry: { limit: 2 }
+    });
+  } catch (e) {
+    console.log("[CINERU] AJAX request failed:", e.message);
+    throw new Error("AJAX request failed: " + e.message);
+  }
+
+  console.log(`[CINERU] AJAX status: ${ajaxRes.statusCode}`);
+  console.log(`[CINERU] AJAX body preview: ${ajaxRes.body.substring(0, 300)}`);
 
   let ajaxJson;
   try {
     ajaxJson = JSON.parse(ajaxRes.body);
   } catch (e) {
-    console.log("[CINERU] ❌ AJAX response is not JSON:", ajaxRes.body.substring(0, 200));
-    throw new Error("Invalid AJAX response");
+    console.log("[CINERU] ❌ Response is not JSON");
+    throw new Error("Invalid AJAX response (not JSON)");
   }
 
-  console.log(`[CINERU] AJAX success=${ajaxJson.success}, dataLength=${ajaxJson.data ? ajaxJson.data.length : 0}`);
+  // ═══ STEP 3: If AJAX failed, try alternate endpoint ═══
+  if (!ajaxJson.success || !ajaxJson.data) {
+    console.log("[CINERU] ⚠️ AJAX returned success=false, trying fallback...");
 
+    try {
+      const fbRes = await gotScraping.post("https://cineru.lk/wp-admin/admin-ajax.php", {
+        ...REQUEST_OPTIONS,
+        headers: ajaxHeaders,
+        form: {
+          action: "cs_download_data",
+          post_id: postId,
+          _wpnonce: nonce || ""
+        },
+        cookieJar: cookieJar,
+        throwHttpErrors: false
+      });
+
+      const fbJson = JSON.parse(fbRes.body);
+      if (fbJson.success && fbJson.data) {
+        console.log("[CINERU] ✅ Fallback 1 succeeded!");
+        ajaxJson = fbJson;
+      }
+    } catch (e) {
+      console.log("[CINERU] Fallback 1 failed:", e.message);
+    }
+  }
+
+  // ═══ STEP 4: Parse the response ═══
   const downloads = [];
 
   if (ajaxJson.success && ajaxJson.data) {
@@ -252,22 +377,13 @@ async function getMovieDownloadData(movieUrl, postId) {
         const downloadUrl = $dl(btnEl).attr("data-link");
 
         let priority = 99;
-        if (upperName.includes("PIXELDRAIN")) {
-          priority = 1;
-        } else if (upperName.includes("GDRIVE")) {
-          priority = 2;
-        } else if (upperName.includes("DRIVE") && !upperName.includes("USERDRIVE")) {
-          priority = 2;
-        } else if (upperName.includes("MEGA")) {
-          priority = 3;
-        }
+        if (upperName.includes("PIXELDRAIN")) priority = 1;
+        else if (upperName.includes("GDRIVE")) priority = 2;
+        else if (upperName.includes("DRIVE") && !upperName.includes("USERDRIVE")) priority = 2;
+        else if (upperName.includes("MEGA")) priority = 3;
 
         if (downloadUrl && priority < 99) {
-          servers.push({
-            name: upperName,
-            url: downloadUrl,
-            priority: priority
-          });
+          servers.push({ name: upperName, url: downloadUrl, priority });
         }
       });
 
@@ -275,16 +391,14 @@ async function getMovieDownloadData(movieUrl, postId) {
 
       console.log(`[CINERU] Quality: "${qualityInfo}" | Servers: ${servers.length}`);
 
-      // 🔥 2GB FILTER එක අයින් කළා — හැම quality එකම show වෙනවා 🔥
       if (qualityInfo && servers.length > 0) {
-        downloads.push({
-          quality: qualityInfo,
-          servers: servers
-        });
+        downloads.push({ quality: qualityInfo, servers });
       }
     });
   } else {
-    console.log("[CINERU] ❌ AJAX failed. Response:", JSON.stringify(ajaxJson).substring(0, 300));
+    console.log("[CINERU] ❌ Server returned success=false. Full response:");
+    console.log("[CINERU] Response:", JSON.stringify(ajaxJson));
+    console.log("[CINERU] 💡 මෙයට හේතු: Server IP එක Cineru.lk එකෙන් block වීම හෝ Cloudflare challenge");
   }
 
   console.log(`[CINERU] ✅ Total downloads found: ${downloads.length}`);
@@ -577,6 +691,7 @@ cmd({
 
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
   } catch (error) {
+    console.log("[CINERU] Search error:", error);
     await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
     await sendErrorMsg(sock, from, mek, "Failed to connect to Cineru search server.");
   }
