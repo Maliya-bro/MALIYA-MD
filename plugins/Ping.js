@@ -44,51 +44,71 @@ cmd(
         `🧩 *Node:* ${nodeV}\n` +
         `💻 *Platform:* ${platform}`;
 
-      // 1. Phone එකේ පේන්න ඕන Thumbnail එක Buffer කරගැනීම
       const imgUrl = "https://i.ibb.co/4pDNDk1/avatar.png"; 
       const response = await axios.get(imgUrl, { responseType: "arraybuffer" });
       const thumbBuffer = Buffer.from(response.data, "binary");
 
-      // 2. Web එකට සහ Phone එකට දෙකටම වැඩ කරන Location Message Structure එක
-      await conn.sendMessage(
+      // Asitha-MD එකේ වගේ Web එකෙයි Phone එකෙයි දෙකේම Text + Buttons පේන්න relayMessage යැවීම
+      await conn.relayMessage(
         m.chat,
         {
-          location: {
-            degreesLatitude: 0,
-            degreesLongitude: 0,
-            name: "MALIYA-MD SYSTEM",
-            address: "SPEED TEST",
-            jpegThumbnail: thumbBuffer,
+          interactiveMessage: {
+            header: {
+              title: "",
+              hasMediaAttachment: true,
+              locationMessage: {
+                degreesLatitude: 0,
+                degreesLongitude: 0,
+                name: "MALIYA-MD SYSTEM",
+                address: "SPEED TEST",
+                jpegThumbnail: thumbBuffer,
+              },
+            },
+            body: {
+              text: text,
+            },
+            footer: {
+              text: "© MALIYA-MD BOT SYSTEM",
+            },
+            nativeFlowMessage: {
+              buttons: [
+                {
+                  name: "quick_reply",
+                  buttonParamsJson: JSON.stringify({
+                    display_text: "📜 Main Menu",
+                    id: ".menu",
+                  }),
+                },
+                {
+                  name: "quick_reply",
+                  buttonParamsJson: JSON.stringify({
+                    display_text: "👤 Owner Info",
+                    id: ".owner",
+                  }),
+                },
+                {
+                  name: "quick_reply",
+                  buttonParamsJson: JSON.stringify({
+                    display_text: "📊 System Info",
+                    id: ".systeminfo",
+                  }),
+                },
+              ],
+            },
+            contextInfo: {
+              stanzaId: mek.key.id,
+              participant: mek.key.participant || mek.key.remoteJid,
+              quotedMessage: mek.message,
+            },
           },
-          caption: text,
-          footer: "© MALIYA-MD BOT SYSTEM",
-          buttons: [
-            {
-              buttonId: ".menu",
-              buttonText: { displayText: "📜 Main Menu" },
-              type: 1,
-            },
-            {
-              buttonId: ".owner",
-              buttonText: { displayText: "👤 Owner Info" },
-              type: 1,
-            },
-            {
-              buttonId: ".systeminfo",
-              buttonText: { displayText: "📊 System Info" },
-              type: 1,
-            },
-          ],
-          headerType: 6, // 6 = Location Type
-          viewOnce: false, // 🔥 Web එකේ පේන්න නම් viewOnce false විය යුතුය
         },
-        { quoted: mek }
+        {}
       );
 
       await conn.sendMessage(m.chat, { react: { text: "🏓", key: mek.key } });
 
     } catch (e) {
-      console.log("PING WEB FIX ERROR:", e);
+      console.log("PING RELAY WEB FIX ERROR:", e);
       await reply("❌ Ping error: " + (e?.message || e));
     }
   }
