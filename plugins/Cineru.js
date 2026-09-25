@@ -188,7 +188,8 @@ async function searchMovies(query) {
 }
 
 /**
- * 2. Post ID එකෙන් PIXELDRAIN, GDRIVE සහ MEGA ලින්ක් පමණක් ලබාගැනීම
+ * 2. Post ID එකෙන් PIXELDRAIN, GDRIVE සහ MEGA ලින්ක් ලබාගැනීම
+ *    🔥 2GB FILTER එක අයින් කළා 🔥
  */
 async function getMovieDownloadData(movieUrl, postId) {
   const cheerio = require("cheerio");
@@ -207,6 +208,8 @@ async function getMovieDownloadData(movieUrl, postId) {
     throw new Error("Post ID එක සොයාගත නොහැකි විය.");
   }
 
+  console.log(`[CINERU] Fetching downloads for postId=${postId}`);
+
   const ajaxRes = await gotScraping.post("https://cineru.lk/wp-admin/admin-ajax.php", {
     ...REQUEST_OPTIONS,
     form: {
@@ -220,11 +223,23 @@ async function getMovieDownloadData(movieUrl, postId) {
     }
   });
 
-  const ajaxJson = JSON.parse(ajaxRes.body);
+  let ajaxJson;
+  try {
+    ajaxJson = JSON.parse(ajaxRes.body);
+  } catch (e) {
+    console.log("[CINERU] ❌ AJAX response is not JSON:", ajaxRes.body.substring(0, 200));
+    throw new Error("Invalid AJAX response");
+  }
+
+  console.log(`[CINERU] AJAX success=${ajaxJson.success}, dataLength=${ajaxJson.data ? ajaxJson.data.length : 0}`);
+
   const downloads = [];
 
   if (ajaxJson.success && ajaxJson.data) {
     const $dl = cheerio.load(ajaxJson.data);
+
+    const copyCards = $dl(".download-card .copy");
+    console.log(`[CINERU] Found ${copyCards.length} quality cards`);
 
     $dl(".download-card .copy").each((_, copyEl) => {
       const qualityInfo = $dl(copyEl).find(".namer").text().trim();
@@ -258,24 +273,21 @@ async function getMovieDownloadData(movieUrl, postId) {
 
       servers.sort((a, b) => a.priority - b.priority);
 
-      // 2GB ට අඩු Qualities පමණක් පෙරහන් කිරීම
-      let isUnder2GB = true;
-      const match = qualityInfo.match(/([\d.]+)\s*(MB|GB)/i);
-      if (match) {
-        const size = parseFloat(match[1]);
-        const unit = match[2].toUpperCase();
-        if (unit === "GB" && size >= 2.0) isUnder2GB = false;
-      }
+      console.log(`[CINERU] Quality: "${qualityInfo}" | Servers: ${servers.length}`);
 
-      if (qualityInfo && servers.length > 0 && isUnder2GB) {
+      // 🔥 2GB FILTER එක අයින් කළා — හැම quality එකම show වෙනවා 🔥
+      if (qualityInfo && servers.length > 0) {
         downloads.push({
           quality: qualityInfo,
           servers: servers
         });
       }
     });
+  } else {
+    console.log("[CINERU] ❌ AJAX failed. Response:", JSON.stringify(ajaxJson).substring(0, 300));
   }
 
+  console.log(`[CINERU] ✅ Total downloads found: ${downloads.length}`);
   return { downloads, poster };
 }
 
@@ -613,7 +625,7 @@ const cineruReplyHandler = {
         const { downloads, poster } = await getMovieDownloadData(selected.link, selected.id);
         if (!downloads ? true : downloads.length === 0) {
           clearUserSession(k);
-          return await sendErrorMsg(sock, from, mek, "මෙම චිත්‍රපටය සඳහා 2GB ට අඩු Direct Download ලින්ක් හමු නොවුණි.");
+          return await sendErrorMsg(sock, from, mek, "මෙම චිත්‍රපටය සඳහා Direct Download ලින්ක් හමු නොවුණි.");
         }
 
         let qualityMsg = "╭──────────. ִ ࣪ ⋆ ೀ ─╮\n";
@@ -648,6 +660,7 @@ const cineruReplyHandler = {
 
         await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
       } catch (error) {
+        console.log("[CINERU] Step 1 error:", error);
         clearUserSession(k);
         await sendErrorMsg(sock, from, mek, "Failed to fetch qualities for this movie.");
       }
@@ -724,6 +737,7 @@ const cineruReplyHandler = {
             break;
           }
         } catch (serverErr) {
+          console.log(`[CINERU] Server ${currentServer.name} failed:`, serverErr.message);
           if (fs.existsSync(tempFilePath)) {
             try { fs.unlinkSync(tempFilePath); } catch (e) {}
           }
@@ -783,6 +797,7 @@ const cineruReplyHandler = {
         await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
 
       } catch (sendErr) {
+        console.log("[CINERU] Send error:", sendErr);
         await sendErrorMsg(sock, from, mek, `Failed to send movie: ${sendErr.message}`);
       } finally {
         if (fs.existsSync(tempFilePath)) {
