@@ -144,22 +144,22 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// 🔥 Native Button Builder (Direct Buttons, max 3)
+// 🔥 Native ButtonV2 Builder (Ping එකේ විදිහටම සකස් කර ඇත)
 async function sendQualityInteractiveMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
   
   if (!!settings.btns_enabled) {
     try {
-      const { Button } = await import("@vanzxy/baileys");
-      const msg = new Button(sock)
-          .setImage(video.thumbnail)
-          .setBody(buildVideoDetails(video))
-          .setFooter("𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥")
-          .addReply("📹 360p", "quality:360")
-          .addReply("📺 480p", "quality:480")
-          .addReply("✨ 720p HD", "quality:720");
+      const { ButtonV2 } = await import("@vanzxy/baileys");
 
-      await msg.send(from, { quoted: mek });
+      await new ButtonV2(sock)
+        .setBody(buildVideoDetails(video))
+        .setFooter("𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥")
+        .setThumbnail(video.thumbnail)
+        .addButton("📹 360p", "quality:360")
+        .addButton("📺 480p", "quality:480")
+        .addButton("✨ 720p HD", "quality:720")
+        .send(from, { quoted: mek });
       return;
     } catch (e) { console.log("VIDEO BUTTON ERROR:", e); }
   }
