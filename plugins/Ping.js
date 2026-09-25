@@ -1,6 +1,6 @@
 const os = require("os");
+const axios = require("axios");
 const { cmd } = require("../command");
-const { sendInteractiveMessage } = require("lilgabriel-btns");
 
 // Uptime formatter
 function formatUptime(seconds) {
@@ -27,7 +27,6 @@ cmd(
     try {
       // 1. ඇත්තම Network Latency එක මැනීම
       const start = Date.now();
-      // Server එකට Reaction එකක් යවා ගතවන කාලය මැනීම
       await conn.sendMessage(m.chat, { react: { text: "🔄", key: mek.key } });
       const ping = Date.now() - start;
 
@@ -47,50 +46,45 @@ cmd(
         `🧩 *Node:* ${nodeV}\n` +
         `💻 *Platform:* ${platform}`;
 
-      // 2. lilgabriel-btns හරහා Send කිරීම
-      await sendInteractiveMessage(
-        conn,
+      // 2. Phone එකේ පේන්න ඕන Image එක Buffer එකක් විදිහට ගැනීම (මෙතනට ඔයාගේ Bot Logo URL එක දාන්න)
+      const imgUrl = "https://i.ibb.co/4pDNDk1/avatar.png"; 
+      const response = await axios.get(imgUrl, { responseType: "arraybuffer" });
+      const thumbBuffer = Buffer.from(response.data, "binary");
+
+      // 3. Asitha-MD එකේ වගේ Location Header + Buttons යැවීම
+      await conn.sendMessage(
         m.chat,
         {
-          text: text,
-          footer: "MALIYA-MD BOT SYSTEM",
-          viewOnce: true, // Web support සදහා ViewOnce Bypass සක්‍රීය කිරීම
-          interactiveButtons: [
+          location: {
+            degreesLatitude: 0,
+            degreesLongitude: 0,
+            jpegThumbnail: thumbBuffer, // Phone එකේදි Image එකක් විදිහට පෙන්නන්නේ මේකයි
+          },
+          caption: text,
+          footer: "© MALIYA-MD BOT SYSTEM",
+          buttons: [
             {
-              name: "quick_reply",
-              buttonParamsJson: {
-                display_text: "📜 Main Menu",
-                id: ".menu",
-              },
+              buttonId: ".menu",
+              buttonText: { displayText: "📜 Main Menu" },
+              type: 1,
             },
             {
-              name: "quick_reply",
-              buttonParamsJson: {
-                display_text: "👤 Owner Info",
-                id: ".owner",
-              },
+              buttonId: ".owner",
+              buttonText: { displayText: "👤 Owner Info" },
+              type: 1,
             },
             {
-              name: "single_select",
-              buttonParamsJson: {
-                title: "📊 System Details",
-                sections: [
-                  {
-                    title: "Bot Performance",
-                    rows: [
-                      { id: ".systeminfo", title: "System Info", description: "View detailed server info" },
-                      { id: ".ping", title: "Re-Ping", description: "Test connection again" },
-                    ],
-                  },
-                ],
-              },
+              buttonId: ".systeminfo",
+              buttonText: { displayText: "📊 System Info" },
+              type: 1,
             },
           ],
+          headerType: 6, // 6 කියන්නේ Location Header එකයි
         },
         { quoted: mek }
       );
 
-      // 3. Message එක යැව්වාට පසුව අවසාන Reaction එක දැමීම (Optional)
+      // 4. අවසාන Reaction එක
       await conn.sendMessage(m.chat, { react: { text: "🏓", key: mek.key } });
 
     } catch (e) {
