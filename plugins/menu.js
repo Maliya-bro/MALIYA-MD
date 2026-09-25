@@ -1,5 +1,6 @@
 const { cmd, commands, replyHandlers } = require("../command");
 const config = require("../config");
+const axios = require("axios");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const pendingMenu = Object.create(null);
@@ -286,6 +287,22 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
+async function getSafeBuffer(url) {
+  try {
+    const res = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 8000,
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    return Buffer.from(res.data);
+  } catch (err) {
+    return Buffer.from(
+      "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
+      "base64"
+    );
+  }
+}
+
 async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId) {
   let headerImg = DEFAULT_HEADER_IMAGE;
   if (sessionId) {
@@ -295,10 +312,12 @@ async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId)
     } catch (e) {}
   }
 
+  const imgBuf = await getSafeBuffer(headerImg);
+
   return await sock.sendMessage(
     from,
     {
-      image: { url: headerImg },
+      image: imgBuf,
       caption: commandListCaption(cat, list, userName),
       contextInfo: channelContextInfo(),
     },
@@ -312,7 +331,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Show command categories with ButtonV2 Location & List",
+    desc: "Show command categories with Location & List Menu",
     category: "main",
     filename: __filename,
   },
@@ -350,57 +369,88 @@ cmd(
 
       if (btnsOn) {
         try {
-          const { ButtonV2 } = await import("@vanzxy/baileys");
+          const vanzxy = await import("@vanzxy/baileys");
+          const { Button, ButtonV2 } = vanzxy;
 
-          const listRows = categories.map((cat) => ({
-            header: "",
-            title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
-            description: `Total ${state.map[cat].length} commands available`,
-            id: `.menu_view ${cat}`,
-          }));
+          // 1. Image එක හරියටම ButtonV2 එකේ වගේ 300x300 ට resize කරගැනීම (එවිට අළු පාට රවුම වැටෙන්නේ නැත)
+          const rawBuf = await getSafeBuffer(headerImg);
+          let thumbBuf = rawBuf;
+          if (ButtonV2 && typeof ButtonV2.resize === "function") {
+            try {
+              thumbBuf = await ButtonV2.resize(rawBuf, 300, 300);
+            } catch {}
+          }
 
-          // .ping එකේ විදිහටම ButtonV2 සැකසීම
-          const btn = new ButtonV2(sock)
+          // 2. Button (V1) class එකෙන් Location Header + List Menu + Ping Button සෑදීම
+          const btn = new Button(sock)
+            .setTitle(BOT_NAME)
+            .setSubtitle("BOT MENU SYSTEM")
             .setBody(menuHeader(userName))
             .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
-            .setThumbnail(headerImg);
+            .setMedia({
+              locationMessage: {
+                degreesLatitude: 0,
+                degreesLongitude: 0,
+                name: BOT_NAME,
+                address: "Sri Lanka",
+                jpegThumbnail: thumbBuf,
+              },
+            })
+            .addSelection("≡ List Menu")
+            .makeSection("📁 Command Categories", "POPULAR");
 
-          // 1. Native Flow List Menu Button (type: 2 විය යුතුයි!)
-          btn.addRawButton({
-            buttonId: "list_menu",
-            buttonText: { displayText: "≡ List Menu" },
-            type: 2,
-            nativeFlowInfo: {
-              name: "single_select",
-              paramsJson: JSON.stringify({
-                title: "≡ List Menu",
-                sections: [
-                  {
-                    title: "📁 Command Categories",
-                    rows: listRows,
-                  },
-                ],
-              }),
-            },
+          categories.forEach((cat) => {
+            const emo = getCategoryEmoji(cat);
+            const count = state.map[cat].length;
+            btn.makeRow(
+              "",
+              `${emo} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
+              `Total ${count} commands available`,
+              `.menu_view ${cat}`
+            );
           });
 
-          // 2. Quick Reply Ping Button (Side-by-Side සඳහා)
-          btn.addButton("📊 Ping", ".ping");
+          btn.addReply("📊 Ping", ".ping");
 
-          const sentMsg = await btn.send(from, { quoted: mek });
-          if (sentMsg?.key?.id) state.expectedMsgId = sentMsg.key.id;
+          // 3. Message එක build කර, WhatsApp drop නොකරන සහ Update WhatsApp නොවැටෙන biz node එක සමඟ යැවීම
+          const builtMsg = await btn.build(from, { quoted: mek });
+
+          await sock.relayMessage(from, builtMsg.message, {
+            messageId: builtMsg.key.id,
+            additionalNodes: [
+              {
+                tag: "biz",
+                attrs: {},
+                content: [
+                  {
+                    tag: "interactive",
+                    attrs: { type: "native_flow", v: "1" },
+                    content: [
+                      {
+                        tag: "native_flow",
+                        attrs: { v: "9", name: "mixed" },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          });
+
+          state.expectedMsgId = builtMsg.key.id;
           pendingMenu[k] = state;
           return;
         } catch (err) {
-          console.log("BUTTONV2 LIST MENU ERROR:", err);
+          console.log("NATIVE LIST MENU ERROR:", err);
         }
       }
 
       // Fallback: Buttons Off නම් සාමාන්‍ය Numbered Menu එක
+      const imgBuf = await getSafeBuffer(headerImg);
       const sentMsg = await sock.sendMessage(
         from,
         {
-          image: { url: headerImg },
+          image: imgBuf,
           caption: buildStyledMainMenu(state, userName),
           contextInfo: channelContextInfo(),
         },
