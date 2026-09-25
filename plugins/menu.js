@@ -1,5 +1,4 @@
 const { cmd, commands, replyHandlers } = require("../command");
-const { sendInteractiveMessage } = require("gifted-btns");
 const config = require("../config");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
@@ -46,7 +45,6 @@ let cacheTime = 0;
 const MENU_CACHE_MS = 60 * 1000;
 
 /* ================= HELPERS ================= */
-// ✅ Group එකේ ඕනෑම කෙනෙකුට reply කළ හැකි වන පරිදි 'from' පමණක් භාවිතය
 function keyFor(sender, from) {
   return `${from || ""}`;
 }
@@ -179,7 +177,6 @@ function buildCommandMapCached() {
   return cachedMenu;
 }
 
-// ✅ Fix: WhatsApp Text layout එක කැඩෙන්නේ නැති පරිදි border එක කෙලින් සකස් කර ඇත
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
@@ -200,6 +197,26 @@ function menuHeader(userName = "User") {
 
 ╰─────✦❘•❘✦────•┈➤
 👇 *Select a command category below to view commands:*`;
+}
+
+function buildStyledMainMenu(state, userName) {
+  const { categories } = state;
+  const styledUser = toSmallCaps(userName);
+  let msg = `┏━━━◥◣◆◢◤━━━━┓\n`;
+  msg += `★彡 *${BOT_NAME}* 彡★\n`;
+  msg += `┗━━━◢◤◆◥◣━━━━┛\n\n`;
+  msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
+
+  categories.forEach((cat, idx) => {
+    const emo = getCategoryEmoji(cat);
+    const numStr = String(idx + 1).padStart(2, "0");
+    const styledCat = toSmallCaps(cat);
+    msg += `*[ ${numStr} ]*  ${emo}  *${styledCat}*  _(${state.map[cat].length})_\n`;
+  });
+
+  msg += `\n⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n`;
+  msg += `> 💬 *Swipe & Reply this message with a number...*`;
+  return msg;
 }
 
 function commandListCaption(cat, list, userName = "User") {
@@ -230,7 +247,7 @@ function makeCategoryRows(map, categories) {
   return categories.map((cat) => ({
     title: `${getCategoryEmoji(cat)} ${toSmallCaps(cat)} MENU`,
     description: `${map[cat].length} commands available`,
-    id: `menu_view:${cat}`,
+    rowId: `.menu_view ${cat}`,
   }));
 }
 
@@ -296,6 +313,9 @@ function resolveMenuAction(texts, state) {
     if (text.startsWith("MENU_VIEW:")) {
       return { type: "view", cat: text.replace("MENU_VIEW:", "").trim() };
     }
+    if (text.startsWith(".MENU_VIEW")) {
+      return { type: "view", cat: text.replace(".MENU_VIEW", "").trim() };
+    }
     for (const cat of state.categories || []) {
       const catText = normalizeText(cat);
       if (
@@ -322,26 +342,6 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
-function buildStyledMainMenu(state, userName) {
-  const { categories } = state;
-  const styledUser = toSmallCaps(userName);
-  let msg = `┏━━━◥◣◆◢◤━━━━┓\n`;
-  msg += `★彡 *${BOT_NAME}* 彡★\n`;
-  msg += `┗━━━◢◤◆◥◣━━━━┛\n\n`;
-  msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
-
-  categories.forEach((cat, idx) => {
-    const emo = getCategoryEmoji(cat);
-    const numStr = String(idx + 1).padStart(2, "0");
-    const styledCat = toSmallCaps(cat);
-    msg += `*[ ${numStr} ]*  ${emo}  *${styledCat}*  _(${state.map[cat].length})_\n`;
-  });
-
-  msg += `\n⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n`;
-  msg += `> 💬 *Swipe & Reply this message with a number...*`;
-  return msg;
-}
-
 async function sendNumberedMainMenu(sock, from, mek, state, userName, sessionId) {
   let headerImg = DEFAULT_HEADER_IMAGE;
   if (sessionId) {
@@ -365,66 +365,6 @@ async function sendNumberedMainMenu(sock, from, mek, state, userName, sessionId)
     },
     { quoted: mek }
   );
-}
-
-async function sendMainMenu(sock, from, mek, state, userName, sessionId) {
-  const settings = await readSettings(sessionId);
-  const btnsOn = !!settings.btns_enabled;
-
-  if (btnsOn && sendInteractiveMessage) {
-    try {
-      let headerImg = DEFAULT_HEADER_IMAGE;
-      if (sessionId) {
-        try {
-          const custom = await getCustomImage(sessionId, "menu_header");
-          if (custom && custom.data) headerImg = custom.data;
-        } catch (e) {}
-      }
-
-      return await sendInteractiveMessage(
-        sock,
-        from,
-        {
-          image: { url: headerImg },
-          text: menuHeader(userName),
-          footer: `${BOT_NAME} | Interactive Menu`,
-          interactiveButtons: [
-            {
-              name: "single_select",
-              buttonParamsJson: JSON.stringify({
-                title: "Click Here ↯",
-                sections: [
-                  {
-                    title: "Command Categories",
-                    rows: makeCategoryRows(state.map, state.categories),
-                  },
-                ],
-              }),
-            },
-            {
-              name: "cta_url",
-              buttonParamsJson: JSON.stringify({
-                display_text: "🌐 Official Website",
-                url: "https://maliya-md.replit.app",
-              }),
-            },
-            {
-              name: "cta_copy",
-              buttonParamsJson: JSON.stringify({
-                display_text: "📋 Copy Owner Number",
-                copy_code: OWNER_NUMBER,
-              }),
-            },
-          ],
-        },
-        { quoted: mek }
-      );
-    } catch (e) {
-      console.log("MENU BUTTON ERROR:", e);
-    }
-  }
-
-  return await sendNumberedMainMenu(sock, from, mek, state, userName, sessionId);
 }
 
 async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId) {
@@ -478,8 +418,43 @@ cmd(
         lastActionAt: 0,
       };
 
-      const sentMsg = await sendMainMenu(sock, from, mek, state, userName, sessionId);
+      const settings = await readSettings(sessionId);
+      const btnsOn = !!settings.btns_enabled;
 
+      let headerImg = DEFAULT_HEADER_IMAGE;
+      if (sessionId) {
+        try {
+          const custom = await getCustomImage(sessionId, "menu_header");
+          if (custom && custom.data) headerImg = custom.data;
+        } catch (e) {}
+      }
+
+      // 1. Buttons Enabled නම් ButtonV2 හරහා යැවීම
+      if (btnsOn) {
+        try {
+          const { ButtonV2 } = await import("@vanzxy/baileys");
+
+          const sentMsg = await new ButtonV2(sock)
+            .setBody(menuHeader(userName))
+            .setFooter(`${BOT_NAME} | 2026 SYSTEM`)
+            .setThumbnail(headerImg)
+            .addButton("📑 List Menu", ".open_categories")
+            .addButton("🏓 Ping Latency", ".ping")
+            .addButton("👤 Owner Info", ".owner")
+            .send(from, { quoted: mek });
+
+          if (sentMsg?.key?.id) {
+            state.expectedMsgId = sentMsg.key.id;
+          }
+          pendingMenu[k] = state;
+          return;
+        } catch (btnErr) {
+          console.log("BUTTON V2 SEND ERROR:", btnErr);
+        }
+      }
+
+      // 2. Buttons Disabled නම් සාමාන්‍ය Numbered Menu එක යැවීම
+      const sentMsg = await sendNumberedMainMenu(sock, from, mek, state, userName, sessionId);
       if (sentMsg?.key?.id) {
         state.expectedMsgId = sentMsg.key.id;
         pendingMenu[k] = state;
@@ -491,23 +466,85 @@ cmd(
   }
 );
 
-/* ================= REPLY HANDLER ================= */
+/* ================= COMMAND: .open_categories ================= */
+cmd(
+  {
+    pattern: "open_categories",
+    dontAddCommandList: true,
+    filename: __filename,
+  },
+  async (sock, mek, m, { from }) => {
+    try {
+      const { map, categories } = buildCommandMapCached();
+
+      const listSections = [
+        {
+          title: "COMMAND CATEGORIES",
+          rows: makeCategoryRows(map, categories),
+        },
+      ];
+
+      const listMessage = {
+        text: " ",
+        footer: `© 2026 ${BOT_NAME}`,
+        title: "",
+        buttonText: "📑 Click Here to Select Category",
+        sections: listSections,
+      };
+
+      await sock.sendMessage(from, listMessage, { quoted: mek });
+    } catch (e) {
+      console.log("OPEN CATEGORIES ERROR:", e?.message || e);
+    }
+  }
+);
+
+/* ================= COMMAND: .menu_view ================= */
+cmd(
+  {
+    pattern: "menu_view",
+    dontAddCommandList: true,
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, q, sender, pushname, reply, sessionId }) => {
+    try {
+      const cat = String(q || "").trim().toUpperCase();
+      const { map } = buildCommandMapCached();
+      const list = map[cat] || [];
+      if (!list.length) return reply("❌ No commands found in this category.");
+
+      const userName = getUserName(pushname, m, mek, sender);
+      await sock.sendMessage(from, {
+        react: { text: getCategoryEmoji(cat), key: mek.key },
+      });
+
+      await sendCommandsList(sock, from, mek, cat, list, userName, sessionId);
+    } catch (e) {
+      console.log("MENU VIEW ERROR:", e);
+    }
+  }
+);
+
+/* ================= REPLY HANDLER (NUMBER + LIST HANDLER) ================= */
 const menuReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
     const state = pendingMenu[k];
     if (!state) return false;
 
-    // 🔥 Check if incoming message is a quoted reply to the bot's sent menu message
+    // Quoted ID Match වීම හෝ සෘජු Number/Text Match වීම
     const quotedId = getQuotedId(m, mek);
-    if (!quotedId || quotedId !== state.expectedMsgId) return false;
+    const isQuoted = quotedId && quotedId === state.expectedMsgId;
 
     const texts = extractTexts(text, mek, m);
     const action = resolveMenuAction(texts, state);
     if (action) return true;
 
     const num = parseInt(String(text || "").trim(), 10);
-    return !isNaN(num) && num > 0 && num <= state.categories.length;
+    const isNum = !isNaN(num) && num > 0 && num <= state.categories.length;
+
+    // Number Reply එකක් නම් Quoted Match හෝ අංකය පමණක් වුවද පිළිගැනීම
+    return isQuoted || isNum;
   },
   function: async (sock, mek, m, { from, body, sender, pushname, reply }) => {
     try {
@@ -523,6 +560,8 @@ const menuReplyHandler = {
 
       const texts = extractTexts(body, mek, m);
       let action = resolveMenuAction(texts, state);
+
+      // Number Reply Handling (උදා: '1', '2' වැනි අංකයක් එවීම)
       if (!action) {
         const num = parseInt(inputStr, 10);
         if (!isNaN(num) && num > 0 && num <= state.categories.length) {
