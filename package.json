@@ -84,7 +84,8 @@
     "https": "latest",
     "crypto": "latest",
     "@vanzxy/baileys": "latest",
-    "got-scraping": "latest"
+    "got-scraping": "latest",
+    "tough-cookie": "latest"
   
     
 
