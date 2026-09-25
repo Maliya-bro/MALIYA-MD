@@ -34,9 +34,6 @@ const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
   ? `+${OWNER_NUMBER_RAW}`
   : "Not Set";
 
-const OWNER_NAME =
-  String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
-
 const DEFAULT_HEADER_IMAGE =
   "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
 
@@ -331,7 +328,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Show command categories with Asitha-MD detached side-by-side buttons",
+    desc: "Show command categories with separated buttons (gap)",
     category: "main",
     filename: __filename,
   },
@@ -367,9 +364,17 @@ cmd(
         } catch (e) {}
       }
 
+      const imgBuf = await getSafeBuffer(headerImg);
+
       if (btnsOn) {
         try {
-          const { ButtonV2 } = await import("@vanzxy/baileys");
+          const vanzxy = await import("@vanzxy/baileys");
+          const { generateWAMessageFromContent, prepareWAMessageMedia } = vanzxy;
+
+          const media = await prepareWAMessageMedia(
+            { image: imgBuf },
+            { upload: sock.waUploadToServer }
+          );
 
           const listRows = categories.map((cat) => ({
             header: "",
@@ -378,43 +383,47 @@ cmd(
             id: `.menu_view ${cat}`,
           }));
 
-          // 1. ButtonV2 මඟින් වෙන් වුණු (Detached) බටන් හැඩය සහ Location Header එක සෑදීම
-          const btn = new ButtonV2(sock)
-            .setTitle(BOT_NAME)
-            .setSubtitle("Sri Lanka")
-            .setBody(menuHeader(userName))
-            .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
-            .setThumbnail(headerImg);
-
-          // පළමු බටන් එක: List Menu (single_select)
-          btn.addRawButton({
-            buttonId: "list_menu",
-            buttonText: { displayText: "≡ List Menu" },
-            type: 2,
-            nativeFlowInfo: {
-              name: "single_select",
-              paramsJson: JSON.stringify({
-                title: "≡ List Menu",
-                sections: [
+          // buttonsMessage (headerType: 4) මඟින් බටන් අතර Gap එක ලබාගැනීම
+          const msg = generateWAMessageFromContent(
+            from,
+            {
+              buttonsMessage: {
+                imageMessage: media.imageMessage,
+                contentText: menuHeader(userName),
+                footerText: "© 2026 MALIYA-MD BOT SYSTEM",
+                headerType: 4,
+                buttons: [
                   {
-                    title: "📁 Command Categories",
-                    highlight_label: "POPULAR",
-                    rows: listRows,
+                    buttonId: "action",
+                    buttonText: { displayText: "≡ List Menu" },
+                    type: 2,
+                    nativeFlowInfo: {
+                      name: "single_select",
+                      paramsJson: JSON.stringify({
+                        title: "≡ List Menu",
+                        sections: [
+                          {
+                            title: "📁 Command Categories",
+                            highlight_label: "POPULAR",
+                            rows: listRows,
+                          },
+                        ],
+                      }),
+                    },
+                  },
+                  {
+                    buttonId: ".ping",
+                    buttonText: { displayText: "📊 Ping" },
+                    type: 1,
                   },
                 ],
-              }),
+              },
             },
-          });
+            { quoted: mek }
+          );
 
-          // දෙවෙනි බටන් එක: Ping (Side-by-Side වැටීම සඳහා)
-          btn.addButton("📊 Ping", ".ping");
-
-          // 2. ButtonV2 message එක build කරගැනීම
-          const builtMsg = await btn.build(from, { quoted: mek });
-
-          // 3. "Update WhatsApp" නොවැටීමට native_flow binary node එක සමඟ relay කිරීම
-          await sock.relayMessage(from, builtMsg.message, {
-            messageId: builtMsg.key.id,
+          await sock.relayMessage(from, msg.message, {
+            messageId: msg.key.id,
             additionalNodes: [
               {
                 tag: "biz",
@@ -426,7 +435,7 @@ cmd(
                     content: [
                       {
                         tag: "native_flow",
-                        attrs: { v: "9", name: "mixed" },
+                        attrs: { v: "2", name: "mixed" },
                       },
                     ],
                   },
@@ -435,16 +444,15 @@ cmd(
             ],
           });
 
-          state.expectedMsgId = builtMsg.key.id;
+          state.expectedMsgId = msg.key.id;
           pendingMenu[k] = state;
           return;
         } catch (err) {
-          console.log("BUTTONV2 RELAY MENU ERROR:", err);
+          console.log("BUTTONSMESSAGE LIST ERROR:", err);
         }
       }
 
-      // Fallback: Buttons Off නම් සාමාන්‍ය Numbered Menu එක
-      const imgBuf = await getSafeBuffer(headerImg);
+      // Fallback: Numbered Menu
       const sentMsg = await sock.sendMessage(
         from,
         {
