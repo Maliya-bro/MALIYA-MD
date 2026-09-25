@@ -1,7 +1,9 @@
 const { cmd, replyHandlers } = require("../command");
 const axios = require("axios");
-const cheerio = require("cheerio");
+const cheerio = "cheerio" in global ? global.cheerio : require("cheerio");
 const sharp = require("sharp");
+const fs = require("fs");
+const path = require("path");
 const { File: MegaFile } = require("megajs");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
@@ -116,10 +118,48 @@ async function sendErrorMsg(sock, from, mek, text) {
   }, { quoted: mek });
 }
 
+function makeProgressBarText(transferred, total, startTime, movieTitle, quality, serverName) {
+  const barLength = 12;
+  const downloadedMB = (transferred / (1024 * 1024)).toFixed(2);
+  const elapsedSec = (Date.now() - startTime) / 1000;
+  let speedMBps = 0;
+  if (elapsedSec > 0) {
+    speedMBps = (transferred / (1024 * 1024)) / elapsedSec;
+  }
+  const speedStr = speedMBps.toFixed(2);
+
+  let barLine = "";
+  if (total && total > 0) {
+    const percent = Math.min(1, transferred / total);
+    const filled = Math.round(barLength * percent);
+    const empty = barLength - filled;
+    const bar = "█".repeat(filled) + "░".repeat(empty);
+    const pctStr = (percent * 100).toFixed(1);
+    const totalMB = (total / (1024 * 1024)).toFixed(2);
+    barLine = `📊 *[${bar}] ${pctStr}%*\n📦 *Size :* ${downloadedMB} MB / ${totalMB} MB\n⚡ *Speed :* ${speedStr} MB/s`;
+  } else {
+    barLine = `📦 *Downloaded :* ${downloadedMB} MB\n⚡ *Speed :* ${speedStr} MB/s`;
+  }
+
+  let msg = "╭──────────. ִ ࣪ ⋆ ೀ ─╮\n";
+  msg += "   ⬇️  𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐈НГ  \n";
+  msg += "╰─ ִ ࣪ ⋆ ೀ ──────────╯\n\n";
+  msg += "─── ⋆⋅☆⋅⋆ ───\n";
+  msg += `🎬 *Movie  :* ${toSmallCaps(movieTitle)}\n`;
+  msg += `📺 *Quality:* ${quality}\n`;
+  msg += `🌐 *Server :* ${serverName}\n`;
+  msg += "─── ⋆⋅☆⋅⋆ ───\n\n";
+  msg += `${barLine}\n\n`;
+  msg += "•───────•°•❀•°•───────•\n";
+  msg += "> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
+  return msg;
+}
+
 /**
- * 1. Search Cineru.lk Movies
+ * 1. නම අනුව Movies Search කිරීම
  */
-async function searchCineruMovies(query) {
+async function searchMovies(query) {
+  const cheerio = require("cheerio");
   const { gotScraping } = await import("got-scraping");
   const searchUrl = `https://cineru.lk/wp-json/wp/v2/posts?search=${encodeURIComponent(query)}&per_page=10`;
 
@@ -129,7 +169,7 @@ async function searchCineruMovies(query) {
     return posts.map(post => ({
       id: post.id,
       title: cheerio.load(post.title.rendered).text().trim(),
-      url: post.link
+      link: post.link
     }));
   } catch (err) {
     const fallbackUrl = `https://cineru.lk/?s=${encodeURIComponent(query)}`;
@@ -140,7 +180,7 @@ async function searchCineruMovies(query) {
     $(".post-box-title a").each((_, el) => {
       results.push({
         title: $(el).text().trim(),
-        url: $(el).attr("href")
+        link: $(el).attr("href")
       });
     });
     return results;
@@ -148,26 +188,23 @@ async function searchCineruMovies(query) {
 }
 
 /**
- * 2. Scrape Movie and sort by PIXELDRAIN -> GDRIVE -> MEGA
+ * 2. Post ID එකෙන් PIXELDRAIN, GDRIVE සහ MEGA ලින්ක් පමණක් ලබාගැනීම
  */
-async function scrapeCineruMovie(movieUrl, postId) {
+async function getMovieDownloadData(movieUrl, postId) {
+  const cheerio = require("cheerio");
   const { gotScraping } = await import("got-scraping");
 
-  const pageRes = await gotScraping({ url: movieUrl, ...REQUEST_OPTIONS });
-  const $ = cheerio.load(pageRes.body);
-
-  const rawTitle = $("h1.post-title").text().trim();
-  const pipeChar = String.fromCharCode(124);
-  const cleanTitle = rawTitle ? rawTitle.split(pipeChar)[0].trim() : "Movie";
-  const imdb = $(".cs-rate__val").text().trim();
-  const poster = $(".single-post-thumb img").attr("src");
+  let pageRes = await gotScraping({ url: movieUrl, ...REQUEST_OPTIONS });
+  let $ = cheerio.load(pageRes.body);
 
   if (!postId) {
     postId = $("#post_id").val();
   }
 
+  const poster = $(".single-post-thumb img").attr("src");
+
   if (!postId) {
-    throw new Error("Post ID not found.");
+    throw new Error("Post ID එක සොයාගත නොහැකි විය.");
   }
 
   const ajaxRes = await gotScraping.post("https://cineru.lk/wp-admin/admin-ajax.php", {
@@ -184,7 +221,7 @@ async function scrapeCineruMovie(movieUrl, postId) {
   });
 
   const ajaxJson = JSON.parse(ajaxRes.body);
-  const downloadLinks = [];
+  const downloads = [];
 
   if (ajaxJson.success && ajaxJson.data) {
     const $dl = cheerio.load(ajaxJson.data);
@@ -195,24 +232,24 @@ async function scrapeCineruMovie(movieUrl, postId) {
       const servers = [];
 
       linksContainer.find(".btns").each((_, btnEl) => {
-        const serverName = $dl(btnEl).find(".nmcld").text().trim().toUpperCase();
+        const serverName = $dl(btnEl).find(".nmcld").text().trim();
+        const upperName = serverName.toUpperCase();
         const downloadUrl = $dl(btnEl).attr("data-link");
 
-        // Priority: 1 = PIXELDRAIN, 2 = GDRIVE, 3 = MEGA
         let priority = 99;
-        if (serverName.includes("PIXELDRAIN")) {
+        if (upperName.includes("PIXELDRAIN")) {
           priority = 1;
-        } else if (serverName.includes("GDRIVE")) {
+        } else if (upperName.includes("GDRIVE")) {
           priority = 2;
-        } else if (serverName.includes("DRIVE") && !serverName.includes("USERDRIVE")) {
+        } else if (upperName.includes("DRIVE") && !upperName.includes("USERDRIVE")) {
           priority = 2;
-        } else if (serverName.includes("MEGA")) {
+        } else if (upperName.includes("MEGA")) {
           priority = 3;
         }
 
         if (downloadUrl && priority < 99) {
           servers.push({
-            name: serverName,
+            name: upperName,
             url: downloadUrl,
             priority: priority
           });
@@ -221,8 +258,17 @@ async function scrapeCineruMovie(movieUrl, postId) {
 
       servers.sort((a, b) => a.priority - b.priority);
 
-      if (qualityInfo && servers.length > 0) {
-        downloadLinks.push({
+      // 2GB ට අඩු Qualities පමණක් පෙරහන් කිරීම
+      let isUnder2GB = true;
+      const match = qualityInfo.match(/([\d.]+)\s*(MB|GB)/i);
+      if (match) {
+        const size = parseFloat(match[1]);
+        const unit = match[2].toUpperCase();
+        if (unit === "GB" && size >= 2.0) isUnder2GB = false;
+      }
+
+      if (qualityInfo && servers.length > 0 && isUnder2GB) {
+        downloads.push({
           quality: qualityInfo,
           servers: servers
         });
@@ -230,130 +276,229 @@ async function scrapeCineruMovie(movieUrl, postId) {
     });
   }
 
-  return {
-    title: cleanTitle,
-    fullTitle: rawTitle,
-    imdb_rate: imdb,
-    poster: poster,
-    url: movieUrl,
-    downloadLinks: downloadLinks
-  };
+  return { downloads, poster };
 }
 
-/**
- * 3. Token URL එකෙන් Direct Streaming URL එක Resolve කරගැනීම (No Disk Save)
- */
-async function resolveDirectStreamingUrl(initialUrl, refererUrl) {
-  const { gotScraping } = await import("got-scraping");
-
-  // 1. Pixeldrain ලින්ක් එකක් නම් කෙලින්ම Direct Stream URL එක සෑදීම
-  const pdQuick = initialUrl.match(/pixeldrain\.[a-z]+\/[ul]\/([a-zA-Z0-9_-]+)/i);
-  if (pdQuick) {
-    return {
-      type: "url",
-      url: `https://pixeldrain.com/api/file/${pdQuick[1]}?download`
-    };
+function normalizeDirectUrl(url) {
+  const pdMatch = url.match(/pixeldrain\.[a-z]+\/[ul]\/([a-zA-Z0-9_-]+)/i);
+  if (pdMatch) {
+    return `https://pixeldrain.com/api/file/${pdMatch[1]}?download`;
   }
 
-  // 2. Google Drive ලින්ක් එකක් නම්
-  let gdId = null;
-  const gdMatch = initialUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/i);
-  if (gdMatch) gdId = gdMatch[1];
-  const gdMatch2 = initialUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/i);
-  if (!gdId && gdMatch2) gdId = gdMatch2[1];
+  const gdFileMatch = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/i);
+  if (gdFileMatch) {
+    return `https://drive.usercontent.google.com/download?id=${gdFileMatch[1]}&export=download&confirm=t`;
+  }
 
-  if (gdId) {
-    const gdCheckUrl = `https://drive.usercontent.google.com/download?id=${gdId}&export=download`;
-    const checkRes = await gotScraping({ url: gdCheckUrl, ...REQUEST_OPTIONS });
-    let contentType = checkRes.headers["content-type"] ? checkRes.headers["content-type"].toLowerCase() : "";
+  const gdOpenMatch = url.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/i);
+  if (gdOpenMatch) {
+    return `https://drive.usercontent.google.com/download?id=${gdOpenMatch[1]}&export=download&confirm=t`;
+  }
 
-    if (contentType.includes("text/html")) {
-      const $ = cheerio.load(checkRes.body);
-      const gdForm = $("form#download-form, form[action*='drive.usercontent.google.com']");
-      if (gdForm.length) {
-        const action = gdForm.attr("action");
-        const params = new URLSearchParams();
-        gdForm.find("input[name]").each((_, el) => {
-          let val = $(el).attr("value");
-          if (!val) val = "";
-          params.append($(el).attr("name"), val);
-        });
-        return { type: "url", url: `${action}?${params.toString()}` };
-      }
-      return { type: "url", url: `https://drive.usercontent.google.com/download?id=${gdId}&export=download&confirm=t` };
+  const gdUcMatch = url.match(/drive\.google\.com\/uc\?.*id=([a-zA-Z0-9_-]+)/i);
+  if (gdUcMatch) {
+    return `https://drive.usercontent.google.com/download?id=${gdUcMatch[1]}&export=download&confirm=t`;
+  }
+
+  return url;
+}
+
+async function downloadFromMega(megaUrl, downloadDir, fallbackFilePath, onProgress) {
+  const file = MegaFile.fromURL(megaUrl);
+  await file.loadAttributes();
+
+  let finalPath = fallbackFilePath;
+  if (file.name) {
+    const cleanName = file.name.replace(/[^a-zA-Z0-9._ -]/g, "");
+    if (cleanName) {
+      finalPath = path.join(downloadDir, cleanName);
     }
-    return { type: "url", url: gdCheckUrl };
   }
 
-  // 3. dl.cineru.lk Token එක හරහා Redirect වීම
-  const res = await gotScraping({
-    url: initialUrl,
-    ...REQUEST_OPTIONS,
-    followRedirect: true,
-    headers: { "Referer": refererUrl }
+  const totalBytes = file.size;
+
+  return await new Promise((resolve, reject) => {
+    let transferred = 0;
+    const readStream = file.download();
+    const writeStream = fs.createWriteStream(finalPath);
+
+    readStream.on("data", (chunk) => {
+      transferred += chunk.length;
+      if (onProgress) onProgress(transferred, totalBytes);
+    });
+
+    readStream.pipe(writeStream);
+
+    writeStream.on("finish", () => resolve(finalPath));
+    readStream.on("error", reject);
+    writeStream.on("error", reject);
+  });
+}
+
+function extractNextUrlFromHtml(html, currentUrl) {
+  const cheerio = require("cheerio");
+  const $ = cheerio.load(html);
+
+  const gdForm = $("form#download-form, form[action*='drive.usercontent.google.com']");
+  if (gdForm.length) {
+    const action = gdForm.attr("action");
+    const params = new URLSearchParams();
+    gdForm.find("input[name]").each((_, el) => {
+      let val = $(el).attr("value");
+      if (!val) val = "";
+      params.append($(el).attr("name"), val);
+    });
+    return `${action}?${params.toString()}`;
+  }
+
+  const megaMatch = html.match(/https?:\/\/mega\.nz\/[a-zA-Z0-9/_#-]+/i);
+  if (megaMatch) return megaMatch[0];
+
+  const pdMatch = html.match(/https?:\/\/[a-z0-9.]*pixeldrain\.[a-z]+\/[ul]\/([a-zA-Z0-9_-]+)/i);
+  if (pdMatch) return `https://pixeldrain.com/api/file/${pdMatch[1]}?download`;
+
+  const gdMatch = html.match(/https?:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/i);
+  if (gdMatch && !currentUrl.includes("drive.usercontent.google.com")) {
+    return `https://drive.usercontent.google.com/download?id=${gdMatch[1]}&export=download&confirm=t`;
+  }
+
+  let foundLink = null;
+  $("a[href], [data-link], [data-url]").each((_, el) => {
+    let rawHref = $(el).attr("data-link");
+    if (!rawHref) rawHref = $(el).attr("data-url");
+    if (!rawHref) rawHref = $(el).attr("href");
+
+    if (!rawHref) return;
+    if (rawHref.startsWith("#")) return;
+    if (rawHref.startsWith("javascript")) return;
+
+    try {
+      const fullUrl = new URL(rawHref, currentUrl).toString();
+      let isValidTarget = false;
+
+      if (fullUrl.includes("pixeldrain")) isValidTarget = true;
+      if (fullUrl.includes("drive.google")) isValidTarget = true;
+      if (fullUrl.includes("usercontent.google")) isValidTarget = true;
+      if (fullUrl.includes("mega.nz")) isValidTarget = true;
+      if (fullUrl.includes("workers.dev")) isValidTarget = true;
+      if (fullUrl.includes("r2.dev")) isValidTarget = true;
+      if (fullUrl.includes("dl.php?") && fullUrl !== currentUrl) isValidTarget = true;
+      if (fullUrl.includes(".mp4")) isValidTarget = true;
+      if (fullUrl.includes(".mkv")) isValidTarget = true;
+
+      if (isValidTarget) {
+        foundLink = normalizeDirectUrl(fullUrl);
+        return false;
+      }
+    } catch (e) {}
   });
 
-  const finalVisited = res.url ? res.url : initialUrl;
+  return foundLink;
+}
 
-  // Final URL එකෙන් Pixeldrain අල්ලා ගැනීම
-  const pdFinal = finalVisited.match(/pixeldrain\.[a-z]+\/[ul]\/([a-zA-Z0-9_-]+)/i);
-  if (pdFinal) {
-    return { type: "url", url: `https://pixeldrain.com/api/file/${pdFinal[1]}?download` };
+async function downloadMovieDirect(initialUrl, refererUrl, tempFilePath, onProgress, depth = 0) {
+  if (depth > 5) throw new Error("Redirect සීමාව ඉක්මවා ගියා.");
+
+  if (initialUrl.includes("mega.nz")) {
+    return await downloadFromMega(initialUrl, path.dirname(tempFilePath), tempFilePath, onProgress);
   }
 
-  // Final URL එකෙන් GDrive අල්ලා ගැනීම
-  const gdFinal = finalVisited.match(/\/file\/d\/([a-zA-Z0-9_-]+)/i);
-  if (gdFinal) {
-    return { type: "url", url: `https://drive.usercontent.google.com/download?id=${gdFinal[1]}&export=download&confirm=t` };
-  }
+  const { gotScraping } = await import("got-scraping");
+  const targetUrl = normalizeDirectUrl(initialUrl);
 
-  // Final URL එකෙන් Mega අල්ලා ගැනීම (Mega වලට stream එකක් ලබාදේ)
-  if (finalVisited.includes("mega.nz")) {
-    const file = MegaFile.fromURL(finalVisited);
-    await file.loadAttributes();
-    return { type: "stream", stream: file.download(), size: file.size };
-  }
+  return new Promise((resolve, reject) => {
+    const stream = gotScraping.stream({
+      url: targetUrl,
+      ...REQUEST_OPTIONS,
+      followRedirect: true,
+      headers: { "Referer": refererUrl }
+    });
 
-  // HTML එක තුළ ඇත්නම් parse කිරීම
-  if (typeof res.body === "string") {
-    const $ = cheerio.load(res.body);
+    let isHtmlResponse = false;
+    const htmlChunks = [];
 
-    const pdInHtml = res.body.match(/https?:\/\/[a-z0-9.]*pixeldrain\.[a-z]+\/[ul]\/([a-zA-Z0-9_-]+)/i);
-    if (pdInHtml) {
-      return { type: "url", url: `https://pixeldrain.com/api/file/${pdInHtml[1]}?download` };
-    }
+    stream.on("response", (res) => {
+      let finalVisitedUrl = res.url ? res.url : targetUrl;
 
-    const gdInHtml = res.body.match(/https?:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/i);
-    if (gdInHtml) {
-      return { type: "url", url: `https://drive.usercontent.google.com/download?id=${gdInHtml[1]}&export=download&confirm=t` };
-    }
+      if (finalVisitedUrl.includes("mega.nz")) {
+        stream.destroy();
+        downloadFromMega(finalVisitedUrl, path.dirname(tempFilePath), tempFilePath, onProgress)
+          .then(resolve)
+          .catch(reject);
+        return;
+      }
 
-    const megaInHtml = res.body.match(/https?:\/\/mega\.nz\/[a-zA-Z0-9/_#-]+/i);
-    if (megaInHtml) {
-      const file = MegaFile.fromURL(megaInHtml[0]);
-      await file.loadAttributes();
-      return { type: "stream", stream: file.download(), size: file.size };
-    }
-  }
+      let contentType = res.headers["content-type"] ? res.headers["content-type"].toLowerCase() : "";
+      let disposition = res.headers["content-disposition"] ? res.headers["content-disposition"] : "";
 
-  throw new Error("Direct link extract කරගත නොහැකි විය.");
+      const normalizedFinal = normalizeDirectUrl(finalVisitedUrl);
+      if (normalizedFinal !== finalVisitedUrl) {
+        stream.destroy();
+        downloadMovieDirect(normalizedFinal, finalVisitedUrl, tempFilePath, onProgress, depth + 1)
+          .then(resolve)
+          .catch(reject);
+        return;
+      }
+
+      let isBinaryFile = false;
+      if (disposition.includes("attachment")) isBinaryFile = true;
+      if (contentType.includes("video/")) isBinaryFile = true;
+      if (contentType.includes("application/octet-stream")) isBinaryFile = true;
+      if (contentType.includes("application/x-matroska")) isBinaryFile = true;
+      if (contentType.includes("application/force-download")) isBinaryFile = true;
+
+      if (contentType.includes("text/html") && !isBinaryFile) {
+        isHtmlResponse = true;
+        stream.on("data", (chunk) => htmlChunks.push(chunk));
+        stream.on("end", () => {
+          const htmlBody = Buffer.concat(htmlChunks).toString("utf8");
+          if (htmlBody.includes("Quota exceeded") || htmlBody.includes("TooManyRequests")) {
+            reject(new Error("Google Drive quota ඉක්මවා ඇත."));
+            return;
+          }
+          const nextUrl = extractNextUrlFromHtml(htmlBody, finalVisitedUrl);
+          if (nextUrl && nextUrl !== targetUrl) {
+            downloadMovieDirect(nextUrl, finalVisitedUrl, tempFilePath, onProgress, depth + 1)
+              .then(resolve)
+              .catch(reject);
+          } else {
+            reject(new Error("ගොනුව ලබාගත නොහැකි විය."));
+          }
+        });
+        return;
+      }
+
+      const fileWriter = fs.createWriteStream(tempFilePath);
+      stream.on("downloadProgress", ({ transferred, total }) => {
+        if (onProgress) onProgress(transferred, total);
+      });
+      stream.pipe(fileWriter);
+
+      fileWriter.on("finish", () => resolve(tempFilePath));
+      fileWriter.on("error", reject);
+    });
+
+    stream.on("error", (err) => {
+      if (!isHtmlResponse) reject(err);
+    });
+  });
 }
 
 /**
- * 4. Bot Command (.cineru)
+ * Command: .cineru <name>
  */
 cmd({
   pattern: "cineru",
   alias: ["cr", "cinerulk", "crfilm"],
   react: "🎬",
-  desc: "Search and send movies from Cineru.lk (No Server Storage)",
+  desc: "Search and download movies from Cineru.lk",
   category: "download",
   filename: __filename
 }, async (sock, mek, m, { from, q, sender, sessionId }) => {
   try {
     if (!q) {
       let helpText = "╔═════ஓ๑♡๑ஓ═════╗\n";
-      helpText += "    🎬 𝐂𝐈𝐍𝐄𝐑𝐔 𝐒𝐄𝐀𝐑𝐂𝐇 🎬\n";
+      helpText += "    🎬 𝐂𝐈𝐍𝐄𝐑𝐔 𝐃𝐋 🎬\n";
       helpText += "╚═════ஓ๑♡๑ஓ═════╝\n\n";
       helpText += "⋆⁺｡˚⋆˙‧₊☾ ◯ ☽₊‧˙⋆˚｡⁺⋆\n\n";
       helpText += "📌 *Usage :* `.cineru <movie name>`\n";
@@ -369,7 +514,7 @@ cmd({
 
     await sock.sendMessage(from, { react: { text: "🔍", key: m.key } });
 
-    const results = await searchCineruMovies(q.trim());
+    const results = await searchMovies(q.trim());
     if (!results ? true : results.length === 0) {
       await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
       return await sendErrorMsg(sock, from, mek, `No movies found on Cineru.lk for "${q}".`);
@@ -421,12 +566,12 @@ cmd({
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
   } catch (error) {
     await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
-    await sendErrorMsg(sock, from, mek, "Failed to connect to Cineru.lk search server.");
+    await sendErrorMsg(sock, from, mek, "Failed to connect to Cineru search server.");
   }
 });
 
 /**
- * 5. Reply Handler (Direct Stream Send - No Disk Storage)
+ * Reply Handler
  */
 const cineruReplyHandler = {
   filter: (text, { sender, from }) => {
@@ -465,48 +610,29 @@ const cineruReplyHandler = {
 
       const selected = pending.results[choice - 1];
       try {
-        const movieInfo = await scrapeCineruMovie(selected.url, selected.id);
-        if (!movieInfo ? true : !movieInfo.downloadLinks ? true : movieInfo.downloadLinks.length === 0) {
+        const { downloads, poster } = await getMovieDownloadData(selected.link, selected.id);
+        if (!downloads ? true : downloads.length === 0) {
           clearUserSession(k);
-          return await sendErrorMsg(sock, from, mek, "No download links available for this movie.");
-        }
-
-        const filteredQualities = movieInfo.downloadLinks.filter(d => {
-          const match = d.quality.match(/([\d.]+)\s*(MB|GB)/i);
-          if (match) {
-            const size = parseFloat(match[1]);
-            const unit = match[2].toUpperCase();
-            if (unit === "GB") return size < 2.0;
-            if (unit === "MB") return true;
-          }
-          return true;
-        });
-
-        if (filteredQualities.length === 0) {
-          clearUserSession(k);
-          return await sendErrorMsg(sock, from, mek, "No download links found below 2GB.");
+          return await sendErrorMsg(sock, from, mek, "මෙම චිත්‍රපටය සඳහා 2GB ට අඩු Direct Download ලින්ක් හමු නොවුණි.");
         }
 
         let qualityMsg = "╭──────────. ִ ࣪ ⋆ ೀ ─╮\n";
         qualityMsg += "   📥 𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒\n";
         qualityMsg += "╰─ ִ ࣪ ⋆ ೀ ──────────╯\n\n";
         qualityMsg += "⊹₊˚‧︵‿₊୨ᰔ୧₊‿︵‧˚₊⊹\n";
-        qualityMsg += `🎬 *Movie  :* ${toSmallCaps(movieInfo.title)}\n`;
-        if (movieInfo.imdb_rate) {
-          qualityMsg += `⭐ *IMDb   :* ${movieInfo.imdb_rate} / 10\n`;
-        }
+        qualityMsg += `🎬 *Movie  :* ${toSmallCaps(selected.title)}\n`;
         qualityMsg += "•───────•°•❀•°•───────•\n\n";
 
-        filteredQualities.forEach((d, i) => {
+        downloads.forEach((d, i) => {
           qualityMsg += `╭─── ⋆⋅ 𖤓 ⋅⋆ ───\n`;
           qualityMsg += `│ *[ ${String(i + 1).padStart(2, "0")} ]* 📊 *${d.quality}*\n`;
           qualityMsg += `╰────────────────\n`;
         });
 
         qualityMsg += "\n.𖥔 ݁ ˖⊹˚₊‧──────୨ ✦ ✦ ୧──────‧₊˚⊹.𖥔 ݁ ˖\n";
-        qualityMsg += "> 💬 *Reply with quality number to send movie...*";
+        qualityMsg += "> 💬 *Reply with quality number to auto-download...*";
 
-        const imgToSend = movieInfo.poster ? movieInfo.poster : DEFAULT_SEARCH_IMAGE;
+        const imgToSend = poster ? poster : DEFAULT_SEARCH_IMAGE;
 
         const sentQualityMsg = await sock.sendMessage(from, {
           image: { url: imgToSend },
@@ -515,7 +641,7 @@ const cineruReplyHandler = {
         }, { quoted: mek });
 
         pending.step = 2;
-        pending.movie = { metadata: movieInfo, downloadLinks: filteredQualities };
+        pending.movie = { title: selected.title, link: selected.link, poster, downloads };
         pending.timestamp = Date.now();
         pending.isProcessing = false;
         pending.expectedMsgId = sentQualityMsg.key.id;
@@ -523,81 +649,145 @@ const cineruReplyHandler = {
         await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
       } catch (error) {
         clearUserSession(k);
-        await sendErrorMsg(sock, from, mek, "Failed to fetch download links for this movie.");
+        await sendErrorMsg(sock, from, mek, "Failed to fetch qualities for this movie.");
       }
     }
 
-    // ================= STEP 2: QUALITY CHOSEN -> DIRECT STREAM TO WHATSAPP =================
+    // ================= STEP 2: QUALITY CHOSEN -> AUTO DOWNLOAD & SEND =================
     else if (pending.step === 2) {
       if (choice < 1) return;
-      if (choice > pending.movie.downloadLinks.length) return;
+      if (choice > pending.movie.downloads.length) return;
 
       pending.isProcessing = true;
-      await sock.sendMessage(from, { react: { text: "⬆️", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "⬇️", key: m.key } });
 
       const { movie } = pending;
-      const selectedQuality = movie.downloadLinks[choice - 1];
-      const { metadata } = movie;
+      const selectedQuality = movie.downloads[choice - 1];
 
       clearUserSession(k);
 
-      const cleanTitle = metadata.title.replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
-      let sentSuccessfully = false;
-      let usedServer = "";
+      const tempDir = path.join(__dirname, "../temp");
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
 
-      // Fallback Loop: PIXELDRAIN ➔ GDRIVE ➔ MEGA (Direct Streaming)
+      const cleanTitle = movie.title.replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
+      const tempFilePath = path.join(tempDir, `cineru_${Date.now()}_${cleanTitle}.mp4`);
+
+      const firstServer = selectedQuality.servers[0] ? selectedQuality.servers[0].name : "AUTO";
+      const progressMsg = await sock.sendMessage(from, {
+        text: makeProgressBarText(0, 0, Date.now(), movie.title, selectedQuality.quality, firstServer),
+        contextInfo: channelContextInfo()
+      }, { quoted: mek });
+
+      let downloadedSuccessfully = false;
+      let usedServerName = "";
+
       for (let i = 0; i < selectedQuality.servers.length; i++) {
         const currentServer = selectedQuality.servers[i];
+        const startTime = Date.now();
+        let lastUpdate = 0;
 
         try {
-          const resolved = await resolveDirectStreamingUrl(currentServer.url, metadata.url);
+          await sock.sendMessage(from, {
+            text: makeProgressBarText(0, 0, startTime, movie.title, selectedQuality.quality, currentServer.name),
+            edit: progressMsg.key
+          });
+        } catch (e) {}
 
-          const correctPosterUrl = metadata.poster ? metadata.poster : DEFAULT_SEARCH_IMAGE;
-          const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
-
-          let captionText = "╔═════ஓ๑♡๑ஓ═════╗\n";
-          captionText += "  🎉 𝐌𝐎𝐕𝐈𝐄 𝐔𝐏𝐋𝐎𝐀𝐃𝐄𝐃 🎉\n";
-          captionText += "╚═════ஓ๑♡๑ஓ═════╝\n\n";
-          captionText += "⋆⁺｡˚⋆˙‧₊☾ ◯ ☽₊‧˙⋆˚｡⁺⋆\n";
-          captionText += `🎬 *Movie   :* ${toSmallCaps(metadata.title)}\n`;
-          captionText += `📊 *Quality :* ${selectedQuality.quality}\n`;
-          captionText += `🌐 *Server  :* ${currentServer.name}\n`;
-          captionText += "•───────•°•❀•°•───────•\n\n";
-          captionText += "•∘˙⊹. ꒰ঌ ᧔ෆ᧓ ໒꒱ .⊹˙∘•\n";
-          captionText += "> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
-
-          // Baileys Document Payload: Server එකේ file save නොවී Stream එක කෙලින්ම යවයි
-          let docPayload = {
-            mimetype: "video/mp4",
-            fileName: `MALIYA-MD ${cleanTitle}.mp4`,
-            caption: captionText,
-            contextInfo: channelContextInfo()
-          };
-
-          if (thumbBuffer) {
-            docPayload.jpegThumbnail = thumbBuffer;
+        try {
+          if (fs.existsSync(tempFilePath)) {
+            try { fs.unlinkSync(tempFilePath); } catch (e) {}
           }
 
-          if (resolved.type === "url") {
-            docPayload.document = { url: resolved.url };
-          } else if (resolved.type === "stream") {
-            docPayload.document = { stream: resolved.stream };
-          }
+          await downloadMovieDirect(
+            currentServer.url,
+            movie.link,
+            tempFilePath,
+            async (transferred, total) => {
+              const nowTime = Date.now();
+              if (nowTime - lastUpdate > 4000) {
+                lastUpdate = nowTime;
+                try {
+                  await sock.sendMessage(from, {
+                    text: makeProgressBarText(transferred, total, startTime, movie.title, selectedQuality.quality, currentServer.name),
+                    edit: progressMsg.key
+                  });
+                } catch (e) {}
+              }
+            }
+          );
 
-          await sock.sendMessage(from, docPayload, { quoted: mek });
-          sentSuccessfully = true;
-          usedServer = currentServer.name;
-          break; // සාර්ථක වූ බැවින් ඊළඟ server එකට යාම නතර කරයි
+          if (fs.existsSync(tempFilePath) && fs.statSync(tempFilePath).size > 1024 * 1024) {
+            downloadedSuccessfully = true;
+            usedServerName = currentServer.name;
+            break;
+          }
         } catch (serverErr) {
-          continue; // Server එක අසාර්ථක නම් auto ඊළඟ server එකට යයි
+          if (fs.existsSync(tempFilePath)) {
+            try { fs.unlinkSync(tempFilePath); } catch (e) {}
+          }
+          continue;
         }
       }
 
-      if (sentSuccessfully) {
+      try {
+        const correctPosterUrl = movie.poster ? movie.poster : DEFAULT_SEARCH_IMAGE;
+        const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
+
+        if (!downloadedSuccessfully) {
+          let failText = "╭─── ⋆⋅ ♰ ⋅⋆ ───╮\n";
+          failText += " ⚠️ 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃 ⚠️\n";
+          failText += "╰─── ⋆⋅ ♰ ⋅⋆ ───╯\n\n";
+          failText += `🎬 *Movie   :* ${toSmallCaps(movie.title)}\n`;
+          failText += `📊 *Quality :* ${selectedQuality.quality}\n\n`;
+          failText += "🚫 _Pixeldrain, GDrive සහ Mega යන සේවාදායක ත්‍රිත්වයෙන්ම ගොනුව බාගත කිරීමට නොහැකි විය._\n";
+
+          if (thumbBuffer) {
+            await sock.sendMessage(from, { image: thumbBuffer, caption: failText, contextInfo: channelContextInfo() }, { quoted: mek });
+          } else {
+            await sock.sendMessage(from, { text: failText, contextInfo: channelContextInfo() }, { quoted: mek });
+          }
+          return await sock.sendMessage(from, { react: { text: "⚠️", key: m.key } });
+        }
+
+        await sock.sendMessage(from, { react: { text: "⬆️", key: m.key } });
+
+        let captionText = "╔═════ஓ๑♡๑ஓ═════╗\n";
+        captionText += "  🎉 𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃 🎉\n";
+        captionText += "╚═════ஓ๑♡๑ஓ═════╝\n\n";
+        captionText += "⋆⁺｡˚⋆˙‧₊☾ ◯ ☽₊‧˙⋆˚｡⁺⋆\n";
+        captionText += `🎬 *Movie   :* ${toSmallCaps(movie.title)}\n`;
+        captionText += `📊 *Quality :* ${selectedQuality.quality}\n`;
+        captionText += `🌐 *Server  :* ${usedServerName}\n`;
+        captionText += `📦 *Format  :* MKV Video\n`;
+        captionText += "•───────•°•❀•°•───────•\n\n";
+        captionText += "⚠️ *Important Note :*\n";
+        captionText += "_Please download *VLC Media Player* because this is an *MKV* video file._ 📲🎞️\n\n";
+        captionText += "•∘˙⊹. ꒰ঌ ᧔ෆ᧓ ໒꒱ .⊹˙∘•\n";
+        captionText += "> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
+
+        const docPayload = {
+          document: fs.readFileSync(tempFilePath),
+          mimetype: "video/x-matroska",
+          fileName: `MALIYA-MD ${cleanTitle}.mkv`,
+          caption: captionText,
+          contextInfo: channelContextInfo()
+        };
+
+        if (thumbBuffer) {
+          docPayload.jpegThumbnail = thumbBuffer;
+        }
+
+        await sock.sendMessage(from, docPayload, { quoted: mek });
         await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
-      } else {
-        await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
-        await sendErrorMsg(sock, from, mek, "Pixeldrain, GDrive සහ Mega යන සියලුම servers වලින් stream කිරීමට නොහැකි විය. කරුණාකර වෙනත් Quality එකක් උත්සාහ කරන්න.");
+
+      } catch (sendErr) {
+        await sendErrorMsg(sock, from, mek, `Failed to send movie: ${sendErr.message}`);
+      } finally {
+        if (fs.existsSync(tempFilePath)) {
+          try { fs.unlinkSync(tempFilePath); } catch (e) {}
+        }
       }
     }
   }
