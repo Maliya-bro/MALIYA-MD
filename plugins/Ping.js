@@ -1,7 +1,6 @@
 const os = require("os");
 const axios = require("axios");
 const { cmd } = require("../command");
-const { sendInteractiveMessage } = require("lilgabriel-btns");
 
 function formatUptime(seconds) {
   seconds = Math.floor(seconds);
@@ -45,55 +44,62 @@ cmd(
         `🧩 *Node:* ${nodeV}\n` +
         `💻 *Platform:* ${platform}`;
 
-      // Asitha-MD එකේ වගේ Phone එකේ Thumbnail එක පේන්න Image එක Buffer එකක් කරගැනීම
+      // 1. Phone එකේ පේන Thumbnail එක
       const imgUrl = "https://i.ibb.co/4pDNDk1/avatar.png"; 
       const response = await axios.get(imgUrl, { responseType: "arraybuffer" });
       const thumbBuffer = Buffer.from(response.data, "binary");
 
-      // lilgabriel-btns හරහා Location Header + Quick Reply Buttons පමණක් යැවීම
-      await sendInteractiveMessage(
-        conn,
-        m.chat,
-        {
-          location: {
-            degreesLatitude: 0,
-            degreesLongitude: 0,
-            jpegThumbnail: thumbBuffer, // Phone එකේ Image එක විදිහට පේන්නේ මේකයි
+      // 2. Asitha-MD Legacy Hydrated Template Message Payload
+      const templateMessagePayload = {
+        viewOnceMessage: {
+          message: {
+            templateMessage: {
+              hydratedTemplate: {
+                locationMessage: {
+                  degreesLatitude: 0,
+                  degreesLongitude: 0,
+                  jpegThumbnail: thumbBuffer,
+                },
+                hydratedContentText: text,
+                hydratedFooterText: "© MALIYA-MD BOT SYSTEM",
+                hydratedButtons: [
+                  {
+                    quickReplyButton: {
+                      displayText: "📜 Main Menu",
+                      id: ".menu",
+                    },
+                    index: 1,
+                  },
+                  {
+                    quickReplyButton: {
+                      displayText: "👤 Owner Info",
+                      id: ".owner",
+                    },
+                    index: 2,
+                  },
+                  {
+                    quickReplyButton: {
+                      displayText: "📊 System Info",
+                      id: ".systeminfo",
+                    },
+                    index: 3,
+                  },
+                ],
+              },
+            },
           },
-          text: text,
-          footer: "© MALIYA-MD BOT SYSTEM",
-          viewOnce: true,
-          interactiveButtons: [
-            {
-              name: "quick_reply",
-              buttonParamsJson: {
-                display_text: "📜 Main Menu",
-                id: ".menu",
-              },
-            },
-            {
-              name: "quick_reply",
-              buttonParamsJson: {
-                display_text: "👤 Owner Info",
-                id: ".owner",
-              },
-            },
-            {
-              name: "quick_reply",
-              buttonParamsJson: {
-                display_text: "📊 System Info",
-                id: ".systeminfo",
-              },
-            },
-          ],
         },
-        { quoted: mek }
-      );
+      };
+
+      // 3. conn.relayMessage හරහා යැවීම
+      await conn.relayMessage(m.chat, templateMessagePayload, {
+        messageId: mek.key.id,
+      });
 
       await conn.sendMessage(m.chat, { react: { text: "🏓", key: mek.key } });
 
     } catch (e) {
-      console.log("PING ERROR:", e);
+      console.log("PING ASITHA STYLE ERROR:", e);
       await reply("❌ Ping error: " + (e?.message || e));
     }
   }
