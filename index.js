@@ -46,7 +46,7 @@ const {
   downloadContentFromMessage,
   fetchLatestBaileysVersion,
   Browsers,
-} = require("@vanzxy/baileys");
+} = require("@whiskeysockets/baileys");
 
 const fs      = require("fs");
 const P       = require("pino");
