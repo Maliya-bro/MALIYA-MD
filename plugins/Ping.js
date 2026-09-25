@@ -25,7 +25,7 @@ cmd(
   },
   async (conn, mek, m, { reply }) => {
     try {
-      // 1. ඇත්තම Network Latency එක මැනීම
+      // 1. Network Latency මැනීම
       const start = Date.now();
       await conn.sendMessage(m.chat, { react: { text: "🔄", key: mek.key } });
       const ping = Date.now() - start;
@@ -46,42 +46,68 @@ cmd(
         `🧩 *Node:* ${nodeV}\n` +
         `💻 *Platform:* ${platform}`;
 
-      // 2. Phone එකේ පේන්න ඕන Image එක Buffer එකක් විදිහට ගැනීම (මෙතනට ඔයාගේ Bot Logo URL එක දාන්න)
-      const imgUrl = "https://i.ibb.co/4pDNDk1/avatar.png"; 
+      // 2. Phone එකේ පේන්න ඕන Image එක Buffer එකක් විදිහට ගැනීම
+      const imgUrl = "https://i.ibb.co/4pDNDk1/avatar.png";
       const response = await axios.get(imgUrl, { responseType: "arraybuffer" });
       const thumbBuffer = Buffer.from(response.data, "binary");
 
-      // 3. Asitha-MD එකේ වගේ Location Header + Buttons යැවීම
-      await conn.sendMessage(
+      // 3. conn.relayMessage හරහා Location Header + Quick Reply Buttons යැවීම
+      await conn.relayMessage(
         m.chat,
         {
-          location: {
-            degreesLatitude: 0,
-            degreesLongitude: 0,
-            jpegThumbnail: thumbBuffer, // Phone එකේදි Image එකක් විදිහට පෙන්නන්නේ මේකයි
+          viewOnceMessage: {
+            message: {
+              interactiveMessage: {
+                header: {
+                  title: "",
+                  hasMediaAttachment: true,
+                  locationMessage: {
+                    degreesLatitude: 0,
+                    degreesLongitude: 0,
+                    jpegThumbnail: thumbBuffer, // Phone එකේදි Image එකක් විදිහට පෙන්නන්නේ මේකයි
+                  },
+                },
+                body: {
+                  text: text,
+                },
+                footer: {
+                  text: "© MALIYA-MD BOT SYSTEM",
+                },
+                nativeFlowMessage: {
+                  buttons: [
+                    {
+                      name: "quick_reply",
+                      buttonParamsJson: JSON.stringify({
+                        display_text: "📜 Main Menu",
+                        id: ".menu",
+                      }),
+                    },
+                    {
+                      name: "quick_reply",
+                      buttonParamsJson: JSON.stringify({
+                        display_text: "👤 Owner Info",
+                        id: ".owner",
+                      }),
+                    },
+                    {
+                      name: "quick_reply",
+                      buttonParamsJson: JSON.stringify({
+                        display_text: "📊 System Info",
+                        id: ".systeminfo",
+                      }),
+                    },
+                  ],
+                },
+                contextInfo: {
+                  stanzaId: mek.key.id,
+                  participant: mek.key.participant || mek.key.remoteJid,
+                  quotedMessage: mek.message, // මැසේජ් එක Quote (Reply) වීමට
+                },
+              },
+            },
           },
-          caption: text,
-          footer: "© MALIYA-MD BOT SYSTEM",
-          buttons: [
-            {
-              buttonId: ".menu",
-              buttonText: { displayText: "📜 Main Menu" },
-              type: 1,
-            },
-            {
-              buttonId: ".owner",
-              buttonText: { displayText: "👤 Owner Info" },
-              type: 1,
-            },
-            {
-              buttonId: ".systeminfo",
-              buttonText: { displayText: "📊 System Info" },
-              type: 1,
-            },
-          ],
-          headerType: 6, // 6 කියන්නේ Location Header එකයි
         },
-        { quoted: mek }
+        {}
       );
 
       // 4. අවසාන Reaction එක
