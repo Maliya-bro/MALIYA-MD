@@ -1,5 +1,7 @@
 const os = require("os");
+const axios = require("axios");
 const { cmd } = require("../command");
+const { sendInteractiveMessage } = require("lilgabriel-btns");
 
 function formatUptime(seconds) {
   seconds = Math.floor(seconds);
@@ -43,60 +45,55 @@ cmd(
         `🧩 *Node:* ${nodeV}\n` +
         `💻 *Platform:* ${platform}`;
 
-      // Builder methods නොමැතිව සෘජුවම Quick Reply Buttons යැවීම
-      await conn.relayMessage(
+      // Asitha-MD එකේ වගේ Phone එකේ Thumbnail එක පේන්න Image එක Buffer එකක් කරගැනීම
+      const imgUrl = "https://i.ibb.co/4pDNDk1/avatar.png"; 
+      const response = await axios.get(imgUrl, { responseType: "arraybuffer" });
+      const thumbBuffer = Buffer.from(response.data, "binary");
+
+      // lilgabriel-btns හරහා Location Header + Quick Reply Buttons පමණක් යැවීම
+      await sendInteractiveMessage(
+        conn,
         m.chat,
         {
-          viewOnceMessage: {
-            message: {
-              interactiveMessage: {
-                body: {
-                  text: text,
-                },
-                footer: {
-                  text: "© MALIYA-MD BOT SYSTEM",
-                },
-                nativeFlowMessage: {
-                  buttons: [
-                    {
-                      name: "quick_reply",
-                      buttonParamsJson: JSON.stringify({
-                        display_text: "📜 Main Menu",
-                        id: ".menu",
-                      }),
-                    },
-                    {
-                      name: "quick_reply",
-                      buttonParamsJson: JSON.stringify({
-                        display_text: "👤 Owner Info",
-                        id: ".owner",
-                      }),
-                    },
-                    {
-                      name: "quick_reply",
-                      buttonParamsJson: JSON.stringify({
-                        display_text: "📊 System Info",
-                        id: ".systeminfo",
-                      }),
-                    },
-                  ],
-                },
-                contextInfo: {
-                  stanzaId: mek.key.id,
-                  participant: mek.key.participant || mek.key.remoteJid,
-                  quotedMessage: mek.message,
-                },
+          location: {
+            degreesLatitude: 0,
+            degreesLongitude: 0,
+            jpegThumbnail: thumbBuffer, // Phone එකේ Image එක විදිහට පේන්නේ මේකයි
+          },
+          text: text,
+          footer: "© MALIYA-MD BOT SYSTEM",
+          viewOnce: true,
+          interactiveButtons: [
+            {
+              name: "quick_reply",
+              buttonParamsJson: {
+                display_text: "📜 Main Menu",
+                id: ".menu",
               },
             },
-          },
+            {
+              name: "quick_reply",
+              buttonParamsJson: {
+                display_text: "👤 Owner Info",
+                id: ".owner",
+              },
+            },
+            {
+              name: "quick_reply",
+              buttonParamsJson: {
+                display_text: "📊 System Info",
+                id: ".systeminfo",
+              },
+            },
+          ],
         },
-        {}
+        { quoted: mek }
       );
 
       await conn.sendMessage(m.chat, { react: { text: "🏓", key: mek.key } });
 
     } catch (e) {
-      console.log("PING DIRECT ERROR:", e);
+      console.log("PING ERROR:", e);
       await reply("❌ Ping error: " + (e?.message || e));
     }
   }
