@@ -1,89 +1,92 @@
-const os = require("os");
 const { cmd } = require("../command");
+const { sendInteractiveMessage } = require("gifted-btns");
+const axios = require("axios");
 
-function formatUptime(seconds) {
-  seconds = Math.floor(seconds);
-  const d = Math.floor(seconds / 86400);
-  seconds %= 86400;
-  const h = Math.floor(seconds / 3600);
-  seconds %= 3600;
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${d}d ${h}h ${m}m ${s}s`;
-}
-
-// 1. ප්‍රධාන Menu එක: Asitha-MD විලාසයේ ButtonV2 මඟින් යැවීම
 cmd(
   {
-    pattern: "menu",
-    alias: ["panel", "mainmenu"],
-    desc: "Main menu with ButtonV2 buttons",
-    category: "main",
-    react: "📜",
+    pattern: "testmenu",
+    desc: "Test gifted-btns with location thumbnail and side-by-side buttons",
+    category: "test",
+    react: "🧪",
     filename: __filename,
   },
-  async (conn, mek, m, { reply }) => {
+  async (sock, mek, m, { from, reply }) => {
     try {
-      const uptime = formatUptime(process.uptime());
-      const mem = process.memoryUsage();
-      const usedMB = (mem.rss / 1024 / 1024).toFixed(1);
-      const totalMB = (os.totalmem() / 1024 / 1024).toFixed(0);
+      const headerUrl = "https://i.ibb.co/4pDNDk1/avatar.png";
 
-      const menuText =
-        "🎀 *Ξ MALIYA-MD BOT SYSTEM Ξ*\n\n" +
-        "👤 *Developer:* Malindu Nadith\n" +
-        `⏱️ *Uptime:* ${uptime}\n` +
-        `🧠 *RAM:* ${usedMB} MB / ${totalMB} MB\n\n` +
-        "> පහත ඇති *📑 List Menu* බටන් එක ඔබන්න.";
+      // Thumbnail buffer download maduvudu
+      let thumbBuffer;
+      try {
+        const res = await axios.get(headerUrl, {
+          responseType: "arraybuffer",
+          timeout: 5000,
+          headers: { "User-Agent": "Mozilla/5.0" },
+        });
+        thumbBuffer = Buffer.from(res.data);
+      } catch (err) {
+        // Fallback transparent buffer
+        thumbBuffer = Buffer.from(
+          "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
+          "base64"
+        );
+      }
 
-      const { ButtonV2 } = await import("@vanzxy/baileys");
+      // Test Category List Rows
+      const listRows = [
+        {
+          title: "📥 Download Menu",
+          description: "Show downloader commands list",
+          id: ".ping",
+        },
+        {
+          title: "⚙️ System Menu",
+          description: "Show bot system commands",
+          id: ".ping",
+        },
+      ];
 
-      // පෙනුමෙන් Asitha-MD ආකාරයේ වෙනම බටන්ස්
-      await new ButtonV2(conn)
-        .setBody(menuText)
-        .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
-        .setThumbnail("https://i.ibb.co/4pDNDk1/avatar.png")
-        .addButton("📑 List Menu", ".open_native_list")
-        .addButton("🏓 Ping Speed", ".ping")
-        .addButton("👤 Owner Info", ".owner")
-        .send(m.chat, { quoted: mek });
+      // Side-by-Side 2 Buttons: 1 Single Select (List) + 1 Quick Reply (Ping)
+      const interactiveButtons = [
+        {
+          name: "single_select",
+          buttonParamsJson: JSON.stringify({
+            title: "≡ List Menu",
+            sections: [
+              {
+                title: "📁 Test Categories",
+                rows: listRows,
+              },
+            ],
+          }),
+        },
+        {
+          name: "quick_reply",
+          buttonParamsJson: JSON.stringify({
+            display_text: "📊 Ping",
+            id: ".ping",
+          }),
+        },
+      ];
 
+      // Location thumbnail trick jothege message send maduvudu
+      await sendInteractiveMessage(
+        sock,
+        from,
+        {
+          text: "👋 *HI TEST USER*\n\n╭─ 「 *BOT'S MENU* 」\n│ 👾 *Bot :* MALIYA-MD\n│ 🎯 *Prefix :* [ . ]\n╰───────────────┈➤\n\n🎀 *≡ Select a Command List: ≡*",
+          footer: "© 2026 MALIYA-MD SYSTEM",
+          interactiveButtons: interactiveButtons,
+          location: {
+            degreesLatitude: 0,
+            degreesLongitude: 0,
+            jpegThumbnail: thumbBuffer,
+          },
+        },
+        { quoted: mek }
+      );
     } catch (e) {
-      console.log("MENU ERROR:", e);
-      await reply("❌ Menu error: " + (e?.message || e));
-    }
-  }
-);
-
-// 2. Button එක එබූ සැනින් NativeFlow Single Select List එක ඉදිරිපත් කිරීම
-cmd(
-  {
-    pattern: "open_native_list",
-    dontAddCommandList: true,
-    filename: __filename,
-  },
-  async (conn, mek, m, { reply }) => {
-    try {
-      const { Button } = await import("@vanzxy/baileys");
-
-      // මෙහිදී NativeFlow Selection Menu එක සෘජුවම ඉදිරිපත් කෙරේ
-      const nativeList = new Button(conn)
-        .setBody("පහත බොත්තම ඔබා ඔබට අවශ්‍ය කාණ්ඩය තෝරන්න:")
-        .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
-        .addSelection("📑 Click Here to Select Category")
-        .makeSection("📂 DOWNLOAD COMMANDS", "HOT")
-        .makeRow("🎵", "Song Downloader", "Download MP3 audio tracks", ".song")
-        .makeRow("🎬", "Video Downloader", "Download MP4 video clips", ".video")
-        .makeRow("📦", "Sticker Maker", "Convert image to sticker", ".sticker")
-        .makeSection("⚙️ SYSTEM COMMANDS", "FAST")
-        .makeRow("🏓", "Speed Test", "Check bot latency", ".ping")
-        .makeRow("👤", "Owner Info", "Contact bot creator", ".owner");
-
-      await nativeList.send(m.chat, { quoted: mek });
-
-    } catch (e) {
-      console.log("NATIVE LIST TRIGGER ERROR:", e);
-      await reply("❌ List open error: " + (e?.message || e));
+      console.log("GIFTED BTNS LOCATION TEST ERROR:", e);
+      reply("❌ Error: " + (e?.message || e));
     }
   }
 );
