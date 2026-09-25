@@ -188,23 +188,13 @@ async function searchMovies(query) {
 }
 
 /**
- * 2. Post ID එකෙන් PIXELDRAIN, GDRIVE සහ MEGA ලින්ක් ලබාගැනීම
- *    🔥 Cookie Jar + Browser Headers + Nonce Support 🔥
+ * 2. Post ID එකෙන් download links ලබාගැනීම
+ *    New approach: Page scraping + token resolve + AJAX fallback
  */
 async function getMovieDownloadData(movieUrl, postId) {
   const cheerio = require("cheerio");
   const { gotScraping } = await import("got-scraping");
 
-  // ─── Cookie jar for session persistence ───
-  let cookieJar;
-  try {
-    const tough = require("tough-cookie");
-    cookieJar = new tough.CookieJar();
-  } catch (e) {
-    console.log("[CINERU] tough-cookie not installed, using manual cookies");
-  }
-
-  // ─── Browser-like headers (Cloudflare-friendly) ───
   const BROWSER_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
@@ -220,7 +210,12 @@ async function getMovieDownloadData(movieUrl, postId) {
 
   console.log(`[CINERU] 🚀 Fetching movie page: ${movieUrl}`);
 
-  // ═══ STEP 1: Fetch the movie page to get cookies + poster ═══
+  let cookieJar;
+  try {
+    const tough = require("tough-cookie");
+    cookieJar = new tough.CookieJar();
+  } catch (e) {}
+
   let pageRes;
   try {
     pageRes = await gotScraping({
@@ -232,199 +227,226 @@ async function getMovieDownloadData(movieUrl, postId) {
       retry: { limit: 2 }
     });
   } catch (e) {
-    console.log("[CINERU] Page fetch failed:", e.message);
     throw new Error("Cineru.lk server එකට සම්බන්ධ විය නොහැක.");
   }
 
   console.log(`[CINERU] Page status: ${pageRes.statusCode}`);
 
+  if (pageRes.statusCode !== 200) {
+    throw new Error(`Page load failed: ${pageRes.statusCode}`);
+  }
+
   let $ = cheerio.load(pageRes.body);
 
-  if (!postId) {
-    postId = $("#post_id").val();
-  }
-
-  const poster = $(".single-post-thumb img").attr("src");
+  const poster = $(".single-post-thumb img").attr("src")
+    || $("meta[property='og:image']").attr("content")
+    || null;
 
   if (!postId) {
-    throw new Error("Post ID එක සොයාගත නොහැකි විය.");
+    postId = $("#post_id").val()
+      || $("input[name='post_id']").val()
+      || $("meta[name='post_id']").attr("content");
   }
+  if (!postId) {
+    const idMatch = pageRes.body.match(/post_id["']?\s*[:=]\s*["']?(\d+)/i);
+    if (idMatch) postId = idMatch[1];
+  }
+
+  if (!postId) throw new Error("Post ID එක සොයාගත නොහැකි විය.");
 
   console.log(`[CINERU] postId=${postId} | poster=${poster ? "✓" : "✗"}`);
 
-  // ─── Get cookies from jar as a string ───
   let cookieString = "";
   try {
     if (cookieJar) {
       const cookies = await cookieJar.getCookies("https://cineru.lk");
       cookieString = cookies.map(c => `${c.key}=${c.value}`).join("; ");
-      console.log(`[CINERU] 🍪 Cookies: ${cookieString.substring(0, 120)}${cookieString.length > 120 ? "..." : ""}`);
+      console.log(`[CINERU] 🍪 Cookies: ${cookieString.substring(0, 150) || "(none)"}`);
     }
-  } catch (e) {
-    console.log("[CINERU] Cookie extraction failed:", e.message);
+  } catch (e) {}
+
+  let downloads = [];
+
+  // ─── Try direct page parsing first ───
+  const directCards = $(".download-card, .download-area, #down_mount .download-card");
+  console.log(`[CINERU] Direct download cards: ${directCards.length}`);
+
+  if (directCards.length > 0) {
+    console.log("[CINERU] ✅ Parsing direct download cards...");
+    downloads = parseDownloadPanel($);
   }
 
-  // ─── Extract nonce from page if exists ───
-  let nonce = "";
-  const nonceMatch = pageRes.body.match(/cs_download_data['"]?\s*[:,]\s*['"]([a-f0-9]+)['"]/i)
-    || pageRes.body.match(/"nonce"\s*:\s*"([a-f0-9]+)"/i)
-    || pageRes.body.match(/var\s+\w*nonce\w*\s*=\s*['"]([a-f0-9]+)['"]/i);
-  if (nonceMatch) {
-    nonce = nonceMatch[1];
-    console.log(`[CINERU] 🔑 Found nonce: ${nonce}`);
-  }
+  // ─── AJAX fallback ───
+  if (downloads.length === 0) {
+    console.log("[CINERU] 📡 Trying AJAX...");
 
-  // ═══ STEP 2: POST to admin-ajax.php with same session ═══
-  const ajaxHeaders = {
-    "Accept": "application/json, text/javascript, */*; q=0.01",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-    "X-Requested-With": "XMLHttpRequest",
-    "Origin": "https://cineru.lk",
-    "Referer": movieUrl,
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-origin",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-  };
+    const ajaxHeaders = {
+      "Accept": "application/json, text/javascript, */*; q=0.01",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      "X-Requested-With": "XMLHttpRequest",
+      "Origin": "https://cineru.lk",
+      "Referer": movieUrl,
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    };
+    if (cookieString) ajaxHeaders["Cookie"] = cookieString;
 
-  if (cookieString) {
-    ajaxHeaders["Cookie"] = cookieString;
-  }
+    let nonce = "";
+    const nonceMatch = pageRes.body.match(/cs_download_data['"]?\s*[:,]\s*['"]([a-f0-9]+)['"]/i)
+      || pageRes.body.match(/"nonce"\s*:\s*"([a-f0-9]+)"/i)
+      || pageRes.body.match(/var\s+\w*nonce\w*\s*=\s*['"]([a-f0-9]+)['"]/i);
+    if (nonceMatch) {
+      nonce = nonceMatch[1];
+      console.log(`[CINERU] 🔑 Nonce: ${nonce}`);
+    }
 
-  const formData = {
-    action: "cs_download_data",
-    post_id: postId
-  };
-
-  if (nonce) {
-    formData.nonce = nonce;
-    formData._wpnonce = nonce;
-  }
-
-  console.log(`[CINERU] 📡 POST admin-ajax.php (postId=${postId})...`);
-
-  let ajaxRes;
-  try {
-    ajaxRes = await gotScraping.post("https://cineru.lk/wp-admin/admin-ajax.php", {
-      ...REQUEST_OPTIONS,
-      headers: ajaxHeaders,
-      form: formData,
-      cookieJar: cookieJar,
-      throwHttpErrors: false,
-      retry: { limit: 2 }
-    });
-  } catch (e) {
-    console.log("[CINERU] AJAX request failed:", e.message);
-    throw new Error("AJAX request failed: " + e.message);
-  }
-
-  console.log(`[CINERU] AJAX status: ${ajaxRes.statusCode}`);
-  console.log(`[CINERU] AJAX body preview: ${ajaxRes.body.substring(0, 300)}`);
-
-  let ajaxJson;
-  try {
-    ajaxJson = JSON.parse(ajaxRes.body);
-  } catch (e) {
-    console.log("[CINERU] ❌ Response is not JSON");
-    throw new Error("Invalid AJAX response (not JSON)");
-  }
-
-  // ═══ STEP 3: If AJAX failed, try alternate endpoint ═══
-  if (!ajaxJson.success || !ajaxJson.data) {
-    console.log("[CINERU] ⚠️ AJAX returned success=false, trying fallback...");
+    const formData = { action: "cs_download_data", post_id: postId };
+    if (nonce) { formData.nonce = nonce; formData._wpnonce = nonce; }
 
     try {
-      const fbRes = await gotScraping.post("https://cineru.lk/wp-admin/admin-ajax.php", {
+      const ajaxRes = await gotScraping.post("https://cineru.lk/wp-admin/admin-ajax.php", {
         ...REQUEST_OPTIONS,
         headers: ajaxHeaders,
-        form: {
-          action: "cs_download_data",
-          post_id: postId,
-          _wpnonce: nonce || ""
-        },
+        form: formData,
         cookieJar: cookieJar,
         throwHttpErrors: false
       });
 
-      const fbJson = JSON.parse(fbRes.body);
-      if (fbJson.success && fbJson.data) {
-        console.log("[CINERU] ✅ Fallback 1 succeeded!");
-        ajaxJson = fbJson;
-      }
+      console.log(`[CINERU] AJAX status: ${ajaxRes.statusCode}`);
+      console.log(`[CINERU] AJAX preview: ${ajaxRes.body.substring(0, 200)}`);
+
+      try {
+        const ajaxJson = JSON.parse(ajaxRes.body);
+        if (ajaxJson.success && ajaxJson.data) {
+          console.log("[CINERU] ✅ AJAX success!");
+          const $dl = cheerio.load(ajaxJson.data);
+          downloads = parseDownloadPanel($dl);
+        }
+      } catch (e) {}
     } catch (e) {
-      console.log("[CINERU] Fallback 1 failed:", e.message);
+      console.log("[CINERU] AJAX failed:", e.message);
     }
   }
 
-  // ═══ STEP 4: Parse the response ═══
-  const downloads = [];
-
-  if (ajaxJson.success && ajaxJson.data) {
-    const $dl = cheerio.load(ajaxJson.data);
-
-    const copyCards = $dl(".download-card .copy");
-    console.log(`[CINERU] Found ${copyCards.length} quality cards`);
-
-    $dl(".download-card .copy").each((_, copyEl) => {
-      const qualityInfo = $dl(copyEl).find(".namer").text().trim();
-      const linksContainer = $dl(copyEl).next(".imgf");
-      const servers = [];
-
-      linksContainer.find(".btns").each((_, btnEl) => {
-        const serverName = $dl(btnEl).find(".nmcld").text().trim();
-        const upperName = serverName.toUpperCase();
-        const downloadUrl = $dl(btnEl).attr("data-link");
-
-        let priority = 99;
-        if (upperName.includes("PIXELDRAIN")) priority = 1;
-        else if (upperName.includes("GDRIVE")) priority = 2;
-        else if (upperName.includes("DRIVE") && !upperName.includes("USERDRIVE")) priority = 2;
-        else if (upperName.includes("MEGA")) priority = 3;
-
-        if (downloadUrl && priority < 99) {
-          servers.push({ name: upperName, url: downloadUrl, priority });
-        }
-      });
-
-      servers.sort((a, b) => a.priority - b.priority);
-
-      console.log(`[CINERU] Quality: "${qualityInfo}" | Servers: ${servers.length}`);
-
-      if (qualityInfo && servers.length > 0) {
-        downloads.push({ quality: qualityInfo, servers });
-      }
+  // ─── Last resort: token links ───
+  if (downloads.length === 0) {
+    console.log("[CINERU] 🔍 Searching token links...");
+    const tokenLinks = [];
+    $("a[href*='dl.cineru.lk'], a[href*='dl.php?token=']").each((_, el) => {
+      const href = $(el).attr("href");
+      if (href) tokenLinks.push(href);
     });
-  } else {
-    console.log("[CINERU] ❌ Server returned success=false. Full response:");
-    console.log("[CINERU] Response:", JSON.stringify(ajaxJson));
-    console.log("[CINERU] 💡 මෙයට හේතු: Server IP එක Cineru.lk එකෙන් block වීම හෝ Cloudflare challenge");
+
+    for (const tokenUrl of tokenLinks) {
+      try {
+        const resolved = await resolveTokenUrl(tokenUrl, movieUrl);
+        if (resolved) {
+          downloads.push({
+            quality: "Resolved",
+            servers: [{ name: resolved.host.toUpperCase(), url: resolved.url, priority: 1 }]
+          });
+        }
+      } catch (e) {}
+    }
   }
 
-  console.log(`[CINERU] ✅ Total downloads found: ${downloads.length}`);
+  console.log(`[CINERU] ✅ Total downloads: ${downloads.length}`);
   return { downloads, poster };
+}
+
+function parseDownloadPanel($) {
+  const downloads = [];
+
+  $(".download-card .copy, .download-card").each((_, cardEl) => {
+    const $card = $(cardEl);
+    const qualityInfo = $card.find(".namer").text().trim()
+      || $card.find(".download-title").text().trim()
+      || $card.find("h4, h3, .title").first().text().trim();
+
+    const linksContainer = $card.next(".imgf").length ? $card.next(".imgf") : $card;
+
+    const servers = [];
+    linksContainer.find(".btns, a[data-link], a[href*='dl.php']").each((_, btnEl) => {
+      const $btn = $(btnEl);
+      const serverName = $btn.find(".nmcld").text().trim()
+        || $btn.text().trim() || "Unknown";
+      const upperName = serverName.toUpperCase();
+      const downloadUrl = $btn.attr("data-link") || $btn.attr("href");
+
+      let priority = 99;
+      if (upperName.includes("PIXELDRAIN")) priority = 1;
+      else if (upperName.includes("GDRIVE")) priority = 2;
+      else if (upperName.includes("DRIVE") && !upperName.includes("USERDRIVE")) priority = 2;
+      else if (upperName.includes("MEGA")) priority = 3;
+
+      if (downloadUrl && priority < 99) {
+        servers.push({ name: upperName, url: downloadUrl, priority });
+      }
+    });
+
+    servers.sort((a, b) => a.priority - b.priority);
+
+    if (qualityInfo && servers.length > 0) {
+      downloads.push({ quality: qualityInfo, servers });
+    }
+  });
+
+  return downloads;
+}
+
+async function resolveTokenUrl(tokenUrl, refererUrl) {
+  const { gotScraping } = await import("got-scraping");
+  try {
+    const res = await gotScraping({
+      url: tokenUrl,
+      method: "GET",
+      followRedirect: false,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Referer": refererUrl,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      },
+      throwHttpErrors: false
+    });
+
+    if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+      const realUrl = res.headers.location;
+      let host = "unknown";
+      try { host = new URL(realUrl).hostname; } catch (e) {}
+      console.log(`[CINERU] 🔗 Token resolved → ${host}`);
+      return { url: realUrl, host };
+    }
+
+    if (res.statusCode === 200 && res.body) {
+      const m = res.body.match(/https?:\/\/(drive\.google\.com|mega\.nz|pixeldrain\.com)[^\s"'<>]+/i);
+      if (m) {
+        let host = "unknown";
+        try { host = new URL(m[0]).hostname; } catch (e) {}
+        return { url: m[0], host };
+      }
+    }
+    return null;
+  } catch (e) {
+    console.log(`[CINERU] Token resolve error: ${e.message}`);
+    return null;
+  }
 }
 
 function normalizeDirectUrl(url) {
   const pdMatch = url.match(/pixeldrain\.[a-z]+\/[ul]\/([a-zA-Z0-9_-]+)/i);
-  if (pdMatch) {
-    return `https://pixeldrain.com/api/file/${pdMatch[1]}?download`;
-  }
+  if (pdMatch) return `https://pixeldrain.com/api/file/${pdMatch[1]}?download`;
 
   const gdFileMatch = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/i);
-  if (gdFileMatch) {
-    return `https://drive.usercontent.google.com/download?id=${gdFileMatch[1]}&export=download&confirm=t`;
-  }
+  if (gdFileMatch) return `https://drive.usercontent.google.com/download?id=${gdFileMatch[1]}&export=download&confirm=t`;
 
   const gdOpenMatch = url.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/i);
-  if (gdOpenMatch) {
-    return `https://drive.usercontent.google.com/download?id=${gdOpenMatch[1]}&export=download&confirm=t`;
-  }
+  if (gdOpenMatch) return `https://drive.usercontent.google.com/download?id=${gdOpenMatch[1]}&export=download&confirm=t`;
 
   const gdUcMatch = url.match(/drive\.google\.com\/uc\?.*id=([a-zA-Z0-9_-]+)/i);
-  if (gdUcMatch) {
-    return `https://drive.usercontent.google.com/download?id=${gdUcMatch[1]}&export=download&confirm=t`;
-  }
+  if (gdUcMatch) return `https://drive.usercontent.google.com/download?id=${gdUcMatch[1]}&export=download&confirm=t`;
 
   return url;
 }
@@ -436,9 +458,7 @@ async function downloadFromMega(megaUrl, downloadDir, fallbackFilePath, onProgre
   let finalPath = fallbackFilePath;
   if (file.name) {
     const cleanName = file.name.replace(/[^a-zA-Z0-9._ -]/g, "");
-    if (cleanName) {
-      finalPath = path.join(downloadDir, cleanName);
-    }
+    if (cleanName) finalPath = path.join(downloadDir, cleanName);
   }
 
   const totalBytes = file.size;
@@ -454,7 +474,6 @@ async function downloadFromMega(megaUrl, downloadDir, fallbackFilePath, onProgre
     });
 
     readStream.pipe(writeStream);
-
     writeStream.on("finish", () => resolve(finalPath));
     readStream.on("error", reject);
     writeStream.on("error", reject);
@@ -493,7 +512,6 @@ function extractNextUrlFromHtml(html, currentUrl) {
     let rawHref = $(el).attr("data-link");
     if (!rawHref) rawHref = $(el).attr("data-url");
     if (!rawHref) rawHref = $(el).attr("href");
-
     if (!rawHref) return;
     if (rawHref.startsWith("#")) return;
     if (rawHref.startsWith("javascript")) return;
@@ -501,7 +519,6 @@ function extractNextUrlFromHtml(html, currentUrl) {
     try {
       const fullUrl = new URL(rawHref, currentUrl).toString();
       let isValidTarget = false;
-
       if (fullUrl.includes("pixeldrain")) isValidTarget = true;
       if (fullUrl.includes("drive.google")) isValidTarget = true;
       if (fullUrl.includes("usercontent.google")) isValidTarget = true;
@@ -549,8 +566,7 @@ async function downloadMovieDirect(initialUrl, refererUrl, tempFilePath, onProgr
       if (finalVisitedUrl.includes("mega.nz")) {
         stream.destroy();
         downloadFromMega(finalVisitedUrl, path.dirname(tempFilePath), tempFilePath, onProgress)
-          .then(resolve)
-          .catch(reject);
+          .then(resolve).catch(reject);
         return;
       }
 
@@ -561,8 +577,7 @@ async function downloadMovieDirect(initialUrl, refererUrl, tempFilePath, onProgr
       if (normalizedFinal !== finalVisitedUrl) {
         stream.destroy();
         downloadMovieDirect(normalizedFinal, finalVisitedUrl, tempFilePath, onProgress, depth + 1)
-          .then(resolve)
-          .catch(reject);
+          .then(resolve).catch(reject);
         return;
       }
 
@@ -585,8 +600,7 @@ async function downloadMovieDirect(initialUrl, refererUrl, tempFilePath, onProgr
           const nextUrl = extractNextUrlFromHtml(htmlBody, finalVisitedUrl);
           if (nextUrl && nextUrl !== targetUrl) {
             downloadMovieDirect(nextUrl, finalVisitedUrl, tempFilePath, onProgress, depth + 1)
-              .then(resolve)
-              .catch(reject);
+              .then(resolve).catch(reject);
           } else {
             reject(new Error("ගොනුව ලබාගත නොහැකි විය."));
           }
