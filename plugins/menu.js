@@ -83,13 +83,9 @@ function getUserName(pushname, m, mek, sender = "") {
     mek?.name,
     m?.notifyName,
     mek?.notifyName,
-    m?.chatName,
-    mek?.chatName,
   ];
   for (const item of candidates) {
-    if (item && String(item).trim()) {
-      return String(item).trim();
-    }
+    if (item && String(item).trim()) return String(item).trim();
   }
   const num = String(sender || "").split("@")[0].split(":")[0];
   return num || "User";
@@ -183,6 +179,20 @@ function menuHeader(userName = "User") {
 🌐 *Web:* https://maliya-md.replit.app`;
 }
 
+function buildStyledMainMenu(state, userName) {
+  const { categories } = state;
+  const styledUser = toSmallCaps(userName);
+  let msg = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
+  msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
+  categories.forEach((cat, idx) => {
+    const emo = getCategoryEmoji(cat);
+    const numStr = String(idx + 1).padStart(2, "0");
+    msg += `*[ ${numStr} ]*  ${emo}  *${toSmallCaps(cat)}*  _(${state.map[cat].length})_\n`;
+  });
+  msg += `\n⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n> 💬 *Swipe & Reply this message with a number...*`;
+  return msg;
+}
+
 function commandListCaption(cat, list, userName = "User") {
   const emo = getCategoryEmoji(cat);
   const styledCat = toSmallCaps(cat);
@@ -200,20 +210,6 @@ function commandListCaption(cat, list, userName = "User") {
 
   txt += `──────✦❘•❘✦──────\n> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
   return txt;
-}
-
-function buildStyledMainMenu(state, userName) {
-  const { categories } = state;
-  const styledUser = toSmallCaps(userName);
-  let msg = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
-  msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
-  categories.forEach((cat, idx) => {
-    const emo = getCategoryEmoji(cat);
-    const numStr = String(idx + 1).padStart(2, "0");
-    msg += `*[ ${numStr} ]*  ${emo}  *${toSmallCaps(cat)}*  _(${state.map[cat].length})_\n`;
-  });
-  msg += `\n⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n> 💬 *Swipe & Reply this message with a number...*`;
-  return msg;
 }
 
 function extractTexts(body, mek, m) {
@@ -312,7 +308,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Show command categories with NativeFlow Asitha-MD layout",
+    desc: "Show command categories with Asitha-MD layout using Luna-lib",
     category: "main",
     filename: __filename,
   },
@@ -350,36 +346,42 @@ cmd(
 
       if (btnsOn) {
         try {
-          // @vanzxy/baileys හි NativeFlow builder ආයාත කර භාවිතය
-          const vanzxy = await import("@vanzxy/baileys");
-          const NativeFlow = vanzxy.NativeFlow || vanzxy.default?.NativeFlow;
+          // @ryuu-reinzz/luna-lib හි Button class එක භාවිත කිරීම
+          const luna = await import("@ryuu-reinzz/luna-lib");
+          const Button = luna.Button || luna.default?.Button;
 
-          if (NativeFlow) {
-            const listRows = categories.map((cat) => ({
-              title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
-              description: `Show ${cat.toLowerCase()} command list`,
-              id: `.menu_view ${cat}`,
-            }));
-
-            // NativeFlow මඟින් side-by-side List & Quick Reply buttons හැදීම
-            const nf = new NativeFlow(sock)
+          if (Button) {
+            const btn = new Button(sock)
               .setImage(headerImg)
               .setBody(menuHeader(userName))
               .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
-              .addSingleSelect("≡ List Menu", "📁 Categories", listRows)
-              .addReply("📊 Ping", ".ping");
+              .addReply("📊 Ping", ".ping") // Side-by-Side Ping button
+              .addSelection("≡ List Menu")  // Popup List ආරම්භය
+              .makeSection("📁 Command Categories"); // Categories Section
 
-            const sentMsg = await nf.send(from, { quoted: mek });
+            // Categories ලැයිස්තුව rows ලෙස එකතු කිරීම
+            categories.forEach((cat) => {
+              const emo = getCategoryEmoji(cat);
+              const count = state.map[cat].length;
+              btn.makeRow(
+                "",
+                `${emo} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
+                `Total ${count} commands available`,
+                `.menu_view ${cat}`
+              );
+            });
+
+            const sentMsg = await btn.send(from, { quoted: mek });
             if (sentMsg?.key?.id) state.expectedMsgId = sentMsg.key.id;
             pendingMenu[k] = state;
             return;
           }
         } catch (err) {
-          console.log("NATIVE FLOW MENU ERROR:", err?.message || err);
+          console.log("LUNA-LIB MENU ERROR:", err?.message || err);
         }
       }
 
-      // Buttons Off විට Numbered Menu එක යැවීම
+      // Buttons Off නම් Numbered Text Menu එක යැවීම
       const sentMsg = await sock.sendMessage(
         from,
         {
