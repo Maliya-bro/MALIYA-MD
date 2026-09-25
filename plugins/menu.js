@@ -38,7 +38,7 @@ const OWNER_NAME =
   String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
 
 const DEFAULT_HEADER_IMAGE =
-  "https://i.ibb.co/4pDNDk1/avatar.png";
+  "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
@@ -331,7 +331,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Show command categories with Location & List Menu",
+    desc: "Show command categories with Asitha-MD detached side-by-side buttons",
     category: "main",
     filename: __filename,
   },
@@ -369,52 +369,50 @@ cmd(
 
       if (btnsOn) {
         try {
-          const vanzxy = await import("@vanzxy/baileys");
-          const { Button, ButtonV2 } = vanzxy;
+          const { ButtonV2 } = await import("@vanzxy/baileys");
 
-          // 1. Image එක හරියටම ButtonV2 එකේ වගේ 300x300 ට resize කරගැනීම (එවිට අළු පාට රවුම වැටෙන්නේ නැත)
-          const rawBuf = await getSafeBuffer(headerImg);
-          let thumbBuf = rawBuf;
-          if (ButtonV2 && typeof ButtonV2.resize === "function") {
-            try {
-              thumbBuf = await ButtonV2.resize(rawBuf, 300, 300);
-            } catch {}
-          }
+          const listRows = categories.map((cat) => ({
+            header: "",
+            title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
+            description: `Total ${state.map[cat].length} commands available`,
+            id: `.menu_view ${cat}`,
+          }));
 
-          // 2. Button (V1) class එකෙන් Location Header + List Menu + Ping Button සෑදීම
-          const btn = new Button(sock)
+          // 1. ButtonV2 මඟින් වෙන් වුණු (Detached) බටන් හැඩය සහ Location Header එක සෑදීම
+          const btn = new ButtonV2(sock)
             .setTitle(BOT_NAME)
-            .setSubtitle("BOT MENU SYSTEM")
+            .setSubtitle("Sri Lanka")
             .setBody(menuHeader(userName))
             .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
-            .setMedia({
-              locationMessage: {
-                degreesLatitude: 0,
-                degreesLongitude: 0,
-                name: BOT_NAME,
-                address: "Sri Lanka",
-                jpegThumbnail: thumbBuf,
-              },
-            })
-            .addSelection("≡ List Menu")
-            .makeSection("📁 Command Categories", "POPULAR");
+            .setThumbnail(headerImg);
 
-          categories.forEach((cat) => {
-            const emo = getCategoryEmoji(cat);
-            const count = state.map[cat].length;
-            btn.makeRow(
-              "",
-              `${emo} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
-              `Total ${count} commands available`,
-              `.menu_view ${cat}`
-            );
+          // පළමු බටන් එක: List Menu (single_select)
+          btn.addRawButton({
+            buttonId: "list_menu",
+            buttonText: { displayText: "≡ List Menu" },
+            type: 2,
+            nativeFlowInfo: {
+              name: "single_select",
+              paramsJson: JSON.stringify({
+                title: "≡ List Menu",
+                sections: [
+                  {
+                    title: "📁 Command Categories",
+                    highlight_label: "POPULAR",
+                    rows: listRows,
+                  },
+                ],
+              }),
+            },
           });
 
-          btn.addReply("📊 Ping", ".ping");
+          // දෙවෙනි බටන් එක: Ping (Side-by-Side වැටීම සඳහා)
+          btn.addButton("📊 Ping", ".ping");
 
-          // 3. Message එක build කර, WhatsApp drop නොකරන සහ Update WhatsApp නොවැටෙන biz node එක සමඟ යැවීම
+          // 2. ButtonV2 message එක build කරගැනීම
           const builtMsg = await btn.build(from, { quoted: mek });
 
+          // 3. "Update WhatsApp" නොවැටීමට native_flow binary node එක සමඟ relay කිරීම
           await sock.relayMessage(from, builtMsg.message, {
             messageId: builtMsg.key.id,
             additionalNodes: [
@@ -441,7 +439,7 @@ cmd(
           pendingMenu[k] = state;
           return;
         } catch (err) {
-          console.log("NATIVE LIST MENU ERROR:", err);
+          console.log("BUTTONV2 RELAY MENU ERROR:", err);
         }
       }
 
