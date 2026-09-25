@@ -24,7 +24,6 @@ cmd(
   },
   async (conn, mek, m, { reply }) => {
     try {
-      // 1. Network Latency මැනීම
       const start = Date.now();
       await conn.sendMessage(m.chat, { react: { text: "🔄", key: mek.key } });
       const ping = Date.now() - start;
@@ -45,11 +44,10 @@ cmd(
         `🧩 *Node:* ${nodeV}\n` +
         `💻 *Platform:* ${platform}`;
 
-      // 2. @vanzxy/baileys වල ButtonV2 හරහා Quick Reply Buttons යැවීම
+      // ButtonV2 (Text + Quick Reply Buttons පමණයි)
       const { ButtonV2 } = await import("@vanzxy/baileys");
 
       const msg = new ButtonV2(conn)
-        .setImage("https://i.ibb.co/4pDNDk1/avatar.png") // Image එකක් එපා නම් මේ පේළිය අයින් කරන්න
         .setBody(text)
         .setFooter("© MALIYA-MD BOT SYSTEM")
         .addReply("📜 Main Menu", ".menu")
@@ -58,7 +56,6 @@ cmd(
 
       await msg.send(m.chat, { quoted: mek });
 
-      // 3. අවසාන Reaction එක
       await conn.sendMessage(m.chat, { react: { text: "🏓", key: mek.key } });
 
     } catch (e) {
