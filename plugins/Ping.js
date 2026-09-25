@@ -9,7 +9,7 @@ function formatUptime(seconds) {
   seconds %= 3600;
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
-  return `${d}d ${h}h ${m}m ${s}s`;
+  return `${d}d ${h}h ${m}s ${s}s`;
 }
 
 cmd(
@@ -43,16 +43,18 @@ cmd(
         `🧩 *Node:* ${nodeV}\n` +
         `💻 *Platform:* ${platform}`;
 
-      // luna-lib ESM library එකක් බැවින් Dynamic import භාවිතා කරයි
-      const { ButtonV2 } = await import("@ryuu-reinzz/luna-lib");
+      // 1. luna-lib හි default export හරහා ButtonV2 ලබාගැනීම
+      const lunaModule = await import("@ryuu-reinzz/luna-lib");
+      const luna = lunaModule.default || lunaModule;
+      const ButtonV2 = luna.ButtonV2;
 
-      // Asitha-MD හී භාවිතා වන ButtonV2 Builder එක
+      // 2. ButtonV2 Builder එක හරහා මැසේජ් එක යැවීම
       await new ButtonV2(conn)
         .setTitle("MALIYA-MD SYSTEM")
         .setSubtitle("SPEED TEST")
         .setBody(text)
         .setFooter("© MALIYA-MD BOT SYSTEM")
-        .setThumbnail("https://i.ibb.co/4pDNDk1/avatar.png") // Phone එකේ Image එකක් ලෙස හා Web හි Location fallback ලෙස පෙන්වයි
+        .setThumbnail("https://i.ibb.co/4pDNDk1/avatar.png")
         .addButton("📜 Main Menu", ".menu")
         .addButton("👤 Owner Info", ".owner")
         .addButton("📊 System Info", ".systeminfo")
