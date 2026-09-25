@@ -83,7 +83,8 @@
     "crypto-js": "latest",
     "https": "latest",
     "crypto": "latest",
-    "@vanzxy/baileys": "latest"
+    "@vanzxy/baileys": "latest",
+    "got-scraping": "latest"
   
     
 
