@@ -33,9 +33,6 @@ const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
   ? `+${OWNER_NUMBER_RAW}`
   : "Not Set";
 
-const OWNER_NAME =
-  String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
-
 const DEFAULT_HEADER_IMAGE =
   "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
 
@@ -62,14 +59,6 @@ function getQuotedId(m, mek) {
   );
 }
 
-function cleanPhone(num = "") {
-  return String(num).replace(/[^\d]/g, "");
-}
-
-function sameNumber(a = "", b = "") {
-  return cleanPhone(a) === cleanPhone(b);
-}
-
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
@@ -91,16 +80,9 @@ function getUserName(pushname, m, mek, sender = "") {
     mek?.name,
     m?.notifyName,
     mek?.notifyName,
-    m?.chatName,
-    mek?.chatName,
   ];
   for (const item of candidates) {
-    if (item && String(item).trim()) {
-      return String(item).trim();
-    }
-  }
-  if (sameNumber(sender.split("@")[0].split(":")[0], OWNER_NUMBER)) {
-    return OWNER_NAME;
+    if (item && String(item).trim()) return String(item).trim();
   }
   const num = String(sender || "").split("@")[0].split(":")[0];
   return num || "User";
@@ -159,9 +141,7 @@ function getCategoryEmoji(cat) {
 
 function buildCommandMapCached() {
   const now = Date.now();
-  if (cachedMenu && now - cacheTime < MENU_CACHE_MS) {
-    return cachedMenu;
-  }
+  if (cachedMenu && now - cacheTime < MENU_CACHE_MS) return cachedMenu;
   const map = Object.create(null);
   for (const c of commands) {
     if (c.dontAddCommandList) continue;
@@ -243,18 +223,6 @@ function commandListCaption(cat, list, userName = "User") {
   return txt;
 }
 
-function makeCategoryRows(map, categories) {
-  return categories.map((cat) => ({
-    title: `${getCategoryEmoji(cat)} ${toSmallCaps(cat)} MENU`,
-    description: `${map[cat].length} commands available`,
-    rowId: `.menu_view ${cat}`,
-  }));
-}
-
-function tryParseJsonString(s) {
-  try { return JSON.parse(s); } catch { return null; }
-}
-
 function extractTexts(body, mek, m) {
   const texts = [];
   const direct = [
@@ -270,7 +238,6 @@ function extractTexts(body, mek, m) {
     m?.message?.listResponseMessage?.title,
     m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
     m?.message?.interactiveResponseMessage?.body?.text,
-    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
     mek?.message?.conversation,
     mek?.message?.extendedTextMessage?.text,
     mek?.message?.buttonsResponseMessage?.selectedButtonId,
@@ -280,29 +247,21 @@ function extractTexts(body, mek, m) {
     mek?.message?.listResponseMessage?.title,
     mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
     mek?.message?.interactiveResponseMessage?.body?.text,
-    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
   ];
   for (const item of direct) {
     if (item) texts.push(String(item).trim());
   }
+
   const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   for (const raw of [p1, p2]) {
     if (!raw) continue;
-    const parsed = tryParseJsonString(raw);
-    if (!parsed) continue;
-    const vals = [
-      parsed.id,
-      parsed.selectedId,
-      parsed.selectedRowId,
-      parsed.title,
-      parsed.display_text,
-      parsed.text,
-      parsed.name,
-    ];
-    for (const v of vals) {
-      if (v) texts.push(String(v).trim());
-    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.id) texts.push(String(parsed.id).trim());
+      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+    } catch {}
   }
   return [...new Set(texts.filter(Boolean))];
 }
@@ -342,31 +301,6 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
-async function sendNumberedMainMenu(sock, from, mek, state, userName, sessionId) {
-  let headerImg = DEFAULT_HEADER_IMAGE;
-  if (sessionId) {
-    try {
-      const custom = await getCustomImage(sessionId, "menu_header");
-      if (custom && custom.data) {
-        headerImg = custom.data;
-      }
-    } catch (e) {
-      console.log("⚠️ Failed to load custom menu image:", e.message);
-    }
-  }
-
-  const caption = buildStyledMainMenu(state, userName);
-  return await sock.sendMessage(
-    from,
-    {
-      image: { url: headerImg },
-      caption: caption,
-      contextInfo: channelContextInfo(),
-    },
-    { quoted: mek }
-  );
-}
-
 async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId) {
   let headerImg = DEFAULT_HEADER_IMAGE;
   if (sessionId) {
@@ -387,7 +321,29 @@ async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId)
   );
 }
 
-/* ================= COMMAND: .menu ================= */
+// 🔥 අමතර Text කිසිවක් නැතිව පිරිසිදු List Button එක පමණක් යැවීම
+async function sendPureListMenu(sock, from, mek) {
+  const { map, categories } = buildCommandMapCached();
+  const { Button } = await import("@vanzxy/baileys");
+
+  const btnMsg = new Button(sock)
+    .setBody("\u200E") // හිස් අකුරක් භාවිතයෙන් Text එක සම්පූර්ණයෙන්ම සඟවා ඇත
+    .addSelection("📑 Click Here to Select Category");
+
+  const section = btnMsg.makeSection("COMMAND CATEGORIES", "ALL");
+  for (const cat of categories) {
+    section.makeRow(
+      getCategoryEmoji(cat),
+      `${toSmallCaps(cat)} MENU`,
+      `${map[cat].length} commands available`,
+      `.menu_view ${cat}`
+    );
+  }
+
+  await btnMsg.send(from, { quoted: mek });
+}
+
+/* ================= COMMAND: .menu (ButtonV2) ================= */
 cmd(
   {
     pattern: "menu",
@@ -429,7 +385,6 @@ cmd(
         } catch (e) {}
       }
 
-      // 1. Buttons Enabled නම් ButtonV2 හරහා යැවීම
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
@@ -438,7 +393,7 @@ cmd(
             .setBody(menuHeader(userName))
             .setFooter(`${BOT_NAME} | 2026 SYSTEM`)
             .setThumbnail(headerImg)
-            .addButton("📑 List Menu", ".open_categories")
+            .addButton("📑 List Menu", ".listmenu")
             .addButton("🏓 Ping Latency", ".ping")
             .addButton("👤 Owner Info", ".owner")
             .send(from, { quoted: mek });
@@ -453,8 +408,17 @@ cmd(
         }
       }
 
-      // 2. Buttons Disabled නම් සාමාන්‍ය Numbered Menu එක යැවීම
-      const sentMsg = await sendNumberedMainMenu(sock, from, mek, state, userName, sessionId);
+      // Buttons Off නම් Numbered Menu එක යැවීම
+      const sentMsg = await sock.sendMessage(
+        from,
+        {
+          image: { url: headerImg },
+          caption: buildStyledMainMenu(state, userName),
+          contextInfo: channelContextInfo(),
+        },
+        { quoted: mek }
+      );
+
       if (sentMsg?.key?.id) {
         state.expectedMsgId = sentMsg.key.id;
         pendingMenu[k] = state;
@@ -466,35 +430,19 @@ cmd(
   }
 );
 
-/* ================= COMMAND: .open_categories ================= */
+/* ================= COMMAND: .listmenu ================= */
 cmd(
   {
-    pattern: "open_categories",
+    pattern: "listmenu",
+    alias: ["📑 List Menu", "List Menu", "list_menu"],
     dontAddCommandList: true,
     filename: __filename,
   },
   async (sock, mek, m, { from }) => {
     try {
-      const { map, categories } = buildCommandMapCached();
-
-      const listSections = [
-        {
-          title: "COMMAND CATEGORIES",
-          rows: makeCategoryRows(map, categories),
-        },
-      ];
-
-      const listMessage = {
-        text: " ",
-        footer: `© 2026 ${BOT_NAME}`,
-        title: "",
-        buttonText: "📑 Click Here to Select Category",
-        sections: listSections,
-      };
-
-      await sock.sendMessage(from, listMessage, { quoted: mek });
+      await sendPureListMenu(sock, from, mek);
     } catch (e) {
-      console.log("OPEN CATEGORIES ERROR:", e?.message || e);
+      console.log("LIST MENU ERROR:", e?.message || e);
     }
   }
 );
@@ -525,14 +473,23 @@ cmd(
   }
 );
 
-/* ================= REPLY HANDLER (NUMBER + LIST HANDLER) ================= */
+/* ================= REPLY HANDLER (BUTTON CLICK + NUMBER REPLY) ================= */
 const menuReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
+    const raw = String(text || "").trim();
+    if (
+      raw === "📑 List Menu" ||
+      raw === "List Menu" ||
+      raw === ".listmenu" ||
+      raw.toLowerCase().includes("list menu")
+    ) {
+      return true;
+    }
+
     const k = keyFor(sender, from);
     const state = pendingMenu[k];
     if (!state) return false;
 
-    // Quoted ID Match වීම හෝ සෘජු Number/Text Match වීම
     const quotedId = getQuotedId(m, mek);
     const isQuoted = quotedId && quotedId === state.expectedMsgId;
 
@@ -540,19 +497,29 @@ const menuReplyHandler = {
     const action = resolveMenuAction(texts, state);
     if (action) return true;
 
-    const num = parseInt(String(text || "").trim(), 10);
+    const num = parseInt(raw, 10);
     const isNum = !isNaN(num) && num > 0 && num <= state.categories.length;
 
-    // Number Reply එකක් නම් Quoted Match හෝ අංකය පමණක් වුවද පිළිගැනීම
     return isQuoted || isNum;
   },
   function: async (sock, mek, m, { from, body, sender, pushname, reply }) => {
     try {
+      const inputStr = String(body || "").trim();
+
+      // List Menu Button එක ක්ලික් කිරීම Handle කිරීම
+      if (
+        inputStr === "📑 List Menu" ||
+        inputStr === "List Menu" ||
+        inputStr === ".listmenu" ||
+        inputStr.toLowerCase().includes("list menu")
+      ) {
+        return await sendPureListMenu(sock, from, mek);
+      }
+
       const k = keyFor(sender, from);
       const state = pendingMenu[k];
       if (!state) return;
 
-      const inputStr = String(body || "").trim();
       const now = Date.now();
       const lastMsg = lastProcessedMsg[k];
       if (lastMsg && lastMsg.text === inputStr && (now - lastMsg.time) < LOOP_COOLDOWN) return;
@@ -561,7 +528,6 @@ const menuReplyHandler = {
       const texts = extractTexts(body, mek, m);
       let action = resolveMenuAction(texts, state);
 
-      // Number Reply Handling (උදා: '1', '2' වැනි අංකයක් එවීම)
       if (!action) {
         const num = parseInt(inputStr, 10);
         if (!isNaN(num) && num > 0 && num <= state.categories.length) {
