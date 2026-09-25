@@ -1,10 +1,9 @@
 const { cmd } = require("../command");
-const axios = require("axios");
 
 cmd(
   {
     pattern: "testmenu",
-    desc: "Test native location thumbnail with side-by-side buttons",
+    desc: "Test native interactive list menu without server drop",
     category: "test",
     react: "🧪",
     filename: __filename,
@@ -13,37 +12,23 @@ cmd(
     try {
       const headerUrl = "https://i.ibb.co/4pDNDk1/avatar.png";
 
-      // 1. Thumbnail Buffer එක ලබාගැනීම
-      let thumbBuffer;
-      try {
-        const res = await axios.get(headerUrl, {
-          responseType: "arraybuffer",
-          timeout: 6000,
-          headers: { "User-Agent": "Mozilla/5.0" },
-        });
-        thumbBuffer = Buffer.from(res.data);
-      } catch (err) {
-        thumbBuffer = Buffer.from(
-          "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
-          "base64"
-        );
-      }
-
-      // 2. Categories List එකේ Rows
+      // 1. List Rows සැකසුම
       const listRows = [
         {
+          header: "",
           title: "📥 Download Menu",
           description: "Show downloader commands list",
           id: ".ping",
         },
         {
+          header: "",
           title: "⚙️ System Menu",
           description: "Show bot system commands",
           id: ".ping",
         },
       ];
 
-      // 3. Side-by-Side Buttons: Single Select (List) + Quick Reply (Ping)
+      // 2. Buttons දෙක (Single Select + Quick Reply Ping)
       const buttons = [
         {
           name: "single_select",
@@ -66,54 +51,21 @@ cmd(
         },
       ];
 
-      // 4. Baileys core එක load කර ගැනීම
-      const baileys = await import("@whiskeysockets/baileys").catch(() =>
-        import("@vanzxy/baileys")
-      );
-      const { generateWAMessageFromContent, proto } = baileys;
-
-      // 5. Location Message එක Header එකක් ලෙස සහිතව Message Payload එක හැදීම
-      const msg = generateWAMessageFromContent(
+      // 3. Drop නොවී යවන නිවැරදි Image Header සහිත interactiveMessage ආකෘතිය
+      await sock.sendMessage(
         from,
         {
-          viewOnceMessage: {
-            message: {
-              interactiveMessage: proto.Message.InteractiveMessage.create({
-                header: proto.Message.InteractiveMessage.Header.create({
-                  title: "",
-                  hasMediaAttachment: true,
-                  locationMessage: {
-                    degreesLatitude: 0,
-                    degreesLongitude: 0,
-                    jpegThumbnail: thumbBuffer,
-                  },
-                }),
-                body: proto.Message.InteractiveMessage.Body.create({
-                  text: "👋 *HI TEST USER*\n\n╭─ 「 *BOT'S MENU* 」\n│ 👾 *Bot :* MALIYA-MD\n│ 🎯 *Prefix :* [ . ]\n╰───────────────┈➤\n\n🎀 *≡ Select a Command List: ≡*",
-                }),
-                footer: proto.Message.InteractiveMessage.Footer.create({
-                  text: "© 2026 MALIYA-MD SYSTEM",
-                }),
-                nativeFlowMessage:
-                  proto.Message.InteractiveMessage.NativeFlowMessage.create({
-                    buttons: buttons,
-                  }),
-                contextInfo: {
-                  stanzaId: mek.key.id,
-                  participant: mek.key.participant || mek.key.remoteJid,
-                  quotedMessage: mek.message,
-                },
-              }),
-            },
-          },
+          image: { url: headerUrl },
+          caption: "👋 *HI TEST USER*\n\n╭─ 「 *BOT'S MENU* 」\n│ 👾 *Bot :* MALIYA-MD\n│ 🎯 *Prefix :* [ . ]\n╰───────────────┈➤\n\n🎀 *≡ Select a Command List: ≡*",
+          footer: "© 2026 MALIYA-MD SYSTEM",
+          buttons: buttons,
+          headerType: 4,
+          viewOnce: true,
         },
         { quoted: mek }
       );
-
-      // 6. Generated Message ID එක සමඟ Relay කිරීම
-      await sock.relayMessage(from, msg.message, { messageId: msg.key.id });
     } catch (e) {
-      console.log("LOCATION TEST ERROR:", e);
+      console.log("TEST MENU ERROR:", e);
       reply("❌ Error: " + (e?.message || e));
     }
   }
