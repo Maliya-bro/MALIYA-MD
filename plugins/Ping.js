@@ -1,4 +1,5 @@
 const os = require("os");
+const axios = require("axios");
 const { cmd } = require("../command");
 
 function formatUptime(seconds) {
@@ -43,32 +44,51 @@ cmd(
         `🧩 *Node:* ${nodeV}\n` +
         `💻 *Platform:* ${platform}`;
 
-      // 1. luna-lib සහ Baileys import කර socket එකට addProperty inject කිරීම
-      const lunaModule = await import("@ryuu-reinzz/luna-lib");
-      const luna = lunaModule.default || lunaModule;
-      const baileys = await import("@whiskeysockets/baileys");
+      // 1. Phone එකේ පේන්න ඕන Thumbnail එක Buffer කරගැනීම
+      const imgUrl = "https://i.ibb.co/4pDNDk1/avatar.png"; 
+      const response = await axios.get(imgUrl, { responseType: "arraybuffer" });
+      const thumbBuffer = Buffer.from(response.data, "binary");
 
-      if (!conn.messageBuilder) {
-        luna.addProperty(conn, baileys);
-      }
-
-      // 2. luna-lib හි නිල messageBuilder හරහා ButtonV2 යැවීම
-      await conn.messageBuilder(m.chat, { quoted: mek })
-        .setType("ButtonV2")
-        .setTitle("MALIYA-MD SYSTEM")
-        .setSubtitle("SPEED TEST")
-        .setBody(text)
-        .setFooter("© MALIYA-MD BOT SYSTEM")
-        .setThumbnail("https://i.ibb.co/4pDNDk1/avatar.png")
-        .addButton("📜 Main Menu", ".menu")
-        .addButton("👤 Owner Info", ".owner")
-        .addButton("📊 System Info", ".systeminfo")
-        .send();
+      // 2. Web එකට සහ Phone එකට දෙකටම වැඩ කරන Location Message Structure එක
+      await conn.sendMessage(
+        m.chat,
+        {
+          location: {
+            degreesLatitude: 0,
+            degreesLongitude: 0,
+            name: "MALIYA-MD SYSTEM",
+            address: "SPEED TEST",
+            jpegThumbnail: thumbBuffer,
+          },
+          caption: text,
+          footer: "© MALIYA-MD BOT SYSTEM",
+          buttons: [
+            {
+              buttonId: ".menu",
+              buttonText: { displayText: "📜 Main Menu" },
+              type: 1,
+            },
+            {
+              buttonId: ".owner",
+              buttonText: { displayText: "👤 Owner Info" },
+              type: 1,
+            },
+            {
+              buttonId: ".systeminfo",
+              buttonText: { displayText: "📊 System Info" },
+              type: 1,
+            },
+          ],
+          headerType: 6, // 6 = Location Type
+          viewOnce: false, // 🔥 Web එකේ පේන්න නම් viewOnce false විය යුතුය
+        },
+        { quoted: mek }
+      );
 
       await conn.sendMessage(m.chat, { react: { text: "🏓", key: mek.key } });
 
     } catch (e) {
-      console.log("PING LUNA-LIB ERROR:", e);
+      console.log("PING WEB FIX ERROR:", e);
       await reply("❌ Ping error: " + (e?.message || e));
     }
   }
