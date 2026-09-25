@@ -87,7 +87,9 @@ function getUserName(pushname, m, mek, sender = "") {
     mek?.chatName,
   ];
   for (const item of candidates) {
-    if (item && String(item).trim()) return String(item).trim();
+    if (item && String(item).trim()) {
+      return String(item).trim();
+    }
   }
   const num = String(sender || "").split("@")[0].split(":")[0];
   return num || "User";
@@ -310,7 +312,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Show command categories with Asitha-MD layout",
+    desc: "Show command categories with NativeFlow Asitha-MD layout",
     category: "main",
     filename: __filename,
   },
@@ -348,41 +350,36 @@ cmd(
 
       if (btnsOn) {
         try {
-          // @vanzxy/baileys ButtonV2 හරහා Header + Side-by-Side Buttons
-          const { ButtonV2 } = await import("@vanzxy/baileys");
+          // @vanzxy/baileys හි NativeFlow builder ආයාත කර භාවිතය
+          const vanzxy = await import("@vanzxy/baileys");
+          const NativeFlow = vanzxy.NativeFlow || vanzxy.default?.NativeFlow;
 
-          const listRows = categories.map((cat) => ({
-            title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
-            description: `Show ${cat.toLowerCase()} command list`,
-            id: `.menu_view ${cat}`,
-          }));
+          if (NativeFlow) {
+            const listRows = categories.map((cat) => ({
+              title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
+              description: `Show ${cat.toLowerCase()} command list`,
+              id: `.menu_view ${cat}`,
+            }));
 
-          const btn = new ButtonV2(sock);
-          btn.setBody(menuHeader(userName));
-          btn.setFooter("© 2026 MALIYA-MD BOT SYSTEM");
-          btn.setThumbnail(headerImg);
+            // NativeFlow මඟින් side-by-side List & Quick Reply buttons හැදීම
+            const nf = new NativeFlow(sock)
+              .setImage(headerImg)
+              .setBody(menuHeader(userName))
+              .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
+              .addSingleSelect("≡ List Menu", "📁 Categories", listRows)
+              .addReply("📊 Ping", ".ping");
 
-          // 1. Popup List Button
-          btn.addSelection("≡ List Menu", [
-            {
-              title: "📁 Categories",
-              rows: listRows,
-            },
-          ]);
-
-          // 2. Quick Reply Ping Button (Side-by-side සඳහා අකුරු කෙටි කර ඇත)
-          btn.addButton("📊 Ping", ".ping");
-
-          const sentMsg = await btn.send(from, { quoted: mek });
-          if (sentMsg?.key?.id) state.expectedMsgId = sentMsg.key.id;
-          pendingMenu[k] = state;
-          return;
+            const sentMsg = await nf.send(from, { quoted: mek });
+            if (sentMsg?.key?.id) state.expectedMsgId = sentMsg.key.id;
+            pendingMenu[k] = state;
+            return;
+          }
         } catch (err) {
-          console.log("BUTTON MENU ERROR:", err?.message || err);
+          console.log("NATIVE FLOW MENU ERROR:", err?.message || err);
         }
       }
 
-      // Buttons Off නම් Numbered Text Menu එක යැවීම
+      // Buttons Off විට Numbered Menu එක යැවීම
       const sentMsg = await sock.sendMessage(
         from,
         {
