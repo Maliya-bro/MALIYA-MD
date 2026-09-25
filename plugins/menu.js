@@ -38,7 +38,7 @@ const OWNER_NAME =
   String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
 
 const DEFAULT_HEADER_IMAGE =
-  "https://i.ibb.co/4pDNDk1/avatar.png"; // ECONNRESET නිරාකරණය සඳහා ස්ථාවර CDN එකක්
+  "https://i.ibb.co/4pDNDk1/avatar.png";
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
@@ -302,24 +302,6 @@ async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId)
   );
 }
 
-// Fallback buffer ලබාගැනීමේ function එක
-async function getSafeBuffer(url) {
-  try {
-    const res = await axios.get(url, {
-      responseType: "arraybuffer",
-      timeout: 5000,
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
-    return Buffer.from(res.data);
-  } catch (err) {
-    // Connection drop වුවහොත් 1x1 Pixel Transparent Fallback Buffer එකක් ලබා දීම
-    return Buffer.from(
-      "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
-      "base64"
-    );
-  }
-}
-
 /* ================= COMMAND: .menu ================= */
 cmd(
   {
@@ -364,8 +346,6 @@ cmd(
 
       if (btnsOn) {
         try {
-          const thumbBuffer = await getSafeBuffer(headerImg);
-
           const listRows = categories.map((cat) => ({
             header: "",
             title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
@@ -373,7 +353,6 @@ cmd(
             id: `.menu_view ${cat}`,
           }));
 
-          // Asitha-MD ආකෘතිය: Single Select (List) + Quick Reply (Ping)
           const buttons = [
             {
               name: "single_select",
@@ -396,56 +375,38 @@ cmd(
             },
           ];
 
-          const baileys = await import("@whiskeysockets/baileys").catch(() => import("@vanzxy/baileys"));
-          const { generateWAMessageFromContent, proto } = baileys;
+          // Direct standard interactive message (drop aaguvudilla)
+          const interactiveContent = {
+            body: { text: menuHeader(userName) },
+            footer: { text: "© 2026 MALIYA-MD BOT SYSTEM" },
+            header: {
+              title: "",
+              hasMediaAttachment: true,
+              imageMessage: (await sock.prepareWAMessageMedia({ image: { url: headerImg } }, { upload: sock.waUploadToServer })).imageMessage,
+            },
+            nativeFlowMessage: {
+              buttons: buttons,
+            },
+            contextInfo: channelContextInfo(),
+          };
 
-          const msg = generateWAMessageFromContent(
+          const sentMsg = await sock.sendMessage(
             from,
             {
-              viewOnceMessage: {
-                message: {
-                  interactiveMessage: proto.Message.InteractiveMessage.create({
-                    header: proto.Message.InteractiveMessage.Header.create({
-                      title: "",
-                      hasMediaAttachment: true,
-                      locationMessage: {
-                        degreesLatitude: 0,
-                        degreesLongitude: 0,
-                        jpegThumbnail: thumbBuffer,
-                      },
-                    }),
-                    body: proto.Message.InteractiveMessage.Body.create({
-                      text: menuHeader(userName),
-                    }),
-                    footer: proto.Message.InteractiveMessage.Footer.create({
-                      text: "© 2026 MALIYA-MD BOT SYSTEM",
-                    }),
-                    nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
-                      buttons: buttons,
-                    }),
-                    contextInfo: {
-                      stanzaId: mek.key.id,
-                      participant: mek.key.participant || mek.key.remoteJid,
-                      quotedMessage: mek.message,
-                    },
-                  }),
-                },
-              },
+              interactiveMessage: interactiveContent,
             },
             { quoted: mek }
           );
 
-          await sock.relayMessage(from, msg.message, { messageId: msg.key.id });
-
-          if (msg.key?.id) state.expectedMsgId = msg.key.id;
+          if (sentMsg?.key?.id) state.expectedMsgId = sentMsg.key.id;
           pendingMenu[k] = state;
           return;
         } catch (err) {
-          console.log("ASITHA STYLE MENU ERROR:", err?.message || err);
+          console.log("INTERACTIVE MENU ERROR:", err?.message || err);
         }
       }
 
-      // Buttons Off විට Numbered Menu එක යැවීම
+      // Buttons disabled iddhaaga numbered menu
       const sentMsg = await sock.sendMessage(
         from,
         {
