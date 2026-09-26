@@ -6,13 +6,8 @@ const {
   toggleSetting,
 } = require("../lib/botSettings");
 
-let sendInteractiveMessage = null;
-try {
-  ({ sendInteractiveMessage } = require("gifted-btns"));
-} catch {}
-
 const SETTINGS_IMAGE =
-  "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/ChatGPT%20Image%20Mar%2022,%202026,%2008_42_52%20AM.png?raw=true";
+  "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/ChatGPT%20Image%20Mar%2022,%202026,%2008_42_52%20AM.png";
 
 const pendingSettingsMenu = Object.create(null);
 
@@ -26,7 +21,6 @@ function isRealOwner(sender = "") {
   ).replace(/\D/g, "");
 
   let user = String(sender).split("@")[0].replace(/\D/g, "");
-
   if (user.startsWith("0")) user = "94" + user.slice(1);
 
   return !!owner && user === owner;
@@ -141,31 +135,17 @@ function getIncomingText(body, mek, m) {
   return String(text).trim().toLowerCase();
 }
 
-// 🔴 Auto Message Trigger yahan se fix kar diya gaya hai.
 function resolveSettingsActionFromText(text = "") {
   const t = String(text).trim().toLowerCase();
   if (!t) return null;
 
-  // Ab yeh sirf aur sirf ".setting" command payload ko check karega. 
-  // Menu ke kisi bhi normal text se auto trigger nahi hoga.
   if (t.startsWith(".setting ")) {
     const parts = t.replace(".setting ", "").trim().split(" ");
     const action = parts[0];
     const value = parts.slice(1).join(" ");
     return { action, value };
   }
-
   return null;
-}
-
-function isDuplicateAction(state, sig) {
-  const now = Date.now();
-  if (state.lastSig === sig && now - (state.lastAt || 0) < 3000) {
-    return true;
-  }
-  state.lastSig = sig;
-  state.lastAt = now;
-  return false;
 }
 
 async function applySettingAction(sessionId, action, value) {
@@ -235,266 +215,141 @@ async function applySettingAction(sessionId, action, value) {
   return await getStatusCard(sessionId);
 }
 
-function buildStyledMenu(title, options, footer = "") {
-  let msg = `\n`;
-  msg += `┌❮ 👑 *${title.toUpperCase()}* 👑 ❯─\n`;
-  msg += `│\n`;
-  options.forEach((opt, idx) => {
-    const num = String(idx + 1).padStart(2, '0');
-    msg += `├► *[ ${num} ]* ➔ \`${opt.label}\`\n`;
-  });
-  msg += `│\n`;
-  msg += `└❮ 💬 *ʀᴇᴘʟʏ ᴛᴏ ᴛʜɪs ᴍᴇssᴀɢᴇ ᴡɪᴛʜ ᴛʜᴇ ɴᴜᴍʙᴇʀ* ❯─\n`;
-  if (footer) msg += `\n*${footer}*`;
+// සියලුම සැකසුම් විකල්ප (Popup List එකට සහ Numbered Menu එකට දෙකටම එකම ලැයිස්තුව)
+function getAllSettingsOptions() {
+  return [
+    { cat: "🛠️ MAIN SETTINGS", label: "Public Mode", desc: "Set bot to public", cmd: ".setting public" },
+    { cat: "🛠️ MAIN SETTINGS", label: "Private Mode", desc: "Set bot to private", cmd: ".setting private" },
+    
+    { cat: "💬 WORK SCOPE", label: "🔒 Private Only", desc: "Work in private chats only", cmd: ".setting workscope private" },
+    { cat: "💬 WORK SCOPE", label: "👥 Group Only", desc: "Work in group chats only", cmd: ".setting workscope group" },
+    { cat: "💬 WORK SCOPE", label: "🌍 All Chats", desc: "Work in both private & group", cmd: ".setting workscope all" },
+    
+    { cat: "🔘 MENU MODE", label: "✅ Buttons ON", desc: "Use WhatsApp interactive buttons", cmd: ".setting on btns" },
+    { cat: "🔘 MENU MODE", label: "❌ Buttons OFF", desc: "Use plain text number menus", cmd: ".setting off btns" },
+    
+    { cat: "✨ PRESENCE", label: "⌨️ Auto Typing", desc: "Show typing status", cmd: ".setting presence typing" },
+    { cat: "✨ PRESENCE", label: "🎙️ Auto Recording", desc: "Show recording status", cmd: ".setting presence recording" },
+    { cat: "✨ PRESENCE", label: "⛔ Presence OFF", desc: "Turn off presence", cmd: ".setting presence off" },
+    
+    { cat: "🛡️ PROTECTION", label: "🛡️ Anti Spam ON", desc: "Protect from spam messages", cmd: ".setting on antispam" },
+    { cat: "🛡️ PROTECTION", label: "🛡️ Anti Spam OFF", desc: "Disable spam protection", cmd: ".setting off antispam" },
+    { cat: "🛡️ PROTECTION", label: "🛡️ Anti Delete ON", desc: "Save deleted messages (PM)", cmd: ".setting on antidelete" },
+    { cat: "🛡️ PROTECTION", label: "🛡️ Anti Delete OFF", desc: "Disable anti delete", cmd: ".setting off antidelete" },
+    { cat: "🛡️ PROTECTION", label: "📞 Reject Calls ON", desc: "Auto-reject incoming calls", cmd: ".setting on rejectcalls" },
+    { cat: "🛡️ PROTECTION", label: "📞 Reject Calls OFF", desc: "Allow incoming calls", cmd: ".setting off rejectcalls" },
 
-  return msg;
+    { cat: "🤖 AUTO REACT", label: "✅ Auto React Msg ON", desc: "React to incoming messages", cmd: ".setting on autoreactmsg" },
+    { cat: "🤖 AUTO REACT", label: "❌ Auto React Msg OFF", desc: "Disable message reactions", cmd: ".setting off autoreactmsg" },
+    { cat: "🤖 AUTO REACT", label: "🔒 React: Private Only", desc: "React in private chats only", cmd: ".setting reactmode private" },
+    { cat: "🤖 AUTO REACT", label: "👥 React: Group Only", desc: "React in groups only", cmd: ".setting reactmode group" },
+    { cat: "🤖 AUTO REACT", label: "🌍 React: All Chats", desc: "React in all chats", cmd: ".setting reactmode all" },
+
+    { cat: "👁️ STATUS & AI", label: "🤖 AI Chat ON", desc: "Turn ON auto chatbot", cmd: ".setting on automsg" },
+    { cat: "👁️ STATUS & AI", label: "🤖 AI Chat OFF", desc: "Turn OFF auto chatbot", cmd: ".setting off automsg" },
+    { cat: "👁️ STATUS & AI", label: "👁️ Auto Status Seen ON", desc: "View status automatically", cmd: ".setting on autoseen" },
+    { cat: "👁️ STATUS & AI", label: "👁️ Auto Status Seen OFF", desc: "Turn off status view", cmd: ".setting off autoseen" },
+    { cat: "👁️ STATUS & AI", label: "❤️ Auto Status React ON", desc: "React to status updates", cmd: ".setting on autoreact" },
+    { cat: "👁️ STATUS & AI", label: "❤️ Auto Status React OFF", desc: "Turn off status react", cmd: ".setting off autoreact" },
+    { cat: "👁️ STATUS & AI", label: "📥 Status Download ON", desc: "Auto-save status to owner", cmd: ".setting on autodownloadstatus" },
+    { cat: "👁️ STATUS & AI", label: "📥 Status Download OFF", desc: "Turn off status saving", cmd: ".setting off autodownloadstatus" },
+  ];
 }
 
-async function sendNumberedMenu(conn, from, mek, title, options, footer = "", imageUrl = SETTINGS_IMAGE) {
-  const caption = buildStyledMenu(title, options, footer);
-  return await conn.sendMessage(
-    from,
-    {
-      image: { url: imageUrl },
-      caption: caption,
-    },
-    { quoted: mek }
-  );
-}
-
+// සැකසුම් වෙනස් කිරීම සඳහා ButtonV2 භාවිතයෙන් හෝ අංක මෙනුවකින් සෘජුවම යැවීම
 async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
-  const text = await getStatusCard(sessionId);
+  const cardText = await getStatusCard(sessionId);
   const key = makePendingKey(sender, from);
+  const allOpts = getAllSettingsOptions();
   
   pendingSettingsMenu[key] = {
     createdAt: Date.now(),
     sessionId,
-    stage: "home",
-    options: null,
     menuMsgId: null,
+    options: allOpts,
     processedMsgIds: []
   };
 
   const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
-  if (btnsOn && sendInteractiveMessage) {
+  if (btnsOn) {
     try {
-      const sentMsg = await sendInteractiveMessage(
-        conn,
-        from,
-        {
-          image: { url: SETTINGS_IMAGE },
-          text,
-          footer: "MALIYA-MD SETTINGS",
-          interactiveButtons: [
-            {
-              name: "quick_reply",
-              buttonParamsJson: JSON.stringify({
-                display_text: "⚙️ Change Settings",
-                id: ".setting menuopen",
-              }),
-            },
-            {
-              name: "quick_reply",
-              buttonParamsJson: JSON.stringify({
-                display_text: "📊 Show Full Status",
-                id: ".setting status",
-              }),
-            },
-          ],
+      const { ButtonV2 } = await import("@vanzxy/baileys");
+
+      // Categorized Sections සැකසීම
+      const sectionMap = {};
+      allOpts.forEach((opt) => {
+        if (!sectionMap[opt.cat]) sectionMap[opt.cat] = [];
+        sectionMap[opt.cat].push({
+          title: opt.label,
+          description: opt.desc,
+          id: opt.cmd
+        });
+      });
+
+      const sections = Object.keys(sectionMap).map((catName) => ({
+        title: catName,
+        rows: sectionMap[catName]
+      }));
+
+      const btn = new ButtonV2(conn)
+        .setBody(cardText + "\n\n👇 *Tap the buttons below to change settings:*")
+        .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
+        .setThumbnail(SETTINGS_IMAGE);
+
+      // 1. Popup List Menu Button (කෙළින්ම Settings වෙනස් කරන List එක)
+      btn.addRawButton({
+        buttonId: ".setting menuopen",
+        buttonText: { displayText: "⚙️ Change Settings" },
+        type: 1,
+        nativeFlowInfo: {
+          name: "single_select",
+          paramsJson: JSON.stringify({
+            title: "Change Settings ↯",
+            sections: sections
+          }),
         },
-        { quoted: mek }
-      );
-      if (sentMsg?.key?.id) pendingSettingsMenu[key].menuMsgId = sentMsg.key.id;
-      return sentMsg;
+      });
+
+      // 2. Full Status Refresh Button
+      btn.addButton("📊 Refresh Status", ".setting status");
+
+      const sentMsg = await btn.send(from, { quoted: mek });
+
+      if (sentMsg?.key?.id) {
+        pendingSettingsMenu[key].menuMsgId = sentMsg.key.id;
+        return sentMsg;
+      }
     } catch (e) {
-      console.log("SETTINGS HOME ERROR:", e);
+      console.log("SETTINGS BUTTONV2 ERROR:", e?.message || e);
     }
   }
 
-  const options = [
-    { label: "⚙️ Change Settings", action: "menuopen" },
-    { label: "📊 Show Full Status", action: "status" },
-  ];
-  pendingSettingsMenu[key].options = options;
-  
-  const sentMsg = await sendNumberedMenu(
-    conn,
+  // Fallback: Buttons OFF නම් කෙළින්ම අංක සහිත සියලුම Settings මෙනුව එකවර යැවීම
+  let numberedCaption = cardText + "\n\n┌❮ ⚙️ *ᴄʜᴀɴɢᴇ sᴇᴛᴛɪɴɢs ʙʏ ɴᴜᴍʙᴇʀ* ❯─\n│\n";
+  allOpts.forEach((opt, idx) => {
+    const num = String(idx + 1).padStart(2, '0');
+    numberedCaption += `├► *[ ${num} ]* ➔ \`${opt.label}\`\n`;
+  });
+  numberedCaption += "│\n└❮ 💬 *Swipe & Reply this message with a number to apply* ❯─";
+
+  const sentMsg = await conn.sendMessage(
     from,
-    mek,
-    text + "\n\n✨ *ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ:*",
-    options,
-    "© MALIYA-MD",
-    SETTINGS_IMAGE
+    {
+      image: { url: SETTINGS_IMAGE },
+      caption: numberedCaption
+    },
+    { quoted: mek }
   );
-  
-  if (sentMsg?.key?.id) pendingSettingsMenu[key].menuMsgId = sentMsg.key.id;
-  return sentMsg;
-}
 
-async function sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId) {
-  const key = makePendingKey(sender, from);
-  
-  const existingProcessedIds = pendingSettingsMenu[key]?.processedMsgIds || [];
-  
-  pendingSettingsMenu[key] = {
-    createdAt: Date.now(),
-    sessionId,
-    stage: "roles",
-    menuMsgId: null,
-    processedMsgIds: existingProcessedIds
-  };
-
-  const settings = await readSettings(sessionId);
-  const btnsOn = !!settings.btns_enabled;
-
-  if (btnsOn && sendInteractiveMessage) {
-    try {
-      const sentMsg = await sendInteractiveMessage(
-        conn,
-        from,
-        {
-          image: { url: SETTINGS_IMAGE },
-          text: "⚙️ *ᴄʜᴏᴏsᴇ ᴀ sᴇᴛᴛɪɴɢ ʀᴏʟᴇ ʙᴇʟᴏᴡ*",
-          footer: "Change Settings",
-          interactiveButtons: [
-            {
-              name: "single_select",
-              buttonParamsJson: JSON.stringify({
-                title: "Change Settings",
-                sections: [
-                  {
-                    title: "🛠 MAIN SETTINGS",
-                    rows: [
-                      { title: "Public Mode", description: "Set bot mode to public", id: ".setting public" },
-                      { title: "Private Mode", description: "Set bot mode to private", id: ".setting private" },
-                    ],
-                  },
-                  {
-                    title: "💬 WORK SCOPE (WHERE BOT WORKS)",
-                    rows: [
-                      { title: "🔒 Private Chat Only", description: "Bot works in private chats only", id: ".setting workscope private" },
-                      { title: "👥 Group Chat Only", description: "Bot works in groups only", id: ".setting workscope group" },
-                      { title: "🌍 All Chats", description: "Bot works in both private and group chats", id: ".setting workscope all" },
-                    ],
-                  },
-                  {
-                    title: "🔘 MENU MODE (BUTTONS)",
-                    rows: [
-                      { title: "✅ Interactive Buttons ON", description: "Use WhatsApp buttons/lists", id: ".setting on btns" },
-                      { title: "❌ Interactive Buttons OFF", description: "Use plain text menus", id: ".setting off btns" },
-                    ],
-                  },
-                  {
-                    title: "✨ BOT PRESENCE",
-                    rows: [
-                      { title: "Auto Typing", description: "Set typing presence mode", id: ".setting presence typing" },
-                      { title: "Auto Recording", description: "Set recording presence mode", id: ".setting presence recording" },
-                      { title: "Presence OFF", description: "Turn presence off", id: ".setting presence off" },
-                    ],
-                  },
-                  {
-                    title: "🛡️ ANTI SPAM PROTECTION",
-                    rows: [
-                      { title: "✅ Anti Spam ON", description: "Protect bot from spam messages", id: ".setting on antispam" },
-                      { title: "❌ Anti Spam OFF", description: "Disable spam protection", id: ".setting off antispam" },
-                      { title: "🔄 Toggle Anti Spam", description: "Switch anti-spam on/off", id: ".setting toggle antispam" },
-                    ],
-                  },
-                  {
-                    title: "🤖 AUTO REACT SETTINGS",
-                    rows: [
-                      { title: "✅ Auto React Msg ON", description: "Enable message auto react", id: ".setting on autoreactmsg" },
-                      { title: "❌ Auto React Msg OFF", description: "Disable message auto react", id: ".setting off autoreactmsg" },
-                      { title: "🔒 React Mode: Private Only", description: "React only in private chats", id: ".setting reactmode private" },
-                      { title: "👥 React Mode: Group Only", description: "React only in groups", id: ".setting reactmode group" },
-                      { title: "🌍 React Mode: All Chats", description: "React in all chats", id: ".setting reactmode all" },
-                    ],
-                  },
-                  {
-                    title: "🤖 AI & TOOLS",
-                    rows: [
-                      { title: "Enable AI Chat", description: "Turn ON auto msg", id: ".setting on automsg" },
-                      { title: "Disable AI Chat", description: "Turn OFF auto msg", id: ".setting off automsg" },
-                      { title: "✅ Seen All Msg ON", description: "Auto-read every private + group msg", id: ".setting on seenallmsg" },
-                      { title: "❌ Seen All Msg OFF", description: "Stop auto-reading every message", id: ".setting off seenallmsg" },
-                      { title: "Enable Anti Delete", description: "Turn ON anti delete (private chats only)", id: ".setting on antidelete" },
-                      { title: "Disable Anti Delete", description: "Turn OFF anti delete", id: ".setting off antidelete" },
-                      { title: "Reject Calls ON", description: "Turn ON reject calls", id: ".setting on rejectcalls" },
-                      { title: "Reject Calls OFF", description: "Turn OFF reject calls", id: ".setting off rejectcalls" },
-                    ],
-                  },
-                  {
-                    title: "👁 AUTO FUNCTIONS",
-                    rows: [
-                      { title: "Auto Status View ON", description: "Enable auto status seen", id: ".setting on autoseen" },
-                      { title: "Auto Status View OFF", description: "Disable auto status seen", id: ".setting off autoseen" },
-                      { title: "Auto Status React ON", description: "Enable auto react", id: ".setting on autoreact" },
-                      { title: "Auto Status React OFF", description: "Disable auto react", id: ".setting off autoreact" },
-                      { title: "Auto Download Status ON", description: "Enable auto status download", id: ".setting on autodownloadstatus" },
-                      { title: "Auto Download Status OFF", description: "Disable auto status download", id: ".setting off autodownloadstatus" },
-                      { title: "Show Full Status", description: "View current settings", id: ".setting status" },
-                    ],
-                  },
-                ],
-              }),
-            },
-          ],
-        },
-        { quoted: mek }
-      );
-      if (sentMsg?.key?.id) pendingSettingsMenu[key].menuMsgId = sentMsg.key.id;
-      return sentMsg;
-    } catch (e) {
-      console.log("SETTINGS ROLES MENU ERROR:", e);
-    }
+  if (sentMsg?.key?.id) {
+    pendingSettingsMenu[key].menuMsgId = sentMsg.key.id;
   }
-
-  const allOptions = [
-    { label: "🌐 Public Mode", action: "public" },
-    { label: "🔒 Private Mode", action: "private" },
-    { label: "🔒 Work Scope: Private", action: "workscope", value: "private" },
-    { label: "👥 Work Scope: Group", action: "workscope", value: "group" },
-    { label: "🌍 Work Scope: All", action: "workscope", value: "all" },
-    { label: "✅ Buttons ON", action: "on", value: "btns" },
-    { label: "❌ Buttons OFF", action: "off", value: "btns" },
-    { label: "⌨️ Presence: Typing", action: "presence", value: "typing" },
-    { label: "🎙️ Presence: Recording", action: "presence", value: "recording" },
-    { label: "⛔ Presence: OFF", action: "presence", value: "off" },
-    { label: "🛡️ Anti Spam ON", action: "on", value: "antispam" },
-    { label: "🛡️ Anti Spam OFF", action: "off", value: "antispam" },
-    { label: "🔄 Toggle Anti Spam", action: "toggle", value: "antispam" },
-    { label: "✅ Auto React Msg ON", action: "on", value: "autoreactmsg" },
-    { label: "❌ Auto React Msg OFF", action: "off", value: "autoreactmsg" },
-    { label: "🔒 React Mode: Private", action: "reactmode", value: "private" },
-    { label: "👥 React Mode: Group", action: "reactmode", value: "group" },
-    { label: "🌍 React Mode: All", action: "reactmode", value: "all" },
-    { label: "🤖 AI Chat ON", action: "on", value: "automsg" },
-    { label: "🤖 AI Chat OFF", action: "off", value: "automsg" },
-    { label: "✅ Seen All Msg ON", action: "on", value: "seenallmsg" },
-    { label: "❌ Seen All Msg OFF", action: "off", value: "seenallmsg" },
-    { label: "🛡️ Anti Delete ON", action: "on", value: "antidelete" },
-    { label: "🛡️ Anti Delete OFF", action: "off", value: "antidelete" },
-    { label: "📞 Reject Calls ON", action: "on", value: "rejectcalls" },
-    { label: "📞 Reject Calls OFF", action: "off", value: "rejectcalls" },
-    { label: "👁️ Auto Status View ON", action: "on", value: "autoseen" },
-    { label: "👁️ Auto Status View OFF", action: "off", value: "autoseen" },
-    { label: "❤️ Auto Status React ON", action: "on", value: "autoreact" },
-    { label: "❤️ Auto Status React OFF", action: "off", value: "autoreact" },
-    { label: "📥 Auto Download Status ON", action: "on", value: "autodownloadstatus" },
-    { label: "📥 Auto Download Status OFF", action: "off", value: "autodownloadstatus" },
-    { label: "📊 Show Full Status", action: "status" },
-  ];
-
-  pendingSettingsMenu[key].options = allOptions;
-  const header = "⚙️ *sᴇᴛᴛɪɴɢs ᴄᴏɴғɪɢᴜʀᴀᴛɪᴏɴ ᴍᴇɴᴜ*";
-  
-  const sentMsg = await sendNumberedMenu(conn, from, mek, header, allOptions, "© MALIYA-MD", SETTINGS_IMAGE);
-  if (sentMsg?.key?.id) pendingSettingsMenu[key].menuMsgId = sentMsg.key.id;
   return sentMsg;
 }
 
+/* ================= COMMAND: .setting ================= */
 cmd(
   {
     pattern: "setting",
@@ -512,26 +367,17 @@ cmd(
     const value = String(args.slice(1).join(" ") || "").toLowerCase().trim();
 
     try {
-      if (action === "menu") {
+      if (action === "menu" || action === "menuopen") {
         return await sendSettingsHome(conn, from, mek, reply, sender, sessionId);
-      }
-      if (action === "menuopen") {
-        return await sendSettingsRolesMenu(conn, from, mek, reply, sender, sessionId);
       }
       
       if (action === "status") return reply(await getStatusCard(sessionId));
       if (action === "private") { await setSetting(sessionId, "mode", "private"); return reply("✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘʀɪᴠᴀᴛᴇ ]`*"); }
       if (action === "public") { await setSetting(sessionId, "mode", "public"); return reply("✨ *`[ ✅ ʙᴏᴛ ᴍᴏᴅᴇ sᴇᴛ ᴛᴏ ᴘᴜʙʟɪᴄ ]`*"); }
       
-      if (action === "on" || action === "off" || action === "toggle") {
-        const key = mapKey(value);
-        if (!key) return reply("❌ *`[ ɪɴᴠᴀʟɪᴅ sᴇᴛᴛɪɴɢ ɴᴀᴍᴇ ]`*");
-        
-        let updated;
-        if (action === "toggle") updated = await toggleSetting(sessionId, key);
-        else updated = await setSetting(sessionId, key, action === "on");
-
-        return reply(`✨ *\`[ ✅ sᴇᴛ ${key.toUpperCase()} ᴛᴏ ${action.toUpperCase()} ]\`*`);
+      if (action === "on" || action === "off" || action === "toggle" || action === "workscope" || action === "presence" || action === "reactmode") {
+        const result = await applySettingAction(sessionId, action, value);
+        return reply(result);
       }
 
       return reply(await getStatusCard(sessionId));
@@ -542,6 +388,7 @@ cmd(
   }
 );
 
+/* ================= REPLY HANDLER ================= */
 if (!global.__maliya_settings_reply_handler_added) {
   global.__maliya_settings_reply_handler_added = true;
 
@@ -562,73 +409,70 @@ if (!global.__maliya_settings_reply_handler_added) {
       const text = getIncomingText(body, mek, m);
       const incomingMsgId = mek?.key?.id || m?.key?.id;
 
+      // 1. Popup List එකෙන් තෝරාගත් විට ලැබෙන කමාන්ඩ් හැසිරවීම
       const resolved = resolveSettingsActionFromText(text);
-
       if (resolved) {
         if (incomingMsgId) {
-            state.processedMsgIds = state.processedMsgIds || [];
-            if (state.processedMsgIds.includes(incomingMsgId)) return;
-            state.processedMsgIds.push(incomingMsgId);
+          state.processedMsgIds = state.processedMsgIds || [];
+          if (state.processedMsgIds.includes(incomingMsgId)) return;
+          state.processedMsgIds.push(incomingMsgId);
         }
 
         try {
-          if (resolved.action === "menuopen") {
-            state.createdAt = Date.now();
-            return await sendSettingsRolesMenu(conn, from, mek, reply, sender, sid);
-          }
           const result = await applySettingAction(sid, resolved.action, resolved.value);
           state.createdAt = Date.now();
-          
           await conn.sendMessage(from, { react: { text: "✅", key: mek.key } });
           return reply(result);
         } catch (e) {
-          console.log("SETTINGS REPLY HANDLER ERROR:", e);
-          return reply("❌ *`[ ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴘʀᴏssᴇssɪɴɢ sᴇᴛᴛɪɴɢs ᴀᴄᴛɪᴏɴ. ]`*");
+          console.log("SETTINGS ACTION ERROR:", e);
+          return reply("❌ *`[ ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴘʀᴏᴄᴇssɪɴɢ sᴇᴛᴛɪɴɢ. ]`*");
         }
       }
 
+      // 2. අංකයක් මඟින් Reply කර ඇති විට සෘජුවම සැකසුම වෙනස් කිරීම
       const num = parseInt(text, 10);
-      if (!isNaN(num) && state.options && state.options.length >= num && num > 0) {
+      if (!isNaN(num) && state.options && num > 0 && num <= state.options.length) {
         const msgObj = mek?.message || m?.message || {};
-        const contextInfo = msgObj?.extendedTextMessage?.contextInfo || msgObj?.imageMessage?.contextInfo || {};
+        const contextInfo =
+          msgObj?.extendedTextMessage?.contextInfo ||
+          msgObj?.imageMessage?.contextInfo ||
+          msgObj?.buttonsResponseMessage?.contextInfo ||
+          {};
         const quotedId = contextInfo?.stanzaId;
 
-        // Reply kiye bina bheja hai toh turant rok dega
+        // Quoted message එකක් නොවේ නම් හෝ Menu එකට අදාළ නැති නම් නතර කිරීම
         if (!quotedId) return;
-
-        // Ye confirm karega ki exactly issi menu ko reply kiya hai
         if (state.menuMsgId && quotedId !== state.menuMsgId) return;
 
         if (incomingMsgId) {
-            state.processedMsgIds = state.processedMsgIds || [];
-            if (state.processedMsgIds.includes(incomingMsgId)) return;
-            state.processedMsgIds.push(incomingMsgId);
+          state.processedMsgIds = state.processedMsgIds || [];
+          if (state.processedMsgIds.includes(incomingMsgId)) return;
+          state.processedMsgIds.push(incomingMsgId);
         }
 
-        const opt = state.options[num-1];
+        const opt = state.options[num - 1];
+        const res = resolveSettingsActionFromText(opt.cmd);
 
-        try {
-          if (opt.action === "menuopen") {
+        if (res) {
+          try {
+            const result = await applySettingAction(sid, res.action, res.value);
             state.createdAt = Date.now();
-            return await sendSettingsRolesMenu(conn, from, mek, reply, sender, sid);
+            await conn.sendMessage(from, { react: { text: "✅", key: mek.key } });
+            return reply(result);
+          } catch (e) {
+            console.log("SETTINGS NUMERIC ERROR:", e);
+            return reply("❌ *`[ ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴀᴘᴘʟʏɪɴɢ sᴇᴛᴛɪɴɢ. ]`*");
           }
-          const result = await applySettingAction(sid, opt.action, opt.value);
-          state.createdAt = Date.now();
-          
-          await conn.sendMessage(from, { react: { text: "✅", key: mek.key } });
-          return reply(result);
-        } catch (e) {
-          console.log("SETTINGS NUMERIC ERROR:", e);
-          return reply("❌ *`[ ᴇʀʀᴏʀ ᴡʜɪʟᴇ ᴀᴘᴘʟʏɪɴɢ sᴇᴛᴛɪɴɢ. ]`*");
         }
       }
     },
   });
 }
 
+/* ================= CLEANUP ================= */
 setInterval(() => {
   const now = Date.now();
-  const timeout = 2 * 60 * 1000;
+  const timeout = 3 * 60 * 1000;
   for (const key of Object.keys(pendingSettingsMenu)) {
     if (now - pendingSettingsMenu[key].createdAt > timeout) {
       delete pendingSettingsMenu[key];
@@ -636,4 +480,4 @@ setInterval(() => {
   }
 }, 30000);
 
-module.exports = { sendSettingsHome, sendSettingsRolesMenu };
+module.exports = { sendSettingsHome };
