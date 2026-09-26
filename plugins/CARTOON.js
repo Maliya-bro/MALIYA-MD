@@ -1,21 +1,21 @@
 const { cmd, replyHandlers } = require('../command');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const sharp = require('sharp'); // Thumbnail එක හදන්න Sharp එකතු කර ඇත
+const sharp = require('sharp');
+const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 // State Management
 const pendingCartoonSearch = {};
 const pendingCartoonSelection = {};
-const lastProcessedMsg = {}; // Loop Protection State
+const lastProcessedMsg = {};
 
-const SESSION_TIMEOUT = 10 * 60 * 1000; // 10 Minutes
+const SESSION_TIMEOUT = 10 * 60 * 1000;
 const LOOP_COOLDOWN = 3000;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-// Channel Forwarding Meta Data
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
-const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
+const DEFAULT_SEARCH_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
 
 function getChannelContext() {
     return {
@@ -34,14 +34,11 @@ function getChannelContext() {
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function keyFor(sender, from) {
-    let f = from;
-    if (!f) f = "";
-    return `${f}`; 
+    return `${from || ""}`; 
 }
 
 function toSmallCaps(str) {
-    let s = str;
-    if (!s) s = "";
+    let s = str || "";
     const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
     return String(s)
@@ -58,13 +55,57 @@ function clearUserSession(k) {
     delete pendingCartoonSelection[k];
 }
 
-// 📱 WhatsApp Mobile එකට හරියටම සපෝට් කරන Thumbnail Generator එක
-async function getThumbnailBuffer(url) {
-    let tryUrl = url;
-    if (!tryUrl) {
-        tryUrl = DEFAULT_SEARCH_IMAGE;
+function safeJsonParse(str) {
+    try { return JSON.parse(str); } catch { return null; }
+}
+
+function getQuotedStanzaId(mek) {
+    return (
+        mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+        mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+        mek?.message?.videoMessage?.contextInfo?.stanzaId ||
+        mek?.message?.documentMessage?.contextInfo?.stanzaId ||
+        mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+        null
+    );
+}
+
+function extractIncomingPayload(body, mek, m) {
+    const paramsJson =
+        m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+        mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+        
+    if (paramsJson) {
+        const parsed = safeJsonParse(paramsJson);
+        if (parsed) {
+            const btnId = parsed.id || parsed.selectedId || parsed.selectedRowId || parsed.name;
+            if (btnId) return String(btnId).trim();
+        }
     }
-    
+
+    const directId =
+        m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+        m?.message?.buttonsResponseMessage?.selectedButtonId ||
+        mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+        mek?.message?.buttonsResponseMessage?.selectedButtonId;
+        
+    if (directId) return String(directId).trim();
+
+    const text =
+        m?.message?.interactiveResponseMessage?.body?.text ||
+        m?.message?.conversation ||
+        m?.message?.extendedTextMessage?.text ||
+        mek?.message?.interactiveResponseMessage?.body?.text ||
+        mek?.message?.conversation ||
+        mek?.message?.extendedTextMessage?.text ||
+        body ||
+        "";
+        
+    return String(text).trim();
+}
+
+async function getThumbnailBuffer(url) {
+    let tryUrl = url || DEFAULT_SEARCH_IMAGE;
     try {
         const res = await axios.get(tryUrl, {
             responseType: "arraybuffer",
@@ -72,34 +113,15 @@ async function getThumbnailBuffer(url) {
             headers: { 'User-Agent': UA }
         });
         
-        const buffer = await sharp(Buffer.from(res.data))
+        return await sharp(Buffer.from(res.data))
             .resize(200, 200, { fit: 'cover' }) 
             .jpeg({ quality: 50 }) 
             .toBuffer();
-            
-        return buffer;
     } catch (e) {
-        if (tryUrl !== DEFAULT_SEARCH_IMAGE) {
-            try {
-                const res2 = await axios.get(DEFAULT_SEARCH_IMAGE, { 
-                    responseType: "arraybuffer", 
-                    timeout: 8000 
-                });
-                
-                const buffer2 = await sharp(Buffer.from(res2.data))
-                    .resize(200, 200, { fit: 'cover' })
-                    .jpeg({ quality: 50 })
-                    .toBuffer();
-                return buffer2;
-            } catch (e2) {
-                return null;
-            }
-        }
         return null;
     }
 }
 
-// 1. Search Results Scraper
 async function getSearchResults(searchTerm) {
     const url = `https://sinhalacartoons.com/?s=${encodeURIComponent(searchTerm)}`;
     const { data } = await axios.get(url, { headers: { 'User-Agent': UA } });
@@ -115,69 +137,32 @@ async function getSearchResults(searchTerm) {
             title = $(el).find('h2, h3').text().trim();
         }
         
-        if (href) {
-            if (title) {
-                if (href.startsWith('https://sinhalacartoons.com/') && 
-                    !href.includes('/category/') && 
-                    !href.includes('/tag/') && 
-                    !href.includes('/page/') && 
-                    !href.includes('/author/') &&
-                    !href.includes('/about-us/') && 
-                    !href.includes('/contact-us/') &&
-                    !href.includes('/dmca-policy/') &&
-                    href !== 'https://sinhalacartoons.com' && 
-                    title.length > 5) {
-                    
-                    let exists = false;
-                    for (let r of results) {
-                        if (r.href === href) exists = true;
-                    }
-                    if (!exists) {
-                        results.push({ title, href });
-                    }
+        if (href && title) {
+            if (href.startsWith('https://sinhalacartoons.com/') && 
+                !href.includes('/category/') && 
+                !href.includes('/tag/') && 
+                !href.includes('/page/') && 
+                !href.includes('/author/') &&
+                !href.includes('/about-us/') && 
+                !href.includes('/contact-us/') && 
+                !href.includes('/dmca-policy/') &&
+                href !== 'https://sinhalacartoons.com' && 
+                title.length > 5) {
+                
+                let exists = false;
+                for (let r of results) {
+                    if (r.href === href) exists = true;
+                }
+                if (!exists) {
+                    results.push({ title, href });
                 }
             }
         }
     });
 
-    if (results.length === 0) {
-        const contentArea = $('#content, .main-content, .site-content');
-        contentArea.find('a[href*="sinhalacartoons.com"]').each((i, el) => {
-            const href = $(el).attr('href');
-            const text = $(el).text().trim();
-            const parent = $(el).closest('div, article, li');
-            const parentText = parent.text().trim();
-            
-            if (href) {
-                if (text) {
-                    if (href.startsWith('https://sinhalacartoons.com/') && 
-                        !href.includes('/category/') && 
-                        !href.includes('/tag/') && 
-                        !href.includes('/page/') &&
-                        !href.includes('/about-us/') &&
-                        !href.includes('/contact-us/') &&
-                        !href.includes('/dmca-policy/') &&
-                        href !== 'https://sinhalacartoons.com' &&
-                        text.length > 5 &&
-                        parentText.length > 20) {
-                        
-                        let exists = false;
-                        for (let r of results) {
-                            if (r.href === href) exists = true;
-                        }
-                        if (!exists) {
-                            results.push({ title: text, href });
-                        }
-                    }
-                }
-            }
-        });
-    }
-
     return results.slice(0, 15);
 }
 
-// 2. Final Direct Link Extractor
 async function getFinalDownloadLink(landingUrl) {
     if (!landingUrl) return null;
     try {
@@ -190,23 +175,15 @@ async function getFinalDownloadLink(landingUrl) {
         });
         const $ = cheerio.load(data);
         
-        let actualDlLink = $('a.dl-card-landing.force-download-btn').attr('href');
-        if (!actualDlLink) {
-            actualDlLink = $('a.force-download-btn').attr('href');
-        }
-        
-        if (actualDlLink) {
-            return actualDlLink;
-        }
+        let actualDlLink = $('a.dl-card-landing.force-download-btn').attr('href') \vert{}\vert{}$('a.force-download-btn').attr('href');
+        if (actualDlLink) return actualDlLink;
 
         const urlObj = new URL(cleanUrl, 'https://sinhalacartoons.com');
         const scData = urlObj.searchParams.get('sc_data');
         if (scData) {
             const decodedStr = Buffer.from(scData, 'base64').toString('utf-8');
             const parsedObj = JSON.parse(decodedStr);
-            if (parsedObj.direct) {
-                return parsedObj.direct;
-            }
+            if (parsedObj.direct) return parsedObj.direct;
         }
     } catch(e) {
         console.error("Link Extraction Error:", e.message);
@@ -214,18 +191,12 @@ async function getFinalDownloadLink(landingUrl) {
     return null;
 }
 
-// 3. Details Fetcher
 async function getMovieAndEpisodes(moviePageUrl) {
     const { data } = await axios.get(moviePageUrl, { headers: { 'User-Agent': UA } });
     const $ = cheerio.load(data);
 
-    let pageTitle = $('h1.movie-title').text().trim();
-    if (!pageTitle) {
-        pageTitle = $('title').text().trim();
-    }
-
-    let poster = $('.info-poster img').attr('src');
-    if (!poster) poster = '';
+    let pageTitle = $('h1.movie-title').text().trim() \vert{}\vert{}$('title').text().trim();
+    let poster = $('.info-poster img').attr('src') || '';
 
     const details = {
         title: pageTitle,
@@ -249,15 +220,8 @@ async function getMovieAndEpisodes(moviePageUrl) {
         details.isSeries = true;
         
         $('.episode-row').each((i, el) => {
-            let landingUrl = $(el).find('a.sc-download-links-btn').attr('href');
-            if (!landingUrl) {
-                landingUrl = $(el).attr('data-download-url');
-            }
-
-            let epTitle = $(el).find('.ep-title').text().trim();
-            if (!epTitle) {
-                epTitle = `Episode ${i + 1}`;
-            }
+            let landingUrl = $(el).find('a.sc-download-links-btn').attr('href') \vert{}\vert{}$(el).attr('data-download-url');
+            let epTitle = $(el).find('.ep-title').text().trim() || `Episode ${i + 1}`;
             
             if (landingUrl) {
                 items.push({ title: epTitle, landingUrl: landingUrl });
@@ -266,10 +230,7 @@ async function getMovieAndEpisodes(moviePageUrl) {
 
     } else {
         details.isSeries = false;
-        let landingUrl = $('a.sc-download-links-btn').attr('href');
-        if (!landingUrl) {
-            landingUrl = $('a[href*="sc_data="]').attr('href');
-        }
+        let landingUrl = $('a.sc-download-links-btn').attr('href') \vert{}\vert{}$('a[href*="sc_data="]').attr('href');
         
         if (landingUrl) {
             items.push({ title: "Full Movie", landingUrl: landingUrl });
@@ -285,8 +246,7 @@ function generateResultText(results) {
     text += `├─ *👇 Reply with a Number:* 👇\n│\n`;
 
     results.forEach((v, idx) => {
-        let numStr = String(idx + 1);
-        if (numStr.length === 1) numStr = "0" + numStr;
+        let numStr = String(idx + 1).padStart(2, "0");
         let cleanTitle = v.title.replace(/\s+/g, ' ').trim();
         text += `├─ 📱 *[ ${numStr} ]* 🎬 *${toSmallCaps(cleanTitle.slice(0, 40))}*\n`;
     });
@@ -304,13 +264,12 @@ cmd({
     category: "download",
     react: "🎬",
     filename: __filename
-}, async (bot, mek, m, { from, q, sender, reply }) => {
+}, async (bot, mek, m, { from, q, sender, reply, sessionId }) => {
     if (!q) {
         return reply(`*╭──[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗨𝗦𝗔𝗚𝗘 ]──╮*\n│\n├─ 📌 *Usage:* .scartoon [cartoon name]\n├─ 💡 *Example:* .scartoon kung fu panda\n╰────────────────────╯`);
     }
 
     await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
-    await reply("*╭──[ 🔍 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ]──╮*\n│\n├─ 🎬 *Searching SinhalaCartoons...*\n├─ ⚡ _Please wait a moment..._\n╰───────────────────╯");
 
     try {
         const results = await getSearchResults(q.trim());
@@ -323,16 +282,88 @@ cmd({
         const k = keyFor(sender, from);
         clearUserSession(k);
 
-        pendingCartoonSearch[k] = { 
-            results, 
-            timestamp: Date.now() 
-        };
+        const settings = await readSettings(sessionId);
+        const btnsOn = !!settings.btns_enabled;
 
+        let searchImg = DEFAULT_SEARCH_IMAGE;
+        if (sessionId) {
+            try {
+                const custom = await getCustomImage(sessionId, "cartoon_header");
+                if (custom && custom.data) searchImg = custom.data;
+            } catch (e) {}
+        }
+
+        // 🔥 Asitha-MD Style ButtonV2 Search Results
+        if (btnsOn) {
+            try {
+                const { ButtonV2 } = await import("@vanzxy/baileys");
+
+                const cartoonRows = results.map((item, index) => ({
+                    title: `${String(index + 1).padStart(2, "0")}. ${item.title.substring(0, 45)}`,
+                    description: "Click to view cartoon details & episodes",
+                    id: `.sc_select ${index + 1}`
+                }));
+
+                const bodyText = `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡𝗦 ]─╮*\n│\n├─ 🔍 *Search :* ${q}\n├─ 📊 *Total Results :* ${results.length}\n│\n╰──────────────────╯\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+
+                const btn = new ButtonV2(bot)
+                    .setBody(bodyText)
+                    .setFooter("WaBot by MALIYA-MD Team ツ")
+                    .setThumbnail(searchImg);
+
+                // 1. Popup List Menu Button
+                btn.addRawButton({
+                    buttonId: "scartoon_search_list",
+                    buttonText: { displayText: "🎬 Select Cartoon" },
+                    type: 1,
+                    nativeFlowInfo: {
+                        name: "single_select",
+                        paramsJson: JSON.stringify({
+                            title: "Available Cartoons ↯",
+                            sections: [
+                                {
+                                    title: "🎥 Search Results",
+                                    rows: cartoonRows
+                                }
+                            ]
+                        }),
+                    },
+                });
+
+                // 2. Bot Menu Button
+                btn.addButton("📜 Bot Menu", ".menu");
+
+                const sentMsg = await btn.send(from, { quoted: mek });
+
+                if (sentMsg?.key?.id) {
+                    pendingCartoonSearch[k] = { 
+                        results, 
+                        timestamp: Date.now(),
+                        expectedMsgId: sentMsg.key.id
+                    };
+                    await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+                    return;
+                }
+            } catch (err) {
+                console.log("SCARTOON BUTTON ERROR:", err?.message || err);
+            }
+        }
+
+        // 🔢 Fallback: Numbered Menu
         const channelMeta = getChannelContext();
-        await bot.sendMessage(from, { 
-            text: generateResultText(results),
+        const sentMsg = await bot.sendMessage(from, { 
+            image: { url: searchImg },
+            caption: generateResultText(results),
             ...channelMeta
         }, { quoted: mek });
+
+        pendingCartoonSearch[k] = { 
+            results, 
+            timestamp: Date.now(),
+            expectedMsgId: sentMsg.key.id
+        };
+
+        await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
 
     } catch (error) {
         console.error("SinhalaCartoon Search Error:", error);
@@ -344,48 +375,36 @@ cmd({
 // ===== NUMBER & EPISODE REPLY HANDLER =====
 const cartoonReplyHandler = {
     filter: (text, { sender, from }) => {
-        if (!text) return false;
         const k = keyFor(sender, from);
-        
-        const cleanInput = text.trim().toLowerCase();
-        const isNumberOrList = /^(\d+|all|\d+(\s*,\s*\d+)*)$/.test(cleanInput);
-
-        if (!isNumberOrList) return false;
-
-        if (pendingCartoonSearch[k]) return true;
-        if (pendingCartoonSelection[k]) return true;
-        return false;
+        return Boolean(pendingCartoonSearch[k] || pendingCartoonSelection[k]);
     },
-    function: async (bot, mek, m, { body, sender, reply, from }) => {
-        let input = body;
-        if (!input) input = "";
-        input = input.trim();
-        if (!input) return;
+    function: async (bot, mek, m, { body, sender, reply, from, sessionId }) => {
+        const payload = extractIncomingPayload(body, mek, m);
+        if (!payload) return;
 
         const k = keyFor(sender, from);
 
-        // LOOP PROTECTION SYSTEM
+        // Loop Protection
         const now = Date.now();
         const lastMsg = lastProcessedMsg[k];
-        if (lastMsg) {
-            if (lastMsg.text === input) {
-                if ((now - lastMsg.time) < LOOP_COOLDOWN) {
-                    return;
-                }
-            }
-        }
-        lastProcessedMsg[k] = { text: input, time: now };
+        if (lastMsg && lastMsg.text === payload && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+        lastProcessedMsg[k] = { text: payload, time: now };
+
+        const quotedId = getQuotedStanzaId(mek);
 
         // --- STEP 1: CARTOON SELECTION FROM SEARCH ---
         if (pendingCartoonSearch[k]) {
-            const num = parseInt(input, 10);
             const session = pendingCartoonSearch[k];
+            if (quotedId && session.expectedMsgId && quotedId !== session.expectedMsgId) return;
 
-            if (isNaN(num)) return;
-            if (num <= 0) return;
-            if (num > session.results.length) {
-                return reply(`*╭──[ ⚠️ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗢𝗣𝗧𝗜𝗢𝗡 ]──╮*\n│\n├─ 🎯 *Range:* 1 - ${session.results.length}\n╰────────────────────╯`);
+            let num = null;
+            if (payload.startsWith(".sc_select ")) {
+                num = parseInt(payload.replace(".sc_select ", "").trim(), 10);
+            } else if (/^\d+$/.test(payload)) {
+                num = parseInt(payload, 10);
             }
+
+            if (num === null || isNaN(num) || num <= 0 || num > session.results.length) return;
 
             const selectedMovie = session.results[num - 1];
             delete pendingCartoonSearch[k];
@@ -399,59 +418,116 @@ const cartoonReplyHandler = {
                     return reply(`*╭───[ ❌ 𝗘𝗥𝗥𝗢𝗥 ]───╮*\n│\n├─ 🚫 _No download options available!_\n╰───────────────────╯`);
                 }
 
-                pendingCartoonSelection[k] = {
-                    details,
-                    items,
-                    timestamp: Date.now()
-                };
-
-                const channelMeta = getChannelContext();
-                let dispTitle = details.title;
-                if (!dispTitle) dispTitle = selectedMovie.title;
+                let dispTitle = details.title || selectedMovie.title;
+                let typeName = details.isSeries ? 'TV Series' : 'Movie';
 
                 let captionText = `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡 ]─╮*\n│\n`;
                 captionText += `├─ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(dispTitle)}\n`;
                 captionText += `├─ 📅 *𝗬𝗲𝗮𝗿:* ${details.year}\n`;
                 captionText += `├─ ⭐ *𝗥𝗮𝘁𝗶𝗻𝗴:* ${details.rating}\n`;
                 captionText += `├─ 🎥 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${details.quality}\n`;
-                
-                let typeName = 'Movie';
-                if (details.isSeries) typeName = 'TV Series';
-                captionText += `├─ 📺 *𝗧𝘆𝗽𝗲:* ${typeName}\n│\n`;
-                
+                captionText += `├─ 📺 *𝗧𝘆𝗽𝗲:* ${typeName}\n`;
                 if (details.isSeries) {
-                    captionText += `├─ 📥 *𝗔𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲 𝗘𝗽𝗶𝘀𝗼𝗱𝗲𝘀:* ${items.length}\n│\n`;
-                    captionText += `├─ *👇 Reply to Select Download:* 👇\n│\n`;
-                    captionText += `├─ 📱 *[ 01 ]* 📦 Download ALL Episodes\n`;
+                    captionText += `├─ 📥 *𝗔𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲 𝗘𝗽𝗶𝘀𝗼𝗱𝗲𝘀:* ${items.length}\n`;
+                }
+                captionText += `│\n╰──────────────────╯\n\n© 2026 MALIYA-MD BOT SYSTEM`;
 
+                const settings = await readSettings(sessionId);
+                const btnsOn = !!settings.btns_enabled;
+                const posterImg = details.poster || DEFAULT_SEARCH_IMAGE;
+
+                // 🔥 ButtonV2 Episode Selection Popup
+                if (btnsOn) {
+                    try {
+                        const { ButtonV2 } = await import("@vanzxy/baileys");
+
+                        const btn = new ButtonV2(bot)
+                            .setBody(captionText)
+                            .setFooter("WaBot by MALIYA-MD Team ツ")
+                            .setThumbnail(posterImg);
+
+                        if (details.isSeries) {
+                            const episodeRows = [
+                                {
+                                    title: "📦 Download ALL Episodes",
+                                    description: `Download all ${items.length} episodes sequentially`,
+                                    id: ".sc_ep all"
+                                },
+                                ...items.map((it, idx) => ({
+                                    title: `${String(idx + 1).padStart(2, "0")}. ${it.title.substring(0, 45)}`,
+                                    description: `Download ${it.title}`,
+                                    id: `.sc_ep ${idx + 1}`
+                                }))
+                            ];
+
+                            btn.addRawButton({
+                                buttonId: "scartoon_ep_list",
+                                buttonText: { displayText: "📺 Select Episodes" },
+                                type: 1,
+                                nativeFlowInfo: {
+                                    name: "single_select",
+                                    paramsJson: JSON.stringify({
+                                        title: "Choose Episode ↯",
+                                        sections: [
+                                            {
+                                                title: "Available Episodes",
+                                                rows: episodeRows
+                                            }
+                                        ]
+                                    }),
+                                },
+                            });
+                        } else {
+                            btn.addButton("📥 Download Movie", ".sc_ep 1");
+                        }
+
+                        btn.addButton("📜 Bot Menu", ".menu");
+
+                        const sentDetailsMsg = await btn.send(from, { quoted: mek });
+
+                        if (sentDetailsMsg?.key?.id) {
+                            pendingCartoonSelection[k] = {
+                                details,
+                                items,
+                                timestamp: Date.now(),
+                                expectedMsgId: sentDetailsMsg.key.id
+                            };
+                            await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+                            return;
+                        }
+                    } catch (e) {
+                        console.log("SCARTOON DETAILS BTN ERROR:", e?.message || e);
+                    }
+                }
+
+                // 🔢 Fallback: Numbered Menu for Episodes
+                let fallbackMsg = captionText + `\n\n`;
+                if (details.isSeries) {
+                    fallbackMsg += `├─ 📱 *[ 01 ]* 📦 Download ALL Episodes\n`;
                     items.forEach((item, idx) => {
-                        let numStr = String(idx + 2);
-                        if (numStr.length === 1) numStr = "0" + numStr;
-                        captionText += `├─ 📱 *[ ${numStr} ]* 📌 ${item.title}\n`;
+                        let numStr = String(idx + 2).padStart(2, "0");
+                        fallbackMsg += `├─ 📱 *[ ${numStr} ]* 📌 ${item.title}\n`;
                     });
-
-                    captionText += `│\n╰──────────────────╯\n\n`;
-                    captionText += `💡 *Reply "01" or "all" for ALL episodes.*\n`;
-                    captionText += `💡 *Or reply with numbers (e.g., "2,3,5") for specific episodes.*`;
+                    fallbackMsg += `\n💡 *Reply with "01" or "all" for ALL episodes, or numbers like "2,3" for specific episodes.*`;
                 } else {
-                    captionText += `├─ *👇 Reply to Select Download:* 👇\n│\n`;
-                    captionText += `├─ 📱 *[ 01 ]* 📌 Download Movie\n`;
-                    captionText += `│\n╰──────────────────╯\n\n`;
-                    captionText += `💡 *Reply "1" or "01" to download.*`;
+                    fallbackMsg += `├─ 📱 *[ 01 ]* 📌 Download Movie\n\n💡 *Reply "01" to download.*`;
                 }
 
-                if (details.poster) {
-                    await bot.sendMessage(from, {
-                        image: { url: details.poster },
-                        caption: captionText,
-                        ...channelMeta
-                    }, { quoted: mek });
-                } else {
-                    await bot.sendMessage(from, {
-                        text: captionText,
-                        ...channelMeta
-                    }, { quoted: mek });
-                }
+                const channelMeta = getChannelContext();
+                const sentDetailsMsg = await bot.sendMessage(from, {
+                    image: { url: posterImg },
+                    caption: fallbackMsg,
+                    ...channelMeta
+                }, { quoted: mek });
+
+                pendingCartoonSelection[k] = {
+                    details,
+                    items,
+                    timestamp: Date.now(),
+                    expectedMsgId: sentDetailsMsg.key.id
+                };
+
+                await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
 
             } catch (err) {
                 console.error("SinhalaCartoon Details Error:", err);
@@ -461,37 +537,36 @@ const cartoonReplyHandler = {
             return;
         }
 
-        // --- STEP 2: MULTI-EPISODE SELECTION & DOWNLOAD (ONE BY ONE) ---
+        // --- STEP 2: MULTI-EPISODE SELECTION & DOWNLOAD ---
         if (pendingCartoonSelection[k]) {
-            const { details, items } = pendingCartoonSelection[k];
+            const session = pendingCartoonSelection[k];
+            if (quotedId && session.expectedMsgId && quotedId !== session.expectedMsgId) return;
 
+            const { details, items } = session;
             let selectedIndices = [];
-            const lowerInput = input.toLowerCase();
+
+            let cmdInput = payload;
+            if (cmdInput.startsWith(".sc_ep ")) {
+                cmdInput = cmdInput.replace(".sc_ep ", "").trim();
+            }
+
+            const lowerInput = cmdInput.toLowerCase();
 
             if (details.isSeries) {
-                if (lowerInput === "01") {
-                    selectedIndices = items.map((_, idx) => idx);
-                } else if (lowerInput === "1") {
-                    selectedIndices = items.map((_, idx) => idx);
-                } else if (lowerInput === "all") {
+                if (lowerInput === "all" || lowerInput === "01" || lowerInput === "1") {
                     selectedIndices = items.map((_, idx) => idx);
                 } else {
-                    const numbers = input.split(/[\s,]+/).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
-                    
+                    const numbers = cmdInput.split(/[\s,]+/).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
                     numbers.forEach(num => {
                         if (num === 1) {
                             items.forEach((_, idx) => selectedIndices.push(idx));
-                        } else if (num >= 2) {
-                            if (num <= items.length + 1) {
-                                selectedIndices.push(num - 2);
-                            }
+                        } else if (num >= 2 && num <= items.length + 1) {
+                            selectedIndices.push(num - 2);
                         }
                     });
                 }
             } else {
-                if (lowerInput === "01") {
-                    selectedIndices = [0];
-                } else if (lowerInput === "1") {
+                if (lowerInput === "01" || lowerInput === "1" || lowerInput === "all") {
                     selectedIndices = [0];
                 }
             }
@@ -507,8 +582,6 @@ const cartoonReplyHandler = {
             await reply(`*╭──[ ⬇️ 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚 ]──╮*\n│\n├─ 🚀 *Starting Download...*\n├─ 📦 *Selected Items:* ${selectedIndices.length}\n╰───────────────────╯`);
 
             const channelMeta = getChannelContext();
-
-            // 🟢 Thumbnail එක අරගන්නවා
             const thumbBuffer = await getThumbnailBuffer(details.poster);
 
             for (let i = 0; i < selectedIndices.length; i++) {
@@ -526,11 +599,8 @@ const cartoonReplyHandler = {
                         continue;
                     }
 
-                    let rawTitle = details.title;
-                    if (!rawTitle) rawTitle = "Cartoon";
-                    
-                    let rawItemTitle = selectedItem.title;
-                    if (!rawItemTitle) rawItemTitle = "";
+                    let rawTitle = details.title || "Cartoon";
+                    let rawItemTitle = selectedItem.title || "";
 
                     const cleanTitle = rawTitle.replace(/[^\w\s.-]/gi, "").substring(0, 40);
                     const cleanSubTitle = rawItemTitle.replace(/[^\w\s.-]/gi, "").substring(0, 20);
@@ -540,7 +610,6 @@ const cartoonReplyHandler = {
                         finalFileName = `MALIYA-MD ${cleanTitle} - ${cleanSubTitle}.mp4`;
                     }
 
-                    // 🟢 Document Payload එක සකස් කිරීම
                     const docPayload = {
                         document: { url: finalDirectLink },
                         mimetype: "video/mp4",
@@ -549,7 +618,6 @@ const cartoonReplyHandler = {
                         ...channelMeta
                     };
 
-                    // Thumbnail එක ඇතුළත් කිරීම
                     if (thumbBuffer) {
                         docPayload.jpegThumbnail = thumbBuffer;
                     }
