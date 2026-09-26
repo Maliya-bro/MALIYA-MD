@@ -174,7 +174,6 @@ function buildCommandMapCached() {
   return cachedMenu;
 }
 
-// ලස්සන Box Border සහිත Menu Header එක
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
@@ -396,6 +395,7 @@ cmd(
         } catch (e) {}
       }
 
+      // 🔥 ASITHA-MD EXACT STYLE: SAME ROW / LINE BUTTONS (LIST + PING)
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
@@ -411,44 +411,28 @@ cmd(
             .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
             .setThumbnail(headerImg);
 
-          // 1. Popup List Menu Button
+          // Asitha-MD style එකට එකම action array එකක් ඇතුළේ List Menu Button එක සහ Quick Reply Button එක define කිරීම
           btn.addRawButton({
-            buttonId: ".menu_all",
-            buttonText: { displayText: "≡ List Menu" },
-            type: 1,
-            nativeFlowInfo: {
-              name: "single_select",
-              paramsJson: JSON.stringify({
-                title: "Click Here ↯",
-                sections: [
-                  {
-                    title: "Command Categories",
-                    rows: listRows,
-                  },
-                ],
-              }),
-            },
+            name: "single_select",
+            buttonParamsJson: JSON.stringify({
+              title: "Click Here ↯",
+              sections: [
+                {
+                  title: "Command Categories",
+                  rows: listRows,
+                },
+              ],
+            }),
           });
 
-          // 2. Ping Button
-          btn.addButton("📊 Ping", ".ping");
-
-          // 3. Web URL Button
           btn.addRawButton({
-            buttonId: "official_web",
-            buttonText: { displayText: "🌐 Official Website" },
-            type: 1,
-            nativeFlowInfo: {
-              name: "cta_url",
-              paramsJson: JSON.stringify({
-                display_text: "🌐 Official Website",
-                url: "https://maliya-md.replit.app",
-                merchant_url: "https://maliya-md.vercel.app",
-              }),
-            },
+            name: "quick_reply",
+            buttonParamsJson: JSON.stringify({
+              display_text: "📊 Ping",
+              id: ".ping",
+            }),
           });
 
-          // සෘජුවම send() කිරීම (එවිට ෆෝන් එකට බටන්ස් සහ Popup List එක නොවරදවාම පැමිණේ)
           const sentMsg = await btn.send(from, { quoted: mek });
 
           if (sentMsg?.key?.id) {
