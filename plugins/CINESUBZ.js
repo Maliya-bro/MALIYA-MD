@@ -11,11 +11,11 @@ const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 const DEFAULT_SEARCH_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
 const SESSION_TIMEOUT = 5 * 60 * 1000;
-const LOOP_COOLDOWN = 3000;
+const LOOP_COOLDOWN = 2500;
 const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
-function makePendingKey(sender, from) {
+function keyFor(sender, from) {
   return `${from || ""}`;
 }
 
@@ -44,68 +44,55 @@ function channelContextInfo() {
   };
 }
 
-function getQuotedStanzaId(mek) {
+function getQuotedId(m, mek) {
   return (
+    m?.quoted?.id ||
     mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.imageMessage?.contextInfo?.stanzaId ||
     mek?.message?.imageMessage?.contextInfo?.stanzaId ||
-    mek?.message?.videoMessage?.contextInfo?.stanzaId ||
-    mek?.message?.documentMessage?.contextInfo?.stanzaId ||
+    m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
     mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
     null
   );
 }
 
-function safeJsonParse(str) {
-  try { return JSON.parse(str); } catch { return null; }
-}
-
-function extractIncomingPayload(body, mek, m) {
-  const paramsJson =
-    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
-    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-    
-  if (paramsJson) {
-    const parsed = safeJsonParse(paramsJson);
-    if (parsed) {
-      const btnId = parsed.id || parsed.selectedId || parsed.selectedRowId || parsed.name;
-      if (btnId) return String(btnId).trim();
-    }
+function extractTexts(body, mek, m) {
+  const texts = [];
+  const direct = [
+    body, m?.body, m?.text, m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text, m?.message?.buttonsResponseMessage?.selectedButtonId,
+    m?.message?.buttonsResponseMessage?.selectedDisplayText,
+    m?.message?.listResponseMessage?.title, m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.interactiveResponseMessage?.body?.text,
+    mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+  ];
+  for (const item of direct) {
+    if (item) texts.push(String(item).trim());
   }
 
-  const directId =
-    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    m?.message?.buttonsResponseMessage?.selectedButtonId ||
-    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    mek?.message?.buttonsResponseMessage?.selectedButtonId;
-    
-  if (directId) return String(directId).trim();
-
-  const text =
-    m?.message?.interactiveResponseMessage?.body?.text ||
-    m?.message?.conversation ||
-    m?.message?.extendedTextMessage?.text ||
-    mek?.message?.interactiveResponseMessage?.body?.text ||
-    mek?.message?.conversation ||
-    mek?.message?.extendedTextMessage?.text ||
-    body ||
-    "";
-    
-  return String(text).trim();
+  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  for (const raw of [p1, p2]) {
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.id) texts.push(String(parsed.id).trim());
+      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+      if (parsed.title) texts.push(String(parsed.title).trim());
+    } catch {}
+  }
+  return [...new Set(texts.filter(Boolean))];
 }
 
 async function getThumbnailBuffer(url) {
   const tryUrl = url || DEFAULT_SEARCH_IMAGE;
   try {
-    const res = await axios.get(tryUrl, {
-      responseType: "arraybuffer",
-      timeout: 8000,
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    
-    return await sharp(Buffer.from(res.data))
-      .resize(200, 200, { fit: 'cover' })
-      .jpeg({ quality: 50 })
-      .toBuffer();
+    const res = await axios.get(tryUrl, { responseType: "arraybuffer", timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    return await sharp(Buffer.from(res.data)).resize(200, 200, { fit: 'cover' }).jpeg({ quality: 50 }).toBuffer();
   } catch (e) {
     return null;
   }
@@ -262,16 +249,16 @@ cmd({
       }, { quoted: mek });
     }
 
-    await sock.sendMessage(from, { react: { text: "🔍", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "📺", key: mek.key } });
 
     const results = await searchCineSubz(q.trim());
     if (!results || results.length === 0) {
-      await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
       return await sendErrorMsg(sock, from, mek, `No movies found on CineSubz for "${q}".`);
     }
 
     const topResults = results.slice(0, 10);
-    const k = makePendingKey(sender, from);
+    const k = keyFor(sender, from);
     clearUserSession(k);
 
     let searchImg = DEFAULT_SEARCH_IMAGE;
@@ -287,7 +274,6 @@ cmd({
     const settings = await readSettings(sessionId);
     const btnsOn = !!settings.btns_enabled;
 
-    // 🔥 BUTTONS SYSTEM (Asitha-MD Style)
     if (btnsOn) {
       try {
         const { ButtonV2 } = await import("@vanzxy/baileys");
@@ -303,7 +289,6 @@ cmd({
           .setFooter("WaBot by MALIYA-MD Team ツ")
           .setThumbnail(searchImg);
 
-        // 1. Popup List Menu Button
         btn.addRawButton({
           buttonId: "cinesubz_movies_list",
           buttonText: { displayText: "🎬 Select Movie" },
@@ -312,17 +297,11 @@ cmd({
             name: "single_select",
             paramsJson: JSON.stringify({
               title: "CineSubz Search Results ↯",
-              sections: [
-                {
-                  title: "🎥 Available Movies",
-                  rows: movieRows
-                }
-              ]
+              sections: [{ title: "🎥 Available Movies", rows: movieRows }]
             }),
           },
         });
 
-        // 2. Bot Menu Button
         btn.addButton("📜 Bot Menu", ".menu");
 
         const sentMsg = await btn.send(from, { quoted: mek });
@@ -335,7 +314,7 @@ cmd({
             isProcessing: false,
             expectedMsgId: sentMsg.key.id 
           };
-          await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+          await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
           return;
         }
       } catch (e) {
@@ -343,17 +322,12 @@ cmd({
       }
     }
 
-    // 🔢 FALLBACK NUMBERED MENU
-    let text = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
-    text += "🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n";
-    text += "⊱━━━━━ • ✿ • ━━━━━⊰\n\n";
-    text += `🎀 *Search :* ${q}\n`;
-    text += `🍿 *Results :* ${topResults.length}\n\n`;
-
+    // Numbered Fallback
+    let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n`;
     topResults.forEach((item, index) => {
       text += `*[ ${String(index + 1).padStart(2, "0")} ]* ➔ *${item.title}*\n`;
     });
-    text += "\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 💬 *Please reply to this message with a number...*";
+    text += "\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 💬 *Swipe & Reply this message with a number...*";
 
     const sentMsg = await sock.sendMessage(from, { image: { url: searchImg }, caption: text, contextInfo: channelContextInfo() }, { quoted: mek });
     
@@ -365,54 +339,70 @@ cmd({
       expectedMsgId: sentMsg.key.id 
     };
 
-    await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
   } catch (error) {
-    await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
     await sendErrorMsg(sock, from, mek, "Failed to connect to CineSubz search server.");
   }
 });
 
 /* ================= REPLY HANDLER ================= */
 const csReplyHandler = {
-  filter: (text, { sender, from }) => {
-    const k = makePendingKey(sender, from);
-    return !!pendingCineSubz[k];
-  },
-  function: async (sock, mek, m, { body, sender, from, sessionId }) => {
-    const payload = extractIncomingPayload(body, mek, m);
-    if (!payload) return;
+  filter: (text, { sender, from, m, mek }) => {
+    const k = keyFor(sender, from);
+    const pending = pendingCineSubz[k];
+    if (!pending) return false;
 
-    let choice = null;
-    if (payload.startsWith(".cs_select ")) {
-      choice = parseInt(payload.replace(".cs_select ", "").trim(), 10);
-    } else if (payload.startsWith(".cs_dl ")) {
-      choice = parseInt(payload.replace(".cs_dl ", "").trim(), 10);
-    } else if (/^\d+$/.test(payload)) {
-      choice = parseInt(payload, 10);
+    const texts = extractTexts(text, mek, m);
+    for (const t of texts) {
+      if (t.startsWith(".cs_select ") || t.startsWith(".cs_dl ")) return true;
     }
 
-    if (choice === null || isNaN(choice)) return;
+    const num = parseInt(String(text || "").trim(), 10);
+    const max = pending.step === 1 ? (pending.results?.length || 0) : (pending.movie?.downloadLinks?.length || 0);
+    const isNum = !isNaN(num) && num > 0 && num <= max;
 
-    const k = makePendingKey(sender, from);
+    const quotedId = getQuotedId(m, mek);
+    const isQuoted = quotedId && quotedId === pending.expectedMsgId;
+
+    return isQuoted || isNum;
+  },
+  function: async (sock, mek, m, { body, sender, from, sessionId }) => {
+    const k = keyFor(sender, from);
     const pending = pendingCineSubz[k];
     if (!pending || pending.isProcessing) return;
 
-    // Quoted reply validation
-    const quotedId = getQuotedStanzaId(mek);
-    if (quotedId && pending.expectedMsgId && quotedId !== pending.expectedMsgId) {
-      return;
+    const texts = extractTexts(body, mek, m);
+    let choice = null;
+
+    for (const t of texts) {
+      if (t.startsWith(".cs_select ")) {
+        choice = parseInt(t.replace(".cs_select ", "").trim(), 10);
+        break;
+      }
+      if (t.startsWith(".cs_dl ")) {
+        choice = parseInt(t.replace(".cs_dl ", "").trim(), 10);
+        break;
+      }
     }
+
+    if (choice === null) {
+      const num = parseInt(String(body || "").trim(), 10);
+      if (!isNaN(num)) choice = num;
+    }
+
+    if (!choice || choice < 1) return;
 
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === payload && (now - lastMsg.time) < LOOP_COOLDOWN) return;
-    lastProcessedMsg[k] = { text: payload, time: now };
+    if (lastMsg && lastMsg.text === String(choice) && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+    lastProcessedMsg[k] = { text: String(choice), time: now };
 
-    // STEP 1: Process Movie Choice & Show Qualities
+    // STEP 1: Select Movie
     if (pending.step === 1) {
-      if (choice < 1 || choice > pending.results.length) return;
+      if (choice > pending.results.length) return;
       pending.isProcessing = true;
-      await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
       const selected = pending.results[choice - 1];
       try {
@@ -447,7 +437,6 @@ const csReplyHandler = {
         const settings = await readSettings(sessionId);
         const btnsOn = !!settings.btns_enabled;
 
-        // 🔥 BUTTONS SYSTEM (Quality List Popup)
         if (btnsOn) {
           try {
             const { ButtonV2 } = await import("@vanzxy/baileys");
@@ -463,7 +452,6 @@ const csReplyHandler = {
               .setFooter("WaBot by MALIYA-MD Team ツ")
               .setThumbnail(imgToSend);
 
-            // 1. Popup List Menu Button
             btn.addRawButton({
               buttonId: "cinesubz_quality_list",
               buttonText: { displayText: "📥 Select Quality" },
@@ -472,17 +460,11 @@ const csReplyHandler = {
                 name: "single_select",
                 paramsJson: JSON.stringify({
                   title: "Choose Quality & Size ↯",
-                  sections: [
-                    {
-                      title: "📊 Available Qualities",
-                      rows: qualityRows
-                    }
-                  ]
+                  sections: [{ title: "📊 Available Qualities", rows: qualityRows }]
                 }),
               },
             });
 
-            // 2. Bot Menu Button
             btn.addButton("📜 Bot Menu", ".menu");
 
             const sentQualityMsg = await btn.send(from, { quoted: mek });
@@ -493,7 +475,7 @@ const csReplyHandler = {
               pending.timestamp = Date.now();
               pending.isProcessing = false;
               pending.expectedMsgId = sentQualityMsg.key.id;
-              await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+              await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
               return;
             }
           } catch (e) {
@@ -501,18 +483,15 @@ const csReplyHandler = {
           }
         }
 
-        // 🔢 FALLBACK NUMBERED QUALITY MENU
-        let qualityMsg = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
-        qualityMsg += "📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n"; 
-        qualityMsg += "⊱━━━━━ • ✿ • ━━━━━⊰\n\n";
-        qualityMsg += `🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
+        // Fallback Quality Numbered Menu
+        let qualityMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
         if (movieInfo.imdb_rate) qualityMsg += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
         if (movieInfo.duration) qualityMsg += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
 
         downloadLinks.forEach((d, i) => {
           qualityMsg += `*[ ${String(i + 1).padStart(2, "0")} ]* 📊 *${d.quality}*\n`;
         });
-        qualityMsg += "\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Please reply to this message with a quality number...*";
+        qualityMsg += "\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Swipe & Reply this message with a quality number...*";
 
         const sentQualityMsg = await sock.sendMessage(from, { image: { url: imgToSend }, caption: qualityMsg, contextInfo: channelContextInfo() }, { quoted: mek });
 
@@ -522,17 +501,17 @@ const csReplyHandler = {
         pending.isProcessing = false;
         pending.expectedMsgId = sentQualityMsg.key.id;
 
-        await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
       } catch (error) {
         clearUserSession(k);
         await sendErrorMsg(sock, from, mek, "Failed to fetch download links for this movie.");
       }
     }
-    // STEP 2: Process Quality Choice & Direct Download
+    // STEP 2: Process Download
     else if (pending.step === 2) {
-      if (choice < 1 || choice > pending.movie.downloadLinks.length) return;
+      if (choice > pending.movie.downloadLinks.length) return;
       pending.isProcessing = true;
-      await sock.sendMessage(from, { react: { text: "⬆️", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
 
       const { movie } = pending;
       const selectedLink = movie.downloadLinks[choice - 1];
@@ -546,25 +525,18 @@ const csReplyHandler = {
         if (targetServerLink.endsWith('.mp4') && !targetServerLink.includes('?ext=')) targetServerLink = targetServerLink.replace('.mp4', '?ext=mp4');
 
         const finalResult = await getCineSubzLinks(targetServerLink);
-        
         const correctPosterUrl = movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE;
         const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
 
         if (!finalResult.success || !finalResult.links || finalResult.links.length === 0) {
-          let fallbackText = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
-          fallbackText += "⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n";
-          fallbackText += "⊱━━━━━ • ✿ • ━━━━━⊰\n\n";
-          fallbackText += `🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n`;
-          fallbackText += `📊 *Quality :* ${selectedLink.quality}\n\n`;
-          fallbackText += "ℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය. කරුණාකර පසුව නැවත උත්සාහ කරන්න._\n\n";
-          fallbackText += "⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
+          let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\nℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය._\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
           if (thumbBuffer) {
              await sock.sendMessage(from, { image: thumbBuffer, caption: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
           } else {
              await sock.sendMessage(from, { text: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
           }
-          return await sock.sendMessage(from, { react: { text: "⚠️", key: m.key } });
+          return await sock.sendMessage(from, { react: { text: "⚠️", key: mek.key } });
         }
 
         const allLinks = finalResult.links;
@@ -574,12 +546,7 @@ const csReplyHandler = {
         let directDownloadUrl = terracloudLinks[0] || pixeldrainLinks[0] || null;
         const cleanTitle = movie.metadata.title.replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
 
-        let captionText = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
-        captionText += "✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n";
-        captionText += "⊱━━━━━ • ✿ • ━━━━━⊰\n\n";
-        captionText += `🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n`;
-        captionText += `📊 *Quality :* ${selectedLink.quality}\n\n`;
-        captionText += "⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
+        let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
         if (directDownloadUrl) {
           const docPayload = {
@@ -589,17 +556,12 @@ const csReplyHandler = {
             caption: captionText,
             contextInfo: channelContextInfo()
           };
-          
-          if (thumbBuffer) {
-             docPayload.jpegThumbnail = thumbBuffer;
-          }
-          
+          if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
           await sock.sendMessage(from, docPayload, { quoted: mek });
         } else {
           await sock.sendMessage(from, { text: captionText, contextInfo: channelContextInfo() }, { quoted: mek });
         }
-        await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
-
+        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
       } catch (error) {
         await sendErrorMsg(sock, from, mek, `Failed to download movie: ${error.message}`);
       }
