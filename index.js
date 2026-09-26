@@ -37,6 +37,7 @@ process.on("uncaughtException", (err) => {
 });
 
 /* ==================== IMPORTS ==================== */
+const baileysPkg = require("@whiskeysockets/baileys");
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -46,7 +47,7 @@ const {
   downloadContentFromMessage,
   fetchLatestBaileysVersion,
   Browsers,
-} = require("@whiskeysockets/baileys");
+} = baileysPkg;
 
 const fs      = require("fs");
 const P       = require("pino");
@@ -60,6 +61,16 @@ const config            = require("./config");
 const { readSettings, isWorkAllowed } = require("./lib/botSettings");
 const { sms }           = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
+
+// ── Native Flow / Button V2 Injector ──────────────────────
+let lunaHelper = null;
+try {
+  lunaHelper = require("@ryuu-reinzz/luna-lib");
+} catch (_) {
+  try {
+    lunaHelper = require("@vanzxy/baileys");
+  } catch (__) {}
+}
 
 // ── Settings API Router Import ──────────────────────────────
 let settingsApiRouter = null;
@@ -99,16 +110,14 @@ const app  = express();
 const port = process.env.PORT || 8000;
 
 /* ==================== MIDDLEWARES ==================== */
-// ✅ Web එකෙන් එන requests වලට ඉඩ දෙන්න CORS වෙනස් කළා
 app.use(cors({ 
   origin: function(origin, callback) {
-    callback(null, true); // ඕනෑම තැනකින් එන request එකකට අවසර දෙනවා
+    callback(null, true);
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "x-settings-token"]
 }));
-// ✅ පින්තූර (3MB දක්වා) Upload කරන්න ඉඩ දෙනවා
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -245,15 +254,13 @@ function loadCommandPluginsOnce() {
     fs.readdirSync("./plugins/").forEach((plugin) => {
       if (plugin === "auto_msg.js")   return;
       if (plugin === "antidelete.js") return;
-      if (plugin === "anti-spam.js")  return; // Loaded manually
+      if (plugin === "anti-spam.js")  return;
       
       if (plugin.endsWith(".js")) {
         try {
-          // 🛠️ මෙතනින් තමයි file එක load කරන්නේ
           require(`./plugins/${plugin}`);
           successCount++;
         } catch (e) {
-          // 🚨 Error එකක් ආවොත් හරියටම File එකේ නමත් එක්කම පෙන්වයි!
           console.log(`\n❌ [PLUGIN ERROR] අවුල තියෙන ෆයිල් එක: ${plugin}`);
           console.log(`⚠️ Error Message:`, e?.message || e, `\n`);
           errorCount++;
@@ -317,7 +324,7 @@ function getBodyFromMessage(message) {
 }
 
 /* ==================== MULTI-SESSION MANAGER ==================== */
-const activeSessions  = new Map();
+const activeSessions   = new Map();
 const reconnectTimers = new Map();
 const startingSessions = new Set();
 let   watcherStarted   = false;
@@ -422,6 +429,16 @@ async function startSessionBot(sessionId) {
       generateHighQualityLinkPreview: true,
     });
 
+    // ── 🔥 ASITHA-MD / LUNA LIB NATIVE FLOW SOCKET INJECTOR 🔥 ──
+    if (lunaHelper && typeof lunaHelper.addProperty === "function") {
+      try {
+        lunaHelper.addProperty(sock, baileysPkg);
+        console.log(`✨ Native Flow UI injected for session: ${sessionId}`);
+      } catch (injErr) {
+        console.log("⚠️ Injector notice:", injErr?.message || injErr);
+      }
+    }
+
     sessionCtx.sock = sock;
     activeSessions.set(sessionId, sessionCtx);
     startingSessions.delete(sessionId);
@@ -469,7 +486,7 @@ async function startSessionBot(sessionId) {
 ✅✨ Connection : CONNECTED & ONLINE
 ⚡🧬 System     : STABLE | FAST | SECURE
 🛡️🔐 Mode       : ${String(settings.mode || "public").toUpperCase()}
-🎯🧩 Prefix    : ${prefix}
+🎯🧩 Prefix     : ${prefix}
 📍 Work Scope  : ${String(settings.work_scope || "private").toUpperCase()}
 
 🧑‍💻👑 Owner    : ${BOT_OWNER_NAME}
@@ -568,10 +585,6 @@ function startSessionWatcher() {
         primaryFile: { $exists: true },
         status:      { $nin: ["logged_out", "deleted", "disabled", "invalid"] },
       }).toArray();
-
-      console.log(
-        `🔍 Watcher tick: found ${docs.length} session(s) in DB [${MONGODB_DB}/${SESSION_COLLECTION}]`
-      );
 
       for (const doc of docs) {
         const id = doc.sessionId;
@@ -765,7 +778,7 @@ function attachSessionHandlers(sock, sessionCtx) {
         //  NORMAL MESSAGE HANDLING
         // ============================================================
         const m    = sms(sock, mek);
-        let   body = String(getBodyFromMessage(mek.message) || "").trim();
+        let    body = String(getBodyFromMessage(mek.message) || "").trim();
 
         let isCmd       = body.startsWith(prefix);
         let commandName = isCmd
@@ -798,7 +811,6 @@ function attachSessionHandlers(sock, sessionCtx) {
 
         // ── WORK SCOPE CHECK ────────────────────────────────────
         if (!(await isWorkAllowed(sessionCtx.sessionId, isGroup))) {
-          console.log(`⏭️ Skipping message: work_scope disallows ${isGroup ? "group" : "private"} chat for ${sessionCtx.sessionId}`);
           continue messageLoop;
         }
 
@@ -814,14 +826,14 @@ function attachSessionHandlers(sock, sessionCtx) {
           console.log("AutoReact hook error:", e?.message || e);
         }
 
-        // ── 🔥 ANTI SPAM PLUGIN HOOK 🔥 ───────────────────────────────────
+        // ── ANTI SPAM PLUGIN HOOK ──────────────────────────────
         if (antiSpamPlugin && typeof antiSpamPlugin.handleAntiSpam === "function") {
           try {
             const isAllowed = await antiSpamPlugin.handleAntiSpam(sock, mek, m, {
               from, sender, senderNumber, isOwner, reply,
               sessionId: sessionCtx.sessionId
             });
-            if (!isAllowed) continue messageLoop; // 🚫 Block spammer!
+            if (!isAllowed) continue messageLoop;
           } catch (e) {
             console.log("AntiSpam error:", e?.message);
           }
@@ -995,8 +1007,6 @@ function attachSessionHandlers(sock, sessionCtx) {
 }
 
 /* ==================== EXPRESS ROUTING & APIS ==================== */
-
-// ✅ Web එකෙන් එන API requests අල්ලගන්නේ මෙතනින් 
 if (settingsApiRouter) {
   app.use("/api/settings", settingsApiRouter);
 }
