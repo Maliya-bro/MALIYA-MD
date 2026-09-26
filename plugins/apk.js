@@ -7,12 +7,12 @@ const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 const DEFAULT_APK_IMAGE = "https://github.com/Maliya-bro/web-pair/blob/main/Gemini_Generated_Image_xmzfzfxmzfzfxmzf.jpg?raw=true";
 const SESSION_TIMEOUT = 5 * 60 * 1000;
-const LOOP_COOLDOWN = 3000;
+const LOOP_COOLDOWN = 2500;
 
 const pendingApkSearch = {};
 const lastProcessedMsg = {};
 
-function makePendingKey(sender, from) {
+function keyFor(sender, from) {
   return `${from || ""}`;
 }
 
@@ -32,53 +32,56 @@ function channelContextInfo() {
   };
 }
 
-function safeJsonParse(str) {
-  try { return JSON.parse(str); } catch { return null; }
-}
-
-function getQuotedStanzaId(mek, m) {
+// menu.js එකේ 100% වැඩ කරන Quoted ID Extraction Helper එක
+function getQuotedId(m, mek) {
   return (
     m?.quoted?.id ||
     mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
     m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.imageMessage?.contextInfo?.stanzaId ||
     mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+    m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
     mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
     null
   );
 }
 
-function extractIncomingPayload(body, mek, m) {
-  const paramsJson =
-    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
-    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-    
-  if (paramsJson) {
-    const parsed = safeJsonParse(paramsJson);
-    if (parsed) {
-      const btnId = parsed.id || parsed.selectedId || parsed.selectedRowId || parsed.name;
-      if (btnId) return { payload: String(btnId).trim(), isButton: true };
-    }
+// menu.js එකේ texts extract කරන exact helper එක
+function extractTexts(body, mek, m) {
+  const texts = [];
+  const direct = [
+    body,
+    m?.body,
+    m?.text,
+    m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text,
+    m?.message?.buttonsResponseMessage?.selectedButtonId,
+    m?.message?.buttonsResponseMessage?.selectedDisplayText,
+    m?.message?.listResponseMessage?.title,
+    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.interactiveResponseMessage?.body?.text,
+    mek?.message?.conversation,
+    mek?.message?.extendedTextMessage?.text,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+  ];
+  for (const item of direct) {
+    if (item) texts.push(String(item).trim());
   }
 
-  const directId =
-    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    m?.message?.buttonsResponseMessage?.selectedButtonId ||
-    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    mek?.message?.buttonsResponseMessage?.selectedButtonId;
-    
-  if (directId) return { payload: String(directId).trim(), isButton: true };
-
-  const text =
-    m?.message?.interactiveResponseMessage?.body?.text ||
-    m?.message?.conversation ||
-    m?.message?.extendedTextMessage?.text ||
-    mek?.message?.interactiveResponseMessage?.body?.text ||
-    mek?.message?.conversation ||
-    mek?.message?.extendedTextMessage?.text ||
-    body ||
-    "";
-    
-  return { payload: String(text).trim(), isButton: false };
+  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  for (const raw of [p1, p2]) {
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.id) texts.push(String(parsed.id).trim());
+      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+      if (parsed.title) texts.push(String(parsed.title).trim());
+    } catch {}
+  }
+  return [...new Set(texts.filter(Boolean))];
 }
 
 const UA = "Mozilla/5.0 (Linux; Android 11; Redmi Note 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
@@ -98,7 +101,7 @@ function extractPkgFromEl($, el) {
   return extractPkg(href);
 }
 
-async function apkSearch(query, limit = 5) {
+async function apkSearch(query, limit = 8) {
   if (!query?.trim()) throw new Error("Query is empty");
   const { data } = await axios.get(`${BASE}/search?q=${encodeURIComponent(query)}`, {
     headers: HEADERS,
@@ -155,10 +158,10 @@ cmd({
       }, { quoted: mek });
     }
 
-    await sock.sendMessage(from, { react: { text: "🔍", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "🔍", key: mek.key } });
 
     const results = await apkSearch(q.trim(), 8);
-    const k = makePendingKey(sender, from);
+    const k = keyFor(sender, from);
     clearUserSession(k);
 
     const settings = await readSettings(sessionId);
@@ -218,7 +221,7 @@ cmd({
             timestamp: Date.now(),
             isProcessing: false,
           };
-          await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+          await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
           return;
         }
       } catch (err) {
@@ -226,6 +229,7 @@ cmd({
       }
     }
 
+    // Numbered List Fallback
     let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
     text += `📦 *𝐀𝐏𝐊 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n`;
     text += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
@@ -253,63 +257,65 @@ cmd({
       isProcessing: false,
     };
 
-    await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
   } catch (e) {
-    await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
     await sendErrorMsg(sock, from, mek, e.message || "Failed to search APK.");
   }
 });
 
-/* ================= REPLY HANDLER ================= */
+/* ================= EXACT MENU.JS STYLE REPLY HANDLER ================= */
 const apkReplyHandler = {
   filter: (text, { from, sender, mek, m }) => {
-    const k = makePendingKey(sender, from);
-    const pending = pendingApkSearch[k];
-    if (!pending) return false;
+    const k = keyFor(sender, from);
+    const state = pendingApkSearch[k];
+    if (!state) return false;
 
-    const { payload, isButton } = extractIncomingPayload(text, mek, m);
-    if (!payload) return false;
-
-    if (isButton && payload.startsWith(".apk_dl ")) return true;
-
-    if (/^\d+$/.test(payload)) {
-      const quotedId = getQuotedStanzaId(mek, m);
-      return Boolean(quotedId && quotedId === pending.expectedMsgId);
+    const texts = extractTexts(text, mek, m);
+    for (const t of texts) {
+      if (t.startsWith(".apk_dl ")) return true;
     }
 
-    return false;
+    const num = parseInt(String(text || "").trim(), 10);
+    const isNum = !isNaN(num) && num > 0 && num <= state.results.length;
+
+    const quotedId = getQuotedId(m, mek);
+    const isQuoted = quotedId && quotedId === state.expectedMsgId;
+
+    // Quoted reply නම් හෝ valid number එකක් නම් 100% allow කරයි
+    return isQuoted || isNum;
   },
   function: async (sock, mek, m, { body, from, sender }) => {
-    const { payload, isButton } = extractIncomingPayload(body, mek, m);
-    if (!payload) return;
+    const k = keyFor(sender, from);
+    const state = pendingApkSearch[k];
+    if (!state || state.isProcessing) return;
 
-    const k = makePendingKey(sender, from);
-    const pending = pendingApkSearch[k];
-    if (!pending || pending.isProcessing) return;
+    const texts = extractTexts(body, mek, m);
+    let choice = null;
 
-    if (!isButton) {
-      const quotedId = getQuotedStanzaId(mek, m);
-      if (!quotedId || quotedId !== pending.expectedMsgId) {
-        return;
+    for (const t of texts) {
+      if (t.startsWith(".apk_dl ")) {
+        choice = parseInt(t.replace(".apk_dl ", "").trim(), 10);
+        break;
       }
     }
 
-    let choice = null;
-    if (payload.startsWith(".apk_dl ")) {
-      choice = parseInt(payload.replace(".apk_dl ", "").trim(), 10);
-    } else if (/^\d+$/.test(payload)) {
-      choice = parseInt(payload, 10);
+    if (choice === null) {
+      const num = parseInt(String(body || "").trim(), 10);
+      if (!isNaN(num) && num > 0 && num <= state.results.length) {
+        choice = num;
+      }
     }
 
-    if (choice === null || isNaN(choice) || choice < 1 || choice > pending.results.length) return;
+    if (!choice || choice < 1 || choice > state.results.length) return;
 
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === payload && (now - lastMsg.time) < LOOP_COOLDOWN) return;
-    lastProcessedMsg[k] = { text: payload, time: now };
+    if (lastMsg && lastMsg.text === String(choice) && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+    lastProcessedMsg[k] = { text: String(choice), time: now };
 
-    pending.isProcessing = true;
-    const selected = pending.results[choice - 1];
+    state.isProcessing = true;
+    const selected = state.results[choice - 1];
 
     await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
