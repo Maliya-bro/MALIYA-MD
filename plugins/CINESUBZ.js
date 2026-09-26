@@ -238,7 +238,7 @@ cmd({
   alias: ["cinesub", "cs", "cssearch", "film", "movie"],
   react: "🎬",
   desc: "Search and send movies from Cinesubz.co",
-  category: "download",
+  category: "movie",
   filename: __filename
 }, async (sock, mek, m, { from, q, sender, sessionId }) => {
   try {
