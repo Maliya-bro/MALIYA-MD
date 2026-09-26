@@ -34,8 +34,8 @@ const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
   ? `+${OWNER_NUMBER_RAW}`
   : "Not Set";
 
-const DEFAULT_HEADER_IMAGE =
-  "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
+// හොඳින් වැඩ කරන Default Image URL එකක් (134B error එක නොඑන්න)
+const FALLBACK_JPG_URL = "https://telegra.ph/file/2a2671bf99e4c5f8b7570.jpg";
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
@@ -285,37 +285,28 @@ function isDuplicateAction(state, action) {
   return false;
 }
 
-async function getSafeBuffer(url) {
-  try {
-    const res = await axios.get(url, {
-      responseType: "arraybuffer",
-      timeout: 8000,
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
-    return Buffer.from(res.data);
-  } catch (err) {
-    return Buffer.from(
-      "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
-      "base64"
-    );
-  }
-}
-
-async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId) {
-  let headerImg = DEFAULT_HEADER_IMAGE;
+// නිවැරදි Image එක ලබාගන්නා Function එක (134B error එක කීයටවත් එන්නේ නැත)
+async function getValidImagePayload(sessionId) {
   if (sessionId) {
     try {
       const custom = await getCustomImage(sessionId, "menu_header");
-      if (custom && custom.data) headerImg = custom.data;
+      if (custom && custom.data) {
+        if (Buffer.isBuffer(custom.data)) return custom.data;
+        if (typeof custom.data === "string" && custom.data.startsWith("http")) {
+          return { url: custom.data };
+        }
+      }
     } catch (e) {}
   }
+  return { url: FALLBACK_JPG_URL };
+}
 
-  const imgBuf = await getSafeBuffer(headerImg);
-
+async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId) {
+  const imgPayload = await getValidImagePayload(sessionId);
   return await sock.sendMessage(
     from,
     {
-      image: imgBuf,
+      image: imgPayload,
       caption: commandListCaption(cat, list, userName),
       contextInfo: channelContextInfo(),
     },
@@ -329,7 +320,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Exact Asitha-MD Location + Side-by-Side List & Ping Button",
+    desc: "Asitha-MD Location + Side-by-Side List & Ping Button",
     category: "main",
     filename: __filename,
   },
@@ -357,48 +348,29 @@ cmd(
       const settings = await readSettings(sessionId);
       const btnsOn = !!settings.btns_enabled;
 
-      let headerImg = DEFAULT_HEADER_IMAGE;
-      if (sessionId) {
-        try {
-          const custom = await getCustomImage(sessionId, "menu_header");
-          if (custom && custom.data) headerImg = custom.data;
-        } catch (e) {}
-      }
-
-      const rawBuf = await getSafeBuffer(headerImg);
-
       if (btnsOn) {
         try {
-          const vanzxy = await import("@vanzxy/baileys");
-          const { generateWAMessageFromContent, ButtonV2 } = vanzxy;
+          // .ping එකේ පාවිච්චි කරපු ButtonV2 එකම ගැනීම
+          const { ButtonV2 } = await import("@vanzxy/baileys");
 
-          let thumbBuf = rawBuf;
-          if (ButtonV2 && typeof ButtonV2.resize === "function") {
-            try {
-              thumbBuf = await ButtonV2.resize(rawBuf, 300, 300);
-            } catch {}
-          }
-
-          // Asitha-MD Exact Row Format (rows ඇතුළේ header property එක නැත)
           const listRows = categories.map((cat) => ({
             title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
             description: `Show ${cat.toLowerCase()} command list`,
             id: `.menu_view ${cat}`,
           }));
 
-          // 1. ButtonV2 මඟින් Location Header සහිත බටන් සැකසීම
           const btn = new ButtonV2(sock)
             .setBody(menuHeader(userName))
             .setFooter(
               "© MALIYA-MD Lite Bot v1.0.0\nWaBot by Maliya MD Team ツ\n\n🌐 Web: https://maliya-md.replit.app"
             )
-            .setThumbnail(thumbBuf);
+            .setThumbnail(FALLBACK_JPG_URL);
 
-          // Button 1: List Menu (type: 4 NATIVE_FLOW inside buttonsMessage)
+          // 1. Asitha-MD List Button (ButtonV2 ඇතුළේ addRawButton මඟින්)
           btn.addRawButton({
             buttonId: ".menu_all",
             buttonText: { displayText: "≡ List Menu" },
-            type: 4,
+            type: 2,
             nativeFlowInfo: {
               name: "single_select",
               paramsJson: JSON.stringify({
@@ -413,35 +385,32 @@ cmd(
             },
           });
 
-          // Button 2: Ping (type: 1 QUICK_REPLY)
+          // 2. Ping Button
           btn.addButton("📊 Ping", ".ping");
 
+          // .build() මඟින් මැසේජ් එක සාදාගැනීම
           const built = await btn.build(from, { quoted: mek });
 
-          // 🔥 Asitha-MD රහස: viewOnceMessage ඉවත් කර කෙළින්ම buttonsMessage යැවීම (එවිට Web WA වලද පෙනේ, Update WA වැටෙන්නේද නැත!)
-          const innerButtonsMsg =
+          // viewOnceMessage කවරය ඉවත් කර කෙළින්ම buttonsMessage ගැනීම (එවිට Web WA වලත් පෙනේ!)
+          const rawButtonsMsg =
             built.message?.viewOnceMessage?.message?.buttonsMessage ||
             built.message?.buttonsMessage;
 
-          const finalMsg = generateWAMessageFromContent(
-            from,
-            {
-              buttonsMessage: innerButtonsMsg,
-            },
-            { quoted: mek }
-          );
+          const msgContent = rawButtonsMsg
+            ? { buttonsMessage: rawButtonsMsg }
+            : built.message;
 
-          // නිවැරදි Binary Nodes: buttons + native_flow (v: "9", name: "mixed")
-          await sock.relayMessage(from, finalMsg.message, {
-            messageId: finalMsg.key.id,
+          // නිවැරදි Binary Node එක සමඟ relay කිරීම
+          await sock.relayMessage(from, msgContent, {
+            messageId: built.key.id,
             additionalNodes: [
               {
                 tag: "biz",
                 attrs: {},
                 content: [
                   {
-                    tag: "buttons",
-                    attrs: {},
+                    tag: "interactive",
+                    attrs: { type: "native_flow", v: "1" },
                     content: [
                       {
                         tag: "native_flow",
@@ -454,19 +423,20 @@ cmd(
             ],
           });
 
-          state.expectedMsgId = finalMsg.key.id;
+          state.expectedMsgId = built.key.id;
           pendingMenu[k] = state;
           return;
         } catch (err) {
-          console.log("ASITHA EXACT MENU ERROR:", err);
+          console.log("BUTTONV2 MENU ERROR:", err);
         }
       }
 
-      // Fallback: Numbered Menu
+      // Fallback: Numbered Menu (නිවැරදි Image URL එක යවන නිසා 134B error එක එන්නේ නැත)
+      const imgPayload = await getValidImagePayload(sessionId);
       const sentMsg = await sock.sendMessage(
         from,
         {
-          image: rawBuf,
+          image: imgPayload,
           caption: buildStyledMainMenu(state, userName),
           contextInfo: channelContextInfo(),
         },
@@ -484,7 +454,7 @@ cmd(
   }
 );
 
-/* ================= COMMAND: .menu_all (WhatsApp Web Click Handler) ================= */
+/* ================= COMMAND: .menu_all ================= */
 cmd(
   {
     pattern: "menu_all",
@@ -497,15 +467,6 @@ cmd(
       const userName = getUserName(pushname, m, mek, sender);
       const k = keyFor(sender, from);
 
-      let headerImg = DEFAULT_HEADER_IMAGE;
-      if (sessionId) {
-        try {
-          const custom = await getCustomImage(sessionId, "menu_header");
-          if (custom && custom.data) headerImg = custom.data;
-        } catch (e) {}
-      }
-      const imgBuf = await getSafeBuffer(headerImg);
-
       const state = pendingMenu[k] || {
         expectedMsgId: null,
         map,
@@ -515,10 +476,11 @@ cmd(
         timestamp: Date.now(),
       };
 
+      const imgPayload = await getValidImagePayload(sessionId);
       const sentMsg = await sock.sendMessage(
         from,
         {
-          image: imgBuf,
+          image: imgPayload,
           caption: buildStyledMainMenu(state, userName),
           contextInfo: channelContextInfo(),
         },
@@ -608,18 +570,11 @@ const menuReplyHandler = {
       const userName = state.userName || getUserName(pushname, m, mek, sender);
 
       if (action.type === "all") {
-        let headerImg = DEFAULT_HEADER_IMAGE;
-        if (state.sessionId) {
-          try {
-            const custom = await getCustomImage(state.sessionId, "menu_header");
-            if (custom && custom.data) headerImg = custom.data;
-          } catch (e) {}
-        }
-        const imgBuf = await getSafeBuffer(headerImg);
+        const imgPayload = await getValidImagePayload(state.sessionId);
         const sent = await sock.sendMessage(
           from,
           {
-            image: imgBuf,
+            image: imgPayload,
             caption: buildStyledMainMenu(state, userName),
             contextInfo: channelContextInfo(),
           },
