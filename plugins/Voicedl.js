@@ -88,7 +88,20 @@ function getTypeLabel(choice) {
 }
 
 function normalizeText(s = "") { return String(s).replace(/\r/g, "").replace(/\n+/g, "\n").replace(/\s+/g, " ").trim().toUpperCase(); }
-function makePendingKey(sender, from) { return `${from || ""}::${(sender || "").split(":")[0]}`; }
+function keyFor(sender, from) { return `${from || ""}`; }
+
+function getQuotedId(m, mek) {
+  return (
+    m?.quoted?.id ||
+    mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.imageMessage?.contextInfo?.stanzaId ||
+    mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+    m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    null
+  );
+}
 
 function extractTexts(body, mek, m) {
   const texts = [];
@@ -105,22 +118,21 @@ function extractTexts(body, mek, m) {
     mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
     mek?.message?.interactiveResponseMessage?.body?.text
   ];
+  for (const item of direct) {
+    if (item) texts.push(String(item).trim());
+  }
   
   const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  if (p1) direct.push(p1);
-  if (p2) direct.push(p2);
-
-  for (const item of direct) {
-    if (!item) continue;
-    if (typeof item === "string" && item.startsWith("{")) {
-      try {
-        const parsed = JSON.parse(item);
-        if (parsed.id) texts.push(String(parsed.id).trim());
-        if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
-      } catch {}
-    }
-    texts.push(String(item).trim());
+  for (const raw of [p1, p2]) {
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.id) texts.push(String(parsed.id).trim());
+      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+      if (parsed.title) texts.push(String(parsed.title).trim());
+    } catch {}
   }
   return [...new Set(texts.filter(Boolean))];
 }
@@ -160,7 +172,6 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// 🔘 Quick Reply Buttons පමණක් සහිත ButtonV2 Menu
 async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
@@ -184,7 +195,6 @@ async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
     }
   }
 
-  // Fallback: Numbered Menu
   return sock.sendMessage(
     from,
     {
@@ -268,7 +278,7 @@ async function convertAudio(inputPath, outputPath, isPtt = false) {
 }
 
 async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
-  const key = makePendingKey(sender, from);
+  const key = keyFor(sender, from);
   const pending = pendingAudioType[key];
   if (!pending || pending.isProcessing) return;
 
@@ -341,7 +351,7 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
 }
 
 /* ================= COMMAND: .song ================= */
-cmd({
+cmd({ 
   
   pattern: "song",
   alias: ["ytmp3", "yta", "mp3", "play"],
@@ -349,33 +359,57 @@ cmd({
   desc: "Download YouTube audio",
   category: "download",
   filename: __filename },
-
     
   async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
   try {
     if (!q) return await sendErrorMsg(reply, "Please provide a YouTube link or song name.");
     const video = await getYoutube(q);
     if (!video) return await sendErrorMsg(reply, "No results found.");
-    const key = makePendingKey(sender, from);
-    pendingAudioType[key] = { video, from, createdAt: Date.now(), isProcessing: false, lastActionSig: "", lastActionAt: 0 };
-    await sendAudioInteractiveMenu(sock, from, mek, video, sessionId);
+    const key = keyFor(sender, from);
+    
+    const state = { video, from, createdAt: Date.now(), isProcessing: false, lastActionSig: "", lastActionAt: 0, expectedMsgId: null };
+    const sentMsg = await sendAudioInteractiveMenu(sock, from, mek, video, sessionId);
+    if (sentMsg?.key?.id) {
+      state.expectedMsgId = sentMsg.key.id;
+    }
+    pendingAudioType[key] = state;
   } catch (e) {
-    await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
     await sendErrorMsg(reply, "Error while preparing audio menu.");
   }
 });
 
 /* ================= REPLY HANDLER ================= */
 replyHandlers.push({
-  filter: (_body, { sender, from }) => !!pendingAudioType[makePendingKey(sender, from)],
+  filter: (text, { sender, from, m, mek }) => {
+    const k = keyFor(sender, from);
+    const state = pendingAudioType[k];
+    if (!state) return false;
+
+    const texts = extractTexts(text, mek, m);
+    let type = extractTypeFromTexts(texts);
+    if (type) return true;
+
+    const num = parseInt(String(text || "").trim(), 10);
+    const isNum = !isNaN(num) && num >= 1 && num <= 3;
+    const quotedId = getQuotedId(m, mek);
+    const isQuoted = quotedId && quotedId === state.expectedMsgId;
+
+    return isQuoted || isNum;
+  },
   function: async (sock, mek, m, { from, body, sender, reply }) => {
+    const k = keyFor(sender, from);
+    const state = pendingAudioType[k];
+    if (!state || state.isProcessing) return;
+
     let type = extractTypeFromTexts(extractTexts(body, mek, m));
-    if (!type && /^[1-3]$/.test(String(body || "").trim())) type = getTypeFromChoice(body);
+    if (!type && /^[1-3]$/.test(String(body || "").trim())) {
+      type = getTypeFromChoice(body);
+    }
     if (type) return handleAudioDownload(sock, mek, from, sender, reply, type);
   },
 });
 
-/* ================= CLEANUP ================= */
 setInterval(() => {
   const now = Date.now();
   for (const key of Object.keys(pendingAudioType)) {
