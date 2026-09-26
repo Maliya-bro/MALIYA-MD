@@ -42,8 +42,7 @@ function safeUnlink(file) {
   try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
 }
 
-// ✅ Group එකේ ඕනෑම කෙනෙකුට reply කළ හැකි වන පරිදි 'from' පමණක් භාවිතය
-function makePendingKey(sender, from) {
+function keyFor(sender, from) {
   return `${from || ""}`;
 }
 
@@ -51,21 +50,63 @@ function clearUserSession(k) {
   delete pendingAn1Search[k];
 }
 
-// ✅ Quoted Message ID extract කරගැනීම
-function getQuotedStanzaId(mek, m) {
+function toSmallCaps(str = "") {
+  const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+  return String(str).split("").map((char) => {
+    const idx = normal.indexOf(char);
+    return idx !== -1 ? small[idx] : char;
+  }).join("");
+}
+
+function getQuotedId(m, mek) {
   return (
     m?.quoted?.id ||
     mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
     m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.imageMessage?.contextInfo?.stanzaId ||
     mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+    m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
     null
   );
+}
+
+function extractTexts(body, mek, m) {
+  const texts = [];
+  const direct = [
+    body, m?.body, m?.text, m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text, m?.message?.buttonsResponseMessage?.selectedButtonId,
+    m?.message?.buttonsResponseMessage?.selectedDisplayText,
+    m?.message?.listResponseMessage?.title, m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.interactiveResponseMessage?.body?.text,
+    mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+  ];
+  for (const item of direct) {
+    if (item) texts.push(String(item).trim());
+  }
+
+  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  for (const raw of [p1, p2]) {
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.id) texts.push(String(parsed.id).trim());
+      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+      if (parsed.title) texts.push(String(parsed.title).trim());
+    } catch {}
+  }
+  return [...new Set(texts.filter(Boolean))];
 }
 
 const pendingAn1Search = Object.create(null);
 const lastProcessedMsg = {};
 const SESSION_TIMEOUT = 5 * 60 * 1000;
-const LOOP_COOLDOWN = 3000;
+const LOOP_COOLDOWN = 2500;
 
 async function getThumbnailBuffer(url) {
   try {
@@ -93,12 +134,10 @@ async function searchAN1(query) {
     const searchUrl = `https://an1.com/?story=${encodeURIComponent(query)}&do=search&subaction=search`;
     const { data } = await axios.get(searchUrl, { headers: HEADERS });
     const $ = cheerio.load(data);
-    
     const results = [];
     
     $(".item_app").each((i, el) => {
       if (i >= 10) return false;
-      
       const title = $(el).find(".name a span").text().trim() || $(el).find(".name a").text().trim();
       const appUrl = $(el).find(".name a").attr("href");
       const img = $(el).find(".img img").attr("src");
@@ -165,18 +204,85 @@ cmd({
       }, { quoted: mek });
     }
 
-    await sock.sendMessage(from, { react: { text: "🔍", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "🔍", key: mek.key } });
 
     const results = await searchAN1(q.trim());
 
     if (results.length === 0) {
-      await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
       return await sendErrorMsg(sock, from, mek, `No MOD apps found for "${q}" on AN1.com.`);
     }
 
-    const key = makePendingKey(sender, from);
+    const key = keyFor(sender, from);
     clearUserSession(key);
 
+    const settings = await readSettings(sessionId);
+    const btnsOn = !!settings.btns_enabled;
+
+    let finalSearchImg = SEARCH_IMAGE;
+    if (sessionId) {
+      try {
+        const custom = await getCustomImage(sessionId, "an1_header");
+        if (custom && custom.data) finalSearchImg = custom.data;
+      } catch (e) {}
+    }
+
+    const bodyText = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n👾 *𝐀𝐍𝟏 𝐒𝐄𝐀𝐑𝐂𝐇 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${results.length}\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+
+    // 🔥 BUTTONS SYSTEM (ButtonV2)
+    if (btnsOn) {
+      try {
+        const { ButtonV2 } = await import("@vanzxy/baileys");
+
+        const an1Rows = results.map((item, index) => ({
+          title: `${String(index + 1).padStart(2, "0")}. ${item.title.substring(0, 45)}`,
+          description: `Dev: ${item.developer || "Unknown"}`,
+          id: `.an1_dl ${index + 1}`
+        }));
+
+        const btn = new ButtonV2(sock)
+          .setBody(bodyText)
+          .setFooter("WaBot by MALIYA-MD Team ツ")
+          .setThumbnail(finalSearchImg);
+
+        btn.addRawButton({
+          buttonId: "an1_search_list",
+          buttonText: { displayText: "👾 Select MOD APK" },
+          type: 1,
+          nativeFlowInfo: {
+            name: "single_select",
+            paramsJson: JSON.stringify({
+              title: "Available MOD Applications ↯",
+              sections: [
+                {
+                  title: "🎮 MOD Apps & Games",
+                  rows: an1Rows
+                }
+              ]
+            }),
+          },
+        });
+
+        btn.addButton("📜 Bot Menu", ".menu");
+
+        const sentMsg = await btn.send(from, { quoted: mek });
+
+        if (sentMsg?.key?.id) {
+          pendingAn1Search[key] = {
+            expectedMsgId: sentMsg.key.id,
+            results,
+            timestamp: Date.now(),
+            isProcessing: false,
+          };
+          await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+          return;
+        }
+      } catch (err) {
+        console.log("AN1 BUTTONV2 ERROR:", err?.message || err);
+      }
+    }
+
+    // 🔢 FALLBACK NUMBERED MENU
     let text = `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n`;
     text += `👾 *𝐀𝐍𝟏 𝐒𝐄𝐀𝐑𝐂𝐇 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n`;
     text += `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n`;
@@ -189,15 +295,7 @@ cmd({
       text += `  ├ 👤 ${item.developer || "Unknown"}\n`;
       text += `  ╰ 🔗 \`an1.com\`\n\n`;
     });
-    text += `━ ━ ━ ⋆ ━ ━ ━\n> 💬 *Please reply to this message with a number to Download...*`;
-
-    let finalSearchImg = SEARCH_IMAGE;
-    if (sessionId) {
-      try {
-        const custom = await getCustomImage(sessionId, "an1_header");
-        if (custom && custom.data) finalSearchImg = custom.data;
-      } catch (e) {}
-    }
+    text += `━ ━ ━ ⋆ ━ ━ ━\n> 💬 *Swipe & Reply this message with a number to Download...*`;
 
     const menuMsg = await sock.sendMessage(from, { 
       image: { url: finalSearchImg }, 
@@ -212,9 +310,9 @@ cmd({
       isProcessing: false,
     };
 
-    await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
   } catch (e) {
-    await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
     await sendErrorMsg(sock, from, mek, "Failed to connect to AN1 API.");
   }
 });
@@ -223,39 +321,59 @@ cmd({
 // 3. Number Reply Listener
 // ==========================================
 const an1ReplyHandler = {
-  filter: (text, { sender, from }) => {
-    if (!text) return false;
-    const key = makePendingKey(sender, from);
-    return !!pendingAn1Search[key];
+  filter: (text, { sender, from, m, mek }) => {
+    const key = keyFor(sender, from);
+    const state = pendingAn1Search[key];
+    if (!state) return false;
+
+    const texts = extractTexts(text, mek, m);
+    for (const t of texts) {
+      if (t.startsWith(".an1_dl ")) return true;
+    }
+
+    const num = parseInt(String(text || "").trim(), 10);
+    const isNum = !isNaN(num) && num > 0 && num <= state.results.length;
+
+    const quotedId = getQuotedId(m, mek);
+    const isQuoted = quotedId && quotedId === state.expectedMsgId;
+
+    return isQuoted || isNum;
   },
   function: async (sock, mek, m, { body, sender, from }) => {
-    const key = makePendingKey(sender, from);
+    const key = keyFor(sender, from);
     const pending = pendingAn1Search[key];
     if (!pending || pending.isProcessing) return;
 
-    const rawInput = String(body || "").trim();
-    if (!rawInput || !/^\d+$/.test(rawInput)) return;
+    const texts = extractTexts(body, mek, m);
+    let choice = null;
 
-    // 🔥 User reply කර ඇත්තේ Bot එවූ Menu message එකටම දැයි පරීක්ෂා කිරීම
-    const quotedId = getQuotedStanzaId(mek, m);
-    if (!quotedId || quotedId !== pending.expectedMsgId) return;
+    for (const t of texts) {
+      if (t.startsWith(".an1_dl ")) {
+        choice = parseInt(t.replace(".an1_dl ", "").trim(), 10);
+        break;
+      }
+    }
 
-    // Spam Cooldown Protection
+    if (choice === null) {
+      const num = parseInt(String(body || "").trim(), 10);
+      if (!isNaN(num) && num > 0 && num <= pending.results.length) {
+        choice = num;
+      }
+    }
+
+    if (!choice || choice < 1 || choice > pending.results.length) return;
+
     const now = Date.now();
     const lastMsg = lastProcessedMsg[key];
-    if (lastMsg && lastMsg.text === rawInput && (now - lastMsg.time) < LOOP_COOLDOWN) return;
-    lastProcessedMsg[key] = { text: rawInput, time: now };
-
-    const input = parseInt(rawInput, 10);
-    if (isNaN(input) || input < 1 || input > pending.results.length) return;
+    if (lastMsg && lastMsg.text === String(choice) && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+    lastProcessedMsg[key] = { text: String(choice), time: now };
 
     pending.isProcessing = true;
-    const selected = pending.results[input - 1];
+    const selected = pending.results[choice - 1];
 
-    await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
     try {
-      // 1. App Details ලබා ගැනීම
       const details = await getAppDetails(selected.url);
       
       if (!details || !details.dlPageUrl) {
@@ -263,7 +381,6 @@ const an1ReplyHandler = {
         return await sendErrorMsg(sock, from, mek, "Failed to find the download page for this app.");
       }
 
-      // 2. Direct Link එක ලබා ගැනීම
       const directLink = await getDirectDownloadLink(details.dlPageUrl);
       
       if (!directLink) {
@@ -271,7 +388,6 @@ const an1ReplyHandler = {
         return await sendErrorMsg(sock, from, mek, "Failed to extract the direct download link.");
       }
 
-      // 3. Download Process එකට යැවීම
       clearUserSession(key);
       await executeDownload(sock, mek, from, directLink, selected, details);
 
@@ -378,3 +494,5 @@ setInterval(() => {
     }
   }
 }, 30000);
+
+module.exports = {};
