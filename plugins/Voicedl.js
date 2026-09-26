@@ -95,9 +95,14 @@ function extractTexts(body, mek, m) {
   const direct = [
     body, m?.body, m?.text, m?.message?.conversation,
     m?.message?.extendedTextMessage?.text, m?.message?.buttonsResponseMessage?.selectedButtonId,
-    m?.message?.templateButtonReplyMessage?.selectedId, m?.message?.interactiveResponseMessage?.body?.text,
+    m?.message?.buttonsResponseMessage?.selectedDisplayText,
+    m?.message?.templateButtonReplyMessage?.selectedId, m?.message?.templateButtonReplyMessage?.selectedDisplayText,
+    m?.message?.interactiveResponseMessage?.body?.text,
     mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
-    mek?.message?.buttonsResponseMessage?.selectedButtonId, mek?.message?.templateButtonReplyMessage?.selectedId,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.buttonsResponseMessage?.selectedDisplayText,
+    mek?.message?.templateButtonReplyMessage?.selectedId,
+    mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
     mek?.message?.interactiveResponseMessage?.body?.text
   ];
   
@@ -109,20 +114,23 @@ function extractTexts(body, mek, m) {
   for (const item of direct) {
     if (!item) continue;
     if (typeof item === "string" && item.startsWith("{")) {
-      try { const parsed = JSON.parse(item); if (parsed.id) texts.push(String(parsed.id).trim()); } catch {}
+      try {
+        const parsed = JSON.parse(item);
+        if (parsed.id) texts.push(String(parsed.id).trim());
+        if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+      } catch {}
     }
     texts.push(String(item).trim());
   }
   return [...new Set(texts.filter(Boolean))];
 }
 
-// 🔥 Bug Fix: Button triggers matching
 function extractTypeFromTexts(texts) {
   const normalized = texts.map((t) => normalizeText(t));
   for (const text of normalized) {
-    if (text.includes("AUDIO") || text === "1") return "audio";
-    if (text.includes("PTT") || text.includes("VOICE") || text === "2") return "ptt";
-    if (text.includes("DOC") || text.includes("DOCUMENT") || text === "3") return "doc";
+    if (text === "AUDIO" || text.includes("AUDIO") || text === "1") return "audio";
+    if (text === "PTT" || text.includes("PTT") || text.includes("VOICE") || text === "2") return "ptt";
+    if (text === "DOC" || text.includes("DOC") || text.includes("DOCUMENT") || text === "3") return "doc";
   }
   return null;
 }
@@ -152,26 +160,40 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
+// 🔘 Quick Reply Buttons පමණක් සහිත ButtonV2 Menu
 async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
-  
-  if (!!settings.btns_enabled) {
-    try {
-      const { Button } = await import("@vanzxy/baileys");
-      const msg = new Button(sock)
-          .setImage(video.thumbnail)
-          .setBody(buildAudioDetails(video))
-          .setFooter("𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 | 𝗬𝗧 𝗠𝗣𝟯 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥")
-          .addReply("🎵 Audio Format", "audio")
-          .addReply("🎙️ Voice Note", "ptt")
-          .addReply("📄 Send Document", "doc");
+  const btnsOn = !!settings.btns_enabled;
 
-      await msg.send(from, { quoted: mek });
-      return;
-    } catch (e) { console.log("AUDIO BUTTON ERROR:", e); }
+  if (btnsOn) {
+    try {
+      const { ButtonV2 } = await import("@vanzxy/baileys");
+
+      const btn = new ButtonV2(sock)
+        .setBody(buildAudioDetails(video) + `\n\n👇 *Tap a button below to download:*`)
+        .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
+        .setThumbnail(video.thumbnail)
+        .addButton("🎵 Audio", "audio")
+        .addButton("🎙️ Voice Note", "ptt")
+        .addButton("📄 Document", "doc");
+
+      const sentMsg = await btn.send(from, { quoted: mek });
+      if (sentMsg?.key?.id) return sentMsg;
+    } catch (e) {
+      console.log("AUDIO BUTTONV2 ERROR:", e?.message || e);
+    }
   }
 
-  return sock.sendMessage(from, { image: { url: video.thumbnail }, caption: buildAudioDetails(video) + `\n\n╭─[ 🎵 *${toSmallCaps("SELECT FORMAT")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 🎵 Audio Format\n├ 📱 *[ 02 ]* ➔ 🎙️ Voice Note (PTT)\n├ 📱 *[ 03 ]* ➔ 📄 Send Document\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`, contextInfo: channelContextInfo() }, { quoted: mek });
+  // Fallback: Numbered Menu
+  return sock.sendMessage(
+    from,
+    {
+      image: { url: video.thumbnail },
+      caption: buildAudioDetails(video) + `\n\n╭─[ 🎵 *${toSmallCaps("SELECT FORMAT")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 🎵 Audio Format (MP3)\n├ 📱 *[ 02 ]* ➔ 🎙️ Voice Note (PTT)\n├ 📱 *[ 03 ]* ➔ 📄 Send Document\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`,
+      contextInfo: channelContextInfo()
+    },
+    { quoted: mek }
+  );
 }
 
 function isDuplicateTypeAction(state, type) {
@@ -229,18 +251,17 @@ async function fallbackAudioAPIs(url, outPath) {
   throw new Error("All Backup APIs Failed");
 }
 
-// 🔥 Bug Fix: Added ["-vn", "-map", "0:a"] to strip hidden video/image tracks & prevent filter graph crashes
 async function convertAudio(inputPath, outputPath, isPtt = false) {
   return new Promise((resolve, reject) => {
     if (!isValidMediaFile(inputPath)) return reject(new Error("Input file is corrupted or empty before conversion."));
     let command = ffmpeg(inputPath);
     if (isPtt) {
       command.audioCodec("libopus").format("ogg").audioBitrate("64k").audioChannels(1).audioFrequency(48000)
-        .outputOptions(["-vn", "-map", "0:a"]) // Explicitly map audio only
+        .outputOptions(["-vn", "-map", "0:a"])
         .on("end", () => resolve(outputPath)).on("error", (err) => reject(new Error(`FFmpeg Error (PTT): ${err.message}`))).save(outputPath);
     } else {
       command.audioCodec("libmp3lame").format("mp3").audioBitrate("192k")
-        .outputOptions(["-vn", "-map", "0:a"]) // Explicitly map audio only
+        .outputOptions(["-vn", "-map", "0:a"])
         .on("end", () => resolve(outputPath)).on("error", (err) => reject(new Error(`FFmpeg Error (MP3): ${err.message}`))).save(outputPath);
     }
   });
@@ -319,7 +340,17 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
   }
 }
 
-cmd({ pattern: "song", alias: ["ytmp3", "yta", "mp3", "play"], react: "🔍", desc: "Download YouTube audio", category: "download", filename: __filename },
+/* ================= COMMAND: .song ================= */
+cmd({
+  
+  pattern: "song",
+  alias: ["ytmp3", "yta", "mp3", "play"],
+  react: "🎵",
+  desc: "Download YouTube audio",
+  category: "download",
+  filename: __filename },
+
+    
   async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
   try {
     if (!q) return await sendErrorMsg(reply, "Please provide a YouTube link or song name.");
@@ -334,6 +365,7 @@ cmd({ pattern: "song", alias: ["ytmp3", "yta", "mp3", "play"], react: "🔍", de
   }
 });
 
+/* ================= REPLY HANDLER ================= */
 replyHandlers.push({
   filter: (_body, { sender, from }) => !!pendingAudioType[makePendingKey(sender, from)],
   function: async (sock, mek, m, { from, body, sender, reply }) => {
@@ -343,6 +375,7 @@ replyHandlers.push({
   },
 });
 
+/* ================= CLEANUP ================= */
 setInterval(() => {
   const now = Date.now();
   for (const key of Object.keys(pendingAudioType)) {
