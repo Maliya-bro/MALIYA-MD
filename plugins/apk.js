@@ -5,7 +5,7 @@ const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
-const DEFAULT_APK_IMAGE = "https://i.ibb.co/L9Hpw2B/apkpure.png";
+const DEFAULT_APK_IMAGE = "https://github.com/Maliya-bro/web-pair/blob/main/Gemini_Generated_Image_xmzfzfxmzfzfxmzf.jpg?raw=true";
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 3000;
 
@@ -56,7 +56,7 @@ function extractIncomingPayload(body, mek, m) {
     const parsed = safeJsonParse(paramsJson);
     if (parsed) {
       const btnId = parsed.id || parsed.selectedId || parsed.selectedRowId || parsed.name;
-      if (btnId) return String(btnId).trim();
+      if (btnId) return { payload: String(btnId).trim(), isButton: true };
     }
   }
 
@@ -66,7 +66,7 @@ function extractIncomingPayload(body, mek, m) {
     mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
     mek?.message?.buttonsResponseMessage?.selectedButtonId;
     
-  if (directId) return String(directId).trim();
+  if (directId) return { payload: String(directId).trim(), isButton: true };
 
   const text =
     m?.message?.interactiveResponseMessage?.body?.text ||
@@ -78,7 +78,7 @@ function extractIncomingPayload(body, mek, m) {
     body ||
     "";
     
-  return String(text).trim();
+  return { payload: String(text).trim(), isButton: false };
 }
 
 const UA = "Mozilla/5.0 (Linux; Android 11; Redmi Note 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
@@ -164,7 +164,7 @@ cmd({
     const settings = await readSettings(sessionId);
     const btnsOn = !!settings.btns_enabled;
 
-    let headerImg = results[0]?.icon || DEFAULT_APK_IMAGE;
+    let headerImg = DEFAULT_APK_IMAGE;
     if (sessionId) {
       try {
         const custom = await getCustomImage(sessionId, "apk_header");
@@ -172,7 +172,6 @@ cmd({
       } catch (e) {}
     }
 
-    // 🔥 BUTTONS SYSTEM (Asitha-MD Style ButtonV2)
     if (btnsOn) {
       try {
         const { ButtonV2 } = await import("@vanzxy/baileys");
@@ -190,7 +189,6 @@ cmd({
           .setFooter("WaBot by MALIYA-MD Team ツ")
           .setThumbnail(headerImg);
 
-        // 1. Popup List Menu Button
         btn.addRawButton({
           buttonId: "apk_search_list",
           buttonText: { displayText: "📦 Select APK" },
@@ -209,7 +207,6 @@ cmd({
           },
         });
 
-        // 2. Bot Menu Button
         btn.addButton("📜 Bot Menu", ".menu");
 
         const sentMsg = await btn.send(from, { quoted: mek });
@@ -229,7 +226,6 @@ cmd({
       }
     }
 
-    // 🔢 FALLBACK NUMBERED MENU
     let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
     text += `📦 *𝐀𝐏𝐊 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n`;
     text += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
@@ -242,7 +238,7 @@ cmd({
       text += `  ├ 👤 ${item.developer || "Unknown"}\n`;
       text += `  ╰ 🆔 \`${item.pkg}\`\n\n`;
     });
-    text += `⊱━━━━━━━━━━━━━━━⊰\n> 💬 *Please reply to this message with a number to Download...*`;
+    text += `⊱━━━━━━━━━━━━━━━⊰\n> 💬 *Swipe & Reply this message with a number to Download...*`;
 
     const menuMsg = await sock.sendMessage(from, {
       image: { url: headerImg },
@@ -266,20 +262,37 @@ cmd({
 
 /* ================= REPLY HANDLER ================= */
 const apkReplyHandler = {
-  filter: (text, { from, sender }) => {
+  filter: (text, { from, sender, mek, m }) => {
     const k = makePendingKey(sender, from);
-    return !!pendingApkSearch[k];
+    const pending = pendingApkSearch[k];
+    if (!pending) return false;
+
+    const { payload, isButton } = extractIncomingPayload(text, mek, m);
+    if (!payload) return false;
+
+    if (isButton && payload.startsWith(".apk_dl ")) return true;
+
+    if (/^\d+$/.test(payload)) {
+      const quotedId = getQuotedStanzaId(mek, m);
+      return Boolean(quotedId && quotedId === pending.expectedMsgId);
+    }
+
+    return false;
   },
   function: async (sock, mek, m, { body, from, sender }) => {
-    const payload = extractIncomingPayload(body, mek, m);
+    const { payload, isButton } = extractIncomingPayload(body, mek, m);
     if (!payload) return;
 
     const k = makePendingKey(sender, from);
     const pending = pendingApkSearch[k];
     if (!pending || pending.isProcessing) return;
 
-    const quotedId = getQuotedStanzaId(mek, m);
-    if (quotedId && pending.expectedMsgId && quotedId !== pending.expectedMsgId) return;
+    if (!isButton) {
+      const quotedId = getQuotedStanzaId(mek, m);
+      if (!quotedId || quotedId !== pending.expectedMsgId) {
+        return;
+      }
+    }
 
     let choice = null;
     if (payload.startsWith(".apk_dl ")) {
@@ -290,7 +303,6 @@ const apkReplyHandler = {
 
     if (choice === null || isNaN(choice) || choice < 1 || choice > pending.results.length) return;
 
-    // Spam / Loop Cooldown
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
     if (lastMsg && lastMsg.text === payload && (now - lastMsg.time) < LOOP_COOLDOWN) return;
@@ -299,7 +311,7 @@ const apkReplyHandler = {
     pending.isProcessing = true;
     const selected = pending.results[choice - 1];
 
-    await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
     try {
       const headRes = await axios.head(selected.dlUrl, { headers: HEADERS }).catch(() => null);
@@ -308,7 +320,7 @@ const apkReplyHandler = {
         sizeMB = parseInt(headRes.headers["content-length"]) / (1024 * 1024);
       }
 
-      await sock.sendMessage(from, { react: { text: "⬆️", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
 
       const cleanName = selected.name.replace(/[\\/:*?"<>|]/g, "").trim();
 
@@ -338,12 +350,12 @@ const apkReplyHandler = {
       };
 
       await sock.sendMessage(from, docPayload, { quoted: mek });
-      await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
       clearUserSession(k);
     } catch (err) {
       clearUserSession(k);
       console.log("APK DOWNLOAD ERROR:", err.message);
-      await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
       await sendErrorMsg(sock, from, mek, "Failed to download the APK file.");
     }
   },
