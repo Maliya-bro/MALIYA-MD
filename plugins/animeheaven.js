@@ -111,9 +111,9 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 cmd(
   {
     pattern: "animedl",
-    alias: ["anime", "animesearch"],
+    alias: ["anime", "animesearch", "animeheaven"],
     desc: "Search up to 10 anime and download episodes as document files",
-    category: "download",
+    category: "movie",
     react: "🎌",
     filename: __filename,
   },
