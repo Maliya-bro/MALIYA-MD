@@ -132,10 +132,10 @@ function getCategoryEmoji(cat) {
   if (c.includes("SEARCH")) return "🔎";
   if (c.includes("NEWS")) return "📰";
   if (c.includes("MEDIA")) return "🎬";
-  if (c.includes("CONFIG")) return "⚙️";
+  if (c.includes("CONFIG")) return "🛠️";
   if (c.includes("MAIN")) return "📜";
   if (c.includes("EDUCATION")) return "📚";
-  if (c.includes("MOVIE")) return "🎞️";
+  if (c.includes("MOVIE")) return "🎬";
   if (c.includes("STICKER")) return "🖼️";
   if (c.includes("CONVERT")) return "♻️";
   if (c.includes("UTILITY")) return "🧰";
@@ -171,12 +171,10 @@ function menuHeader(userName = "User") {
 │ ☎️ *Owner :* ${OWNER_NUMBER}
 │ 🕒 *Time :* ${time}
 │ 📅 *Date :* ${date}
-│ 🎯 *Prefix :* [ ${PREFIX} ]
+│ 🎯 *Prefix :* ${PREFIX}
 ╰───────────────┈➤
 
-🎀 *≡ Select a Command List: ≡*
-
-🌐 *Web:* https://maliya-md.replit.app`;
+🎀 *≡ Select a Command List: ≡*`;
 }
 
 function buildStyledMainMenu(state, userName) {
@@ -331,7 +329,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Asitha-MD Hybrid ButtonV2 (Popup List on Mobile / Quick Reply on Web)",
+    desc: "Exact Asitha-MD Location + Side-by-Side List & Ping Button",
     category: "main",
     filename: __filename,
   },
@@ -367,41 +365,47 @@ cmd(
         } catch (e) {}
       }
 
-      const imgBuf = await getSafeBuffer(headerImg);
+      const rawBuf = await getSafeBuffer(headerImg);
 
       if (btnsOn) {
         try {
-          // @vanzxy/baileys හි ButtonV2 පාවිච්චි කිරීම (.ping එකේ වගේම)
-          const { ButtonV2 } = await import("@vanzxy/baileys");
+          const vanzxy = await import("@vanzxy/baileys");
+          const { generateWAMessageFromContent, ButtonV2 } = vanzxy;
 
+          let thumbBuf = rawBuf;
+          if (ButtonV2 && typeof ButtonV2.resize === "function") {
+            try {
+              thumbBuf = await ButtonV2.resize(rawBuf, 300, 300);
+            } catch {}
+          }
+
+          // Asitha-MD Exact Row Format (rows ඇතුළේ header property එක නැත)
           const listRows = categories.map((cat) => ({
-            header: "",
             title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
-            description: `Total ${state.map[cat].length} commands available`,
+            description: `Show ${cat.toLowerCase()} command list`,
             id: `.menu_view ${cat}`,
           }));
 
+          // 1. ButtonV2 මඟින් Location Header සහිත බටන් සැකසීම
           const btn = new ButtonV2(sock)
             .setBody(menuHeader(userName))
-            .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
-            // Location වෙනුවට Image Media දීමෙන් "Update WhatsApp" වැටීම නවතී
-            .setMedia({ image: imgBuf });
+            .setFooter(
+              "© MALIYA-MD Lite Bot v1.0.0\nWaBot by Maliya MD Team ツ\n\n🌐 Web: https://maliya-md.replit.app"
+            )
+            .setThumbnail(thumbBuf);
 
-          // 1. Asitha-MD Hybrid Button:
-          // - Mobile වලදී nativeFlowInfo මඟින් Popup List එක විවෘත වේ
-          // - WhatsApp Web වලදී buttonId (".menu_all") මඟින් Quick Reply එකක් යයි
+          // Button 1: List Menu (type: 4 NATIVE_FLOW inside buttonsMessage)
           btn.addRawButton({
             buttonId: ".menu_all",
             buttonText: { displayText: "≡ List Menu" },
-            type: 2,
+            type: 4,
             nativeFlowInfo: {
               name: "single_select",
               paramsJson: JSON.stringify({
-                title: "≡ List Menu",
+                title: "Click Here!",
                 sections: [
                   {
-                    title: "📁 Command Categories",
-                    highlight_label: "MALIYA-MD",
+                    title: "📂 Categories",
                     rows: listRows,
                   },
                 ],
@@ -409,25 +413,39 @@ cmd(
             },
           });
 
-          // 2. Ping Quick Reply Button
+          // Button 2: Ping (type: 1 QUICK_REPLY)
           btn.addButton("📊 Ping", ".ping");
 
-          const builtMsg = await btn.build(from, { quoted: mek });
+          const built = await btn.build(from, { quoted: mek });
 
-          await sock.relayMessage(from, builtMsg.message, {
-            messageId: builtMsg.key.id,
+          // 🔥 Asitha-MD රහස: viewOnceMessage ඉවත් කර කෙළින්ම buttonsMessage යැවීම (එවිට Web WA වලද පෙනේ, Update WA වැටෙන්නේද නැත!)
+          const innerButtonsMsg =
+            built.message?.viewOnceMessage?.message?.buttonsMessage ||
+            built.message?.buttonsMessage;
+
+          const finalMsg = generateWAMessageFromContent(
+            from,
+            {
+              buttonsMessage: innerButtonsMsg,
+            },
+            { quoted: mek }
+          );
+
+          // නිවැරදි Binary Nodes: buttons + native_flow (v: "9", name: "mixed")
+          await sock.relayMessage(from, finalMsg.message, {
+            messageId: finalMsg.key.id,
             additionalNodes: [
               {
                 tag: "biz",
                 attrs: {},
                 content: [
                   {
-                    tag: "interactive",
-                    attrs: { type: "native_flow", v: "1" },
+                    tag: "buttons",
+                    attrs: {},
                     content: [
                       {
                         tag: "native_flow",
-                        attrs: { v: "2", name: "mixed" },
+                        attrs: { v: "9", name: "mixed" },
                       },
                     ],
                   },
@@ -436,11 +454,11 @@ cmd(
             ],
           });
 
-          state.expectedMsgId = builtMsg.key.id;
+          state.expectedMsgId = finalMsg.key.id;
           pendingMenu[k] = state;
           return;
         } catch (err) {
-          console.log("HYBRID BUTTONV2 ERROR:", err);
+          console.log("ASITHA EXACT MENU ERROR:", err);
         }
       }
 
@@ -448,7 +466,7 @@ cmd(
       const sentMsg = await sock.sendMessage(
         from,
         {
-          image: imgBuf,
+          image: rawBuf,
           caption: buildStyledMainMenu(state, userName),
           contextInfo: channelContextInfo(),
         },
@@ -466,7 +484,7 @@ cmd(
   }
 );
 
-/* ================= COMMAND: .menu_all (WhatsApp Web Quick Reply සඳහා) ================= */
+/* ================= COMMAND: .menu_all (WhatsApp Web Click Handler) ================= */
 cmd(
   {
     pattern: "menu_all",
