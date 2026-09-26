@@ -158,9 +158,7 @@ function getCategoryEmoji(cat) {
 
 function buildCommandMapCached() {
   const now = Date.now();
-  if (cachedMenu && now - cacheTime < MENU_CACHE_MS) {
-    return cachedMenu;
-  }
+  if (cachedMenu && now - cacheTime < MENU_CACHE_MS) return cachedMenu;
   const map = Object.create(null);
   for (const c of commands) {
     if (c.dontAddCommandList) continue;
@@ -176,11 +174,12 @@ function buildCommandMapCached() {
   return cachedMenu;
 }
 
+// ලස්සන Box Border සහිත Menu Header එක
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
-  return `ㅤㅤ┏━━━◥◣◆◢◤━━━━┓
-ㅤㅤ★彡 *${BOT_NAME}* 彡★
+  return `ㅤ⠀⠀ㅤ┏━━━◥◣◆◢◤━━━━┓
+ㅤㅤ⠀⠀★彡 *${BOT_NAME}* 彡★
 ㅤㅤ┗━━━◢◤◆◥◣━━━━┛
 
 ✨ 👋 *ʜɪ, ${styledUser}!*
@@ -190,7 +189,7 @@ function menuHeader(userName = "User") {
 👤 *ᴜsᴇʀ :* ${styledUser}
 👑 *ᴏᴡɴᴇʀ :* ${OWNER_NUMBER}
 🕒 *ᴛɪᴍᴇ :* ${time}
-📅 *ᴅᴀᴛේ :* ${date}
+📅 *ᴅᴀᴛᴇ :* ${date}
 🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]
 ╚═════════. .★.═══╝
 
@@ -203,12 +202,13 @@ function menuHeader(userName = "User") {
 function buildStyledMainMenu(state, userName) {
   const { categories } = state;
   const styledUser = toSmallCaps(userName);
-  let msg = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
+  let msg = `⠀⠀┏━━━◥◣◆◢◤━━━━┓\n★彡 *${BOT_NAME}* 彡★\n⠀⠀┗━━━◢◤◆◥◣━━━━┛\n\n`;
   msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
   categories.forEach((cat, idx) => {
     const emo = getCategoryEmoji(cat);
     const numStr = String(idx + 1).padStart(2, "0");
-    msg += `*[ ${numStr} ]*  ${emo}  *${toSmallCaps(cat)}*  _(${state.map[cat].length})_\n`;
+    const styledCat = toSmallCaps(cat);
+    msg += `*[ ${numStr} ]*  ${emo}  *${styledCat}*  _(${state.map[cat].length})_\n`;
   });
   msg += `\n⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n> 💬 *Swipe & Reply this message with a number...*`;
   return msg;
@@ -218,7 +218,7 @@ function commandListCaption(cat, list, userName = "User") {
   const emo = getCategoryEmoji(cat);
   const styledCat = toSmallCaps(cat);
   const styledUser = toSmallCaps(userName);
-  let txt = `╭⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n╰⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n\n`;
+  let txt = `╭──── ⋆ ⋅ 𖤐 ⋅ ⋆ ───┈➤\n${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n╰──── ⋆ ⋅ 𖤐 ⋅ ⋆ ───┈➤\n\n`;
   txt += `👤 *ᴜsᴇʀ :* ${styledUser}\n📦 *ᴛᴏᴛᴀʟ :* ${list.length} Commands\n🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]\n\n`;
 
   list.forEach((c) => {
@@ -265,6 +265,7 @@ function extractTexts(body, mek, m) {
       if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
       if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
       if (parsed.title) texts.push(String(parsed.title).trim());
+      if (parsed.name) texts.push(String(parsed.name).trim());
     } catch {}
   }
   return [...new Set(texts.filter(Boolean))];
@@ -285,9 +286,9 @@ function resolveMenuAction(texts, state) {
     for (const cat of state.categories || []) {
       const catText = normalizeText(cat);
       if (
-        text === catText ||
-        text === `${catText} COMMANDS` ||
         text === `${catText} MENU` ||
+        text.includes(`${catText} MENU`) ||
+        text === `${catText} COMMANDS` ||
         text.includes(`${catText} COMMANDS`)
       ) {
         return { type: "view", cat };
@@ -432,37 +433,31 @@ cmd(
           // 2. Ping Button
           btn.addButton("📊 Ping", ".ping");
 
-          // 🔥 Asitha-MD Secret: viewOnceMessage wrapper එක ඉවත් කර buttonsMessage එක යැවීම
-          const built = await btn.build(from, { quoted: mek });
-          const rawMsg = built.message?.viewOnceMessage?.message || built.message;
-
-          await sock.relayMessage(from, rawMsg, {
-            messageId: built.key.id,
-            additionalNodes: [
-              {
-                tag: "biz",
-                attrs: {},
-                content: [
-                  {
-                    tag: "buttons",
-                    attrs: {},
-                    content: [
-                      {
-                        tag: "native_flow",
-                        attrs: { v: "9", name: "mixed" },
-                      },
-                    ],
-                  },
-                ],
-              },
-            ],
+          // 3. Web URL Button
+          btn.addRawButton({
+            buttonId: "official_web",
+            buttonText: { displayText: "🌐 Official Website" },
+            type: 1,
+            nativeFlowInfo: {
+              name: "cta_url",
+              paramsJson: JSON.stringify({
+                display_text: "🌐 Official Website",
+                url: "https://maliya-md.replit.app",
+                merchant_url: "https://maliya-md.vercel.app",
+              }),
+            },
           });
 
-          state.expectedMsgId = built.key.id;
-          pendingMenu[k] = state;
-          return;
+          // සෘජුවම send() කිරීම (එවිට ෆෝන් එකට බටන්ස් සහ Popup List එක නොවරදවාම පැමිණේ)
+          const sentMsg = await btn.send(from, { quoted: mek });
+
+          if (sentMsg?.key?.id) {
+            state.expectedMsgId = sentMsg.key.id;
+            pendingMenu[k] = state;
+            return;
+          }
         } catch (err) {
-          console.log("BUTTONV2 HYBRID SEND ERROR:", err?.message || err);
+          console.log("BUTTONV2 SEND ERROR:", err?.message || err);
         }
       }
 
