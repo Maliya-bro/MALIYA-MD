@@ -395,7 +395,6 @@ cmd(
         } catch (e) {}
       }
 
-      // 🔥 ASITHA-MD EXACT STYLE: SAME ROW / LINE BUTTONS (LIST + PING)
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
@@ -411,27 +410,27 @@ cmd(
             .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
             .setThumbnail(headerImg);
 
-          // Asitha-MD style එකට එකම action array එකක් ඇතුළේ List Menu Button එක සහ Quick Reply Button එක define කිරීම
+          // 1. Popup List Menu Button
           btn.addRawButton({
-            name: "single_select",
-            buttonParamsJson: JSON.stringify({
-              title: "Click Here ↯",
-              sections: [
-                {
-                  title: "Command Categories",
-                  rows: listRows,
-                },
-              ],
-            }),
+            buttonId: ".menu_all",
+            buttonText: { displayText: "≡ List Menu" },
+            type: 1,
+            nativeFlowInfo: {
+              name: "single_select",
+              paramsJson: JSON.stringify({
+                title: "Click Here ↯",
+                sections: [
+                  {
+                    title: "Command Categories",
+                    rows: listRows,
+                  },
+                ],
+              }),
+            },
           });
 
-          btn.addRawButton({
-            name: "quick_reply",
-            buttonParamsJson: JSON.stringify({
-              display_text: "📊 Ping",
-              id: ".ping",
-            }),
-          });
+          // 2. Ping Button
+          btn.addButton("📊 Ping", ".ping");
 
           const sentMsg = await btn.send(from, { quoted: mek });
 
