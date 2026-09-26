@@ -252,6 +252,9 @@ function extractTexts(body, mek, m) {
 function resolveMenuAction(texts, state) {
   const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
   for (const text of normalized) {
+    if (text === "≡ LIST MENU" || text === ".MENU_ALL" || text === "MENU_VIEW:ALL") {
+      return { type: "all" };
+    }
     if (text.startsWith("MENU_VIEW:")) {
       return { type: "view", cat: text.replace("MENU_VIEW:", "").trim() };
     }
@@ -328,7 +331,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Asitha-MD style ButtonV2 + Popup List Menu with Gap",
+    desc: "Asitha-MD Hybrid ButtonV2 (Popup List on Mobile / Quick Reply on Web)",
     category: "main",
     filename: __filename,
   },
@@ -364,22 +367,13 @@ cmd(
         } catch (e) {}
       }
 
-      const rawBuf = await getSafeBuffer(headerImg);
+      const imgBuf = await getSafeBuffer(headerImg);
 
       if (btnsOn) {
         try {
-          const vanzxy = await import("@vanzxy/baileys");
-          const { generateWAMessageFromContent, ButtonV2 } = vanzxy;
+          // @vanzxy/baileys හි ButtonV2 පාවිච්චි කිරීම (.ping එකේ වගේම)
+          const { ButtonV2 } = await import("@vanzxy/baileys");
 
-          // Thumbnail එක resize කර ගැනීම
-          let thumbBuf = rawBuf;
-          if (ButtonV2 && typeof ButtonV2.resize === "function") {
-            try {
-              thumbBuf = await ButtonV2.resize(rawBuf, 300, 300);
-            } catch {}
-          }
-
-          // Dynamic Rows (මේකට තමයි .movie එකේදී film list එකත් auto add වෙන්නේ)
           const listRows = categories.map((cat) => ({
             header: "",
             title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
@@ -387,63 +381,41 @@ cmd(
             id: `.menu_view ${cat}`,
           }));
 
-          // 🔥 Asitha-MD Secret: viewOnceMessage + buttonsMessage (headerType: 6 Location) + type: 2 single_select
-          const msg = generateWAMessageFromContent(
-            from,
-            {
-              viewOnceMessage: {
-                message: {
-                  messageContextInfo: {
-                    deviceListMetadata: {},
-                    deviceListMetadataVersion: 2,
-                  },
-                  buttonsMessage: {
-                    locationMessage: {
-                      degreesLatitude: 0,
-                      degreesLongitude: 0,
-                      name: BOT_NAME,
-                      address: "Sri Lanka",
-                      jpegThumbnail: thumbBuf,
-                    },
-                    contentText: menuHeader(userName),
-                    footerText: "© 2026 MALIYA-MD BOT SYSTEM",
-                    headerType: 6,
-                    contextInfo: channelContextInfo(),
-                    buttons: [
-                      {
-                        buttonId: "list_menu",
-                        buttonText: { displayText: "≡ List Menu" },
-                        type: 2,
-                        nativeFlowInfo: {
-                          name: "single_select",
-                          paramsJson: JSON.stringify({
-                            title: "≡ List Menu",
-                            sections: [
-                              {
-                                title: "📁 Command Categories",
-                                highlight_label: "MALIYA-MD",
-                                rows: listRows,
-                              },
-                            ],
-                          }),
-                        },
-                      },
-                      {
-                        buttonId: ".ping",
-                        buttonText: { displayText: "📊 Ping" },
-                        type: 1,
-                      },
-                    ],
-                  },
-                },
-              },
-            },
-            { quoted: mek }
-          );
+          const btn = new ButtonV2(sock)
+            .setBody(menuHeader(userName))
+            .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
+            // Location වෙනුවට Image Media දීමෙන් "Update WhatsApp" වැටීම නවතී
+            .setMedia({ image: imgBuf });
 
-          // 🔥 Asitha-MD Binary Node: "Update WhatsApp" නොවැටී Gap එකත් එක්ක Popup List එක පෙන්වන node එක
-          await sock.relayMessage(from, msg.message, {
-            messageId: msg.key.id,
+          // 1. Asitha-MD Hybrid Button:
+          // - Mobile වලදී nativeFlowInfo මඟින් Popup List එක විවෘත වේ
+          // - WhatsApp Web වලදී buttonId (".menu_all") මඟින් Quick Reply එකක් යයි
+          btn.addRawButton({
+            buttonId: ".menu_all",
+            buttonText: { displayText: "≡ List Menu" },
+            type: 2,
+            nativeFlowInfo: {
+              name: "single_select",
+              paramsJson: JSON.stringify({
+                title: "≡ List Menu",
+                sections: [
+                  {
+                    title: "📁 Command Categories",
+                    highlight_label: "MALIYA-MD",
+                    rows: listRows,
+                  },
+                ],
+              }),
+            },
+          });
+
+          // 2. Ping Quick Reply Button
+          btn.addButton("📊 Ping", ".ping");
+
+          const builtMsg = await btn.build(from, { quoted: mek });
+
+          await sock.relayMessage(from, builtMsg.message, {
+            messageId: builtMsg.key.id,
             additionalNodes: [
               {
                 tag: "biz",
@@ -455,7 +427,7 @@ cmd(
                     content: [
                       {
                         tag: "native_flow",
-                        attrs: { v: "9", name: "mixed" },
+                        attrs: { v: "2", name: "mixed" },
                       },
                     ],
                   },
@@ -464,11 +436,11 @@ cmd(
             ],
           });
 
-          state.expectedMsgId = msg.key.id;
+          state.expectedMsgId = builtMsg.key.id;
           pendingMenu[k] = state;
           return;
         } catch (err) {
-          console.log("ASITHA STYLE MENU ERROR:", err);
+          console.log("HYBRID BUTTONV2 ERROR:", err);
         }
       }
 
@@ -476,7 +448,7 @@ cmd(
       const sentMsg = await sock.sendMessage(
         from,
         {
-          image: rawBuf,
+          image: imgBuf,
           caption: buildStyledMainMenu(state, userName),
           contextInfo: channelContextInfo(),
         },
@@ -490,6 +462,57 @@ cmd(
     } catch (e) {
       console.log("MENU ERROR:", e?.message || e);
       reply("❌ Cannot send menu");
+    }
+  }
+);
+
+/* ================= COMMAND: .menu_all (WhatsApp Web Quick Reply සඳහා) ================= */
+cmd(
+  {
+    pattern: "menu_all",
+    dontAddCommandList: true,
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, sender, pushname, sessionId }) => {
+    try {
+      const { map, categories } = buildCommandMapCached();
+      const userName = getUserName(pushname, m, mek, sender);
+      const k = keyFor(sender, from);
+
+      let headerImg = DEFAULT_HEADER_IMAGE;
+      if (sessionId) {
+        try {
+          const custom = await getCustomImage(sessionId, "menu_header");
+          if (custom && custom.data) headerImg = custom.data;
+        } catch (e) {}
+      }
+      const imgBuf = await getSafeBuffer(headerImg);
+
+      const state = pendingMenu[k] || {
+        expectedMsgId: null,
+        map,
+        categories,
+        userName,
+        sessionId,
+        timestamp: Date.now(),
+      };
+
+      const sentMsg = await sock.sendMessage(
+        from,
+        {
+          image: imgBuf,
+          caption: buildStyledMainMenu(state, userName),
+          contextInfo: channelContextInfo(),
+        },
+        { quoted: mek }
+      );
+
+      if (sentMsg?.key?.id) {
+        state.expectedMsgId = sentMsg.key.id;
+        pendingMenu[k] = state;
+      }
+    } catch (e) {
+      console.log("MENU ALL ERROR:", e);
     }
   }
 );
@@ -565,6 +588,29 @@ const menuReplyHandler = {
       if (isDuplicateAction(state, action)) return;
 
       const userName = state.userName || getUserName(pushname, m, mek, sender);
+
+      if (action.type === "all") {
+        let headerImg = DEFAULT_HEADER_IMAGE;
+        if (state.sessionId) {
+          try {
+            const custom = await getCustomImage(state.sessionId, "menu_header");
+            if (custom && custom.data) headerImg = custom.data;
+          } catch (e) {}
+        }
+        const imgBuf = await getSafeBuffer(headerImg);
+        const sent = await sock.sendMessage(
+          from,
+          {
+            image: imgBuf,
+            caption: buildStyledMainMenu(state, userName),
+            contextInfo: channelContextInfo(),
+          },
+          { quoted: mek }
+        );
+        if (sent?.key?.id) state.expectedMsgId = sent.key.id;
+        return;
+      }
+
       const cat = action.cat;
       const list = state.map[cat] || [];
       if (!list.length) {
