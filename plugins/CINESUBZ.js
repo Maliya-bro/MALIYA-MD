@@ -9,7 +9,7 @@ const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
-const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
+const DEFAULT_SEARCH_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 3000;
 const pendingCineSubz = {};
@@ -44,15 +44,53 @@ function channelContextInfo() {
   };
 }
 
-// WhatsApp Baileys Quoted Message ID extract කරගන්න helper එක
 function getQuotedStanzaId(mek) {
   return (
     mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
     mek?.message?.imageMessage?.contextInfo?.stanzaId ||
     mek?.message?.videoMessage?.contextInfo?.stanzaId ||
     mek?.message?.documentMessage?.contextInfo?.stanzaId ||
+    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
     null
   );
+}
+
+function safeJsonParse(str) {
+  try { return JSON.parse(str); } catch { return null; }
+}
+
+function extractIncomingPayload(body, mek, m) {
+  const paramsJson =
+    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+    
+  if (paramsJson) {
+    const parsed = safeJsonParse(paramsJson);
+    if (parsed) {
+      const btnId = parsed.id || parsed.selectedId || parsed.selectedRowId || parsed.name;
+      if (btnId) return String(btnId).trim();
+    }
+  }
+
+  const directId =
+    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    m?.message?.buttonsResponseMessage?.selectedButtonId ||
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    mek?.message?.buttonsResponseMessage?.selectedButtonId;
+    
+  if (directId) return String(directId).trim();
+
+  const text =
+    m?.message?.interactiveResponseMessage?.body?.text ||
+    m?.message?.conversation ||
+    m?.message?.extendedTextMessage?.text ||
+    mek?.message?.interactiveResponseMessage?.body?.text ||
+    mek?.message?.conversation ||
+    mek?.message?.extendedTextMessage?.text ||
+    body ||
+    "";
+    
+  return String(text).trim();
 }
 
 async function getThumbnailBuffer(url) {
@@ -61,7 +99,7 @@ async function getThumbnailBuffer(url) {
     const res = await axios.get(tryUrl, {
       responseType: "arraybuffer",
       timeout: 8000,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
+      headers: { 'User-Agent': 'Mozilla/5.0' }
     });
     
     return await sharp(Buffer.from(res.data))
@@ -69,17 +107,6 @@ async function getThumbnailBuffer(url) {
       .jpeg({ quality: 50 })
       .toBuffer();
   } catch (e) {
-    if (tryUrl !== DEFAULT_SEARCH_IMAGE) {
-      try {
-        const res2 = await axios.get(DEFAULT_SEARCH_IMAGE, { responseType: "arraybuffer", timeout: 8000 });
-        return await sharp(Buffer.from(res2.data))
-          .resize(200, 200, { fit: 'cover' })
-          .jpeg({ quality: 50 })
-          .toBuffer();
-      } catch (e2) {
-        return null;
-      }
-    }
     return null;
   }
 }
@@ -218,6 +245,7 @@ async function getCineSubzLinks(originalUrl) {
   return { error: 'File not found on any server.' };
 }
 
+/* ================= COMMAND: .cinesubz ================= */
 cmd({
   pattern: "cinesubz",
   alias: ["cinesub", "cs", "cssearch", "film", "movie"],
@@ -246,6 +274,76 @@ cmd({
     const k = makePendingKey(sender, from);
     clearUserSession(k);
 
+    let searchImg = DEFAULT_SEARCH_IMAGE;
+    if (sessionId) {
+      try {
+        const custom = await getCustomImage(sessionId, "cinesubz_header");
+        if (custom && custom.data) searchImg = custom.data;
+      } catch (e) {}
+    }
+
+    const bodyText = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+
+    const settings = await readSettings(sessionId);
+    const btnsOn = !!settings.btns_enabled;
+
+    // 🔥 BUTTONS SYSTEM (Asitha-MD Style)
+    if (btnsOn) {
+      try {
+        const { ButtonV2 } = await import("@vanzxy/baileys");
+
+        const movieRows = topResults.map((item, index) => ({
+          title: `${String(index + 1).padStart(2, "0")}. ${item.title.substring(0, 45)}`,
+          description: "Click to view movie qualities",
+          id: `.cs_select ${index + 1}`
+        }));
+
+        const btn = new ButtonV2(sock)
+          .setBody(bodyText)
+          .setFooter("WaBot by MALIYA-MD Team ツ")
+          .setThumbnail(searchImg);
+
+        // 1. Popup List Menu Button
+        btn.addRawButton({
+          buttonId: "cinesubz_movies_list",
+          buttonText: { displayText: "🎬 Select Movie" },
+          type: 1,
+          nativeFlowInfo: {
+            name: "single_select",
+            paramsJson: JSON.stringify({
+              title: "CineSubz Search Results ↯",
+              sections: [
+                {
+                  title: "🎥 Available Movies",
+                  rows: movieRows
+                }
+              ]
+            }),
+          },
+        });
+
+        // 2. Bot Menu Button
+        btn.addButton("📜 Bot Menu", ".menu");
+
+        const sentMsg = await btn.send(from, { quoted: mek });
+
+        if (sentMsg?.key?.id) {
+          pendingCineSubz[k] = { 
+            step: 1, 
+            results: topResults, 
+            timestamp: Date.now(), 
+            isProcessing: false,
+            expectedMsgId: sentMsg.key.id 
+          };
+          await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+          return;
+        }
+      } catch (e) {
+        console.log("CINESUBZ BUTTONV2 ERROR:", e?.message || e);
+      }
+    }
+
+    // 🔢 FALLBACK NUMBERED MENU
     let text = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
     text += "🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n";
     text += "⊱━━━━━ • ✿ • ━━━━━⊰\n\n";
@@ -257,17 +355,8 @@ cmd({
     });
     text += "\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 💬 *Please reply to this message with a number...*";
 
-    let searchImg = DEFAULT_SEARCH_IMAGE;
-    if (sessionId) {
-      try {
-        const custom = await getCustomImage(sessionId, "cinesubz_header");
-        if (custom && custom.data) searchImg = custom.data;
-      } catch (e) {}
-    }
-
     const sentMsg = await sock.sendMessage(from, { image: { url: searchImg }, caption: text, contextInfo: channelContextInfo() }, { quoted: mek });
     
-    // Bot යැවූ message එකේ ID එක session එකේ තබා ගනී
     pendingCineSubz[k] = { 
       step: 1, 
       results: topResults, 
@@ -283,33 +372,43 @@ cmd({
   }
 });
 
+/* ================= REPLY HANDLER ================= */
 const csReplyHandler = {
   filter: (text, { sender, from }) => {
-    if (!text) return false;
     const k = makePendingKey(sender, from);
     return !!pendingCineSubz[k];
   },
-  function: async (sock, mek, m, { body, sender, from }) => {
-    const input = String(body || "").trim();
-    if (!input || !/^\d+$/.test(input)) return;
+  function: async (sock, mek, m, { body, sender, from, sessionId }) => {
+    const payload = extractIncomingPayload(body, mek, m);
+    if (!payload) return;
+
+    let choice = null;
+    if (payload.startsWith(".cs_select ")) {
+      choice = parseInt(payload.replace(".cs_select ", "").trim(), 10);
+    } else if (payload.startsWith(".cs_dl ")) {
+      choice = parseInt(payload.replace(".cs_dl ", "").trim(), 10);
+    } else if (/^\d+$/.test(payload)) {
+      choice = parseInt(payload, 10);
+    }
+
+    if (choice === null || isNaN(choice)) return;
 
     const k = makePendingKey(sender, from);
     const pending = pendingCineSubz[k];
     if (!pending || pending.isProcessing) return;
 
-    // 🔥 Check if the incoming message is a quoted reply to the bot's sent message
+    // Quoted reply validation
     const quotedId = getQuotedStanzaId(mek);
-    if (!quotedId || quotedId !== pending.expectedMsgId) {
-      return; // Normal numbers හෝ වෙනත් messages වලට reply කර ඒවා reject කරයි
+    if (quotedId && pending.expectedMsgId && quotedId !== pending.expectedMsgId) {
+      return;
     }
 
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) return;
-    lastProcessedMsg[k] = { text: input, time: now };
+    if (lastMsg && lastMsg.text === payload && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+    lastProcessedMsg[k] = { text: payload, time: now };
 
-    const choice = parseInt(input, 10);
-
+    // STEP 1: Process Movie Choice & Show Qualities
     if (pending.step === 1) {
       if (choice < 1 || choice > pending.results.length) return;
       pending.isProcessing = true;
@@ -339,6 +438,70 @@ const csReplyHandler = {
           return await sendErrorMsg(sock, from, mek, "No download links found below 2GB.");
         }
 
+        const imgToSend = movieInfo.poster || movieInfo.image || DEFAULT_SEARCH_IMAGE;
+        let qualityBody = `⊱━━━━━ • ✿ • ━━━━━⊰\n📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
+        if (movieInfo.imdb_rate) qualityBody += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
+        if (movieInfo.duration) qualityBody += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
+        qualityBody += `Available formats below 2GB are listed. Choose one to start download.\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+
+        const settings = await readSettings(sessionId);
+        const btnsOn = !!settings.btns_enabled;
+
+        // 🔥 BUTTONS SYSTEM (Quality List Popup)
+        if (btnsOn) {
+          try {
+            const { ButtonV2 } = await import("@vanzxy/baileys");
+
+            const qualityRows = downloadLinks.map((d, i) => ({
+              title: `${String(i + 1).padStart(2, "0")}. ${d.quality}`,
+              description: `Download ${d.quality}`,
+              id: `.cs_dl ${i + 1}`
+            }));
+
+            const btn = new ButtonV2(sock)
+              .setBody(qualityBody)
+              .setFooter("WaBot by MALIYA-MD Team ツ")
+              .setThumbnail(imgToSend);
+
+            // 1. Popup List Menu Button
+            btn.addRawButton({
+              buttonId: "cinesubz_quality_list",
+              buttonText: { displayText: "📥 Select Quality" },
+              type: 1,
+              nativeFlowInfo: {
+                name: "single_select",
+                paramsJson: JSON.stringify({
+                  title: "Choose Quality & Size ↯",
+                  sections: [
+                    {
+                      title: "📊 Available Qualities",
+                      rows: qualityRows
+                    }
+                  ]
+                }),
+              },
+            });
+
+            // 2. Bot Menu Button
+            btn.addButton("📜 Bot Menu", ".menu");
+
+            const sentQualityMsg = await btn.send(from, { quoted: mek });
+
+            if (sentQualityMsg?.key?.id) {
+              pending.step = 2;
+              pending.movie = { metadata: movieInfo, downloadLinks };
+              pending.timestamp = Date.now();
+              pending.isProcessing = false;
+              pending.expectedMsgId = sentQualityMsg.key.id;
+              await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+              return;
+            }
+          } catch (e) {
+            console.log("CINESUBZ QUALITY BUTTONV2 ERROR:", e?.message || e);
+          }
+        }
+
+        // 🔢 FALLBACK NUMBERED QUALITY MENU
         let qualityMsg = "⊱━━━━━ • ✿ • ━━━━━⊰\n";
         qualityMsg += "📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n"; 
         qualityMsg += "⊱━━━━━ • ✿ • ━━━━━⊰\n\n";
@@ -351,15 +514,13 @@ const csReplyHandler = {
         });
         qualityMsg += "\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Please reply to this message with a quality number...*";
 
-        const imgToSend = movieInfo.poster || movieInfo.image || DEFAULT_SEARCH_IMAGE;
-
         const sentQualityMsg = await sock.sendMessage(from, { image: { url: imgToSend }, caption: qualityMsg, contextInfo: channelContextInfo() }, { quoted: mek });
 
         pending.step = 2;
         pending.movie = { metadata: movieInfo, downloadLinks };
         pending.timestamp = Date.now();
         pending.isProcessing = false;
-        pending.expectedMsgId = sentQualityMsg.key.id; // Quality menu එකේ ID එක update කරයි
+        pending.expectedMsgId = sentQualityMsg.key.id;
 
         await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
       } catch (error) {
@@ -367,6 +528,7 @@ const csReplyHandler = {
         await sendErrorMsg(sock, from, mek, "Failed to fetch download links for this movie.");
       }
     }
+    // STEP 2: Process Quality Choice & Direct Download
     else if (pending.step === 2) {
       if (choice < 1 || choice > pending.movie.downloadLinks.length) return;
       pending.isProcessing = true;
@@ -456,3 +618,5 @@ setInterval(() => {
     if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) delete lastProcessedMsg[k];
   }
 }, 2.5 * 60 * 1000);
+
+module.exports = {};
