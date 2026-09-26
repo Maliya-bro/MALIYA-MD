@@ -36,8 +36,7 @@ const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
 const OWNER_NAME =
   String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
 
-const DEFAULT_HEADER_IMAGE =
-  "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
+const DEFAULT_HEADER_IMAGE = "https://i.ibb.co/4pDNDk1/avatar.png";
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
@@ -147,7 +146,7 @@ function getCategoryEmoji(cat) {
   if (c.includes("SEARCH")) return "🔎";
   if (c.includes("NEWS")) return "📰";
   if (c.includes("MEDIA")) return "🎬";
-  if (c.includes("CONFIG")) return "⚙️";
+  if (c.includes("CONFIG")) return "🛠️";
   if (c.includes("MAIN")) return "📜";
   if (c.includes("EDUCATION")) return "📚";
   if (c.includes("MOVIE")) return "🎬";
@@ -191,24 +190,36 @@ function menuHeader(userName = "User") {
 👤 *ᴜsᴇʀ :* ${styledUser}
 👑 *ᴏᴡɴᴇʀ :* ${OWNER_NUMBER}
 🕒 *ᴛɪᴍᴇ :* ${time}
-📅 *ᴅᴀᴛᴇ :* ${date}
+📅 *ᴅᴀᴛේ :* ${date}
 🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]
 ╚═════════. .★.═══╝
 
 ╰─────✦❘•❘✦────•┈➤
-👇 *Select a command category below to view commands:*`;
+👇 *Select a command category below to view commands:*
+
+🌐 *Web:* https://maliya-md.replit.app`;
+}
+
+function buildStyledMainMenu(state, userName) {
+  const { categories } = state;
+  const styledUser = toSmallCaps(userName);
+  let msg = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
+  msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
+  categories.forEach((cat, idx) => {
+    const emo = getCategoryEmoji(cat);
+    const numStr = String(idx + 1).padStart(2, "0");
+    msg += `*[ ${numStr} ]*  ${emo}  *${toSmallCaps(cat)}*  _(${state.map[cat].length})_\n`;
+  });
+  msg += `\n⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n> 💬 *Swipe & Reply this message with a number...*`;
+  return msg;
 }
 
 function commandListCaption(cat, list, userName = "User") {
   const emo = getCategoryEmoji(cat);
   const styledCat = toSmallCaps(cat);
   const styledUser = toSmallCaps(userName);
-  let txt = `╭⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n`;
-  txt += `${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n`;
-  txt += `╰⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n\n`;
-  txt += `👤 *ᴜsᴇʀ :* ${styledUser}\n`;
-  txt += `📦 *ᴛᴏᴛᴀʟ :* ${list.length} Commands\n`;
-  txt += `🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]\n\n`;
+  let txt = `╭⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n╰⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n\n`;
+  txt += `👤 *ᴜsᴇʀ :* ${styledUser}\n📦 *ᴛᴏᴛᴀʟ :* ${list.length} Commands\n🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]\n\n`;
 
   list.forEach((c) => {
     const primary = c.pattern ? `${PREFIX}${toSmallCaps(c.pattern)}` : "No Pattern";
@@ -218,29 +229,8 @@ function commandListCaption(cat, list, userName = "User") {
     txt += `  ╰ 📌 *ᴅᴇsᴄ:* _${c.desc || "No description"}_\n\n`;
   });
 
-  txt += `──────✦❘•❘✦──────\n`;
-  txt += `> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
+  txt += `──────✦❘•❘✦──────\n> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
   return txt;
-}
-
-function buildStyledMainMenu(state, userName) {
-  const { categories } = state;
-  const styledUser = toSmallCaps(userName);
-  let msg = `┏━━━◥◣◆◢◤━━━━┓\n`;
-  msg += `★彡 *${BOT_NAME}* 彡★\n`;
-  msg += `┗━━━◢◤◆◥◣━━━━┛\n\n`;
-  msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
-
-  categories.forEach((cat, idx) => {
-    const emo = getCategoryEmoji(cat);
-    const numStr = String(idx + 1).padStart(2, "0");
-    const styledCat = toSmallCaps(cat);
-    msg += `*[ ${numStr} ]*  ${emo}  *${styledCat}*  _(${state.map[cat].length})_\n`;
-  });
-
-  msg += `\n⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n`;
-  msg += `> 💬 *Swipe & Reply this message with a number...*`;
-  return msg;
 }
 
 function extractTexts(body, mek, m) {
@@ -253,24 +243,18 @@ function extractTexts(body, mek, m) {
     m?.message?.extendedTextMessage?.text,
     m?.message?.buttonsResponseMessage?.selectedButtonId,
     m?.message?.buttonsResponseMessage?.selectedDisplayText,
-    m?.message?.templateButtonReplyMessage?.selectedId,
-    m?.message?.templateButtonReplyMessage?.selectedDisplayText,
     m?.message?.listResponseMessage?.title,
     m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
     m?.message?.interactiveResponseMessage?.body?.text,
     mek?.message?.conversation,
     mek?.message?.extendedTextMessage?.text,
     mek?.message?.buttonsResponseMessage?.selectedButtonId,
-    mek?.message?.buttonsResponseMessage?.selectedDisplayText,
-    mek?.message?.templateButtonReplyMessage?.selectedId,
-    mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    mek?.message?.listResponseMessage?.title,
     mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
-    mek?.message?.interactiveResponseMessage?.body?.text,
   ];
   for (const item of direct) {
     if (item) texts.push(String(item).trim());
   }
+
   const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   for (const raw of [p1, p2]) {
@@ -301,9 +285,9 @@ function resolveMenuAction(texts, state) {
     for (const cat of state.categories || []) {
       const catText = normalizeText(cat);
       if (
-        text === `${catText} MENU` ||
-        text.includes(`${catText} MENU`) ||
+        text === catText ||
         text === `${catText} COMMANDS` ||
+        text === `${catText} MENU` ||
         text.includes(`${catText} COMMANDS`)
       ) {
         return { type: "view", cat };
@@ -413,8 +397,7 @@ cmd(
 
       if (btnsOn) {
         try {
-          const baileysLib = await import("@whiskeysockets/baileys");
-          const { generateWAMessageFromContent } = baileysLib;
+          const { ButtonV2 } = await import("@vanzxy/baileys");
 
           const listRows = categories.map((cat) => ({
             title: `${getCategoryEmoji(cat)} ${toSmallCaps(cat)} MENU`,
@@ -422,55 +405,39 @@ cmd(
             id: `.menu_view ${cat}`,
           }));
 
-          // Asitha-MD එකේ විදිහටම buttonsMessage (headerType: 6) සකස් කිරීම
-          const msg = generateWAMessageFromContent(
-            from,
-            {
-              buttonsMessage: {
-                locationMessage: {
-                  degreesLatitude: 0,
-                  degreesLongitude: 0,
-                  name: BOT_NAME,
-                  address: "Sri Lanka",
-                  jpegThumbnail: await axios.get(headerImg, { responseType: "arraybuffer", timeout: 5000 })
-                    .then(res => Buffer.from(res.data))
-                    .catch(() => Buffer.from("")),
-                },
-                contentText: menuHeader(userName),
-                footerText: "© 2026 MALIYA-MD BOT SYSTEM",
-                headerType: 6,
-                contextInfo: channelContextInfo(),
-                buttons: [
+          const btn = new ButtonV2(sock)
+            .setBody(menuHeader(userName))
+            .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
+            .setThumbnail(headerImg);
+
+          // 1. Popup List Menu Button
+          btn.addRawButton({
+            buttonId: ".menu_all",
+            buttonText: { displayText: "≡ List Menu" },
+            type: 1,
+            nativeFlowInfo: {
+              name: "single_select",
+              paramsJson: JSON.stringify({
+                title: "Click Here ↯",
+                sections: [
                   {
-                    buttonId: ".menu_all",
-                    buttonText: { displayText: "≡ List Menu" },
-                    type: 4,
-                    nativeFlowInfo: {
-                      name: "single_select",
-                      paramsJson: JSON.stringify({
-                        title: "Click Here ↯",
-                        sections: [
-                          {
-                            title: "Command Categories",
-                            rows: listRows,
-                          },
-                        ],
-                      }),
-                    },
-                  },
-                  {
-                    buttonId: ".ping",
-                    buttonText: { displayText: "📊 Ping" },
-                    type: 1,
+                    title: "Command Categories",
+                    rows: listRows,
                   },
                 ],
-              },
+              }),
             },
-            { quoted: mek }
-          );
+          });
 
-          await sock.relayMessage(from, msg.message, {
-            messageId: msg.key.id,
+          // 2. Ping Button
+          btn.addButton("📊 Ping", ".ping");
+
+          // 🔥 Asitha-MD Secret: viewOnceMessage wrapper එක ඉවත් කර buttonsMessage එක යැවීම
+          const built = await btn.build(from, { quoted: mek });
+          const rawMsg = built.message?.viewOnceMessage?.message || built.message;
+
+          await sock.relayMessage(from, rawMsg, {
+            messageId: built.key.id,
             additionalNodes: [
               {
                 tag: "biz",
@@ -491,13 +458,11 @@ cmd(
             ],
           });
 
-          if (msg?.key?.id) {
-            state.expectedMsgId = msg.key.id;
-            pendingMenu[k] = state;
-            return;
-          }
+          state.expectedMsgId = built.key.id;
+          pendingMenu[k] = state;
+          return;
         } catch (err) {
-          console.log("ASITHA WEB COMPATIBLE MENU ERROR:", err?.message || err);
+          console.log("BUTTONV2 HYBRID SEND ERROR:", err?.message || err);
         }
       }
 
@@ -602,15 +567,17 @@ const menuReplyHandler = {
     const state = pendingMenu[k];
     if (!state) return false;
 
-    const quotedId = getQuotedId(m, mek);
-    if (!quotedId || quotedId !== state.expectedMsgId) return false;
-
     const texts = extractTexts(text, mek, m);
     const action = resolveMenuAction(texts, state);
     if (action) return true;
 
     const num = parseInt(String(text || "").trim(), 10);
-    return !isNaN(num) && num > 0 && num <= state.categories.length;
+    const isNum = !isNaN(num) && num > 0 && num <= state.categories.length;
+
+    const quotedId = getQuotedId(m, mek);
+    const isQuoted = quotedId && quotedId === state.expectedMsgId;
+
+    return isQuoted || isNum;
   },
   function: async (sock, mek, m, { from, body, sender, pushname, reply }) => {
     try {
@@ -626,6 +593,7 @@ const menuReplyHandler = {
 
       const texts = extractTexts(body, mek, m);
       let action = resolveMenuAction(texts, state);
+
       if (!action) {
         const num = parseInt(inputStr, 10);
         if (!isNaN(num) && num > 0 && num <= state.categories.length) {
@@ -637,6 +605,26 @@ const menuReplyHandler = {
       if (isDuplicateAction(state, action)) return;
 
       const userName = state.userName || getUserName(pushname, m, mek, sender);
+
+      if (action.type === "all") {
+        let headerImg = DEFAULT_HEADER_IMAGE;
+        if (state.sessionId) {
+          try {
+            const custom = await getCustomImage(state.sessionId, "menu_header");
+            if (custom && custom.data) headerImg = custom.data;
+          } catch (e) {}
+        }
+        const sent = await safeSendImageOrText(
+          sock,
+          from,
+          headerImg,
+          buildStyledMainMenu(state, userName),
+          mek
+        );
+        if (sent?.key?.id) state.expectedMsgId = sent.key.id;
+        return;
+      }
+
       const cat = action.cat;
       const list = state.map[cat] || [];
       if (!list.length) {
