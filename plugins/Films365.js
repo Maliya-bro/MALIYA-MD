@@ -121,7 +121,7 @@ cmd({
   alias: ["f365", "movie365"],
   react: "🎬",
   desc: "Search and download movies from Films365",
-  category: "download",
+  category: "movie",
   filename: __filename,
 }, async (sock, mek, m, { from, q, sender, sessionId }) => {
   try {
