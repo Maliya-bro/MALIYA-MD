@@ -7,7 +7,7 @@ const lastProcessedMsg = {};
 const LOOP_COOLDOWN = 2500;
 
 /* ============ CONFIG ============ */
-const BOT_NAME = "𝕄𝔸𝕃𝕀𝕐𝔸-𝕄𝔻";
+const BOT_NAME = "「 𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸 」";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
@@ -178,9 +178,9 @@ function buildCommandMapCached() {
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
-  return `ㅤ⠀⠀ㅤ┏━━━◥◣◆◢◤━━━━┓
-ㅤㅤ⠀⠀★彡 *${BOT_NAME}* 彡★
-ㅤㅤ┗━━━◢◤◆◥◣━━━━┛
+  return `ㅤ┏━━━◥◣◆◢◤━━━━┓
+ㅤ⠀★彡 *${BOT_NAME}* 彡★
+┗━━━◢◤◆◥◣━━━━┛
 
 ✨ 👋 *ʜɪ, ${styledUser}!*
 
