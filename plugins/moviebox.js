@@ -1,22 +1,23 @@
 const { cmd, replyHandlers } = require("../command");
 const axios = require("axios");
-const { getCustomImage } = require("../lib/botSettings");
+const sharp = require("sharp");
+const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
-const DEFAULT_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
+const DEFAULT_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
 
 const API_BASE = "https://api.chamindu.site";
 const API_KEY = "chama_api_c18d54f734c23ea0c333d33b7494b3b2";
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
-const LOOP_COOLDOWN = 3000;
+const LOOP_COOLDOWN = 2500;
 
-const pendingMovieBox = {};
+const pendingMovieBox = Object.create(null);
 const lastProcessedMsg = {};
 
-function makePendingKey(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
+function keyFor(sender, from) {
+  return `${from || ""}`;
 }
 
 function clearUserSession(k) {
@@ -44,6 +45,22 @@ function channelContextInfo() {
   };
 }
 
+async function getFittedImageBuffer(url) {
+  try {
+    const res = await axios.get(url, { responseType: "arraybuffer", timeout: 10000 });
+    const inputBuf = Buffer.from(res.data);
+    return await sharp(inputBuf)
+      .resize(800, 800, {
+        fit: "contain",
+        background: { r: 18, g: 18, b: 24, alpha: 1 }
+      })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+  } catch (e) {
+    return url;
+  }
+}
+
 async function getThumbnailBuffer(url) {
   try {
     if (!url) return null;
@@ -54,9 +71,54 @@ async function getThumbnailBuffer(url) {
   }
 }
 
+function getQuotedId(m, mek) {
+  return (
+    m?.quoted?.id ||
+    mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.imageMessage?.contextInfo?.stanzaId ||
+    mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+    m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    null
+  );
+}
+
+function extractTexts(body, mek, m) {
+  const texts = [];
+  const direct = [
+    body, m?.body, m?.text, m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text, m?.message?.buttonsResponseMessage?.selectedButtonId,
+    m?.message?.buttonsResponseMessage?.selectedDisplayText,
+    m?.message?.listResponseMessage?.title, m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.interactiveResponseMessage?.body?.text,
+    mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+  ];
+  for (const item of direct) {
+    if (item) texts.push(String(item).trim());
+  }
+
+  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  for (const raw of [p1, p2]) {
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.id) texts.push(String(parsed.id).trim());
+      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+      if (parsed.title) texts.push(String(parsed.title).trim());
+      if (parsed.name) texts.push(String(parsed.name).trim());
+    } catch {}
+  }
+  return [...new Set(texts.filter(Boolean))];
+}
+
 async function sendErrorMsg(sock, from, mek, text) {
   await sock.sendMessage(from, {
-    text: `⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _${text}_`,
+    text: `⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *ERROR*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _${text}_`,
     contextInfo: channelContextInfo(),
   }, { quoted: mek });
 }
@@ -73,45 +135,27 @@ cmd({
   try {
     if (!q) {
       return await sock.sendMessage(from, {
-        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐌𝐎𝐕𝐈𝐄𝐁𝐎𝐗 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.mb <name>\`\n💡 *Example:*\n• \`.mb avatar\`\n• \`.mb game of thrones\``,
+        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *MOVIEBOX DL*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.mb <name>\`\n💡 *Example:*\n• \`.mb avatar\`\n• \`.mb game of thrones\``,
         contextInfo: channelContextInfo()
       }, { quoted: mek });
     }
 
-    await sock.sendMessage(from, { react: { text: "🔍", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "🔍", key: mek.key } });
 
     const res = await axios.get(`${API_BASE}/api/v1/movie/moviebox/search?q=${encodeURIComponent(q.trim())}&api_key=${API_KEY}`);
     const results = res.data.data || res.data.results || [];
 
     if (!results.length) {
-      await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
       return await sendErrorMsg(sock, from, mek, `No results found for "${q}".`);
     }
 
     const topResults = results.slice(0, 15);
-    const k = makePendingKey(sender, from);
+    const k = keyFor(sender, from);
     clearUserSession(k);
 
-    pendingMovieBox[k] = {
-      step: 1,
-      results: topResults,
-      timestamp: Date.now(),
-      isProcessing: false,
-    };
-
-    let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
-    text += `🎬 *𝐌𝐎𝐕𝐈𝐄𝐁𝐎𝐗 𝐒𝐄𝐀𝐑𝐂𝐇*\n`;
-    text += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
-    text += `🎀 *Search :* ${q}\n`;
-    text += `🍿 *Results :* ${topResults.length}\n\n`;
-
-    topResults.forEach((item, index) => {
-      const numStr = String(index + 1).padStart(2, "0");
-      const typeIcon = (item.type === 'tvshows' || item.type === 'tv') ? '📺' : '🎥';
-      text += `*[ ${numStr} ]* ➔ ${typeIcon} *${(item.title || 'Movie').substring(0, 35)}* (${item.year || 'N/A'})\n`;
-    });
-
-    text += `\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 👇 *Reply with a number to Download...*`;
+    const settings = await readSettings(sessionId);
+    const btnsOn = !!settings.btns_enabled;
 
     let searchImg = DEFAULT_IMAGE;
     if (sessionId) {
@@ -121,52 +165,161 @@ cmd({
       } catch (e) {}
     }
 
-    await sock.sendMessage(from, { 
+    const bodyText = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *MOVIEBOX SEARCH* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+
+    // 🔘 ButtonV2 Popup List
+    if (btnsOn) {
+      try {
+        const { ButtonV2 } = await import("@vanzxy/baileys");
+
+        const mbRows = topResults.map((item, index) => {
+          const typeIcon = (item.type === 'tvshows' || item.type === 'tv') ? '📺' : '🎥';
+          return {
+            title: `${String(index + 1).padStart(2, "0")}. ${(item.title || 'Movie').slice(0, 38)}`,
+            description: `${typeIcon} Year: ${item.year || 'N/A'} | Type: ${item.type || 'Movie'}`,
+            id: `.mb_select ${index + 1}`
+          };
+        });
+
+        const fittedThumb = await getFittedImageBuffer(searchImg);
+
+        const btn = new ButtonV2(sock)
+          .setBody(bodyText)
+          .setFooter("WaBot by MALIYA-MD Team ツ")
+          .setThumbnail(fittedThumb);
+
+        btn.addRawButton({
+          buttonId: ".mb_list",
+          buttonText: { displayText: "🎬 Select Movie / Series" },
+          type: 1,
+          nativeFlowInfo: {
+            name: "single_select",
+            paramsJson: JSON.stringify({
+              title: "MovieBox Results ↯",
+              sections: [{ title: "Found Movies & Series", rows: mbRows }]
+            }),
+          },
+        });
+
+        btn.addButton("⚡ Alive", ".alive");
+
+        const sentMsg = await btn.send(from, { quoted: mek });
+
+        if (sentMsg?.key?.id) {
+          pendingMovieBox[k] = {
+            expectedMsgId: sentMsg.key.id,
+            step: 1,
+            results: topResults,
+            timestamp: Date.now(),
+            isProcessing: false,
+          };
+          await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+          return;
+        }
+      } catch (err) {
+        console.log("MOVIEBOX BUTTONV2 ERROR:", err?.message || err);
+      }
+    }
+
+    // Numbered Fallback Menu
+    let text = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *MOVIEBOX SEARCH* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
+    text += `🎀 *Search :* ${q}\n`;
+    text += `🍿 *Results :* ${topResults.length}\n\n`;
+
+    topResults.forEach((item, index) => {
+      const numStr = String(index + 1).padStart(2, "0");
+      const typeIcon = (item.type === 'tvshows' || item.type === 'tv') ? '📺' : '🎥';
+      text += `*[ ${numStr} ]* ➔ ${typeIcon} *${(item.title || 'Movie').substring(0, 35)}* (${item.year || 'N/A'})\n`;
+    });
+
+    text += `\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 💬 *Swipe & Reply this message with a number...*`;
+
+    const menuMsg = await sock.sendMessage(from, { 
       image: { url: searchImg }, 
       caption: text, 
       contextInfo: channelContextInfo() 
     }, { quoted: mek });
 
-    await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+    pendingMovieBox[k] = {
+      expectedMsgId: menuMsg.key.id,
+      step: 1,
+      results: topResults,
+      timestamp: Date.now(),
+      isProcessing: false,
+    };
 
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
   } catch (error) {
-    console.error("MovieBox Search Error:", error.message);
-    await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
     await sendErrorMsg(sock, from, mek, "Failed to connect to MovieBox server.");
   }
 });
 
-// ── 2. Reply Handler ───────────────────────────────────────────
+// ── 2. Unified Reply Handler ───────────────────────────────────
 const mbReplyHandler = {
-  filter: (text, { sender, from }) => {
-    if (!text) return false;
-    const k = makePendingKey(sender, from);
-    return !!pendingMovieBox[k];
-  },
-  function: async (sock, mek, m, { body, sender, from }) => {
-    const input = String(body || "").trim();
-    if (!input || !/^\d+$/.test(input)) return;
+  filter: (text, { sender, from, m, mek }) => {
+    const k = keyFor(sender, from);
+    const state = pendingMovieBox[k];
+    if (!state) return false;
 
-    const k = makePendingKey(sender, from);
+    const texts = extractTexts(text, mek, m);
+    for (const t of texts) {
+      if (t.startsWith(".mb_select ") || t.startsWith(".mb_pick_dl ") || t.startsWith(".mb_batch_dl")) return true;
+    }
+
+    const num = parseInt(String(text || "").trim(), 10);
+    const maxItems = state.step === 1 ? state.results.length : (state.step === "tv_episode" ? state.episodes.length + 1 : state.downloads.length);
+    const isNum = !isNaN(num) && num > 0 && num <= maxItems;
+
+    const quotedId = getQuotedId(m, mek);
+    const isQuoted = quotedId && quotedId === state.expectedMsgId;
+
+    return isQuoted || isNum;
+  },
+  function: async (sock, mek, m, { body, sender, from, sessionId }) => {
+    const k = keyFor(sender, from);
     const pending = pendingMovieBox[k];
     if (!pending || pending.isProcessing) return;
 
-    // Loop & Spam Protection
-    const now = Date.now();
-    const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) return;
-    lastProcessedMsg[k] = { text: input, time: now };
+    const texts = extractTexts(body, mek, m);
+    let choice = null;
+    let isBatch = false;
 
-    const choice = parseInt(input, 10);
+    for (const t of texts) {
+      if (t.startsWith(".mb_select ") || t.startsWith(".mb_pick_dl ")) {
+        choice = parseInt(t.split(" ")[1].trim(), 10);
+        break;
+      }
+      if (t === ".mb_batch_dl") {
+        isBatch = true;
+        break;
+      }
+    }
+
+    if (choice === null && !isBatch) {
+      const num = parseInt(String(body || "").trim(), 10);
+      if (!isNaN(num) && num > 0) {
+        choice = num;
+      }
+    }
+
+    const now = Date.now();
+    const sig = `${pending.step}_${choice || (isBatch ? 'batch' : '')}`;
+    const lastMsg = lastProcessedMsg[k];
+    if (lastMsg && lastMsg.text === sig && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+    lastProcessedMsg[k] = { text: sig, time: now };
+
+    const settings = await readSettings(sessionId);
+    const btnsOn = !!settings.btns_enabled;
 
     // ══════════════════════════════════════════════════════════
-    // STEP 1: SELECT MOVIE OR SERIES (From search results)
+    // STEP 1: MOVIE / TV SHOW SELECTION
     // ══════════════════════════════════════════════════════════
     if (pending.step === 1) {
-      if (choice < 1 || choice > pending.results.length) return;
+      if (!choice || choice < 1 || choice > pending.results.length) return;
 
       pending.isProcessing = true;
-      await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
       const selectedItem = pending.results[choice - 1];
       const isTvShow = selectedItem.type === 'tvshows' || selectedItem.type === 'tv';
@@ -176,8 +329,8 @@ const mbReplyHandler = {
         const detailsData = detailsRes.data.data || {};
         const posterUrl = detailsData.image || selectedItem.image || DEFAULT_IMAGE;
 
+        // ─── 📺 TV SERIES SELECTED ───
         if (isTvShow) {
-          // ─── 📺 TV SERIES SELECTED ───
           const episodes = detailsData.episodes || detailsData.downloads || [];
 
           if (episodes.length === 0) {
@@ -185,27 +338,77 @@ const mbReplyHandler = {
             return await sendErrorMsg(sock, from, mek, "No episodes available for this series.");
           }
 
-          let tvText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
-          tvText += `📺 *𝐓𝐕 𝐒𝐄𝐑𝐈𝐄𝐒 𝐃𝐄𝐓𝐀𝐈𝐋𝐒*\n`;
-          tvText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
-          tvText += `🎬 *Series :* ${toSmallCaps(detailsData.title || selectedItem.title)}\n`;
-          tvText += `⭐ *IMDb :* ${detailsData.rating || detailsData.imdb || 'N/A'}\n`;
-          tvText += `📅 *Year :* ${detailsData.year || 'N/A'}\n`;
-          tvText += `🎞️ *Total Eps :* ${episodes.length}\n\n`;
-          
-          episodes.slice(0, 30).forEach((ep, idx) => {
+          let tvCard = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *TV SERIES DETAILS* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
+          tvCard += `🎬 *Series :* ${toSmallCaps(detailsData.title || selectedItem.title)}\n`;
+          tvCard += `⭐ *IMDb :* ${detailsData.rating || detailsData.imdb || 'N/A'}\n`;
+          tvCard += `📅 *Year :* ${detailsData.year || 'N/A'}\n`;
+          tvCard += `🎞️ *Total Episodes :* ${episodes.length}\n`;
+
+          if (btnsOn) {
+            try {
+              const { ButtonV2 } = await import("@vanzxy/baileys");
+
+              const epRows = episodes.slice(0, 30).map((ep, idx) => ({
+                title: `${String(idx + 1).padStart(2, "0")}. ${ep.name || ep.title || 'Episode ' + (idx + 1)}`,
+                description: "Direct High-Speed Stream Download",
+                id: `.mb_pick_dl ${idx + 1}`
+              }));
+
+              const fittedThumb = await getFittedImageBuffer(posterUrl);
+
+              const btn = new ButtonV2(sock)
+                .setBody(tvCard + "\n👇 *Select an episode or download all at once:*")
+                .setFooter("WaBot by MALIYA-MD Team ツ")
+                .setThumbnail(fittedThumb);
+
+              btn.addRawButton({
+                buttonId: ".mb_ep_list",
+                buttonText: { displayText: "📺 Select Episode" },
+                type: 1,
+                nativeFlowInfo: {
+                  name: "single_select",
+                  paramsJson: JSON.stringify({
+                    title: "Episode List ↯",
+                    sections: [{ title: "Episodes", rows: epRows }]
+                  }),
+                },
+              });
+
+              // Batch download button
+              btn.addButton("📥 Download ALL", ".mb_batch_dl");
+
+              const sentMsg = await btn.send(from, { quoted: mek });
+
+              if (sentMsg?.key?.id) {
+                pending.expectedMsgId = sentMsg.key.id;
+                pending.step = "tv_episode";
+                pending.episodes = episodes;
+                pending.metadata = detailsData;
+                pending.timestamp = Date.now();
+                pending.isProcessing = false;
+                await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+                return;
+              }
+            } catch (err) {
+              console.log("TV BUTTONV2 ERROR:", err);
+            }
+          }
+
+          // Numbered Fallback Menu (With Download ALL option)
+          let tvText = tvCard + `\n*[ 00 ]* ➔ 📥 *Download ALL Episodes (Batch)*\n`;
+          episodes.slice(0, 25).forEach((ep, idx) => {
             const numStr = String(idx + 1).padStart(2, "0");
             tvText += `*[ ${numStr} ]* ➔ 📺 *${ep.name || ep.title || 'Episode ' + (idx + 1)}*\n`;
           });
+          tvText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Swipe & Reply with Episode number or 00 for ALL...*`;
 
-          tvText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply with Episode number to Download...*`;
-
-          await sock.sendMessage(from, { 
+          const sentMsg = await sock.sendMessage(from, { 
             image: { url: posterUrl }, 
             caption: tvText, 
             contextInfo: channelContextInfo() 
           }, { quoted: mek });
 
+          pending.expectedMsgId = sentMsg.key.id;
           pending.step = "tv_episode";
           pending.episodes = episodes;
           pending.metadata = detailsData;
@@ -221,27 +424,75 @@ const mbReplyHandler = {
             return await sendErrorMsg(sock, from, mek, "No direct downloads available for this movie.");
           }
 
-          let movieText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
-          movieText += `🎬 *𝐌𝐎𝐕𝐈𝐄 𝐃𝐄𝐓𝐀𝐈𝐋𝐒*\n`;
-          movieText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
-          movieText += `🎬 *Movie :* ${toSmallCaps(detailsData.title || selectedItem.title)}\n`;
-          movieText += `⭐ *IMDb :* ${detailsData.imdb || detailsData.rating || 'N/A'}\n`;
-          movieText += `📅 *Year :* ${detailsData.year || 'N/A'}\n`;
-          movieText += `⏳ *Duration :* ${detailsData.duration || 'N/A'}\n\n`;
+          let movieCard = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *MOVIE DETAILS* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
+          movieCard += `🎬 *Movie :* ${toSmallCaps(detailsData.title || selectedItem.title)}\n`;
+          movieCard += `⭐ *IMDb :* ${detailsData.imdb || detailsData.rating || 'N/A'}\n`;
+          movieCard += `📅 *Year :* ${detailsData.year || 'N/A'}\n`;
+          movieCard += `⏳ *Duration :* ${detailsData.duration || 'N/A'}\n`;
 
+          if (btnsOn) {
+            try {
+              const { ButtonV2 } = await import("@vanzxy/baileys");
+
+              const dlRows = validDownloads.map((dl, i) => ({
+                title: `${String(i + 1).padStart(2, "0")}. ${dl.quality || 'Direct'} Quality`,
+                description: `Size: ${dl.size || 'N/A'} | Direct Cloud Upload`,
+                id: `.mb_pick_dl ${i + 1}`
+              }));
+
+              const fittedThumb = await getFittedImageBuffer(posterUrl);
+
+              const btn = new ButtonV2(sock)
+                .setBody(movieCard + "\n👇 *Select your preferred video quality:*")
+                .setFooter("WaBot by MALIYA-MD Team ツ")
+                .setThumbnail(fittedThumb);
+
+              btn.addRawButton({
+                buttonId: ".mb_quality_list",
+                buttonText: { displayText: "🍿 Choose Quality" },
+                type: 1,
+                nativeFlowInfo: {
+                  name: "single_select",
+                  paramsJson: JSON.stringify({
+                    title: "Quality Options ↯",
+                    sections: [{ title: "Available Downloads", rows: dlRows }]
+                  }),
+                },
+              });
+
+              btn.addButton("⚡ Alive", ".alive");
+
+              const sentMsg = await btn.send(from, { quoted: mek });
+
+              if (sentMsg?.key?.id) {
+                pending.expectedMsgId = sentMsg.key.id;
+                pending.step = "movie_quality";
+                pending.downloads = validDownloads;
+                pending.metadata = detailsData;
+                pending.timestamp = Date.now();
+                pending.isProcessing = false;
+                await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+                return;
+              }
+            } catch (err) {
+              console.log("MOVIE BUTTONV2 ERROR:", err);
+            }
+          }
+
+          let movieText = movieCard + `\n`;
           validDownloads.forEach((dl, i) => {
             const numStr = String(i + 1).padStart(2, "0");
             movieText += `*[ ${numStr} ]* 📊 *${dl.quality || 'Direct'}* _(${dl.size || 'N/A'})_\n`;
           });
+          movieText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Swipe & Reply with quality number to Download...*`;
 
-          movieText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply with quality number to Download...*`;
-
-          await sock.sendMessage(from, { 
+          const sentMsg = await sock.sendMessage(from, { 
             image: { url: posterUrl }, 
             caption: movieText, 
             contextInfo: channelContextInfo() 
           }, { quoted: mek });
 
+          pending.expectedMsgId = sentMsg.key.id;
           pending.step = "movie_quality";
           pending.downloads = validDownloads;
           pending.metadata = detailsData;
@@ -249,10 +500,8 @@ const mbReplyHandler = {
           pending.isProcessing = false;
         }
 
-        await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
-
+        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
       } catch (err) {
-        console.error("MovieBox Fetch Details Error:", err);
         clearUserSession(k);
         await sendErrorMsg(sock, from, mek, "Failed to fetch media details from server.");
       }
@@ -262,12 +511,11 @@ const mbReplyHandler = {
     // STEP 2: MOVIE QUALITY CHOSEN
     // ══════════════════════════════════════════════════════════
     else if (pending.step === "movie_quality") {
-      if (choice < 1 || choice > pending.downloads.length) return;
+      if (!choice || choice < 1 || choice > pending.downloads.length) return;
 
       pending.isProcessing = true;
       const selectedDl = pending.downloads[choice - 1];
       const dlUrl = selectedDl.link || selectedDl.download_link || selectedDl.direct_link;
-      
       const title = pending.metadata.title || "Movie";
       const quality = selectedDl.quality || "HD";
       const poster = pending.metadata.image || DEFAULT_IMAGE;
@@ -277,15 +525,42 @@ const mbReplyHandler = {
     }
 
     // ══════════════════════════════════════════════════════════
-    // STEP 2: TV EPISODE CHOSEN
+    // STEP 2: TV EPISODE / BATCH DOWNLOAD
     // ══════════════════════════════════════════════════════════
     else if (pending.step === "tv_episode") {
-      if (choice < 1 || choice > pending.episodes.length) return;
+      const isBatchSelect = isBatch || choice === 0;
+
+      // ── BATCH ALL DOWNLOAD ──
+      if (isBatchSelect) {
+        pending.isProcessing = true;
+        const epsToDownload = pending.episodes;
+        const seriesTitle = pending.metadata.title || "Series";
+        const poster = pending.metadata.image || DEFAULT_IMAGE;
+
+        clearUserSession(k);
+        await sock.sendMessage(from, { 
+          text: `🚀 *Starting Batch Download for ${epsToDownload.length} Episodes...*\nPlease stay patient while episodes are uploaded one by one.`,
+          contextInfo: channelContextInfo()
+        }, { quoted: mek });
+
+        for (let i = 0; i < epsToDownload.length; i++) {
+          const ep = epsToDownload[i];
+          const dlUrl = ep.download_link || ep.link || ep.url;
+          if (dlUrl) {
+            const title = `${seriesTitle} - ${ep.name || ep.title || 'EP ' + (i + 1)}`;
+            await fastSendVideo(sock, mek, from, dlUrl, title, "HD", poster);
+            await new Promise(r => setTimeout(r, 3000));
+          }
+        }
+        return;
+      }
+
+      // ── SINGLE EPISODE DOWNLOAD ──
+      if (!choice || choice < 1 || choice > pending.episodes.length) return;
 
       pending.isProcessing = true;
       const selectedEp = pending.episodes[choice - 1];
       const dlUrl = selectedEp.download_link || selectedEp.link || selectedEp.url;
-      
       const title = `${pending.metadata.title} - ${selectedEp.name || selectedEp.title || 'EP ' + choice}`;
       const poster = pending.metadata.image || DEFAULT_IMAGE;
 
@@ -295,21 +570,18 @@ const mbReplyHandler = {
   }
 };
 
-// ── Direct Fast Document Upload & Thumbnail (MALIYA-MD Style) ──
+// ── Direct Document Upload with Thumbnail ───────────────────────
 async function fastSendVideo(sock, mek, from, url, rawTitle, quality, posterUrl) {
   try {
     await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
 
     const cleanTitle = (rawTitle || "Movie").replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
 
-    let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
-    captionText += `✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n`;
-    captionText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+    let captionText = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *MOVIEBOX DOWNLOAD* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
     captionText += `🎬 *Title :* ${toSmallCaps(rawTitle)}\n`;
     captionText += `📊 *Quality :* ${quality}\n\n`;
     captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-    // Fetch poster buffer for Thumbnail preview
     const thumbBuffer = await getThumbnailBuffer(posterUrl);
 
     const docPayload = {
@@ -320,14 +592,12 @@ async function fastSendVideo(sock, mek, from, url, rawTitle, quality, posterUrl)
       contextInfo: channelContextInfo()
     };
 
-    // Attach ZANTA-MD style thumbnail if available
     if (thumbBuffer) {
       docPayload.jpegThumbnail = thumbBuffer;
     }
 
     await sock.sendMessage(from, docPayload, { quoted: mek });
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-
   } catch (err) {
     console.error("MovieBox Fast Upload Error:", err.message);
     await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
@@ -353,3 +623,5 @@ setInterval(() => {
     }
   }
 }, 2.5 * 60 * 1000);
+
+module.exports = {};
