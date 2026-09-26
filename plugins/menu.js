@@ -38,7 +38,7 @@ const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
 const OWNER_NAME =
   String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
 
-const DEFAULT_HEADER_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
+const DEFAULT_HEADER_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/ChatGPT%20Image%20Jan%2018,%202026,%2012_27_25%20PM.png?raw=true";
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
@@ -196,9 +196,9 @@ async function getFittedImageBuffer(url) {
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
-  return `┏━━━◥◣◆◢◤━━━━┓
+  return `┏━━━━━◥◣◆◢◤━━━━━┓
 ★彡 *${BOT_NAME}* 彡★
-┗━━━◢◤◆◥◣━━━━┛
+┗━━━━━◢◤◆◥◣━━━━━┛
 
 ✨ 👋 *ʜɪ, ${styledUser}!*
 
