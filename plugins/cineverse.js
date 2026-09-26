@@ -10,9 +10,9 @@ const DL_HEADERS = {
 };
 
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 const DEFAULT_POSTER = "https://i.ibb.co/3m1bXvt/cineverse.jpg";
-const DEFAULT_SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
+const DEFAULT_SEARCH_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 3000;
@@ -21,7 +21,7 @@ const pendingCineVerse = {};
 const lastProcessedMsg = {};
 
 function makePendingKey(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
+  return `${from || ""}`;
 }
 
 function clearUserSession(k) {
@@ -49,6 +49,55 @@ function channelContextInfo() {
   };
 }
 
+function safeJsonParse(str) {
+  try { return JSON.parse(str); } catch { return null; }
+}
+
+function getQuotedStanzaId(mek, m) {
+  return (
+    m?.quoted?.id ||
+    mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    null
+  );
+}
+
+function extractIncomingPayload(body, mek, m) {
+  const paramsJson =
+    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+    
+  if (paramsJson) {
+    const parsed = safeJsonParse(paramsJson);
+    if (parsed) {
+      const btnId = parsed.id || parsed.selectedId || parsed.selectedRowId || parsed.name;
+      if (btnId) return { payload: String(btnId).trim(), isButton: true };
+    }
+  }
+
+  const directId =
+    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    m?.message?.buttonsResponseMessage?.selectedButtonId ||
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    mek?.message?.buttonsResponseMessage?.selectedButtonId;
+    
+  if (directId) return { payload: String(directId).trim(), isButton: true };
+
+  const text =
+    m?.message?.interactiveResponseMessage?.body?.text ||
+    m?.message?.conversation ||
+    m?.message?.extendedTextMessage?.text ||
+    mek?.message?.interactiveResponseMessage?.body?.text ||
+    mek?.message?.conversation ||
+    mek?.message?.extendedTextMessage?.text ||
+    body ||
+    "";
+    
+  return { payload: String(text).trim(), isButton: false };
+}
+
 async function getThumbnailBuffer(url) {
   try {
     if (!url) return null;
@@ -66,6 +115,7 @@ async function sendErrorMsg(sock, from, mek, text) {
   }, { quoted: mek });
 }
 
+/* ================= COMMAND: .cineverse ================= */
 cmd({
   pattern: "cineverse",
   alias: ["cv", "cvlk", "sinhala"],
@@ -109,12 +159,77 @@ cmd({
     const k = makePendingKey(sender, from);
     clearUserSession(k);
 
-    pendingCineVerse[k] = {
-      results: results,
-      timestamp: Date.now(),
-      isProcessing: false,
-    };
+    const settings = await readSettings(sessionId);
+    const btnsOn = !!settings.btns_enabled;
 
+    let searchImg = DEFAULT_SEARCH_IMAGE;
+    if (sessionId) {
+      try {
+        const custom = await getCustomImage(sessionId, "cineverse_header");
+        if (custom && custom.data) searchImg = custom.data;
+      } catch (e) {}
+    }
+
+    const bodyText = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐒𝐄𝐀𝐑𝐂𝐇*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${results.length}\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+
+    // ButtonV2 System
+    if (btnsOn) {
+      try {
+        const { ButtonV2 } = await import("@vanzxy/baileys");
+
+        const cvRows = results.map((item, index) => {
+          const type = item.isSeries ? "📺 Series" : "🎥 Movie";
+          const yr = item.year ? ` (${item.year})` : "";
+          return {
+            title: `${String(index + 1).padStart(2, "0")}. ${item.title.substring(0, 42)}${yr}`,
+            description: `${type} | ⭐ ${item.imdbRating || "N/A"} | 💽 ${item.quality || "1080p"}`,
+            id: `.cv_select ${index + 1}`
+          };
+        });
+
+        const btn = new ButtonV2(sock)
+          .setBody(bodyText)
+          .setFooter("WaBot by MALIYA-MD Team ツ")
+          .setThumbnail(searchImg);
+
+        btn.addRawButton({
+          buttonId: "cineverse_search_list",
+          buttonText: { displayText: "🎬 Select Movie / Series" },
+          type: 1,
+          nativeFlowInfo: {
+            name: "single_select",
+            paramsJson: JSON.stringify({
+              title: "CineVerse Search Results ↯",
+              sections: [
+                {
+                  title: "🎥 Available Titles",
+                  rows: cvRows
+                }
+              ]
+            }),
+          },
+        });
+
+        btn.addButton("📜 Bot Menu", ".menu");
+
+        const sentMsg = await btn.send(from, { quoted: mek });
+
+        if (sentMsg?.key?.id) {
+          pendingCineVerse[k] = {
+            expectedMsgId: sentMsg.key.id,
+            results: results,
+            timestamp: Date.now(),
+            isProcessing: false,
+          };
+          await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+          return;
+        }
+      } catch (err) {
+        console.log("CINEVERSE BUTTONV2 ERROR:", err?.message || err);
+      }
+    }
+
+    // Fallback Numbered Menu
     let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
     text += `🎬 *𝐂𝐈𝐍𝐄𝐕𝐄𝐑𝐒𝐄 𝐒𝐄𝐀𝐑𝐂𝐇*\n`;
     text += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
@@ -130,21 +245,20 @@ cmd({
       text += `   ╰ 💽 ${item.quality || "1080p FHD"}\n\n`;
     });
 
-    text += `⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 👇 *Reply with a number to Download...*`;
+    text += `⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 💬 *Swipe & Reply this message with a number to Download...*`;
 
-    let searchImg = DEFAULT_SEARCH_IMAGE;
-    if (sessionId) {
-      try {
-        const custom = await getCustomImage(sessionId, "cineverse_header");
-        if (custom && custom.data) searchImg = custom.data;
-      } catch (e) {}
-    }
-
-    await sock.sendMessage(from, { 
+    const sentMsg = await sock.sendMessage(from, { 
       image: { url: searchImg }, 
       caption: text, 
       contextInfo: channelContextInfo() 
     }, { quoted: mek });
+
+    pendingCineVerse[k] = {
+      expectedMsgId: sentMsg.key.id,
+      results: results,
+      timestamp: Date.now(),
+      isProcessing: false,
+    };
 
     await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
 
@@ -155,35 +269,63 @@ cmd({
   }
 });
 
+/* ================= REPLY HANDLER ================= */
 const cvReplyHandler = {
-  filter: (text, { sender, from }) => {
-    if (!text) return false;
+  filter: (text, { sender, from, mek, m }) => {
     const k = makePendingKey(sender, from);
-    return !!pendingCineVerse[k];
+    const pending = pendingCineVerse[k];
+    if (!pending) return false;
+
+    const { payload, isButton } = extractIncomingPayload(text, mek, m);
+    if (!payload) return false;
+
+    if (isButton && (payload.startsWith(".cv_select ") || payload.startsWith(".cv_ep "))) return true;
+
+    if (/^\d+$/.test(payload) \vert{}\vert{} /^\d+\s+\d+$/.test(payload)) {
+      const quotedId = getQuotedStanzaId(mek, m);
+      return Boolean(quotedId && quotedId === pending.expectedMsgId);
+    }
+
+    return false;
   },
-  function: async (sock, mek, m, { body, sender, from }) => {
-    const input = String(body || "").trim();
-    if (!input) return;
+  function: async (sock, mek, m, { body, sender, from, sessionId }) => {
+    const { payload, isButton } = extractIncomingPayload(body, mek, m);
+    if (!payload) return;
 
     const k = makePendingKey(sender, from);
     const pending = pendingCineVerse[k];
     if (!pending || pending.isProcessing) return;
 
+    if (!isButton) {
+      const quotedId = getQuotedStanzaId(mek, m);
+      if (!quotedId || quotedId !== pending.expectedMsgId) {
+        return;
+      }
+    }
+
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) return;
-    lastProcessedMsg[k] = { text: input, time: now };
+    if (lastMsg && lastMsg.text === payload && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+    lastProcessedMsg[k] = { text: payload, time: now };
 
-    if (/^\d+$/.test(input) && pending.results) {
-      const choice = parseInt(input, 10);
-      if (choice < 1 || choice > pending.results.length) return;
+    // STEP 1: Title Selection
+    if (pending.results) {
+      let choice = null;
+      if (payload.startsWith(".cv_select ")) {
+        choice = parseInt(payload.replace(".cv_select ", "").trim(), 10);
+      } else if (/^\d+$/.test(payload)) {
+        choice = parseInt(payload, 10);
+      }
+
+      if (choice === null || isNaN(choice) || choice < 1 || choice > pending.results.length) return;
 
       pending.isProcessing = true;
       const selected = pending.results[choice - 1];
 
+      // MOVIE DOWNLOAD
       if (!selected.isSeries) {
         clearUserSession(k);
-        await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
+        await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
         const dlUrl = selected.directLink || selected.downloadLink || selected.link;
         if (!dlUrl || dlUrl === '#') {
@@ -210,34 +352,114 @@ const cvReplyHandler = {
 
         await fastSendVideo(sock, mek, from, dlUrl, selected.title, selected.quality || "1080p FHD", posterUrl);
 
-      } else {
+      } 
+      // SERIES SELECTION
+      else {
         pending.isProcessing = false;
         pending.series = selected;
-        delete pending.results; 
+        delete pending.results;
 
-        let availableSeasons = Object.keys(selected.episodesData || {}).join(", ");
+        const episodesData = selected.episodesData || {};
+        const seasons = Object.keys(episodesData);
+        const poster = selected.posterImage || selected.image || selected.poster || DEFAULT_POSTER;
+
+        const settings = await readSettings(sessionId);
+        const btnsOn = !!settings.btns_enabled;
+
+        // ButtonV2 Series Episode Popup
+        if (btnsOn) {
+          try {
+            const { ButtonV2 } = await import("@vanzxy/baileys");
+
+            const epRows = [];
+            for (const sNum of seasons) {
+              const epList = episodesData[sNum] || {};
+              for (const eNum of Object.keys(epList)) {
+                if (epRows.length >= 25) break;
+                const fS = parseInt(sNum, 10) < 10 ? '0' + sNum : sNum;
+                const fE = parseInt(eNum, 10) < 10 ? '0' + eNum : eNum;
+                epRows.push({
+                  title: `Season ${fS} - Episode ${fE}`,
+                  description: `Download S${fS}E${fE}`,
+                  id: `.cv_ep ${sNum} ${eNum}`
+                });
+              }
+            }
+
+            const bodyText = `⊱━━━━━ • ✿ • ━━━━━⊰\n📺 *𝐒𝐄𝐑𝐈𝐄𝐒 𝐒𝐄𝐋𝐄𝐂𝐓𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Series :* ${toSmallCaps(selected.title)}\n🗂️ *Seasons :* ${seasons.join(", ") || "N/A"}\n\nChoose an episode from below to start download.\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+
+            const btn = new ButtonV2(sock)
+              .setBody(bodyText)
+              .setFooter("WaBot by MALIYA-MD Team ツ")
+              .setThumbnail(poster);
+
+            btn.addRawButton({
+              buttonId: "cineverse_ep_list",
+              buttonText: { displayText: "📺 Select Episode" },
+              type: 1,
+              nativeFlowInfo: {
+                name: "single_select",
+                paramsJson: JSON.stringify({
+                  title: "Available Episodes ↯",
+                  sections: [
+                    {
+                      title: "Series Episodes",
+                      rows: epRows
+                    }
+                  ]
+                }),
+              },
+            });
+
+            btn.addButton("📜 Bot Menu", ".menu");
+
+            const sentEpMsg = await btn.send(from, { quoted: mek });
+
+            if (sentEpMsg?.key?.id) {
+              pending.expectedMsgId = sentEpMsg.key.id;
+              await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+              return;
+            }
+          } catch (err) {
+            console.log("CINEVERSE EP BUTTONV2 ERROR:", err?.message || err);
+          }
+        }
+
+        // Fallback Numbered Menu for Series
         let sText = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
         sText += `📺 *𝐒𝐄𝐑𝐈𝐄𝐒 𝐒𝐄𝐋𝐄𝐂𝐓𝐄𝐃*\n`;
         sText += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
         sText += `🎬 *Series :* ${toSmallCaps(selected.title)}\n`;
-        sText += `🗂️ *Seasons :* ${availableSeasons || "N/A"}\n\n`;
-        sText += `⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Reply: Season & Episode*\n\n`;
+        sText += `🗂️ *Seasons :* ${seasons.join(", ") || "N/A"}\n\n`;
+        sText += `⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 👇 *Swipe & Reply with Season & Episode*\n\n`;
         sText += `> 💡 *Example:* \`1 2\` (Season 1, Episode 2)`;
 
-        const poster = selected.posterImage || selected.image || selected.poster || DEFAULT_POSTER;
-
-        await sock.sendMessage(from, { 
+        const sentMsg = await sock.sendMessage(from, { 
           image: { url: poster }, 
           caption: sText, 
           contextInfo: channelContextInfo() 
         }, { quoted: mek });
 
-        await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+        pending.expectedMsgId = sentMsg.key.id;
+        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
       }
-    } else if (pending.series && /^\d+\s+\d+$/.test(input)) {
-      const parts = input.split(/\s+/);
-      const s = parseInt(parts[0], 10);
-      const e = parseInt(parts[1], 10);
+    } 
+    // STEP 2: Episode Trigger & Download
+    else if (pending.series) {
+      let s = null;
+      let e = null;
+
+      if (payload.startsWith(".cv_ep ")) {
+        const parts = payload.replace(".cv_ep ", "").trim().split(/\s+/);
+        s = parseInt(parts[0], 10);
+        e = parseInt(parts[1], 10);
+      } else if (/^\d+\s+\d+$/.test(payload)) {
+        const parts = payload.split(/\s+/);
+        s = parseInt(parts[0], 10);
+        e = parseInt(parts[1], 10);
+      }
+
+      if (s === null || e === null || isNaN(s) || isNaN(e)) return;
 
       const series = pending.series;
       const epData = series.episodesData && series.episodesData[s] ? series.episodesData[s][e] : null;
@@ -248,7 +470,7 @@ const cvReplyHandler = {
       }
 
       clearUserSession(k);
-      await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
       const fS = s < 10 ? '0' + s : s;
       const fE = e < 10 ? '0' + e : e;
@@ -275,7 +497,6 @@ async function fastSendVideo(sock, mek, from, url, rawTitle, quality, posterUrl 
 
     const thumbBuffer = await getThumbnailBuffer(posterUrl);
 
-    // Fast direct streaming with persistent headers to eliminate delays
     const streamRes = await axios({
       url: url,
       method: "GET",
@@ -298,11 +519,11 @@ async function fastSendVideo(sock, mek, from, url, rawTitle, quality, posterUrl 
     }
 
     await sock.sendMessage(from, docPayload, { quoted: mek });
-    await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
   } catch (err) {
     console.error("Cineverse Fast Upload Error:", err.message);
-    await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
     await sendErrorMsg(sock, from, mek, `Failed to upload video directly. Link might be restricted.`);
   }
 }
@@ -320,3 +541,5 @@ setInterval(() => {
     if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) delete lastProcessedMsg[k];
   }
 }, 2.5 * 60 * 1000);
+
+module.exports = {};
