@@ -220,7 +220,7 @@ function menuHeader(userName = "User") {
 function buildStyledMainMenu(state, userName) {
   const { categories } = state;
   const styledUser = toSmallCaps(userName);
-  let msg = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
+  let msg = `┏━━━━━◥◣◆◢◤━━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n`;
   msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
   categories.forEach((cat, idx) => {
     const emo = getCategoryEmoji(cat);
