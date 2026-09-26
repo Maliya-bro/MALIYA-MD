@@ -1,5 +1,7 @@
 const { cmd, commands, replyHandlers } = require("../command");
 const config = require("../config");
+const axios = require("axios");
+const sharp = require("sharp");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const pendingMenu = Object.create(null);
@@ -7,7 +9,7 @@ const lastProcessedMsg = {};
 const LOOP_COOLDOWN = 2500;
 
 /* ============ CONFIG ============ */
-const BOT_NAME = "「 𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸 」";
+const BOT_NAME = "「 𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸 |";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
@@ -36,7 +38,7 @@ const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
 const OWNER_NAME =
   String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
 
-const DEFAULT_HEADER_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/ChatGPT%20Image%20Jan%2018,%202026,%2012_27_25%20PM.png?raw=true";
+const DEFAULT_HEADER_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
@@ -174,11 +176,28 @@ function buildCommandMapCached() {
   return cachedMenu;
 }
 
+async function getFittedImageBuffer(url) {
+  try {
+    const res = await axios.get(url, { responseType: "arraybuffer", timeout: 10000 });
+    const inputBuf = Buffer.from(res.data);
+    return await sharp(inputBuf)
+      .resize(800, 800, {
+        fit: "contain",
+        background: { r: 18, g: 18, b: 24, alpha: 1 }
+      })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+  } catch (e) {
+    return url;
+  }
+}
+
+// Kalin use karelu original stylish box border
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
-  return `ㅤ┏━━━◥◣◆◢◤━━━━┓
-ㅤ⠀★彡 *${BOT_NAME}* 彡★
+  return `┏━━━◥◣◆◢◤━━━━┓
+★彡 *${BOT_NAME}* 彡★
 ┗━━━◢◤◆◥◣━━━━┛
 
 ✨ 👋 *ʜɪ, ${styledUser}!*
@@ -201,7 +220,7 @@ function menuHeader(userName = "User") {
 function buildStyledMainMenu(state, userName) {
   const { categories } = state;
   const styledUser = toSmallCaps(userName);
-  let msg = `⠀⠀┏━━━◥◣◆◢◤━━━━┓\n★彡 *${BOT_NAME}* 彡★\n⠀⠀┗━━━◢◤◆◥◣━━━━┛\n\n`;
+  let msg = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
   msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
   categories.forEach((cat, idx) => {
     const emo = getCategoryEmoji(cat);
@@ -405,12 +424,13 @@ cmd(
             id: `.menu_view ${cat}`,
           }));
 
+          const fittedThumb = await getFittedImageBuffer(headerImg);
+
           const btn = new ButtonV2(sock)
             .setBody(menuHeader(userName))
             .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
-            .setThumbnail(headerImg);
+            .setThumbnail(fittedThumb);
 
-          // 1. Popup List Menu Button
           btn.addRawButton({
             buttonId: ".menu_all",
             buttonText: { displayText: "≡ List Menu" },
@@ -429,7 +449,6 @@ cmd(
             },
           });
 
-          // 2. Ping Button
           btn.addButton("📊 Ping", ".ping");
 
           const sentMsg = await btn.send(from, { quoted: mek });
@@ -444,7 +463,6 @@ cmd(
         }
       }
 
-      // Fallback: Numbered Menu
       const sentMsg = await safeSendImageOrText(
         sock,
         from,
