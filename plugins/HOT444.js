@@ -6,21 +6,34 @@ const { promisify } = require('util');
 const { mkdtemp, readFile, rm } = require('fs/promises');
 const { join } = require('path');
 const { tmpdir } = require('os');
+const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const execFileAsync = promisify(execFile);
 
 // State Management
 const pendingXhamSearch = {};
 const pendingXhamQuality = {}; 
-const pendingXhamOption = {};  
-const pendingXhamCustomTime = {};
 const lastProcessedMsg = {};   
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 3000;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-// ===== HELPER FUNCTIONS =====
+const CHANNEL_JID = "120363427174988449@newsletter";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const DEFAULT_SEARCH_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
+
+function channelContextInfo() {
+  return {
+    forwardingScore: 999,
+    isForwarded: true,
+    forwardedNewsletterMessageInfo: {
+      newsletterJid: CHANNEL_JID,
+      newsletterName: CHANNEL_NAME,
+      serverMessageId: -1
+    }
+  };
+}
 
 function keyFor(sender, from) {
     return `${from || ""}::${(sender || "").split(":")[0]}`;
@@ -41,8 +54,55 @@ function toSmallCaps(str = "") {
 function clearUserSession(k) {
     delete pendingXhamSearch[k];
     delete pendingXhamQuality[k];
-    delete pendingXhamOption[k];
-    delete pendingXhamCustomTime[k];
+}
+
+function safeJsonParse(str) {
+    try { return JSON.parse(str); } catch { return null; }
+}
+
+function getQuotedStanzaId(mek) {
+    return (
+        mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+        mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+        mek?.message?.videoMessage?.contextInfo?.stanzaId ||
+        mek?.message?.documentMessage?.contextInfo?.stanzaId ||
+        mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+        null
+    );
+}
+
+function extractIncomingPayload(body, mek, m) {
+    const paramsJson =
+        m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+        mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+        
+    if (paramsJson) {
+        const parsed = safeJsonParse(paramsJson);
+        if (parsed) {
+            const btnId = parsed.id || parsed.selectedId || parsed.selectedRowId || parsed.name;
+            if (btnId) return String(btnId).trim();
+        }
+    }
+
+    const directId =
+        m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+        m?.message?.buttonsResponseMessage?.selectedButtonId ||
+        mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+        mek?.message?.buttonsResponseMessage?.selectedButtonId;
+        
+    if (directId) return String(directId).trim();
+
+    const text =
+        m?.message?.interactiveResponseMessage?.body?.text ||
+        m?.message?.conversation ||
+        m?.message?.extendedTextMessage?.text ||
+        mek?.message?.interactiveResponseMessage?.body?.text ||
+        mek?.message?.conversation ||
+        mek?.message?.extendedTextMessage?.text ||
+        body ||
+        "";
+        
+    return String(text).trim();
 }
 
 async function xhamSearch(query, limit = 100) {
@@ -59,9 +119,7 @@ async function xhamSearch(query, limit = 100) {
                 headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' },
                 timeout: 12000
             });
-            const $ = cheerio.load(data);
-            
-            $('.video-thumb').each((_, el) => {
+            const $= cheerio.load(data);$('.video-thumb').each((_, el) => {
                 if (allResults.length >= limit) return false;
                 const anchor = $(el).find('a.video-thumb__image-container').first();
                 const img = $(el).find('img.thumb-image-container__image').first();
@@ -149,8 +207,7 @@ async function fetchXhamVideoDetails(url) {
     return { title, duration, hlsUrl, qualities };
 }
 
-// 🛠️ FIXED: WhatsApp Compatible Encode & Network reconnects
-async function xhamDownloadBuffer(streamUrl, timeOptions = {}) {
+async function xhamDownloadBuffer(streamUrl) {
     const tmpDir = await mkdtemp(join(tmpdir(), 'xhamdl-'));
     const outPath = join(tmpDir, 'video.mp4');
 
@@ -159,37 +216,19 @@ async function xhamDownloadBuffer(streamUrl, timeOptions = {}) {
         '-y',
         '-user_agent', UA,
         '-headers', 'Referer: https://xhamster.com/\r\n',
-        
-        // 🌐 Network drops ආවොත් ආයෙත් connect වෙන්න
         '-reconnect', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5'
-    ];
-
-    // ✂️ Cut කරනවා නම් විතරක් Start Time එක අදාළ වෙනවා
-    if (timeOptions.startTimeInSec !== undefined) {
-        ffmpegArgs.push('-ss', String(timeOptions.startTimeInSec));
-    }
-
-    ffmpegArgs.push('-i', streamUrl);
-
-    // ✂️ Cut කරනවා නම් විතරක් Duration එක අදාළ වෙනවා
-    if (timeOptions.durationInSec !== undefined) {
-        ffmpegArgs.push('-t', String(timeOptions.durationInSec));
-    }
-
-    // 📱 WhatsApp Fix: මේකෙන් තමයි Full වුණත් Cut වුණත් Error එක එන එක නවත්තන්නේ
-    ffmpegArgs.push(
-        '-c:v', 'libx264',        // H.264 විදියට Video එක හදනවා
-        '-preset', 'fast',        // ඉක්මනින් convert වෙන්න
-        '-c:a', 'aac',            // Audio එක AAC කරනවා
-        '-pix_fmt', 'yuv420p',    // WhatsApp එකට ඕනෙම කරන Pixel format එක
+        '-reconnect_delay_max', '5',
+        '-i', streamUrl,
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-c:a', 'aac',
+        '-pix_fmt', 'yuv420p',
         '-movflags', '+faststart',
         outPath
-    );
+    ];
 
     try {
-        // Convert වෙන්න වෙලා යන නිසා Timeout එක විනාඩි 10ක් (600000ms) දුන්නා
         await execFileAsync('ffmpeg', ffmpegArgs, { timeout: 600000 });
         const buffer = await readFile(outPath);
         
@@ -203,7 +242,6 @@ async function xhamDownloadBuffer(streamUrl, timeOptions = {}) {
     }
 }
 
-// 🔥 අලුත් Single-Sided Layout එක 🔥
 function generateResultText(results, startIndex = 0) {
     const endIndex = Math.min(startIndex + 10, results.length);
     let text = `╭─[ 🔞 *𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝟭𝟴+* ]\n│\n`;
@@ -224,12 +262,11 @@ function generateResultText(results, startIndex = 0) {
     return text;
 }
 
-async function processDownload(bot, mek, m, reply, from, selected, streamUrl, qualityName, timeOptions = {}, customMsg = "") {
-    // Downloading React
+async function processDownload(bot, mek, m, reply, from, selected, streamUrl, qualityName) {
     await bot.sendMessage(from, { react: { text: "⬇️", key: m.key } });
 
     try {
-        const buffer = await xhamDownloadBuffer(streamUrl, timeOptions);
+        const buffer = await xhamDownloadBuffer(streamUrl);
 
         if (!buffer || buffer.length < 5000) {
             return reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Could not process video stream!_\n╰───────────────⮞`);
@@ -244,7 +281,6 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, qu
         captionText += `├ 📊 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${qualityName}\n`;
         captionText += `├ ⏱️ *𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻:* ${selected.duration || 'N/A'}\n`;
         captionText += `├ 💾 *𝗦𝗶𝘇𝗲:* ${sizeMB.toFixed(2)} MB\n`;
-        if (customMsg) captionText += `├ ✂️ *𝗖𝘂𝘀𝘁𝗼𝗺:* ${customMsg}\n`;
         captionText += `│\n╰───────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
         const fileName = `MALIYA-MD ${cleanTitle}.mp4`;
@@ -254,14 +290,16 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, qu
                 document: buffer,
                 mimetype: "video/mp4",
                 fileName: fileName,
-                caption: captionText + `\n\n_📄 Video sent as document due to size limit._`
+                caption: captionText + `\n\n_📄 Video sent as document due to size limit._`,
+                contextInfo: channelContextInfo()
             }, { quoted: mek });
         } else {
             await bot.sendMessage(from, {
                 video: buffer,
                 mimetype: "video/mp4",
                 fileName: fileName,
-                caption: captionText
+                caption: captionText,
+                contextInfo: channelContextInfo()
             }, { quoted: mek });
         }
 
@@ -282,10 +320,12 @@ cmd({
     category: "download",
     react: "🔍",
     filename: __filename
-}, async (bot, mek, m, { from, q, sender, reply }) => {
+}, async (bot, mek, m, { from, q, sender, reply, sessionId }) => {
     if (!q) {
         return reply(`╭─[ ⚠️ *𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗨𝗦𝗔𝗚𝗘* ]\n│\n├ 📌 *Usage:* .xham [search_term]\n├ 💡 *Example:* .xham hot\n╰───────────────⮞`);
     }
+
+    await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
 
     try {
         const results = await xhamSearch(q.trim(), 100);
@@ -298,12 +338,88 @@ cmd({
         const k = keyFor(sender, from);
         clearUserSession(k);
 
+        const settings = await readSettings(sessionId);
+        const btnsOn = !!settings.btns_enabled;
+
+        let searchImg = DEFAULT_SEARCH_IMAGE;
+        if (sessionId) {
+            try {
+                const custom = await getCustomImage(sessionId, "xham_header");
+                if (custom && custom.data) searchImg = custom.data;
+            } catch (e) {}
+        }
+
+        // 🔥 Asitha-MD Style ButtonV2 Search Results
+        if (btnsOn) {
+            try {
+                const { ButtonV2 } = await import("@vanzxy/baileys");
+
+                const topResults = results.slice(0, 20); // Top 20 results in popup list
+                const videoRows = topResults.map((v, index) => ({
+                    title: `${String(index + 1).padStart(2, "0")}. ${v.title.substring(0, 45)}`,
+                    description: `Duration: ${v.duration || 'N/A'}`,
+                    id: `.xh_select ${index + 1}`
+                }));
+
+                const bodyText = `╭─[ 🔞 *𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝟭𝟴+* ]\n│\n├ 🔍 *Search :* ${q}\n├ 📊 *Total Results :* ${results.length}\n│\n╰───────────────⮞\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+
+                const btn = new ButtonV2(bot)
+                    .setBody(bodyText)
+                    .setFooter("WaBot by MALIYA-MD Team ツ")
+                    .setThumbnail(searchImg);
+
+                // 1. Popup List Menu Button
+                btn.addRawButton({
+                    buttonId: "xham_search_list",
+                    buttonText: { displayText: "🎬 Select Video" },
+                    type: 1,
+                    nativeFlowInfo: {
+                        name: "single_select",
+                        paramsJson: JSON.stringify({
+                            title: "Search Results ↯",
+                            sections: [
+                                {
+                                    title: "🎥 Available Videos",
+                                    rows: videoRows
+                                }
+                            ]
+                        }),
+                    },
+                });
+
+                // 2. Bot Menu Button
+                btn.addButton("📜 Bot Menu", ".menu");
+
+                const sentMsg = await btn.send(from, { quoted: mek });
+
+                if (sentMsg?.key?.id) {
+                    pendingXhamSearch[k] = { 
+                        results, 
+                        timestamp: Date.now(),
+                        expectedMsgId: sentMsg.key.id
+                    };
+                    await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+                    return;
+                }
+            } catch (err) {
+                console.log("XHAM BUTTON ERROR:", err?.message || err);
+            }
+        }
+
+        // 🔢 Fallback: Numbered Menu
+        const sentMsg = await bot.sendMessage(from, { 
+            image: { url: searchImg },
+            caption: generateResultText(results, 0),
+            contextInfo: channelContextInfo()
+        }, { quoted: mek });
+
         pendingXhamSearch[k] = { 
             results, 
-            timestamp: Date.now() 
+            timestamp: Date.now(),
+            expectedMsgId: sentMsg.key.id
         };
 
-        await bot.sendMessage(from, { text: generateResultText(results, 0) }, { quoted: mek });
+        await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
 
     } catch (error) {
         console.error("xHamster Search Error:", error);
@@ -312,114 +428,41 @@ cmd({
     }
 });
 
-// ===== 2. NUMBER & TIME REPLY HANDLER =====
+// ===== 2. NUMBER & SELECTION REPLY HANDLER =====
 const xhamReplyHandler = {
     filter: (text, { sender, from }) => {
-        if (!text) return false;
         const k = keyFor(sender, from);
-        
-        const isNumber = /^\d+$/.test(text.trim());
-        const isTimeFormat = /^\d+:\d+$/.test(text.trim());
-
-        if (!isNumber && !isTimeFormat) return false;
-
-        return Boolean(pendingXhamSearch[k] || pendingXhamQuality[k] || pendingXhamOption[k] || pendingXhamCustomTime[k]);
+        return Boolean(pendingXhamSearch[k] || pendingXhamQuality[k]);
     },
-    function: async (bot, mek, m, { body, sender, reply, from }) => {
-        const input = body ? body.trim() : "";
-        if (!input) return;
+    function: async (bot, mek, m, { body, sender, reply, from, sessionId }) => {
+        const payload = extractIncomingPayload(body, mek, m);
+        if (!payload) return;
 
         const k = keyFor(sender, from);
 
-        // LOOP PROTECTION SYSTEM
+        // Loop Protection System
         const now = Date.now();
         const lastMsg = lastProcessedMsg[k];
-        if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
+        if (lastMsg && lastMsg.text === payload && (now - lastMsg.time) < LOOP_COOLDOWN) {
             return;
         }
-        lastProcessedMsg[k] = { text: input, time: now };
+        lastProcessedMsg[k] = { text: payload, time: now };
 
-        // 1. Custom Time Handling
-        if (pendingXhamCustomTime[k]) {
-            if (!/^\d+:\d+$/.test(input)) {
-                clearUserSession(k);
-                return reply(`╭─[ ⚠️ *𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗙𝗢𝗥𝗠𝗔𝗧* ]\n│\n├ 📝 _Session cancelled. Please search again._\n╰───────────────⮞`);
-            }
+        const quotedId = getQuotedStanzaId(mek);
 
-            const { selected, streamUrl, qualityName } = pendingXhamCustomTime[k];
-            const parts = input.split(':').map(n => parseInt(n.trim()));
-            
-            let startMin = parts[0];
-            let endMin = parts[1];
-
-            if (isNaN(startMin) || isNaN(endMin) || startMin < 0 || endMin <= startMin) {
-                clearUserSession(k);
-                return reply(`╭─[ ⚠️ *𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗧𝗜𝗠𝗘* ]\n│\n├ 📝 _Start time must be less than end time!_\n╰───────────────⮞`);
-            }
-
-            clearUserSession(k);
-            const startTimeInSec = startMin * 60;
-            const durationInSec = (endMin - startMin) * 60;
-
-            await bot.sendMessage(from, { react: { text: "✂️", key: m.key } });
-            return processDownload(bot, mek, m, reply, from, selected, streamUrl, qualityName, { startTimeInSec, durationInSec }, `${startMin} Min to ${endMin} Min`);
-        }
-
-        // 2. Download Mode Handling (Full Video vs Custom Time)
-        if (pendingXhamOption[k]) {
-            if (input !== '1' && input !== '2') return;
-
-            const { selected, streamUrl, qualityName } = pendingXhamOption[k];
-            delete pendingXhamOption[k];
-
-            if (input === '1') {
-                clearUserSession(k);
-                return processDownload(bot, mek, m, reply, from, selected, streamUrl, qualityName, {});
-            } 
-            
-            if (input === '2') {
-                pendingXhamCustomTime[k] = { selected, streamUrl, qualityName, timestamp: Date.now() };
-                return reply(`╭─[ ✂️ *𝗖𝗨𝗦𝗧𝗢𝗠 𝗧𝗜𝗠𝗘* ]\n│\n├ 📌 *Reply with Start & End minutes:*\n├ 💡 *Example:* \`5:10\`\n├ _(Downloads from 5th to 10th min)_\n╰───────────────⮞`);
-            }
-        }
-
-        // 3. Quality Selection Handling
-        if (pendingXhamQuality[k]) {
-            const choiceNum = parseInt(input) - 1;
-            const { selected, qualities } = pendingXhamQuality[k];
-
-            if (isNaN(choiceNum) || choiceNum < 0 || choiceNum >= qualities.length) {
-                return reply(`╭─[ ⚠️ *𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗢𝗣𝗧𝗜𝗢𝗡* ]\n│\n├ 🎯 *Range:* 1 - ${qualities.length}\n╰───────────────⮞`);
-            }
-
-            const chosenQuality = qualities[choiceNum];
-            delete pendingXhamQuality[k];
-
-            pendingXhamOption[k] = {
-                selected,
-                streamUrl: chosenQuality.url,
-                qualityName: chosenQuality.quality,
-                timestamp: Date.now()
-            };
-
-            let optMsg = `╭─[ 🎬 *𝗦𝗘𝗟𝗘𝗖𝗧𝗘𝗗 𝗩𝗜𝗗𝗘𝗢* ]\n│\n`;
-            optMsg += `├ 📌 *${toSmallCaps(selected.title.slice(0, 36))}*\n`;
-            optMsg += `├ 📊 *Quality:* ${chosenQuality.quality}\n│\n`;
-            optMsg += `├ 👇 *Select Download Mode:*\n│\n`;
-            optMsg += `├ 📱 *[ 01 ]* 🎬 Full Video Download\n`;
-            optMsg += `├ 📱 *[ 02 ]* ✂️ Custom Time Range\n│\n`;
-            optMsg += `╰───────────────>`;
-
-            return reply(optMsg);
-        }
-
-        // 4. Search Result Selection -> Extract Qualities
+        // STEP 1: Search Result Selection -> Extract Qualities
         if (pendingXhamSearch[k]) {
-            const num = parseInt(input);
-            if (isNaN(num)) return;
-
             const session = pendingXhamSearch[k];
-            if (num <= 0 || num > session.results.length) return;
+            if (quotedId && session.expectedMsgId && quotedId !== session.expectedMsgId) return;
+
+            let num = null;
+            if (payload.startsWith(".xh_select ")) {
+                num = parseInt(payload.replace(".xh_select ", "").trim(), 10);
+            } else if (/^\d+$/.test(payload)) {
+                num = parseInt(payload, 10);
+            }
+
+            if (num === null || isNaN(num) || num <= 0 || num > session.results.length) return;
 
             if ([11, 21, 31, 41, 51, 61, 71, 81, 91].includes(num)) {
                 session.timestamp = Date.now();
@@ -429,18 +472,71 @@ const xhamReplyHandler = {
             const selected = session.results[num - 1];
             delete pendingXhamSearch[k];
 
-            // Fetching Quality React
             await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
             try {
                 const videoDetails = await fetchXhamVideoDetails(selected.url);
 
-                pendingXhamQuality[k] = {
-                    selected: { ...selected, title: videoDetails.title || selected.title, duration: videoDetails.duration || selected.duration },
-                    qualities: videoDetails.qualities,
-                    timestamp: Date.now()
-                };
+                const settings = await readSettings(sessionId);
+                const btnsOn = !!settings.btns_enabled;
+                const thumbImg = selected.thumb || DEFAULT_SEARCH_IMAGE;
 
+                // 🔥 ButtonV2 Quality Selection Popup
+                if (btnsOn) {
+                    try {
+                        const { ButtonV2 } = await import("@vanzxy/baileys");
+
+                        const qualityRows = videoDetails.qualities.map((q, idx) => ({
+                            title: `${String(idx + 1).padStart(2, "0")}. ${q.quality}`,
+                            description: `Download video in ${q.quality}`,
+                            id: `.xh_dl ${idx + 1}`
+                        }));
+
+                        const bodyText = `╭─[ 📊 *𝗦𝗘𝗟𝗘𝗖𝗧 𝗤𝗨𝗔𝗟𝗜𝗧𝗬* ]\n│\n├ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(selected.title.slice(0, 36))}\n├ ⏱️ *Duration:* ${selected.duration || 'N/A'}\n│\n╰───────────────⮞\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+
+                        const btn = new ButtonV2(bot)
+                            .setBody(bodyText)
+                            .setFooter("WaBot by MALIYA-MD Team ツ")
+                            .setThumbnail(thumbImg);
+
+                        btn.addRawButton({
+                            buttonId: "xham_quality_list",
+                            buttonText: { displayText: "📥 Select Quality" },
+                            type: 1,
+                            nativeFlowInfo: {
+                                name: "single_select",
+                                paramsJson: JSON.stringify({
+                                    title: "Available Qualities ↯",
+                                    sections: [
+                                        {
+                                            title: "Choose Quality",
+                                            rows: qualityRows
+                                        }
+                                    ]
+                                }),
+                            },
+                        });
+
+                        btn.addButton("📜 Bot Menu", ".menu");
+
+                        const sentQualityMsg = await btn.send(from, { quoted: mek });
+
+                        if (sentQualityMsg?.key?.id) {
+                            pendingXhamQuality[k] = {
+                                selected: { ...selected, title: videoDetails.title || selected.title, duration: videoDetails.duration || selected.duration },
+                                qualities: videoDetails.qualities,
+                                timestamp: Date.now(),
+                                expectedMsgId: sentQualityMsg.key.id
+                            };
+                            await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+                            return;
+                        }
+                    } catch (e) {
+                        console.log("XHAM QUALITY BUTTON ERROR:", e?.message || e);
+                    }
+                }
+
+                // 🔢 Fallback: Numbered Menu for Quality
                 let qMsg = `╭─[ 📊 *𝗦𝗘𝗟𝗘𝗖𝗧 𝗤𝗨𝗔𝗟𝗜𝗧𝗬* ]\n│\n`;
                 qMsg += `├ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(selected.title.slice(0, 36))}\n│\n`;
                 qMsg += `├ 👇 *Reply with Quality Number:*\n│\n`;
@@ -452,12 +548,52 @@ const xhamReplyHandler = {
 
                 qMsg += `│\n╰───────────────⮞`;
 
-                return reply(qMsg);
+                const sentQualityMsg = await bot.sendMessage(from, {
+                    image: { url: thumbImg },
+                    caption: qMsg,
+                    contextInfo: channelContextInfo()
+                }, { quoted: mek });
+
+                pendingXhamQuality[k] = {
+                    selected: { ...selected, title: videoDetails.title || selected.title, duration: videoDetails.duration || selected.duration },
+                    qualities: videoDetails.qualities,
+                    timestamp: Date.now(),
+                    expectedMsgId: sentQualityMsg.key.id
+                };
+
+                await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
 
             } catch (err) {
                 console.error("Quality Extract Error:", err);
+                await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
                 return reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Failed to extract stream qualities!_\n╰───────────────⮞`);
             }
+            return;
+        }
+
+        // STEP 2: Quality Selection -> Direct Full Download (Cut options completely removed)
+        if (pendingXhamQuality[k]) {
+            const session = pendingXhamQuality[k];
+            if (quotedId && session.expectedMsgId && quotedId !== session.expectedMsgId) return;
+
+            let choiceNum = null;
+            if (payload.startsWith(".xh_dl ")) {
+                choiceNum = parseInt(payload.replace(".xh_dl ", "").trim(), 10) - 1;
+            } else if (/^\d+$/.test(payload)) {
+                choiceNum = parseInt(payload, 10) - 1;
+            }
+
+            const { selected, qualities } = session;
+
+            if (choiceNum === null || isNaN(choiceNum) || choiceNum < 0 || choiceNum >= qualities.length) {
+                return reply(`╭─[ ⚠️ *𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗢𝗣𝗧𝗜𝗢𝗡* ]\n│\n├ 🎯 *Range:* 1 - ${qualities.length}\n╰───────────────⮞`);
+            }
+
+            const chosenQuality = qualities[choiceNum];
+            delete pendingXhamQuality[k];
+
+            // 🚀 සෘජුවම Full Video එක Download කිරීම
+            return processDownload(bot, mek, m, reply, from, selected, chosenQuality.url, chosenQuality.quality);
         }
     }
 };
@@ -475,12 +611,6 @@ setInterval(() => {
     }
     for (const s in pendingXhamQuality) {
         if (now - pendingXhamQuality[s].timestamp > SESSION_TIMEOUT) delete pendingXhamQuality[s];
-    }
-    for (const s in pendingXhamOption) {
-        if (now - pendingXhamOption[s].timestamp > SESSION_TIMEOUT) delete pendingXhamOption[s];
-    }
-    for (const s in pendingXhamCustomTime) {
-        if (now - pendingXhamCustomTime[s].timestamp > SESSION_TIMEOUT) delete pendingXhamCustomTime[s];
     }
     for (const s in lastProcessedMsg) {
         if (now - lastProcessedMsg[s].time > LOOP_COOLDOWN) delete lastProcessedMsg[s];
