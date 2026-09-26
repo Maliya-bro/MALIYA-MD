@@ -1,5 +1,6 @@
 const { cmd, replyHandlers } = require("../command");
 const scraper = require("liyanaarachchi-animeheavenme");
+const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 // State Management per Session & User
 const pendingAnimeSearch = {};
@@ -9,9 +10,9 @@ const lastProcessedMsg = {};
 const SESSION_TIMEOUT = 10 * 60 * 1000; // 10 Minutes
 const LOOP_COOLDOWN = 3000;
 
-// Channel Forwarding Meta Data (same pattern as Cinesubz / SinhalaCartoon plugins)
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
+const DEFAULT_ANIME_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
 
 function getChannelContext() {
   return {
@@ -28,7 +29,7 @@ function getChannelContext() {
 }
 
 function keyFor(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
+  return `${from || ""}`;
 }
 
 function clearUserSession(k) {
@@ -48,14 +49,60 @@ function toSmallCaps(str = "") {
     .join("");
 }
 
-// Best-effort poster field lookup — the scraper's exact field name isn't
-// guaranteed, so check the common ones and fall back to nothing.
 function extractPoster(obj) {
   if (!obj) return "";
   return obj.poster || obj.image || obj.thumbnail || obj.cover || obj.img || "";
 }
 
-// Sequential Delay Helper
+function safeJsonParse(str) {
+  try { return JSON.parse(str); } catch { return null; }
+}
+
+function getQuotedStanzaId(mek) {
+  return (
+    mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+    mek?.message?.videoMessage?.contextInfo?.stanzaId ||
+    mek?.message?.documentMessage?.contextInfo?.stanzaId ||
+    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    null
+  );
+}
+
+function extractIncomingPayload(body, mek, m) {
+  const paramsJson =
+    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+    
+  if (paramsJson) {
+    const parsed = safeJsonParse(paramsJson);
+    if (parsed) {
+      const btnId = parsed.id || parsed.selectedId || parsed.selectedRowId || parsed.name;
+      if (btnId) return String(btnId).trim();
+    }
+  }
+
+  const directId =
+    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    m?.message?.buttonsResponseMessage?.selectedButtonId ||
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    mek?.message?.buttonsResponseMessage?.selectedButtonId;
+    
+  if (directId) return String(directId).trim();
+
+  const text =
+    m?.message?.interactiveResponseMessage?.body?.text ||
+    m?.message?.conversation ||
+    m?.message?.extendedTextMessage?.text ||
+    mek?.message?.interactiveResponseMessage?.body?.text ||
+    mek?.message?.conversation ||
+    mek?.message?.extendedTextMessage?.text ||
+    body ||
+    "";
+    
+  return String(text).trim();
+}
+
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ============================================================
@@ -70,7 +117,7 @@ cmd(
     react: "🎌",
     filename: __filename,
   },
-  async (bot, mek, m, { from, q, sender, reply }) => {
+  async (bot, mek, m, { from, q, sender, reply, sessionId }) => {
     if (!q) {
       return reply(
         "📱 *ᴜsᴀɢᴇ:* `.animedl [anime name]`\n💡 *ᴇxᴀᴍᴘʟᴇ:* `.animedl naruto`"
@@ -78,7 +125,6 @@ cmd(
     }
 
     await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
-    await reply("🔍 *sᴇᴀʀᴄʜɪɴɢ ᴀɴɪᴍᴇʜᴇᴀᴠᴇɴ...*");
 
     try {
       let searchResults = await scraper.searchAnime(q.trim());
@@ -91,13 +137,73 @@ cmd(
       const k = keyFor(sender, from);
       clearUserSession(k);
 
-      // Store up to 10 Search Results
       const topResults = searchResults.slice(0, 10);
-      pendingAnimeSearch[k] = {
-        results: topResults,
-        timestamp: Date.now(),
-      };
+      const settings = await readSettings(sessionId);
+      const btnsOn = !!settings.btns_enabled;
 
+      let headerImg = DEFAULT_ANIME_IMAGE;
+      if (sessionId) {
+        try {
+          const custom = await getCustomImage(sessionId, "anime_header");
+          if (custom && custom.data) headerImg = custom.data;
+        } catch (e) {}
+      }
+
+      // 🔥 ButtonV2 Search Results Popup List
+      if (btnsOn) {
+        try {
+          const { ButtonV2 } = await import("@vanzxy/baileys");
+
+          const animeRows = topResults.map((item, index) => ({
+            title: `${String(index + 1).padStart(2, "0")}. ${item.title.substring(0, 45)}`,
+            description: "Click to view anime episodes",
+            id: `.ani_select ${index + 1}`
+          }));
+
+          const bodyText = `╭━━━〔 🎌 *ᴀɴɪᴍᴇ sᴇᴀʀᴄʜ* 〕━━━\n┃\n┃ 🔍 *Search :* ${q}\n┃ 📊 *Found :* ${topResults.length} Anime(s)\n┃\n╰━━━───────━━━━► ❥\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+
+          const btn = new ButtonV2(bot)
+            .setBody(bodyText)
+            .setFooter("WaBot by MALIYA-MD Team ツ")
+            .setThumbnail(headerImg);
+
+          btn.addRawButton({
+            buttonId: "anime_search_list",
+            buttonText: { displayText: "🎌 Select Anime" },
+            type: 1,
+            nativeFlowInfo: {
+              name: "single_select",
+              paramsJson: JSON.stringify({
+                title: "Available Anime ↯",
+                sections: [
+                  {
+                    title: "🎥 Anime Search Results",
+                    rows: animeRows
+                  }
+                ]
+              }),
+            },
+          });
+
+          btn.addButton("📜 Bot Menu", ".menu");
+
+          const sentMsg = await btn.send(from, { quoted: mek });
+
+          if (sentMsg?.key?.id) {
+            pendingAnimeSearch[k] = {
+              results: topResults,
+              timestamp: Date.now(),
+              expectedMsgId: sentMsg.key.id
+            };
+            await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+            return;
+          }
+        } catch (err) {
+          console.log("ANIME BUTTON ERROR:", err?.message || err);
+        }
+      }
+
+      // 🔢 Fallback: Numbered Menu
       let text = `╭━━━〔 🎌 *ᴀɴɪᴍᴇ sᴇᴀʀᴄʜ (ᴍᴀx 10 ʀᴇsᴜʟᴛs)* 〕━━━\n┃\n`;
       text += `┃ 📊 *ғᴏᴜɴᴅ:* ${topResults.length} Anime(s)\n┃\n`;
       text += `╰━━━───────━━━━► ❥\n\n`;
@@ -111,11 +217,19 @@ cmd(
       text += `📌 *Reply with a number to select one Anime*`;
 
       const channelMeta = getChannelContext();
-      await bot.sendMessage(from, {
-        text,
+      const sentMsg = await bot.sendMessage(from, {
+        image: { url: headerImg },
+        caption: text,
         ...channelMeta,
       }, { quoted: mek });
 
+      pendingAnimeSearch[k] = {
+        results: topResults,
+        timestamp: Date.now(),
+        expectedMsgId: sentMsg.key.id
+      };
+
+      await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
       searchResults = null;
     } catch (e) {
       console.error("ANIME SEARCH ERROR:", e);
@@ -126,47 +240,47 @@ cmd(
 );
 
 // ============================================================
-// 2. NUMBER REPLY HANDLER — anime pick, then episode pick
-//    (Cinesubz/SinhalaCartoon-style replyHandlers entry)
+// 2. REPLY HANDLER — Anime pick, then Episode pick
 // ============================================================
 const animeReplyHandler = {
   filter: (text, { sender, from }) => {
-    if (!text) return false;
     const k = keyFor(sender, from);
-
-    const cleanInput = text.trim().toLowerCase();
-    const isNumberOrList = /^(all|\d+(\s*,\s*\d+)*)$/.test(cleanInput);
-    if (!isNumberOrList) return false;
-
     return Boolean(pendingAnimeSearch[k] || pendingAnimeSelection[k]);
   },
-  function: async (bot, mek, m, { body, sender, reply, from }) => {
-    const input = body ? body.trim() : "";
-    if (!input) return;
+  function: async (bot, mek, m, { body, sender, reply, from, sessionId }) => {
+    const payload = extractIncomingPayload(body, mek, m);
+    if (!payload) return;
 
     const k = keyFor(sender, from);
 
     // Loop & Spam Guard
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === input && now - lastMsg.time < LOOP_COOLDOWN) {
+    if (lastMsg && lastMsg.text === payload && now - lastMsg.time < LOOP_COOLDOWN) {
       return;
     }
-    lastProcessedMsg[k] = { text: input, time: now };
+    lastProcessedMsg[k] = { text: payload, time: now };
+
+    const quotedId = getQuotedStanzaId(mek);
 
     // --- STEP 1: ANIME SELECTION FROM SEARCH ---
     if (pendingAnimeSearch[k]) {
-      const num = parseInt(input, 10);
       const session = pendingAnimeSearch[k];
+      if (quotedId && session.expectedMsgId && quotedId !== session.expectedMsgId) return;
 
-      if (isNaN(num) || num <= 0 || num > session.results.length) {
-        return reply(`⚠️ *ɪɴᴠᴀʟɪᴅ ᴏᴘᴛɪᴏɴ.* Range: 1 - ${session.results.length}`);
+      let num = null;
+      if (payload.startsWith(".ani_select ")) {
+        num = parseInt(payload.replace(".ani_select ", "").trim(), 10);
+      } else if (/^\d+$/.test(payload)) {
+        num = parseInt(payload, 10);
       }
+
+      if (num === null || isNaN(num) || num <= 0 || num > session.results.length) return;
 
       const selectedAnime = session.results[num - 1];
       delete pendingAnimeSearch[k];
 
-      await reply(`⏳ *ғᴇᴛᴄʜɪɴɢ ᴇᴘɪsᴏᴅᴇs ғᴏʀ ${toSmallCaps(selectedAnime.title)}...*`);
+      await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
       try {
         let episodes = await scraper.getEpisodes(selectedAnime.link);
@@ -175,44 +289,105 @@ const animeReplyHandler = {
           return reply(`⚠️ *No episodes found for ${selectedAnime.title}.*`);
         }
 
-        pendingAnimeSelection[k] = {
-          anime: selectedAnime,
-          episodes,
-          timestamp: Date.now(),
-        };
-
-        const poster = extractPoster(selectedAnime);
+        const poster = extractPoster(selectedAnime) || DEFAULT_ANIME_IMAGE;
+        const settings = await readSettings(sessionId);
+        const btnsOn = !!settings.btns_enabled;
 
         let captionText = `╭━━━〔 🎌 *${toSmallCaps(selectedAnime.title)}* 〕━━━\n┃\n`;
         captionText += `┃ 📥 *Available Episodes:* ${episodes.length}\n┃\n`;
-        captionText += `╰━━━───────━━━━► ❥\n\n`;
-        captionText += `*[ 00 ]* 📦 Download ALL Episodes\n`;
+        captionText += `╰━━━───────━━━━► ❥\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+
+        // 🔥 ButtonV2 Episode Selection Popup List
+        if (btnsOn) {
+          try {
+            const { ButtonV2 } = await import("@vanzxy/baileys");
+
+            const episodeRows = [
+              {
+                title: "📦 Download ALL Episodes",
+                description: `Download all ${episodes.length} episodes sequentially`,
+                id: ".ani_ep all"
+              },
+              ...episodes.map((ep, idx) => ({
+                title: `${String(idx + 1).padStart(2, "0")}. ${(ep.name || `Episode ${idx + 1}`).substring(0, 45)}`,
+                description: "Download this episode",
+                id: `.ani_ep ${idx + 1}`
+              }))
+            ];
+
+            const btn = new ButtonV2(bot)
+              .setBody(captionText)
+              .setFooter("WaBot by MALIYA-MD Team ツ")
+              .setThumbnail(poster);
+
+            btn.addRawButton({
+              buttonId: "anime_ep_list",
+              buttonText: { displayText: "📥 Select Episodes" },
+              type: 1,
+              nativeFlowInfo: {
+                name: "single_select",
+                paramsJson: JSON.stringify({
+                  title: "Choose Episode ↯",
+                  sections: [
+                    {
+                      title: "Available Episodes",
+                      rows: episodeRows
+                    }
+                  ]
+                }),
+              },
+            });
+
+            btn.addButton("📜 Bot Menu", ".menu");
+
+            const sentDetailsMsg = await btn.send(from, { quoted: mek });
+
+            if (sentDetailsMsg?.key?.id) {
+              pendingAnimeSelection[k] = {
+                anime: selectedAnime,
+                episodes,
+                timestamp: Date.now(),
+                expectedMsgId: sentDetailsMsg.key.id
+              };
+              await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+              return;
+            }
+          } catch (e) {
+            console.log("ANIME DETAILS BUTTON ERROR:", e?.message || e);
+          }
+        }
+
+        // 🔢 Fallback: Numbered Menu for Episodes
+        let fallbackMsg = `╭━━━〔 🎌 *${toSmallCaps(selectedAnime.title)}* 〕━━━\n┃\n`;
+        fallbackMsg += `┃ 📥 *Available Episodes:* ${episodes.length}\n┃\n`;
+        fallbackMsg += `╰━━━───────━━━► ❥\n\n`;
+        fallbackMsg += `*[ 00 ]* 📦 Download ALL Episodes\n`;
 
         episodes.forEach((ep, idx) => {
           const numStr = String(idx + 1).padStart(2, "0");
           const epName = ep.name || `Episode ${idx + 1}`;
-          captionText += `*[ ${numStr} ]* 📌 ${epName}\n`;
+          fallbackMsg += `*[ ${numStr} ]* 📌 ${epName}\n`;
         });
 
-        captionText += `\n───────────────────\n`;
-        captionText += `💡 *Reply "00" or "all" for ALL episodes.*\n`;
-        captionText += `💡 *Or reply with numbers (e.g., "1,3,5") for specific episodes.*`;
+        fallbackMsg += `\n───────────────────\n`;
+        fallbackMsg += `💡 *Reply "00" or "all" for ALL episodes.*\n`;
+        fallbackMsg += `💡 *Or reply with numbers (e.g., "1,3,5") for specific episodes.*`;
 
         const channelMeta = getChannelContext();
+        const sentDetailsMsg = await bot.sendMessage(from, {
+          image: { url: poster },
+          caption: fallbackMsg,
+          ...channelMeta,
+        }, { quoted: mek });
 
-        if (poster) {
-          await bot.sendMessage(from, {
-            image: { url: poster },
-            caption: captionText,
-            ...channelMeta,
-          }, { quoted: mek });
-        } else {
-          await bot.sendMessage(from, {
-            text: captionText,
-            ...channelMeta,
-          }, { quoted: mek });
-        }
+        pendingAnimeSelection[k] = {
+          anime: selectedAnime,
+          episodes,
+          timestamp: Date.now(),
+          expectedMsgId: sentDetailsMsg.key.id
+        };
 
+        await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
         episodes = null;
       } catch (e) {
         console.error("ANIME EPISODES ERROR:", e);
@@ -223,19 +398,24 @@ const animeReplyHandler = {
     }
 
     // --- STEP 2: EPISODE SELECTION & DOWNLOAD ---
-    // Mapping: "0"/"00"/"all" = every episode.
-    // Otherwise each typed number maps directly to that episode:
-    // "1" -> Episode 1 (episodes[0]), "2" -> Episode 2 (episodes[1]), etc.
     if (pendingAnimeSelection[k]) {
-      const { anime, episodes } = pendingAnimeSelection[k];
+      const session = pendingAnimeSelection[k];
+      if (quotedId && session.expectedMsgId && quotedId !== session.expectedMsgId) return;
 
+      const { anime, episodes } = session;
       let selectedIndices = [];
-      const lowerInput = input.toLowerCase();
+
+      let cmdInput = payload;
+      if (cmdInput.startsWith(".ani_ep ")) {
+        cmdInput = cmdInput.replace(".ani_ep ", "").trim();
+      }
+
+      const lowerInput = cmdInput.toLowerCase();
 
       if (lowerInput === "0" || lowerInput === "00" || lowerInput === "all") {
         selectedIndices = episodes.map((_, idx) => idx);
       } else {
-        const numbers = input.split(/[\s,]+/).map((n) => parseInt(n, 10)).filter((n) => !isNaN(n));
+        const numbers = cmdInput.split(/[\s,]+/).map((n) => parseInt(n, 10)).filter((n) => !isNaN(n));
 
         numbers.forEach((num) => {
           if (num === 0) {
