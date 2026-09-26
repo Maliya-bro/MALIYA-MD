@@ -12,7 +12,6 @@ const LOOP_COOLDOWN = 3000;
 const pendingApkSearch = {};
 const lastProcessedMsg = {};
 
-// ✅ Group/Chat එකේ ඕනෑම කෙනෙකුට reply කළ හැකි වන පරිදි 'from' පමණක් භාවිතය
 function makePendingKey(sender, from) {
   return `${from || ""}`;
 }
@@ -33,15 +32,53 @@ function channelContextInfo() {
   };
 }
 
-// ✅ Quoted Message ID extract කරගැනීම
+function safeJsonParse(str) {
+  try { return JSON.parse(str); } catch { return null; }
+}
+
 function getQuotedStanzaId(mek, m) {
   return (
     m?.quoted?.id ||
     mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
     m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
     mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
     null
   );
+}
+
+function extractIncomingPayload(body, mek, m) {
+  const paramsJson =
+    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+    
+  if (paramsJson) {
+    const parsed = safeJsonParse(paramsJson);
+    if (parsed) {
+      const btnId = parsed.id || parsed.selectedId || parsed.selectedRowId || parsed.name;
+      if (btnId) return String(btnId).trim();
+    }
+  }
+
+  const directId =
+    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    m?.message?.buttonsResponseMessage?.selectedButtonId ||
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    mek?.message?.buttonsResponseMessage?.selectedButtonId;
+    
+  if (directId) return String(directId).trim();
+
+  const text =
+    m?.message?.interactiveResponseMessage?.body?.text ||
+    m?.message?.conversation ||
+    m?.message?.extendedTextMessage?.text ||
+    mek?.message?.interactiveResponseMessage?.body?.text ||
+    mek?.message?.conversation ||
+    mek?.message?.extendedTextMessage?.text ||
+    body ||
+    "";
+    
+  return String(text).trim();
 }
 
 const UA = "Mozilla/5.0 (Linux; Android 11; Redmi Note 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
@@ -101,6 +138,7 @@ async function sendErrorMsg(sock, from, mek, text) {
   }, { quoted: mek });
 }
 
+/* ================= COMMAND: .apk ================= */
 cmd({
   pattern: "apk",
   alias: ["app", "playstore", "apkpure"],
@@ -119,10 +157,79 @@ cmd({
 
     await sock.sendMessage(from, { react: { text: "🔍", key: m.key } });
 
-    const results = await apkSearch(q.trim(), 5);
+    const results = await apkSearch(q.trim(), 8);
     const k = makePendingKey(sender, from);
     clearUserSession(k);
 
+    const settings = await readSettings(sessionId);
+    const btnsOn = !!settings.btns_enabled;
+
+    let headerImg = results[0]?.icon || DEFAULT_APK_IMAGE;
+    if (sessionId) {
+      try {
+        const custom = await getCustomImage(sessionId, "apk_header");
+        if (custom && custom.data) headerImg = custom.data;
+      } catch (e) {}
+    }
+
+    // 🔥 BUTTONS SYSTEM (Asitha-MD Style ButtonV2)
+    if (btnsOn) {
+      try {
+        const { ButtonV2 } = await import("@vanzxy/baileys");
+
+        const apkRows = results.map((item, index) => ({
+          title: `${String(index + 1).padStart(2, "0")}. ${item.name.substring(0, 45)}`,
+          description: `Dev: ${item.developer || "Unknown"} | ID: ${item.pkg.substring(0, 25)}`,
+          id: `.apk_dl ${index + 1}`
+        }));
+
+        const bodyText = `⊱━━━━━ • ✿ • ━━━━━⊰\n📦 *𝐀𝐏𝐊 𝐒𝐄𝐀𝐑𝐂𝐇 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${results.length}\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+
+        const btn = new ButtonV2(sock)
+          .setBody(bodyText)
+          .setFooter("WaBot by MALIYA-MD Team ツ")
+          .setThumbnail(headerImg);
+
+        // 1. Popup List Menu Button
+        btn.addRawButton({
+          buttonId: "apk_search_list",
+          buttonText: { displayText: "📦 Select APK" },
+          type: 1,
+          nativeFlowInfo: {
+            name: "single_select",
+            paramsJson: JSON.stringify({
+              title: "Available Applications ↯",
+              sections: [
+                {
+                  title: "📱 Apps & Games",
+                  rows: apkRows
+                }
+              ]
+            }),
+          },
+        });
+
+        // 2. Bot Menu Button
+        btn.addButton("📜 Bot Menu", ".menu");
+
+        const sentMsg = await btn.send(from, { quoted: mek });
+
+        if (sentMsg?.key?.id) {
+          pendingApkSearch[k] = {
+            expectedMsgId: sentMsg.key.id,
+            results,
+            timestamp: Date.now(),
+            isProcessing: false,
+          };
+          await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+          return;
+        }
+      } catch (err) {
+        console.log("APK BUTTONV2 ERROR:", err?.message || err);
+      }
+    }
+
+    // 🔢 FALLBACK NUMBERED MENU
     let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n`;
     text += `📦 *𝐀𝐏𝐊 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n`;
     text += `⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
@@ -137,16 +244,6 @@ cmd({
     });
     text += `⊱━━━━━━━━━━━━━━━⊰\n> 💬 *Please reply to this message with a number to Download...*`;
 
-    // Bot Settings හරහා Custom Image ඇත්නම් එය ලබා ගැනීම
-    let headerImg = results[0]?.icon || DEFAULT_APK_IMAGE;
-    if (sessionId) {
-      try {
-        const custom = await getCustomImage(sessionId, "apk_header");
-        if (custom && custom.data) headerImg = custom.data;
-      } catch (e) {}
-    }
-
-    // Menu එක image caption එකක් ලෙස යවා එහි ID එක save කර ගැනීම
     const menuMsg = await sock.sendMessage(from, {
       image: { url: headerImg },
       caption: text,
@@ -167,32 +264,37 @@ cmd({
   }
 });
 
+/* ================= REPLY HANDLER ================= */
 const apkReplyHandler = {
   filter: (text, { from, sender }) => {
-    if (!text) return false;
     const k = makePendingKey(sender, from);
     return !!pendingApkSearch[k];
   },
   function: async (sock, mek, m, { body, from, sender }) => {
-    const inputStr = String(body || "").trim();
-    if (!inputStr || !/^\d+$/.test(inputStr)) return;
+    const payload = extractIncomingPayload(body, mek, m);
+    if (!payload) return;
 
     const k = makePendingKey(sender, from);
     const pending = pendingApkSearch[k];
     if (!pending || pending.isProcessing) return;
 
-    // 🔥 User reply කර ඇත්තේ Bot එවූ Menu message එකටම දැයි පරීක්ෂා කිරීම
     const quotedId = getQuotedStanzaId(mek, m);
-    if (!quotedId || quotedId !== pending.expectedMsgId) return;
+    if (quotedId && pending.expectedMsgId && quotedId !== pending.expectedMsgId) return;
 
-    // Spam / Duplicate Loop Cooldown
+    let choice = null;
+    if (payload.startsWith(".apk_dl ")) {
+      choice = parseInt(payload.replace(".apk_dl ", "").trim(), 10);
+    } else if (/^\d+$/.test(payload)) {
+      choice = parseInt(payload, 10);
+    }
+
+    if (choice === null || isNaN(choice) || choice < 1 || choice > pending.results.length) return;
+
+    // Spam / Loop Cooldown
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === inputStr && (now - lastMsg.time) < LOOP_COOLDOWN) return;
-    lastProcessedMsg[k] = { text: inputStr, time: now };
-
-    const choice = parseInt(inputStr, 10);
-    if (isNaN(choice) || choice < 1 || choice > pending.results.length) return;
+    if (lastMsg && lastMsg.text === payload && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+    lastProcessedMsg[k] = { text: payload, time: now };
 
     pending.isProcessing = true;
     const selected = pending.results[choice - 1];
@@ -200,7 +302,6 @@ const apkReplyHandler = {
     await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
     try {
-      // 1. Get exact file size
       const headRes = await axios.head(selected.dlUrl, { headers: HEADERS }).catch(() => null);
       let sizeMB = 0;
       if (headRes && headRes.headers["content-length"]) {
@@ -220,7 +321,6 @@ const apkReplyHandler = {
       caption += `📁 *Format:* Standard Document APK\n\n`;
       caption += `⊱━━━━━━━━━━━━━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-      // 2. Stream File (RAM crash වැළැක්වීම සඳහා)
       const res = await axios({
         url: selected.dlUrl,
         method: "GET",
@@ -260,3 +360,5 @@ setInterval(() => {
     if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) delete lastProcessedMsg[k];
   }
 }, 2.5 * 60 * 1000);
+
+module.exports = {};
