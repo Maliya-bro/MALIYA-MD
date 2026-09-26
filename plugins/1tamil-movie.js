@@ -5,10 +5,10 @@ const sharp = require("sharp");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩ𝗬Ａ-〽️Ｄ 🍁";
 const DEFAULT_SEARCH_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
 const SESSION_TIMEOUT = 5 * 60 * 1000;
-const LOOP_COOLDOWN = 3000;
+const LOOP_COOLDOWN = 2500;
 const TAMILMV_BASE = "https://www.1tamilmv.lease";
 
 const pendingTamilMV = {};
@@ -22,7 +22,7 @@ const REQUEST_OPTIONS = {
   }
 };
 
-function makePendingKey(sender, from) {
+function keyFor(sender, from) {
   return `${from || ""}`;
 }
 
@@ -51,86 +51,63 @@ function channelContextInfo() {
   };
 }
 
-function getQuotedStanzaId(mek) {
+function getQuotedId(m, mek) {
   return (
+    m?.quoted?.id ||
     mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.imageMessage?.contextInfo?.stanzaId ||
     mek?.message?.imageMessage?.contextInfo?.stanzaId ||
-    mek?.message?.videoMessage?.contextInfo?.stanzaId ||
-    mek?.message?.documentMessage?.contextInfo?.stanzaId ||
+    m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
     mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
     null
   );
 }
 
-function safeJsonParse(str) {
-  try { return JSON.parse(str); } catch { return null; }
-}
-
-function extractIncomingPayload(body, mek, m) {
-  const paramsJson =
-    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
-    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-    
-  if (paramsJson) {
-    const parsed = safeJsonParse(paramsJson);
-    if (parsed) {
-      const btnId = parsed.id || parsed.selectedId || parsed.selectedRowId || parsed.name;
-      if (btnId) return String(btnId).trim();
-    }
+function extractTexts(body, mek, m) {
+  const texts = [];
+  const direct = [
+    body, m?.body, m?.text, m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text, m?.message?.buttonsResponseMessage?.selectedButtonId,
+    m?.message?.buttonsResponseMessage?.selectedDisplayText,
+    m?.message?.listResponseMessage?.title, m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.interactiveResponseMessage?.body?.text,
+    mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+  ];
+  for (const item of direct) {
+    if (item) texts.push(String(item).trim());
   }
 
-  const directId =
-    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    m?.message?.buttonsResponseMessage?.selectedButtonId ||
-    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    mek?.message?.buttonsResponseMessage?.selectedButtonId;
-    
-  if (directId) return String(directId).trim();
-
-  const text =
-    m?.message?.interactiveResponseMessage?.body?.text ||
-    m?.message?.conversation ||
-    m?.message?.extendedTextMessage?.text ||
-    mek?.message?.interactiveResponseMessage?.body?.text ||
-    mek?.message?.conversation ||
-    mek?.message?.extendedTextMessage?.text ||
-    body ||
-    "";
-    
-  return String(text).trim();
+  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  for (const raw of [p1, p2]) {
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.id) texts.push(String(parsed.id).trim());
+      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+      if (parsed.title) texts.push(String(parsed.title).trim());
+    } catch {}
+  }
+  return [...new Set(texts.filter(Boolean))];
 }
 
 async function getThumbnailBuffer(url) {
   const tryUrl = url || DEFAULT_SEARCH_IMAGE;
   try {
-    const res = await axios.get(tryUrl, {
-      responseType: "arraybuffer",
-      timeout: 8000,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      }
-    });
-
-    return await sharp(Buffer.from(res.data))
-      .resize(200, 200, { fit: "cover" })
-      .jpeg({ quality: 50 })
-      .toBuffer();
+    const res = await axios.get(tryUrl, { responseType: "arraybuffer", timeout: 8000, headers: { "User-Agent": "Mozilla/5.0" } });
+    return await sharp(Buffer.from(res.data)).resize(200, 200, { fit: "cover" }).jpeg({ quality: 50 }).toBuffer();
   } catch (e) {
     return null;
   }
 }
 
 async function sendErrorMsg(sock, from, mek, text) {
-  let errText = "╭─── ⋆⋅ ♰ ⋅⋆ ───╮\n";
-  errText += "  ❌  𝐄𝐑𝐑𝐎𝐑  𝐎𝐂𝐂𝐔𝐑𝐑𝐄𝐃\n";
-  errText += "╰─── ⋆⋅ ♰ ⋅⋆ ───╯\n\n";
-  errText += "• ──────── ⌒⌒⌒ ︶︶︶\n";
-  errText += "🚫 _" + text + "_\n";
-  errText += "• ──────── ⌒⌒⌒ ︶︶︶\n\n";
-  errText += "⋆⁺₊⋆ ♱ MALIYA-MD ♱ ⋆⁺₊⋆";
-
   await sock.sendMessage(from, {
-    text: errText,
+    text: "⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _" + text + "_",
     contextInfo: channelContextInfo()
   }, { quoted: mek });
 }
@@ -138,42 +115,25 @@ async function sendErrorMsg(sock, from, mek, text) {
 function isUnder2GB(titleText) {
   const matches = [...String(titleText).matchAll(/(\d+(?:\.\d+)?)\s*(GB|MB)/gi)];
   if (matches.length === 0) return true;
-
   const lastMatch = matches[matches.length - 1];
   const sizeVal = parseFloat(lastMatch[1]);
   const unit = lastMatch[2].toUpperCase();
-
   if (unit === "GB") return sizeVal <= 2.0;
   if (unit === "MB") return sizeVal <= 2048;
   return true;
 }
 
 function makeSeoSlug(title) {
-  return String(title)
-    .toLowerCase()
-    .replace(/&amp;/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  return String(title).toLowerCase().replace(/&amp;/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 function isRelevantMoviePost(title, query) {
   const lowerTitle = title.toLowerCase().replace(/[^a-z0-9\s]/g, " ");
   const queryWords = query.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
-
   for (const word of queryWords) {
     if (!lowerTitle.includes(word)) return false;
   }
-
-  if (lowerTitle.includes("soundtrack")) return false;
-  if (lowerTitle.includes("flac")) return false;
-  if (lowerTitle.includes("glimpse")) return false;
-  if (lowerTitle.includes("lyrical")) return false;
-  if (lowerTitle.includes("video song")) return false;
-  if (lowerTitle.includes("mp3")) return false;
-  if (lowerTitle.includes("24bit")) return false;
-  if (lowerTitle.includes("16bit")) return false;
-  if (lowerTitle.includes("ost")) return false;
-
+  if (lowerTitle.includes("soundtrack") || lowerTitle.includes("flac") || lowerTitle.includes("glimpse") || lowerTitle.includes("video song") || lowerTitle.includes("mp3")) return false;
   return true;
 }
 
@@ -185,30 +145,15 @@ async function searchTamilMV(query) {
   const res = await gotScraping({
     url: apiUrl,
     ...REQUEST_OPTIONS,
-    headers: {
-      Referer: `${TAMILMV_BASE}/search/?q=${formattedQuery}`,
-      Accept: "application/json, text/plain, */*"
-    }
+    headers: { Referer: `${TAMILMV_BASE}/search/?q=${formattedQuery}`, Accept: "application/json, text/plain, */*" }
   });
 
   const data = JSON.parse(res.body);
   const results = [];
-
-  let list = [];
-  if (Array.isArray(data)) {
-    list = data;
-  } else if (data && typeof data === "object") {
-    for (const key of Object.keys(data)) {
-      if (Array.isArray(data[key])) {
-        list = data[key];
-        break;
-      }
-    }
-  }
+  let list = Array.isArray(data) ? data : (data && typeof data === "object" ? Object.values(data).find(Array.isArray) || [] : []);
 
   list.forEach((item) => {
     if (!item) return;
-
     let title = item.title || item.topic_title || item.name;
     if (!title) return;
 
@@ -216,29 +161,17 @@ async function searchTamilMV(query) {
     if (!isRelevantMoviePost(cleanTitle, query)) return;
 
     let link = null;
-    const possibleUrlKeys = ["url", "topic_url", "link", "href", "seo_url", "full_url"];
-    for (const k of possibleUrlKeys) {
-      if (item[k] && typeof item[k] === "string") {
-        link = item[k];
-        break;
-      }
+    for (const k of ["url", "topic_url", "link", "href", "seo_url", "full_url"]) {
+      if (item[k] && typeof item[k] === "string") { link = item[k]; break; }
     }
 
     let tid = item.tid || item.topic_id || item.id;
     let slug = item.title_seo || item.seo_title || item.slug || makeSeoSlug(cleanTitle);
 
-    if (!link && tid) {
-      link = `${TAMILMV_BASE}/index.php?/forums/topic/${tid}-${slug}/`;
-    } else if (link && !link.startsWith("http")) {
-      link = link.startsWith("/") ? `${TAMILMV_BASE}${link}` : `${TAMILMV_BASE}/${link}`;
-    }
+    if (!link && tid) link = `${TAMILMV_BASE}/index.php?/forums/topic/${tid}-${slug}/`;
+    else if (link && !link.startsWith("http")) link = link.startsWith("/") ? `${TAMILMV_BASE}${link}` : `${TAMILMV_BASE}/${link}`;
 
-    if (cleanTitle && link) {
-      results.push({
-        title: cleanTitle,
-        link: String(link)
-      });
-    }
+    if (cleanTitle && link) results.push({ title: cleanTitle, link: String(link) });
   });
 
   return results;
@@ -246,15 +179,8 @@ async function searchTamilMV(query) {
 
 async function parseTamilMVTopic(topicUrl) {
   const { gotScraping } = await import("got-scraping");
-
   try {
-    const res = await gotScraping({
-      url: topicUrl,
-      ...REQUEST_OPTIONS,
-      followRedirect: true,
-      timeout: { request: 15000 }
-    });
-
+    const res = await gotScraping({ url: topicUrl, ...REQUEST_OPTIONS, followRedirect: true, timeout: { request: 15000 } });
     const $ = cheerio.load(res.body);
     const downloadOptions = [];
     let poster = null;
@@ -262,23 +188,16 @@ async function parseTamilMVTopic(topicUrl) {
     $("div[data-role='commentContent'] img").each((_, imgEl) => {
       const src = $(imgEl).attr("src");
       if (src && !src.includes("torrborder") && !src.includes("uTorrent") && !src.includes("emojis")) {
-        poster = src;
-        return false;
+        poster = src; return false;
       }
     });
 
     $("a").each((_, el) => {
       const href = $(el).attr("href");
       if (!href || href.startsWith("magnet:") || href.startsWith("#") || href.startsWith("javascript")) return;
-
       const btnText = $(el).text().replace(/\s+/g, " ").trim().toUpperCase();
 
-      let isDirectLink = false;
-      if ($(el).hasClass("download-button")) isDirectLink = true;
-      if (btnText.includes("DIRECT LINK")) isDirectLink = true;
-      if (href.includes("cyberloom")) isDirectLink = true;
-      if (href.includes("messycloud")) isDirectLink = true;
-
+      let isDirectLink = $(el).hasClass("download-button") || btnText.includes("DIRECT LINK") || href.includes("cyberloom") || href.includes("messycloud");
       if (!isDirectLink) return;
 
       let qualityTitle = "";
@@ -286,47 +205,23 @@ async function parseTamilMVTopic(topicUrl) {
 
       while (prevEl.length && !qualityTitle) {
         let prevHref = prevEl.attr("href") || prevEl.find("a").attr("href");
-
         if (prevHref && prevHref.startsWith("magnet:")) {
           const dnMatch = prevHref.match(/[?&]dn=([^&]+)/i);
           if (dnMatch && dnMatch[1]) {
-            qualityTitle = decodeURIComponent(dnMatch[1].replace(/\+/g, " "))
-              .replace(/^www\.1TamilMV\.[a-z]+\s*-\s*/i, "")
-              .trim();
+            qualityTitle = decodeURIComponent(dnMatch[1].replace(/\+/g, " ")).replace(/^www\.1TamilMV\.[a-z]+\s*-\s*/i, "").trim();
             break;
           }
         }
-
         const txt = prevEl.text().replace(/\s+/g, " ").trim();
-        let hasQualityKeyword = false;
-        if (txt.includes("1080p") || txt.includes("720p") || txt.includes("480p") || txt.includes("2160p") ||
-            txt.includes("WEB-DL") || txt.includes("HDRip") || txt.includes("BluRay") || txt.includes("PreDVD") ||
-            txt.includes("HDTS") || txt.includes("MB") || txt.includes("GB")) {
-          hasQualityKeyword = true;
-        }
-
-        if (hasQualityKeyword && !txt.startsWith("MAGNET")) {
-          qualityTitle = txt
-            .replace(/^www\.1TamilMV\.[a-z]+\s*-\s*/i, "")
-            .replace(/\.torrent$/i, "")
-            .replace(/[:\-]$/, "")
-            .trim();
+        if (txt.includes("1080p") || txt.includes("720p") || txt.includes("480p") || txt.includes("WEB-DL") || txt.includes("HDRip") || txt.includes("BluRay")) {
+          qualityTitle = txt.replace(/^www\.1TamilMV\.[a-z]+\s*-\s*/i, "").replace(/\.torrent$/i, "").replace(/[:\-]$/, "").trim();
           break;
         }
-
         prevEl = prevEl.prev();
       }
 
-      if (!qualityTitle) {
-        qualityTitle = `Direct Quality Option ${downloadOptions.length + 1}`;
-      }
-
-      if (isUnder2GB(qualityTitle)) {
-        downloadOptions.push({
-          title: qualityTitle,
-          url: href
-        });
-      }
+      if (!qualityTitle) qualityTitle = `Direct Quality Option ${downloadOptions.length + 1}`;
+      if (isUnder2GB(qualityTitle)) downloadOptions.push({ title: qualityTitle, url: href });
     });
 
     return { poster, downloadOptions };
@@ -338,64 +233,35 @@ async function parseTamilMVTopic(topicUrl) {
 async function findPagesWithDirectLinks(matchedTopics) {
   const verifiedPages = [];
   const totalToCheck = Math.min(matchedTopics.length, 15);
-
   for (let i = 0; i < totalToCheck; i++) {
     const topic = matchedTopics[i];
     const parsed = await parseTamilMVTopic(topic.link);
-
     if (parsed.downloadOptions && parsed.downloadOptions.length > 0) {
-      verifiedPages.push({
-        title: topic.title,
-        link: topic.link,
-        poster: parsed.poster,
-        options: parsed.downloadOptions
-      });
+      verifiedPages.push({ title: topic.title, link: topic.link, poster: parsed.poster, options: parsed.downloadOptions });
     }
-
     if (verifiedPages.length >= 10) break;
   }
-
   return verifiedPages;
 }
 
 async function resolveDirectCdnUrl(shortUrl) {
   const { gotScraping } = await import("got-scraping");
-
-  const step1 = await gotScraping({
-    url: shortUrl,
-    ...REQUEST_OPTIONS,
-    followRedirect: true
-  });
-
+  const step1 = await gotScraping({ url: shortUrl, ...REQUEST_OPTIONS, followRedirect: true });
   let $ = cheerio.load(step1.body);
   let messyBody = step1.body;
 
-  let outUrl = $("#cta").attr("href");
-  if (!outUrl) {
-    const match = step1.body.match(/https?:\/\/[^"'\s]*\/out\?t=[^"'\s]+/i);
-    if (match) outUrl = match[0];
-  }
-
+  let outUrl = $("#cta").attr("href") || (step1.body.match(/https?:\/\/[^"'\s]*\/out\?t=[^"'\s]+/i) || [])[0];
   if (outUrl) {
-    const step2 = await gotScraping({
-      url: outUrl,
-      ...REQUEST_OPTIONS,
-      followRedirect: true,
-      headers: { Referer: shortUrl }
-    });
+    const step2 = await gotScraping({ url: outUrl, ...REQUEST_OPTIONS, followRedirect: true, headers: { Referer: shortUrl } });
     messyBody = step2.body;
     $ = cheerio.load(messyBody);
   }
 
   let cdnUrl = null;
-
   $(".download-grid a").each((_, el) => {
     const href = $(el).attr("href");
-    if (href) {
-      if (href.includes("cdn.") || href.includes("juicybits") || href.includes("/files/")) {
-        cdnUrl = href;
-        return false;
-      }
+    if (href && (href.includes("cdn.") || href.includes("juicybits") || href.includes("/files/"))) {
+      cdnUrl = href; return false;
     }
   });
 
@@ -403,15 +269,10 @@ async function resolveDirectCdnUrl(shortUrl) {
     const match = messyBody.match(/https?:\/\/cdn\.[^"'\s]+\/files\/[^"'\s]+/i);
     if (match) cdnUrl = match[0];
   }
-
   if (!cdnUrl) throw new Error("Direct CDN Download Link not found.");
 
   let rawFilename = $("h1").text().trim() || "Movie_File.mkv";
-
-  return {
-    downloadUrl: cdnUrl,
-    fileName: rawFilename
-  };
+  return { downloadUrl: cdnUrl, fileName: rawFilename };
 }
 
 /* ================= COMMAND: .tamilmv ================= */
@@ -420,39 +281,32 @@ cmd({
   alias: ["tmv", "1tamilmv", "tmvdl"],
   react: "🎬",
   desc: "Search and download direct movies from 1TamilMV",
-  category: "download",
+  category: "movie",
   filename: __filename
 }, async (sock, mek, m, { from, q, sender, sessionId }) => {
   try {
     if (!q) {
-      let helpText = "╔═════ஓ๑♡๑ஓ═════╗\n";
-      helpText += "   🎬 𝟏𝐓𝐀𝐌𝐈𝐋𝐌𝐕 𝐃𝐈𝐑𝐄𝐂𝐓 🎬\n";
-      helpText += "╚═════ஓ๑♡๑ஓ═════╝\n\n";
-      helpText += "📌 *Usage :* `.tamilmv <movie name>`\n";
-      helpText += "💡 *Example :* `.tamilmv awarapan 2`\n\n";
-      helpText += "> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
-
       return await sock.sendMessage(from, {
-        text: helpText,
+        text: "╔═════ஓ๑♡๑ஓ═════╗\n   🎬 𝟏𝐓𝐀𝐌𝐈𝐋𝐌𝐕 𝐃𝐈𝐑𝐄𝐂𝐓 🎬\n╚═════ஓ๑♡๑ஓ═════╝\n\n📌 *Usage :* `.tamilmv <movie name>`\n💡 *Example :* `.tamilmv leo`\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗",
         contextInfo: channelContextInfo()
       }, { quoted: mek });
     }
 
-    await sock.sendMessage(from, { react: { text: "🔍", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "📺", key: mek.key } });
 
     const matchedTopics = await searchTamilMV(q.trim());
     if (!matchedTopics || matchedTopics.length === 0) {
-      await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
       return await sendErrorMsg(sock, from, mek, `No relevant movies found on 1TamilMV for "${q}".`);
     }
 
     const validMovies = await findPagesWithDirectLinks(matchedTopics);
     if (validMovies.length === 0) {
-      await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
       return await sendErrorMsg(sock, from, mek, `No Direct Download links (under 2GB) found for "${q}".`);
     }
 
-    const k = makePendingKey(sender, from);
+    const k = keyFor(sender, from);
     clearUserSession(k);
 
     let searchImg = DEFAULT_SEARCH_IMAGE;
@@ -463,12 +317,11 @@ cmd({
       } catch (e) {}
     }
 
-    const bodyText = `╭──────────.★..─╮\n   🍿 𝟏𝐓𝐀𝐌𝐈𝐋𝐌𝐕 𝐒𝐄𝐀𝐑𝐂𝐇 🍿\n╰─..★.──────────╯\n\n🔎 *Search :* ${q}\n⚡ *Direct Movies (< 2GB) :* ${validMovies.length}\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+    const bodyText = `╭──────────.★..─╮\n   🍿 𝟏𝐓𝐀𝐌𝐈𝐋𝐌𝐕 𝐒𝐄𝐀𝐑𝐂𝐇 🍿\n╰─..★.──────────╯\n\n🔎 *Search :* ${q}\n⚡ *Direct Movies (< 2GB) :*${validMovies.length}\n\n© 2026 MALIYA-MD BOT SYSTEM`;
 
     const settings = await readSettings(sessionId);
     const btnsOn = !!settings.btns_enabled;
 
-    // 🔥 BUTTONS SYSTEM (Asitha-MD Style)
     if (btnsOn) {
       try {
         const { ButtonV2 } = await import("@vanzxy/baileys");
@@ -484,7 +337,6 @@ cmd({
           .setFooter("WaBot by MALIYA-MD Team ツ")
           .setThumbnail(searchImg);
 
-        // 1. Popup List Menu Button
         btn.addRawButton({
           buttonId: "tamilmv_movies_list",
           buttonText: { displayText: "🎬 Select Movie" },
@@ -493,17 +345,11 @@ cmd({
             name: "single_select",
             paramsJson: JSON.stringify({
               title: "1TamilMV Search Results ↯",
-              sections: [
-                {
-                  title: "🎥 Available Movies",
-                  rows: movieRows
-                }
-              ]
+              sections: [{ title: "🎥 Available Movies", rows: movieRows }]
             }),
           },
         });
 
-        // 2. Bot Menu Button
         btn.addButton("📜 Bot Menu", ".menu");
 
         const sentMsg = await btn.send(from, { quoted: mek });
@@ -516,7 +362,7 @@ cmd({
             isProcessing: false,
             expectedMsgId: sentMsg.key.id
           };
-          await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+          await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
           return;
         }
       } catch (e) {
@@ -524,27 +370,14 @@ cmd({
       }
     }
 
-    // 🔢 FALLBACK NUMBERED MENU
-    let text = "╭──────────.★..─╮\n";
-    text += "   🍿 𝟏𝐓𝐀𝐌𝐈𝐋𝐌𝐕 𝐒𝐄𝐀𝐑𝐂𝐇 🍿\n";
-    text += "╰─..★.──────────╯\n\n";
-    text += `🔎 *Search  :* ${q}\n`;
-    text += `⚡ *Direct Movies (< 2GB) :* ${validMovies.length}\n`;
-    text += "────── ⋆⋅☆⋅⋆ ──────\n\n";
-
+    // Numbered Fallback
+    let text = `╭──────────.★..─╮\n   🍿 𝟏𝐓𝐀𝐌𝐈𝐋𝐌𝐕 𝐒𝐄𝐀𝐑𝐂𝐇 🍿\n╰─..★.──────────╯\n\n🔎 *Search  :* ${q}\n⚡ *Direct Movies (< 2GB) :*${validMovies.length}\n────── ⋆⋅☆⋅⋆ ──────\n\n`;
     validMovies.forEach((item, index) => {
-      text += `╭─── ⋆⋅☆⋅⋆ ───\n`;
-      text += `│ *[ ${String(index + 1).padStart(2, "0")} ]* ➔ *${item.title}*\n`;
-      text += `╰──────────────\n`;
+      text += `*[ ${String(index + 1).padStart(2, "0")} ]* ➔ *${item.title}*\n`;
     });
+    text += "\n> 💬 *Swipe & Reply this message with the movie number...*";
 
-    text += "\n> 💬 *Reply to this message with the movie number...*";
-
-    const sentMsg = await sock.sendMessage(from, {
-      image: { url: searchImg },
-      caption: text,
-      contextInfo: channelContextInfo()
-    }, { quoted: mek });
+    const sentMsg = await sock.sendMessage(from, { image: { url: searchImg }, caption: text, contextInfo: channelContextInfo() }, { quoted: mek });
 
     pendingTamilMV[k] = {
       step: 1,
@@ -554,54 +387,70 @@ cmd({
       expectedMsgId: sentMsg.key.id
     };
 
-    await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
   } catch (error) {
-    await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+    await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
     await sendErrorMsg(sock, from, mek, "Failed to connect to 1TamilMV search server.");
   }
 });
 
 /* ================= REPLY HANDLER ================= */
 const tmvReplyHandler = {
-  filter: (text, { sender, from }) => {
-    const k = makePendingKey(sender, from);
-    return Boolean(pendingTamilMV[k]);
-  },
-  function: async (sock, mek, m, { body, sender, from, sessionId }) => {
-    const payload = extractIncomingPayload(body, mek, m);
-    if (!payload) return;
+  filter: (text, { sender, from, m, mek }) => {
+    const k = keyFor(sender, from);
+    const pending = pendingTamilMV[k];
+    if (!pending) return false;
 
-    let choice = null;
-    if (payload.startsWith(".tmv_select ")) {
-      choice = parseInt(payload.replace(".tmv_select ", "").trim(), 10);
-    } else if (payload.startsWith(".tmv_dl ")) {
-      choice = parseInt(payload.replace(".tmv_dl ", "").trim(), 10);
-    } else if (/^\d+$/.test(payload)) {
-      choice = parseInt(payload, 10);
+    const texts = extractTexts(text, mek, m);
+    for (const t of texts) {
+      if (t.startsWith(".tmv_select ") || t.startsWith(".tmv_dl ")) return true;
     }
 
-    if (choice === null || isNaN(choice)) return;
+    const num = parseInt(String(text || "").trim(), 10);
+    const max = pending.step === 1 ? (pending.results?.length || 0) : (pending.selectedMovie?.options?.length || 0);
+    const isNum = !isNaN(num) && num > 0 && num <= max;
 
-    const k = makePendingKey(sender, from);
+    const quotedId = getQuotedId(m, mek);
+    const isQuoted = quotedId && quotedId === pending.expectedMsgId;
+
+    return isQuoted || isNum;
+  },
+  function: async (sock, mek, m, { body, sender, from, sessionId }) => {
+    const k = keyFor(sender, from);
     const pending = pendingTamilMV[k];
     if (!pending || pending.isProcessing) return;
 
-    const quotedId = getQuotedStanzaId(mek);
-    if (quotedId && pending.expectedMsgId && quotedId !== pending.expectedMsgId) {
-      return;
+    const texts = extractTexts(body, mek, m);
+    let choice = null;
+
+    for (const t of texts) {
+      if (t.startsWith(".tmv_select ")) {
+        choice = parseInt(t.replace(".tmv_select ", "").trim(), 10);
+        break;
+      }
+      if (t.startsWith(".tmv_dl ")) {
+        choice = parseInt(t.replace(".tmv_dl ", "").trim(), 10);
+        break;
+      }
     }
+
+    if (choice === null) {
+      const num = parseInt(String(body || "").trim(), 10);
+      if (!isNaN(num)) choice = num;
+    }
+
+    if (!choice || choice < 1) return;
 
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === payload && (now - lastMsg.time) < LOOP_COOLDOWN) return;
-    lastProcessedMsg[k] = { text: payload, time: now };
+    if (lastMsg && lastMsg.text === String(choice) && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+    lastProcessedMsg[k] = { text: String(choice), time: now };
 
-    // ================= STEP 1: SELECT MOVIE =================
+    // STEP 1: Select Movie
     if (pending.step === 1) {
-      if (choice < 1 || choice > pending.results.length) return;
-
+      if (choice > pending.results.length) return;
       pending.isProcessing = true;
-      await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
       const selectedMovie = pending.results[choice - 1];
       const qualities = selectedMovie.options;
@@ -612,7 +461,6 @@ const tmvReplyHandler = {
       const settings = await readSettings(sessionId);
       const btnsOn = !!settings.btns_enabled;
 
-      // 🔥 BUTTONS SYSTEM (Quality List Popup)
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
@@ -628,7 +476,6 @@ const tmvReplyHandler = {
             .setFooter("WaBot by MALIYA-MD Team ツ")
             .setThumbnail(imgToSend);
 
-          // 1. Popup List Menu Button
           btn.addRawButton({
             buttonId: "tamilmv_quality_list",
             buttonText: { displayText: "📥 Select Quality" },
@@ -637,17 +484,11 @@ const tmvReplyHandler = {
               name: "single_select",
               paramsJson: JSON.stringify({
                 title: "Choose Quality & Size ↯",
-                sections: [
-                  {
-                    title: "📊 Available Qualities",
-                    rows: qualityRows
-                  }
-                ]
+                sections: [{ title: "📊 Available Qualities", rows: qualityRows }]
               }),
             },
           });
 
-          // 2. Bot Menu Button
           btn.addButton("📜 Bot Menu", ".menu");
 
           const sentQualityMsg = await btn.send(from, { quoted: mek });
@@ -658,7 +499,7 @@ const tmvReplyHandler = {
             pending.timestamp = Date.now();
             pending.isProcessing = false;
             pending.expectedMsgId = sentQualityMsg.key.id;
-            await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+            await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
             return;
           }
         } catch (e) {
@@ -666,26 +507,14 @@ const tmvReplyHandler = {
         }
       }
 
-      // 🔢 FALLBACK NUMBERED QUALITY MENU
-      let qualityMsg = "╭──────────. ִ ࣪ ⋆ ೀ ─╮\n";
-      qualityMsg += "   📥 𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒\n";
-      qualityMsg += "╰─ ִ ࣪ ⋆ ೀ ──────────╯\n\n";
-      qualityMsg += `🎬 *Movie :* ${toSmallCaps(selectedMovie.title)}\n`;
-      qualityMsg += "•───────•°•❀•°•───────•\n\n";
-
+      // Fallback Numbered Menu
+      let qualityMsg = `╭──────────. ִ ࣪ ⋆ ೀ ─╮\n   📥 𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒\n╰─ ִ ࣪ ⋆ ೀ ──────────╯\n\n🎬 *Movie :* ${toSmallCaps(selectedMovie.title)}\n\n`;
       qualities.forEach((opt, i) => {
-        qualityMsg += `╭─── ⋆⋅ 𖤓 ⋅⋆ ───\n`;
-        qualityMsg += `│ *[ ${String(i + 1).padStart(2, "0")} ]* 📊 *${opt.title}*\n`;
-        qualityMsg += `╰────────────────\n`;
+        qualityMsg += `*[ ${String(i + 1).padStart(2, "0")} ]* 📊 *${opt.title}*\n`;
       });
+      qualityMsg += "\n> 💬 *Swipe & Reply this message with quality number to send movie...*";
 
-      qualityMsg += "\n> 💬 *Reply with quality number to send movie...*";
-
-      const sentQualityMsg = await sock.sendMessage(from, {
-        image: { url: imgToSend },
-        caption: qualityMsg,
-        contextInfo: channelContextInfo()
-      }, { quoted: mek });
+      const sentQualityMsg = await sock.sendMessage(from, { image: { url: imgToSend }, caption: qualityMsg, contextInfo: channelContextInfo() }, { quoted: mek });
 
       pending.step = 2;
       pending.selectedMovie = selectedMovie;
@@ -693,16 +522,15 @@ const tmvReplyHandler = {
       pending.isProcessing = false;
       pending.expectedMsgId = sentQualityMsg.key.id;
 
-      await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
     }
-
-    // ================= STEP 2: SELECT QUALITY & DIRECT STREAM SEND =================
+    // STEP 2: Process Download
     else if (pending.step === 2) {
       const selectedMovie = pending.selectedMovie;
-      if (choice < 1 || choice > selectedMovie.options.length) return;
+      if (choice > selectedMovie.options.length) return;
 
       pending.isProcessing = true;
-      await sock.sendMessage(from, { react: { text: "⬆️", key: m.key } });
+      await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
 
       const selectedOpt = selectedMovie.options[choice - 1];
       clearUserSession(k);
@@ -712,21 +540,9 @@ const tmvReplyHandler = {
         const posterUrl = selectedMovie.poster || DEFAULT_SEARCH_IMAGE;
         const thumbBuffer = await getThumbnailBuffer(posterUrl);
 
-        const cleanFileName = fileName
-          .replace(/^www\.1TamilMV\.[a-z]+\s*-\s*/i, "")
-          .replace(/[^a-zA-Z0-9._ -]/g, "")
-          .trim();
+        const cleanFileName = fileName.replace(/^www\.1TamilMV\.[a-z]+\s*-\s*/i, "").replace(/[^a-zA-Z0-9._ -]/g, "").trim();
 
-        let captionText = "╔═════ஓ๑♡๑ஓ═════╗\n";
-        captionText += "   🎉 𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃 🎉\n";
-        captionText += "╚═════ஓ๑♡๑ஓ═════╝\n\n";
-        captionText += `🎬 *File    :* ${toSmallCaps(cleanFileName)}\n`;
-        captionText += `📊 *Quality :* ${selectedOpt.title}\n`;
-        captionText += `📦 *Format  :* MKV Video\n`;
-        captionText += "•───────•°•❀•°•───────•\n\n";
-        captionText += "⚠️ *Important Note :*\n";
-        captionText += "_Please download *VLC Media Player* because this is an *MKV* video file._ 📲🎞️\n\n";
-        captionText += "> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
+        let captionText = `╔═════ஓ๑♡๑ஓ═════╗\n   🎉 𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃 🎉\n╚═════ஓ๑♡๑ஓ═════╝\n\n🎬 *File    :* ${toSmallCaps(cleanFileName)}\n📊 *Quality :* ${selectedOpt.title}\n📦 *Format  :* MKV Video\n\n⚠️ *Important Note :*\n_Please download *VLC Media Player* because this is an *MKV* video file._ 📲🎞️\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
         const docPayload = {
           document: { url: downloadUrl },
@@ -736,15 +552,12 @@ const tmvReplyHandler = {
           contextInfo: channelContextInfo()
         };
 
-        if (thumbBuffer) {
-          docPayload.jpegThumbnail = thumbBuffer;
-        }
+        if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
 
         await sock.sendMessage(from, docPayload, { quoted: mek });
-        await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
-
+        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
       } catch (err) {
-        await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+        await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
         await sendErrorMsg(sock, from, mek, `Failed to send movie: ${err.message}`);
       }
     }
