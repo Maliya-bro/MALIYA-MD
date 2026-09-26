@@ -33,7 +33,6 @@ const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
   ? `+${OWNER_NUMBER_RAW}`
   : "Not Set";
 
-// හොඳින්ම වැඩ කරන Default Image URL එක
 const DEFAULT_HEADER_IMAGE = "https://i.ibb.co/4pDNDk1/avatar.png";
 
 /* ============ CACHE ============ */
@@ -170,7 +169,7 @@ function menuHeader(userName = "User") {
 │ ☎️ *Owner :* ${OWNER_NUMBER}
 │ 🕒 *Time :* ${time}
 │ 📅 *Date :* ${date}
-│ 🎯 *Prefix :* ${PREFIX}
+│ 🎯 *Prefix :* [ ${PREFIX} ]
 ╰───────────────┈➤
 
 🎀 *≡ Select a Command List: ≡*
@@ -377,7 +376,6 @@ cmd(
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
 
-          // Asitha-MD Exact Row Format
           const listRows = categories.map((cat) => ({
             title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
             description: `Show ${cat.toLowerCase()} command list`,
@@ -386,16 +384,14 @@ cmd(
 
           const btn = new ButtonV2(sock)
             .setBody(menuHeader(userName))
-            .setFooter(
-              "© MALIYA-MD Lite Bot v1.0.0\nWaBot by Maliya MD Team ツ"
-            )
+            .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
             .setThumbnail(headerImg);
 
-          // 1. Popup List Menu බටන් එක (≡ List Menu)
+          // 1. Popup List Menu
           btn.addRawButton({
             buttonId: ".menu_all",
             buttonText: { displayText: "≡ List Menu" },
-            type: 2,
+            type: 1,
             nativeFlowInfo: {
               name: "single_select",
               paramsJson: JSON.stringify({
@@ -410,49 +406,19 @@ cmd(
             },
           });
 
-          // 2. Ping බටන් එක (📊 Ping)
+          // 2. Ping Button
           btn.addButton("📊 Ping", ".ping");
 
-          const built = await btn.build(from, { quoted: mek });
+          // 🔥 Asitha-MD ක්‍රමය: relayMessage වෙනුවට කෙළින්ම ButtonV2.send() භාවිතා කිරීම
+          const sentMsg = await btn.send(from, { quoted: mek });
 
-          // 🔥 viewOnceMessage කවරය ඉවත් කිරීම (එවිට Update WhatsApp නොවැටේ + Web WA වලද පෙනේ)
-          const innerMsg =
-            built.message?.viewOnceMessage?.message ||
-            built.message?.viewOnceMessageV2?.message ||
-            built.message;
-
-          if (innerMsg?.buttonsMessage?.locationMessage) {
-            delete innerMsg.buttonsMessage.locationMessage.name;
-            delete innerMsg.buttonsMessage.locationMessage.address;
+          if (sentMsg?.key?.id) {
+            state.expectedMsgId = sentMsg.key.id;
+            pendingMenu[k] = state;
+            return;
           }
-
-          await sock.relayMessage(from, innerMsg, {
-            messageId: built.key.id,
-            additionalNodes: [
-              {
-                tag: "biz",
-                attrs: {},
-                content: [
-                  {
-                    tag: "interactive",
-                    attrs: { type: "native_flow", v: "1" },
-                    content: [
-                      {
-                        tag: "native_flow",
-                        attrs: { v: "9", name: "mixed" },
-                      },
-                    ],
-                  },
-                ],
-              },
-            ],
-          });
-
-          state.expectedMsgId = built.key.id;
-          pendingMenu[k] = state;
-          return;
         } catch (err) {
-          console.log("BUTTONV2 LIST POPUP ERROR:", err?.message || err);
+          console.log("BUTTONV2 SEND ERROR:", err?.message || err);
         }
       }
 
@@ -476,7 +442,7 @@ cmd(
   }
 );
 
-/* ================= COMMAND: .menu_all (Web WA Click Handler) ================= */
+/* ================= COMMAND: .menu_all ================= */
 cmd(
   {
     pattern: "menu_all",
