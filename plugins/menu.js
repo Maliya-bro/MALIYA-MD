@@ -328,7 +328,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu"],
     react: "📜",
-    desc: "Show command categories with separated buttons (gap)",
+    desc: "Asitha-MD style ButtonV2 + Popup List Menu with Gap",
     category: "main",
     filename: __filename,
   },
@@ -364,18 +364,22 @@ cmd(
         } catch (e) {}
       }
 
-      const imgBuf = await getSafeBuffer(headerImg);
+      const rawBuf = await getSafeBuffer(headerImg);
 
       if (btnsOn) {
         try {
           const vanzxy = await import("@vanzxy/baileys");
-          const { generateWAMessageFromContent, prepareWAMessageMedia } = vanzxy;
+          const { generateWAMessageFromContent, ButtonV2 } = vanzxy;
 
-          const media = await prepareWAMessageMedia(
-            { image: imgBuf },
-            { upload: sock.waUploadToServer }
-          );
+          // Thumbnail එක resize කර ගැනීම
+          let thumbBuf = rawBuf;
+          if (ButtonV2 && typeof ButtonV2.resize === "function") {
+            try {
+              thumbBuf = await ButtonV2.resize(rawBuf, 300, 300);
+            } catch {}
+          }
 
+          // Dynamic Rows (මේකට තමයි .movie එකේදී film list එකත් auto add වෙන්නේ)
           const listRows = categories.map((cat) => ({
             header: "",
             title: `${getCategoryEmoji(cat)} ${cat.charAt(0) + cat.slice(1).toLowerCase()} Commands`,
@@ -383,45 +387,61 @@ cmd(
             id: `.menu_view ${cat}`,
           }));
 
-          // buttonsMessage (headerType: 4) මඟින් බටන් අතර Gap එක ලබාගැනීම
+          // 🔥 Asitha-MD Secret: viewOnceMessage + buttonsMessage (headerType: 6 Location) + type: 2 single_select
           const msg = generateWAMessageFromContent(
             from,
             {
-              buttonsMessage: {
-                imageMessage: media.imageMessage,
-                contentText: menuHeader(userName),
-                footerText: "© 2026 MALIYA-MD BOT SYSTEM",
-                headerType: 4,
-                buttons: [
-                  {
-                    buttonId: "action",
-                    buttonText: { displayText: "≡ List Menu" },
-                    type: 2,
-                    nativeFlowInfo: {
-                      name: "single_select",
-                      paramsJson: JSON.stringify({
-                        title: "≡ List Menu",
-                        sections: [
-                          {
-                            title: "📁 Command Categories",
-                            highlight_label: "POPULAR",
-                            rows: listRows,
-                          },
-                        ],
-                      }),
+              viewOnceMessage: {
+                message: {
+                  messageContextInfo: {
+                    deviceListMetadata: {},
+                    deviceListMetadataVersion: 2,
+                  },
+                  buttonsMessage: {
+                    locationMessage: {
+                      degreesLatitude: 0,
+                      degreesLongitude: 0,
+                      name: BOT_NAME,
+                      address: "Sri Lanka",
+                      jpegThumbnail: thumbBuf,
                     },
+                    contentText: menuHeader(userName),
+                    footerText: "© 2026 MALIYA-MD BOT SYSTEM",
+                    headerType: 6,
+                    contextInfo: channelContextInfo(),
+                    buttons: [
+                      {
+                        buttonId: "list_menu",
+                        buttonText: { displayText: "≡ List Menu" },
+                        type: 2,
+                        nativeFlowInfo: {
+                          name: "single_select",
+                          paramsJson: JSON.stringify({
+                            title: "≡ List Menu",
+                            sections: [
+                              {
+                                title: "📁 Command Categories",
+                                highlight_label: "MALIYA-MD",
+                                rows: listRows,
+                              },
+                            ],
+                          }),
+                        },
+                      },
+                      {
+                        buttonId: ".ping",
+                        buttonText: { displayText: "📊 Ping" },
+                        type: 1,
+                      },
+                    ],
                   },
-                  {
-                    buttonId: ".ping",
-                    buttonText: { displayText: "📊 Ping" },
-                    type: 1,
-                  },
-                ],
+                },
               },
             },
             { quoted: mek }
           );
 
+          // 🔥 Asitha-MD Binary Node: "Update WhatsApp" නොවැටී Gap එකත් එක්ක Popup List එක පෙන්වන node එක
           await sock.relayMessage(from, msg.message, {
             messageId: msg.key.id,
             additionalNodes: [
@@ -435,7 +455,7 @@ cmd(
                     content: [
                       {
                         tag: "native_flow",
-                        attrs: { v: "2", name: "mixed" },
+                        attrs: { v: "9", name: "mixed" },
                       },
                     ],
                   },
@@ -448,7 +468,7 @@ cmd(
           pendingMenu[k] = state;
           return;
         } catch (err) {
-          console.log("BUTTONSMESSAGE LIST ERROR:", err);
+          console.log("ASITHA STYLE MENU ERROR:", err);
         }
       }
 
@@ -456,7 +476,7 @@ cmd(
       const sentMsg = await sock.sendMessage(
         from,
         {
-          image: imgBuf,
+          image: rawBuf,
           caption: buildStyledMainMenu(state, userName),
           contextInfo: channelContextInfo(),
         },
