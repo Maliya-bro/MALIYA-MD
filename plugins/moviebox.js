@@ -36,9 +36,10 @@ function toSmallCaps(str = "") {
   }).join("");
 }
 
+// Generates direct Sinhala translated subtitle URL
 function getTranslatedSubUrl(rawSubUrl) {
   if (!rawSubUrl) return null;
-  return `${API_BASE}/api/v1/movie/subtitle/translate?url=${encodeURIComponent(rawSubUrl)}&referer=${encodeURIComponent(REFERER)}&api_key=${API_KEY}`;
+  return `${API_BASE}/api/v1/movie/subtitle/translate?url=${encodeURIComponent(rawSubUrl)}&lang=si&target=si&to=si&referer=${encodeURIComponent(REFERER)}&api_key=${API_KEY}`;
 }
 
 function separateVideosAndSubs(rawList) {
@@ -171,7 +172,7 @@ cmd({
   try {
     if (!q) {
       return await sock.sendMessage(from, {
-        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *MOVIEBOX DL*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Kasutus:* \`.mb <nimi>\`\n💡 *Näide:*\n• \`.mb avatar\`\n• \`.mb loki\``,
+        text: `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *MOVIEBOX DL*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* \`.mb <name>\`\n💡 *Example:*\n• \`.mb avatar\`\n• \`.mb loki\``,
         contextInfo: channelContextInfo()
       }, { quoted: mek });
     }
@@ -196,7 +197,7 @@ cmd({
 
     if (!results.length) {
       await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-      return await sendErrorMsg(sock, from, mek, `Tulemusi ei leitud päringule "${q}".`);
+      return await sendErrorMsg(sock, from, mek, `No results found for "${q}".`);
     }
 
     const topResults = results.slice(0, 15);
@@ -214,7 +215,7 @@ cmd({
       } catch (e) {}
     }
 
-    const bodyText = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *MOVIEBOX SEARCH* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n🎀 *Otsing :* ${q}\n🍿 *Tulemused :* ${topResults.length}\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+    const bodyText = `┏━━━━━◥◣◆◢◤━━━━━┓\n★彡 *MOVIEBOX SEARCH* 彡★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n© 2026 MALIYA-MD BOT SYSTEM`;
 
     if (btnsOn) {
       try {
@@ -225,7 +226,7 @@ cmd({
           const typeIcon = isTv ? '📺' : '🎥';
           return {
             title: `${String(index + 1).padStart(2, "0")}. ${(item.title || item.name || 'Title').slice(0, 38)}`,
-            description: `${typeIcon} Aasta: ${item.year || 'N/A'} | Tüüp: ${isTv ? 'TV Series' : 'Film'}`,
+            description: `${typeIcon} Year: ${item.year || 'N/A'} | Type: ${isTv ? 'TV Series' : 'Movie'}`,
             id: `.mb_select ${index + 1}`
           };
         });
@@ -239,13 +240,13 @@ cmd({
 
         btn.addRawButton({
           buttonId: ".mb_list",
-          buttonText: { displayText: "🎬 Vali Film / Sari" },
+          buttonText: { displayText: "🎬 Select Movie / Series" },
           type: 1,
           nativeFlowInfo: {
             name: "single_select",
             paramsJson: JSON.stringify({
-              title: "Otsingu Tulemused ↯",
-              sections: [{ title: "Leitud Pealkirjad", rows: mbRows }]
+              title: "Search Results ↯",
+              sections: [{ title: "Found Titles", rows: mbRows }]
             }),
           },
         });
@@ -270,9 +271,9 @@ cmd({
       }
     }
 
-    let text = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *MOVIEBOX SEARCH* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
-    text += `🎀 *Otsing :* ${q}\n`;
-    text += `🍿 *Tulemused :* ${topResults.length}\n\n`;
+    let text = `┏━━━━━◥◣◆◢◤━━━━━┓\n★彡 *MOVIEBOX SEARCH* 彡★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n`;
+    text += `🎀 *Search :* ${q}\n`;
+    text += `🍿 *Results :* ${topResults.length}\n\n`;
 
     topResults.forEach((item, index) => {
       const numStr = String(index + 1).padStart(2, "0");
@@ -280,7 +281,7 @@ cmd({
       text += `*[ ${numStr} ]* ➔ ${isTv ? '📺' : '🎥'} *${(item.title || item.name || 'Title').substring(0, 35)}* (${item.year || 'N/A'})\n`;
     });
 
-    text += `\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 💬 *Vasta numbrit kasutades...*`;
+    text += `\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 💬 *Swipe & Reply this message with a number...*`;
 
     const menuMsg = await sock.sendMessage(from, { 
       image: { url: searchImg }, 
@@ -299,7 +300,7 @@ cmd({
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
   } catch (error) {
     await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    await sendErrorMsg(sock, from, mek, "Ühendus serveriga ebaõnnestus.");
+    await sendErrorMsg(sock, from, mek, "Failed to connect to MovieBox server.");
   }
 });
 
@@ -311,6 +312,7 @@ const mbReplyHandler = {
     if (!state) return false;
 
     const texts = extractTexts(text, mek, m);
+    // Button actions pass automatically
     for (const t of texts) {
       if (
         t.startsWith(".mb_select ") || 
@@ -322,13 +324,14 @@ const mbReplyHandler = {
       ) return true;
     }
 
-    const cleanInput = String(text || "").trim().toLowerCase();
-    const isNumOrAll = /^(\d+|00|all)$/.test(cleanInput);
-
     const quotedId = getQuotedId(m, mek);
     const isQuoted = quotedId && quotedId === state.expectedMsgId;
 
-    return isQuoted || isNumOrAll;
+    // Reject message if it is not a direct quoted reply to the bot message
+    if (!isQuoted) return false;
+
+    const cleanInput = String(text || "").trim().toLowerCase();
+    return /^(\d+|00|all)$/.test(cleanInput);
   },
   function: async (sock, mek, m, { body, sender, from, sessionId }) => {
     const k = keyFor(sender, from);
@@ -378,7 +381,7 @@ const mbReplyHandler = {
     const btnsOn = !!settings.btns_enabled;
 
     // ──────────────────────────────────────────────────────────
-    // STEP 1: FILMI VÕI SARJA VALIK
+    // STEP 1: MOVIE OR SERIES SELECTED
     // ──────────────────────────────────────────────────────────
     if (pending.step === 1) {
       if (!choice || choice < 1 || choice > pending.results.length) return;
@@ -399,7 +402,7 @@ const mbReplyHandler = {
         const detailsData = detailsRes.data?.data || detailsRes.data || {};
         const posterUrl = detailsData.image || selectedItem.image || DEFAULT_IMAGE;
 
-        // ─── 📺 TV SARJA TEEKOND ───
+        // ─── 📺 TV SERIES ROUTE ───
         if (isTvShow) {
           let seasons = detailsData.seasons || [];
 
@@ -415,14 +418,14 @@ const mbReplyHandler = {
 
           if (!seasons.length) {
             clearUserSession(k);
-            return await sendErrorMsg(sock, from, mek, "Sellel sarjal pole episoode saadaval.");
+            return await sendErrorMsg(sock, from, mek, "No seasons or episodes available for this series.");
           }
 
-          let tvCard = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *TV SERIES SEASONS* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
-          tvCard += `🎬 *Sari :* ${toSmallCaps(detailsData.title || selectedItem.title || selectedItem.name)}\n`;
+          let tvCard = `┏━━━━━◥◣◆◢◤━━━━━┓\n★彡 *TV SERIES SEASONS* 彡★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n`;
+          tvCard += `🎬 *Series :* ${toSmallCaps(detailsData.title || selectedItem.title || selectedItem.name)}\n`;
           tvCard += `⭐ *IMDb :* ${detailsData.rating || detailsData.imdb || 'N/A'}\n`;
-          tvCard += `📅 *Aasta :* ${detailsData.year || 'N/A'}\n`;
-          tvCard += `📁 *Hooaegu kokku :* ${seasons.length}\n`;
+          tvCard += `📅 *Year :* ${detailsData.year || 'N/A'}\n`;
+          tvCard += `📁 *Total Seasons :* ${seasons.length}\n`;
 
           if (btnsOn) {
             try {
@@ -430,10 +433,10 @@ const mbReplyHandler = {
 
               const seasonRows = seasons.map((s, idx) => {
                 const sNum = typeof s === 'object' ? (s.season || idx + 1) : s;
-                const epLen = Array.isArray(s.episodes) ? `${s.episodes.length} osa` : 'Saadaval';
+                const epLen = Array.isArray(s.episodes) ? `${s.episodes.length} Episodes` : 'Available';
                 return {
                   title: `Season ${sNum}`,
-                  description: `${epLen} saadaval`,
+                  description: `${epLen} available`,
                   id: `.mb_season ${idx + 1}`
                 };
               });
@@ -441,19 +444,19 @@ const mbReplyHandler = {
               const fittedThumb = await getFittedImageBuffer(posterUrl);
 
               const btn = new ButtonV2(sock)
-                .setBody(tvCard + "\n👇 *Vali hooaeg episoodide vaatamiseks:*")
+                .setBody(tvCard + "\n👇 *Select a season to view episodes:*")
                 .setFooter("WaBot by MALIYA-MD Team ツ")
                 .setThumbnail(fittedThumb);
 
               btn.addRawButton({
                 buttonId: ".mb_season_list",
-                buttonText: { displayText: "📁 Vali Hooaeg" },
+                buttonText: { displayText: "📁 Select Season" },
                 type: 1,
                 nativeFlowInfo: {
                   name: "single_select",
                   paramsJson: JSON.stringify({
-                    title: "Hooajad ↯",
-                    sections: [{ title: "Hooajad", rows: seasonRows }]
+                    title: "Available Seasons ↯",
+                    sections: [{ title: "Seasons", rows: seasonRows }]
                   }),
                 },
               });
@@ -482,10 +485,10 @@ const mbReplyHandler = {
           seasons.forEach((s, idx) => {
             const numStr = String(idx + 1).padStart(2, "0");
             const sNum = typeof s === 'object' ? (s.season || idx + 1) : s;
-            const epCount = Array.isArray(s.episodes) ? `${s.episodes.length} osa` : 'Saadaval';
+            const epCount = Array.isArray(s.episodes) ? `${s.episodes.length} episodes` : 'Available';
             seasonText += `*[ ${numStr} ]* ➔ 📁 *Season ${sNum}* _(${epCount})_\n`;
           });
-          seasonText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Vasta hooaja numbriga...*`;
+          seasonText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Swipe & Reply with Season number...*`;
 
           const sentMsg = await sock.sendMessage(from, { 
             image: { url: posterUrl }, 
@@ -502,51 +505,51 @@ const mbReplyHandler = {
           pending.isProcessing = false;
 
         } else {
-          // ─── 🎥 FILMI TEEKOND (KVALITEEDI VALIK NUPPUDENA) ───
+          // ─── 🎥 MOVIE ROUTE ───
           const rawDownloads = detailsData.downloads || detailsData.qualities || detailsData.links || [];
           const { videos, subtitles } = separateVideosAndSubs(Array.isArray(rawDownloads) ? rawDownloads : []);
 
           if (detailsData.subtitle) {
-            subtitles.push({ label: "Filmi Subtiiter", link: detailsData.subtitle });
+            subtitles.push({ label: "Movie Subtitle", link: detailsData.subtitle });
           }
 
           if (!videos.length) {
             clearUserSession(k);
-            return await sendErrorMsg(sock, from, mek, "Sellele filmile pole allalaadimislinke saadaval.");
+            return await sendErrorMsg(sock, from, mek, "No direct download links available for this movie.");
           }
 
-          let movieCard = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *MOVIE DETAILS* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
-          movieCard += `🎬 *Film :* ${toSmallCaps(detailsData.title || selectedItem.title)}\n`;
+          let movieCard = `┏━━━━━◥◣◆◢◤━━━━━┓\n★彡 *MOVIE DETAILS* 彡★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n`;
+          movieCard += `🎬 *Movie :* ${toSmallCaps(detailsData.title || selectedItem.title)}\n`;
           movieCard += `⭐ *IMDb :* ${detailsData.imdb || detailsData.rating || 'N/A'}\n`;
-          movieCard += `📅 *Aasta :* ${detailsData.year || 'N/A'}\n`;
-          movieCard += `⏳ *Kestus :* ${detailsData.duration || 'N/A'}\n`;
+          movieCard += `📅 *Year :* ${detailsData.year || 'N/A'}\n`;
+          movieCard += `⏳ *Duration :* ${detailsData.duration || 'N/A'}\n`;
 
           if (btnsOn) {
             try {
               const { ButtonV2 } = await import("@vanzxy/baileys");
 
               const dlRows = videos.map((dl, i) => ({
-                title: `${String(i + 1).padStart(2, "0")}. Kvaliteet: ${dl.quality || 'Direct'}`,
-                description: `Suurus: ${dl.size || 'N/A'} | Otsefail + Subtiiter`,
+                title: `${String(i + 1).padStart(2, "0")}. Quality: ${dl.quality || 'Direct'}`,
+                description: `Size: ${dl.size || 'N/A'} | Direct Video + Subtitle`,
                 id: `.mb_movie_dl ${i + 1}`
               }));
 
               const fittedThumb = await getFittedImageBuffer(posterUrl);
 
               const btn = new ButtonV2(sock)
-                .setBody(movieCard + "\n👇 *Vali sobiv video kvaliteet:*")
+                .setBody(movieCard + "\n👇 *Select your preferred video quality:*")
                 .setFooter("WaBot by MALIYA-MD Team ツ")
                 .setThumbnail(fittedThumb);
 
               btn.addRawButton({
                 buttonId: ".mb_quality_list",
-                buttonText: { displayText: "🍿 Vali Kvaliteet" },
+                buttonText: { displayText: "🍿 Choose Quality" },
                 type: 1,
                 nativeFlowInfo: {
                   name: "single_select",
                   paramsJson: JSON.stringify({
-                    title: "Saadaolevad Kvaliteedid ↯",
-                    sections: [{ title: "Kvaliteedi Valik", rows: dlRows }]
+                    title: "Available Qualities ↯",
+                    sections: [{ title: "Quality Options", rows: dlRows }]
                   }),
                 },
               });
@@ -576,7 +579,7 @@ const mbReplyHandler = {
             const numStr = String(i + 1).padStart(2, "0");
             movieText += `*[ ${numStr} ]* 📊 *${dl.quality || 'Direct'}* _(${dl.size || 'N/A'})_\n`;
           });
-          movieText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Vasta kvaliteedi numbriga allalaadimiseks...*`;
+          movieText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Swipe & Reply with quality number to download...*`;
 
           const sentMsg = await sock.sendMessage(from, { 
             image: { url: posterUrl }, 
@@ -596,12 +599,12 @@ const mbReplyHandler = {
         await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
       } catch (err) {
         clearUserSession(k);
-        await sendErrorMsg(sock, from, mek, "Detailide laadimine ebaõnnestus.");
+        await sendErrorMsg(sock, from, mek, "Failed to fetch details from server.");
       }
     }
 
     // ──────────────────────────────────────────────────────────
-    // STEP 2: HOOAEG VALITUD ➔ EPISOODIDE NIMEKIRI
+    // STEP 2: SEASON SELECTED ➔ EPISODE LIST
     // ──────────────────────────────────────────────────────────
     else if (pending.step === "select_season") {
       if (!choice || choice < 1 || choice > pending.seasons.length) return;
@@ -614,10 +617,10 @@ const mbReplyHandler = {
       const episodes = Array.isArray(selectedSeason.episodes) ? selectedSeason.episodes : [];
       const posterUrl = pending.metadata?.image || DEFAULT_IMAGE;
 
-      let epCard = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *SEASON ${seasonNum} EPISODES* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
-      epCard += `🎬 *Sari :* ${toSmallCaps(pending.metadata.title)}\n`;
-      epCard += `📁 *Hooaeg :* ${seasonNum}\n`;
-      epCard += `🎞️ *Episoodid :* ${episodes.length || 'Mitmeid'}\n`;
+      let epCard = `┏━━━━━◥◣◆◢◤━━━━━┓\n★彡 *SEASON ${seasonNum} EPISODES* 彡★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n`;
+      epCard += `🎬 *Series :* ${toSmallCaps(pending.metadata.title)}\n`;
+      epCard += `📁 *Season :* ${seasonNum}\n`;
+      epCard += `🎞️ *Episodes :* ${episodes.length || 'Multiple'}\n`;
 
       const listCount = episodes.length > 0 ? episodes.length : 25;
 
@@ -628,7 +631,7 @@ const mbReplyHandler = {
           const epRows = [
             {
               title: "📦 Download ALL Episodes",
-              description: `Laadi alla terve hooaeg ${seasonNum} koos subtiitritega`,
+              description: `Download complete Season ${seasonNum} with Sinhala Subtitles`,
               id: ".mb_batch_ep"
             },
             ...Array.from({ length: Math.min(listCount, 30) }, (_, idx) => {
@@ -636,7 +639,7 @@ const mbReplyHandler = {
               const epTitle = typeof ep === 'object' ? (ep.name || ep.title || `Episode ${idx + 1}`) : `Episode ${idx + 1}`;
               return {
                 title: `${String(idx + 1).padStart(2, "0")}. ${epTitle.slice(0, 38)}`,
-                description: "Vali kvaliteet enne allalaadimist",
+                description: "Select resolution before downloading",
                 id: `.mb_ep ${idx + 1}`
               };
             })
@@ -645,19 +648,19 @@ const mbReplyHandler = {
           const fittedThumb = await getFittedImageBuffer(posterUrl);
 
           const btn = new ButtonV2(sock)
-            .setBody(epCard + "\n👇 *Vali episood või klõpsa 'Download ALL':*")
+            .setBody(epCard + "\n👇 *Select an episode or click 'Download ALL':*")
             .setFooter("WaBot by MALIYA-MD Team ツ")
             .setThumbnail(fittedThumb);
 
           btn.addRawButton({
             buttonId: ".mb_episodes_list",
-            buttonText: { displayText: "📺 Vali Episood" },
+            buttonText: { displayText: "📺 Select Episode" },
             type: 1,
             nativeFlowInfo: {
               name: "single_select",
               paramsJson: JSON.stringify({
-                title: "Episoodide Nimekiri ↯",
-                sections: [{ title: "Hooaja Episoodid", rows: epRows }]
+                title: "Episode List ↯",
+                sections: [{ title: "Season Episodes", rows: epRows }]
               }),
             },
           });
@@ -681,14 +684,14 @@ const mbReplyHandler = {
         }
       }
 
-      let epText = epCard + `\n*[ 00 ]* ➔ 📥 *Download ALL Episodes (Batch + Subtiitrid)*\n`;
+      let epText = epCard + `\n*[ 00 ]* ➔ 📥 *Download ALL Episodes (Batch + Sinhala Subs)*\n`;
       for (let idx = 0; idx < Math.min(listCount, 25); idx++) {
         const ep = episodes[idx];
         const numStr = String(idx + 1).padStart(2, "0");
         const epTitle = typeof ep === 'object' ? (ep.name || ep.title || `Episode ${idx + 1}`) : `Episode ${idx + 1}`;
         epText += `*[ ${numStr} ]* ➔ 📺 *${epTitle}*\n`;
       }
-      epText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Vasta episoodi numbriga või 00 (KÕIK)...*`;
+      epText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Swipe & Reply with Episode number or 00 (ALL)...*`;
 
       const sentMsg = await sock.sendMessage(from, { 
         image: { url: posterUrl }, 
@@ -707,12 +710,12 @@ const mbReplyHandler = {
     }
 
     // ──────────────────────────────────────────────────────────
-    // STEP 3: EPISOOD VALITUD ➔ NUPPUDENA KVALITEEDI VALIK (VÕI KOGU HOOAEG)
+    // STEP 3: EPISODE SELECTED ➔ QUALITY SELECTION / BATCH
     // ──────────────────────────────────────────────────────────
     else if (pending.step === "select_episode") {
       const isBatchSelect = isBatch || choice === 0;
 
-      // ── BATCH ALL EPISODES: KÕIK KORRAGA ──
+      // ── BATCH ALL EPISODES ──
       if (isBatchSelect) {
         pending.isProcessing = true;
         const seasonNum = pending.seasonNum || 1;
@@ -724,7 +727,7 @@ const mbReplyHandler = {
         clearUserSession(k);
 
         await sock.sendMessage(from, { 
-          text: `*╭──[ ⬇️ 𝗕𝗔𝗧𝗖𝗛 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗 ]──╮*\n│\n├─ 🚀 *Alustan hooaja ${seasonNum} allalaadimist!*\n├─ 🎞️ *Kokku osasid :* ${totalEps}\n├─ ⏳ _Videod ja subtiitrid saadetakse järjestikku._\n╰─────────────────────────╯`,
+          text: `*╭──[ ⬇️ 𝗕𝗔𝗧𝗖𝗛 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗 ]──╮*\n│\n├─ 🚀 *Starting Batch Download!*\n├─ 📁 *Season :* ${seasonNum}\n├─ 🎞️ *Total Episodes :* ${totalEps}\n├─ ⏳ _Videos and Sinhala subtitles will be sent sequentially._\n╰─────────────────────────╯`,
           contextInfo: channelContextInfo()
         }, { quoted: mek });
 
@@ -762,14 +765,14 @@ const mbReplyHandler = {
         }
 
         await sock.sendMessage(from, { 
-          text: `*╭───[ ✅ 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗 ]───╮*\n│\n├─ 🎉 *Hooaeg ${seasonNum} edukalt alla laaditud!*\n╰───────────────────────╯`,
+          text: `*╭───[ ✅ 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗 ]───╮*\n│\n├─ 🎉 *Season ${seasonNum} downloaded successfully!*\n╰─────────────────────╯`,
           contextInfo: channelContextInfo()
         }, { quoted: mek });
 
         return;
       }
 
-      // ── ÜKSIK EPISOOD: VALI KVALITEET (POPUP MENU) ──
+      // ── SINGLE EPISODE QUALITY POPUP ──
       if (!choice || choice < 1) return;
 
       pending.isProcessing = true;
@@ -796,40 +799,40 @@ const mbReplyHandler = {
 
         if (!videos.length) {
           pending.isProcessing = false;
-          return await sendErrorMsg(sock, from, mek, `Episoodile S${seasonNum}E${epNum} pole kvaliteete leitud.`);
+          return await sendErrorMsg(sock, from, mek, `No qualities found for S${seasonNum}E${epNum}.`);
         }
 
-        let epQualCard = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *EPISODE QUALITIES* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
-        epQualCard += `🎬 *Sari :* ${toSmallCaps(pending.metadata.title)}\n`;
-        epQualCard += `🎞️ *Sihtmärk :* S${seasonNum}E${epNum}\n`;
-        epQualCard += `📄 *Subtiiter :* ${subtitles.length > 0 ? 'Valmis automaatseks saatmiseks ✅' : 'Pole saadaval ⚠️'}\n`;
+        let epQualCard = `┏━━━━━◥◣◆◢◤━━━━━┓\n★ *EPISODE QUALITIES* ★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n`;
+        epQualCard += `🎬 *Series :* ${toSmallCaps(pending.metadata.title)}\n`;
+        epQualCard += `🎞️ *Target :* S${seasonNum}E${epNum}\n`;
+        epQualCard += `📄 *Subtitle :* ${subtitles.length > 0 ? 'Sinhala Auto-Translate Ready ✅' : 'Not available ⚠️'}\n`;
 
         if (btnsOn) {
           try {
             const { ButtonV2 } = await import("@vanzxy/baileys");
 
             const qRows = videos.map((v, i) => ({
-              title: `${String(i + 1).padStart(2, "0")}. Kvaliteet: ${v.quality}`,
-              description: `Suurus: ${v.size} | Kiire pilveallalaadimine`,
+              title: `${String(i + 1).padStart(2, "0")}. Quality: ${v.quality}`,
+              description: `Size: ${v.size} | Fast Cloud DL`,
               id: `.mb_ep_dl ${i + 1}`
             }));
 
             const fittedThumb = await getFittedImageBuffer(posterUrl);
 
             const btn = new ButtonV2(sock)
-              .setBody(epQualCard + "\n👇 *Vali oma eelistatud resolutsioon:*")
+              .setBody(epQualCard + "\n👇 *Select your preferred resolution:*")
               .setFooter("WaBot by MALIYA-MD Team ツ")
               .setThumbnail(fittedThumb);
 
             btn.addRawButton({
               buttonId: ".mb_ep_qual_list",
-              buttonText: { displayText: "🍿 Vali Kvaliteet" },
+              buttonText: { displayText: "🍿 Choose Quality" },
               type: 1,
               nativeFlowInfo: {
                 name: "single_select",
                 paramsJson: JSON.stringify({
-                  title: "Saadaolevad Kvaliteedid ↯",
-                  sections: [{ title: "Kvaliteedi Valikud", rows: qRows }]
+                  title: "Available Qualities ↯",
+                  sections: [{ title: "Quality Options", rows: qRows }]
                 }),
               },
             });
@@ -859,7 +862,7 @@ const mbReplyHandler = {
           const numStr = String(i + 1).padStart(2, "0");
           qualText += `*[ ${numStr} ]* 📊 *${v.quality}* _(${v.size})_\n`;
         });
-        qualText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Vasta kvaliteedi numbriga allalaadimiseks...*`;
+        qualText += `\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Swipe & Reply with quality number to download...*`;
 
         const sentMsg = await sock.sendMessage(from, { 
           image: { url: posterUrl }, 
@@ -878,12 +881,12 @@ const mbReplyHandler = {
 
       } catch (err) {
         clearUserSession(k);
-        await sendErrorMsg(sock, from, mek, "Episoodi valikute laadimine ebaõnnestus.");
+        await sendErrorMsg(sock, from, mek, "Failed to load episode download options.");
       }
     }
 
     // ──────────────────────────────────────────────────────────
-    // STEP 4: ÜKSIKU EPISOODI KVALITEET VALITUD ➔ ALLALAADIMINE JA SUBTIITRI SAATMINE
+    // STEP 4: SINGLE EPISODE QUALITY SELECTED ➔ DOWNLOAD & SEND SUBTITLE
     // ──────────────────────────────────────────────────────────
     else if (pending.step === "select_episode_quality") {
       if (!choice || choice < 1 || choice > pending.epVideos.length) return;
@@ -908,7 +911,7 @@ const mbReplyHandler = {
     }
 
     // ──────────────────────────────────────────────────────────
-    // STEP: FILMI KVALITEET VALITUD ➔ VIDEO JA SUBTIITRID
+    // STEP: MOVIE QUALITY SELECTED ➔ VIDEO & SUBTITLES
     // ──────────────────────────────────────────────────────────
     else if (pending.step === "movie_quality") {
       if (!choice || choice < 1 || choice > pending.downloads.length) return;
@@ -941,9 +944,9 @@ async function fastSendVideo(sock, mek, from, url, rawTitle, quality, posterUrl)
 
     const cleanTitle = (rawTitle || "Movie").replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
 
-    let captionText = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *MOVIEBOX DOWNLOAD* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
-    captionText += `🎬 *Pealkiri :* ${toSmallCaps(rawTitle)}\n`;
-    captionText += `📊 *Kvaliteet :* ${quality}\n\n`;
+    let captionText = `┏━━━━━◥◣◆◢◤━━━━━┓\n★ *MOVIEBOX DOWNLOAD* ★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n`;
+    captionText += `🎬 *Title :* ${toSmallCaps(rawTitle)}\n`;
+    captionText += `📊 *Quality :* ${quality}\n\n`;
     captionText += `⊱━━━• ✿ •━━━• ✿ •━━━⊰\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
     const thumbBuffer = await getThumbnailBuffer(posterUrl);
@@ -966,7 +969,7 @@ async function fastSendVideo(sock, mek, from, url, rawTitle, quality, posterUrl)
   } catch (err) {
     console.error("MovieBox Fast Upload Error:", err.message);
     await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    await sendErrorMsg(sock, from, mek, `Video saatmine ebaõnnestus.`);
+    await sendErrorMsg(sock, from, mek, `Failed to upload video directly.`);
   }
 }
 
@@ -978,8 +981,8 @@ async function sendSubtitleDoc(sock, mek, from, subUrl, title) {
     await sock.sendMessage(from, {
       document: { url: subUrl },
       mimetype: "application/x-subrip",
-      fileName: `MALIYA-MD ${cleanTitle} [Sub].srt`,
-      caption: `📄 *Subtiitrifail lisatud:*\n🎬 _${cleanTitle}_`,
+      fileName: `MALIYA-MD ${cleanTitle} [Sinhala Sub].srt`,
+      caption: `📄 *Sinhala Subtitle Attached:*\n🎬 _${cleanTitle}_`,
       contextInfo: channelContextInfo()
     }, { quoted: mek });
   } catch (err) {
