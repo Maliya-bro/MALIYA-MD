@@ -38,7 +38,7 @@ const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
 const OWNER_NAME =
   String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
 
-const DEFAULT_HEADER_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/ChatGPT%20Image%20Jan%2018,%202026,%2012_27_25%20PM.png?raw=true";
+const DEFAULT_HEADER_IMAGE = "https://github.com/Maliya-bro/web-pair/blob/main/ChatGPT%20Image%20Sep%2027,%202026,%2007_25_52%20PM.png?raw=true";
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
@@ -202,14 +202,14 @@ function menuHeader(userName = "User") {
 
 ✨ 👋 *ʜɪ, ${styledUser}!*
 
-╔══════. .★.══════════╗
+╔═════. .★.══════════╗
 🤖 *ʙᴏᴛ ɴᴀᴍᴇ :* ${BOT_NAME}
 👤 *ᴜsᴇʀ :* ${styledUser}
 👑 *ᴏᴡɴᴇʀ :* ${OWNER_NUMBER}
 🕒 *ᴛɪᴍᴇ :* ${time}
 📅 *ᴅᴀᴛᴇ :* ${date}
 🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]
-╚══════════. .★.══════╝
+╚══════════. .★.═════╝
 
 ╰─────✦❘•❘✦────•┈➤
 👇 *Select a command category below to view commands:*
@@ -228,7 +228,7 @@ function buildStyledMainMenu(state, userName) {
     const styledCat = toSmallCaps(cat);
     msg += `*[ ${numStr} ]*  ${emo}  *${styledCat}*  _(${state.map[cat].length})_\n`;
   });
-  msg += `\n━━─── ⋆ ⋅ 𖤐 ⋅ ⋆ ─━─━┈➤\n> 💬 *Swipe & Reply this message with a number...*`;
+  msg += `\n━─ ⋆ ⋅ 𖤐 ⋅ ⋆ ─━┈➤\n> 💬 *Swipe & Reply this message with a number...*`;
   return msg;
 }
 
@@ -236,7 +236,7 @@ function commandListCaption(cat, list, userName = "User") {
   const emo = getCategoryEmoji(cat);
   const styledCat = toSmallCaps(cat);
   const styledUser = toSmallCaps(userName);
-  let txt = `╭──━━── ⋆ ⋅ 𖤐 ⋅ ⋆ ──━─┈➤\n${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n╰──━━── ⋆ ⋅ 𖤐 ⋅ ⋆ ──━─┈➤\n\n`;
+  let txt = `╭─── ⋆ ⋅ 𖤐 ⋅ ⋆ ━─┈➤\n${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n╰──━ ⋆ ⋅ 𖤐 ⋅ ⋆ ──┈➤\n\n`;
   txt += `👤 *ᴜsᴇʀ :* ${styledUser}\n📦 *ᴛᴏᴛᴀʟ :* ${list.length} Commands\n🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]\n\n`;
 
   list.forEach((c) => {
@@ -247,7 +247,7 @@ function commandListCaption(cat, list, userName = "User") {
     txt += `  ╰ 📌 *ᴅᴇsᴄ:* _${c.desc || "No description"}_\n\n`;
   });
 
-  txt += `────━━──✦❘•❘✦──━────\n> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
+  txt += `────━──✦❘•❘✦──━───\n> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
   return txt;
 }
 
