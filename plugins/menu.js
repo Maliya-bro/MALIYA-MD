@@ -9,7 +9,7 @@ const lastProcessedMsg = {};
 const LOOP_COOLDOWN = 2500;
 
 /* ============ CONFIG ============ */
-const BOT_NAME = "「 𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸 |";
+const BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
@@ -196,20 +196,20 @@ async function getFittedImageBuffer(url) {
 function menuHeader(userName = "User") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
-  return `┏━━━━━◥◣◆◢◤━━━━━┓
+  return `┏━━━━━━◥◣◆◢◤━━━━━━┓
 ★彡 *${BOT_NAME}* 彡★
-┗━━━━━◢◤◆◥◣━━━━━┛
+┗━━━━━━◢◤◆◥◣━━━━━━┛
 
 ✨ 👋 *ʜɪ, ${styledUser}!*
 
-╔═══. .★.═════════╗
+╔══════. .★.════════════╗
 🤖 *ʙᴏᴛ ɴᴀᴍᴇ :* ${BOT_NAME}
 👤 *ᴜsᴇʀ :* ${styledUser}
 👑 *ᴏᴡɴᴇʀ :* ${OWNER_NUMBER}
 🕒 *ᴛɪᴍᴇ :* ${time}
 📅 *ᴅᴀᴛᴇ :* ${date}
 🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]
-╚═════════. .★.═══╝
+╚════════════. .★.══════╝
 
 ╰─────✦❘•❘✦────•┈➤
 👇 *Select a command category below to view commands:*
@@ -220,7 +220,7 @@ function menuHeader(userName = "User") {
 function buildStyledMainMenu(state, userName) {
   const { categories } = state;
   const styledUser = toSmallCaps(userName);
-  let msg = `┏━━━━━◥◣◆◢◤━━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n`;
+  let msg = `┏━━━━━━◥◣◆◢◤━━━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━━━━◢◤◆◥◣━━━━━━┛\n\n`;
   msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
   categories.forEach((cat, idx) => {
     const emo = getCategoryEmoji(cat);
@@ -228,7 +228,7 @@ function buildStyledMainMenu(state, userName) {
     const styledCat = toSmallCaps(cat);
     msg += `*[ ${numStr} ]*  ${emo}  *${styledCat}*  _(${state.map[cat].length})_\n`;
   });
-  msg += `\n⊱─── ⋆ ⋅ 𖤐 ⋅ ⋆ ──⊰┈➤\n> 💬 *Swipe & Reply this message with a number...*`;
+  msg += `\n━━─── ⋆ ⋅ 𖤐 ⋅ ⋆ ─━─━┈➤\n> 💬 *Swipe & Reply this message with a number...*`;
   return msg;
 }
 
@@ -236,7 +236,7 @@ function commandListCaption(cat, list, userName = "User") {
   const emo = getCategoryEmoji(cat);
   const styledCat = toSmallCaps(cat);
   const styledUser = toSmallCaps(userName);
-  let txt = `╭──── ⋆ ⋅ 𖤐 ⋅ ⋆ ───┈➤\n${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n╰──── ⋆ ⋅ 𖤐 ⋅ ⋆ ───┈➤\n\n`;
+  let txt = `╭──━━── ⋆ ⋅ 𖤐 ⋅ ⋆ ──━─┈➤\n${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n╰──━━── ⋆ ⋅ 𖤐 ⋅ ⋆ ──━─┈➤\n\n`;
   txt += `👤 *ᴜsᴇʀ :* ${styledUser}\n📦 *ᴛᴏᴛᴀʟ :* ${list.length} Commands\n🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]\n\n`;
 
   list.forEach((c) => {
@@ -247,7 +247,7 @@ function commandListCaption(cat, list, userName = "User") {
     txt += `  ╰ 📌 *ᴅᴇsᴄ:* _${c.desc || "No description"}_\n\n`;
   });
 
-  txt += `──────✦❘•❘✦──────\n> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
+  txt += `────━━──✦❘•❘✦──━────\n> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
   return txt;
 }
 
