@@ -11,12 +11,14 @@ const DEFAULT_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/re
 const SEARCH_ACTION_ID = '4030206670241da32df0a5d1e0827a2ac752327e0d';
 const SECURE_URL_ACTION_ID = '405a53934b798a3f28ee1d33fe148bcf8187a18654';
 
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36';
+
 const httpsAgent = new https.Agent({ family: 4, keepAlive: true });
 const client = axios.create({
   baseURL: 'https://cinevibes.lk',
   httpsAgent,
   headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36',
+    'User-Agent': USER_AGENT,
     'Accept-Language': 'en-US,en;q=0.9',
   }
 });
@@ -193,7 +195,7 @@ cmd({
   pattern: "cinevibes",
   alias: ["cv", "cvsearch"],
   desc: "Search and download movies from CineVibes with direct streaming",
-  category: "movie",
+  category: "download",
   react: "🍿",
   filename: __filename,
 }, async (sock, mek, m, { from, q, sender, sessionId }) => {
@@ -228,7 +230,7 @@ cmd({
       } catch (e) {}
     }
 
-    const bodyText = `┏━━━━━◥◣◆◢◤━━━━━┓\n★彡 *CINEVIBES SEARCH* 彡★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+    const bodyText = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *CINEVIBES SEARCH* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n© 2026 MALIYA-MD BOT SYSTEM`;
 
     if (btnsOn) {
       try {
@@ -262,7 +264,7 @@ cmd({
           },
         });
 
-        btn.addButton("⚡ PING", ".ping");
+        btn.addButton("⚡ Alive", ".alive");
 
         const sentMsg = await btn.send(from, { quoted: mek });
 
@@ -282,7 +284,7 @@ cmd({
       }
     }
 
-    let text = `┏━━━━━◥◣◆◢◤━━━━━┓\n★彡 *CINEVIBES SEARCH* 彡★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n`;
+    let text = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *CINEVIBES SEARCH* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
     text += `🎀 *Search :* ${q}\n`;
     text += `🍿 *Results :* ${topResults.length}\n\n`;
 
@@ -375,12 +377,16 @@ if (Array.isArray(replyHandlers)) {
   replyHandlers.push(cvReplyHandler);
 }
 
-// ── 3. Resolve & Stream Direct Link (RAM Safe Stream Upload) ──
+// ── 3. Resolve & Stream Direct Link (Stream Safe Pipe - 0MB Extra RAM) ──
 async function processCineDownload(sock, mek, from, movieObj) {
   try {
     await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
-    const moviePath = new URL(movieObj.url).pathname;
+    // URL path එක ලබා ගැනීම
+    const moviePath = movieObj.url.startsWith('http') 
+      ? new URL(movieObj.url).pathname 
+      : movieObj.url;
+
     const { data: html } = await client.get(moviePath);
     const cleanHtml = html.replace(/\\"/g, '"');
 
@@ -433,7 +439,7 @@ async function processCineDownload(sock, mek, from, movieObj) {
 
     const cleanTitle = (movieObj.title || "CineVibes Movie").replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
 
-    let captionText = `┏━━━━━◥◣◆◢◤━━━━━┓\n★彡 *CINEVIBES DOWNLOAD* 彡★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n`;
+    let captionText = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *CINEVIBES DOWNLOAD* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
     captionText += `🎬 *Title :* ${toSmallCaps(movieObj.title)}\n`;
     captionText += `📅 *Year :* ${movieObj.year || 'N/A'}\n`;
     captionText += `⭐ *IMDb :* ${movieObj.rating || 'N/A'}\n\n`;
@@ -441,8 +447,19 @@ async function processCineDownload(sock, mek, from, movieObj) {
 
     const thumbBuffer = await getThumbnailBuffer(movieObj.poster);
 
+    // ⚡ Baileys Expired/Forbidden වළක්වා ගැනීමට Axios Stream එකක් ලෙස Pipe කිරීම (RAM එක පිරෙන්නේ නැත)
+    console.log(`[CineVibes] Streaming video to WhatsApp: ${directVideoLink}`);
+    const videoStreamRes = await axios.get(directVideoLink, {
+      responseType: 'stream',
+      httpsAgent,
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Referer': 'https://cinevibes.lk/'
+      }
+    });
+
     const docPayload = {
-      document: { url: directVideoLink },
+      document: { stream: videoStreamRes.data },
       mimetype: "video/mp4",
       fileName: `MALIYA-MD ${cleanTitle}.mp4`,
       caption: captionText,
@@ -455,25 +472,36 @@ async function processCineDownload(sock, mek, from, movieObj) {
 
     await sock.sendMessage(from, docPayload, { quoted: mek });
 
-    // Send Subtitle if available
+    // Send Subtitle if available (Stream Pipe)
     if (directSubLink) {
       try {
+        const subStreamRes = await axios.get(directSubLink, {
+          responseType: 'stream',
+          httpsAgent,
+          headers: {
+            'User-Agent': USER_AGENT,
+            'Referer': 'https://cinevibes.lk/'
+          }
+        });
+
         await sock.sendMessage(from, {
-          document: { url: directSubLink },
+          document: { stream: subStreamRes.data },
           mimetype: "application/x-subrip",
           fileName: `MALIYA-MD ${cleanTitle} [Sinhala Sub].srt`,
           caption: `📄 *Sinhala Subtitle Attached:*\n🎬 _${movieObj.title}_`,
           contextInfo: channelContextInfo()
         }, { quoted: mek });
-      } catch (e) {}
+      } catch (e) {
+        console.error("Subtitle Stream Error:", e.message);
+      }
     }
 
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
   } catch (err) {
-    console.error("CineVibes Process Error:", err.message);
+    console.error("CineVibes Process Error:", err.response ? `${err.response.status} ${err.response.statusText}` : err.message);
     await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-    await sendErrorMsg(sock, from, mek, "Failed to download and stream movie from CineVibes.");
+    await sendErrorMsg(sock, from, mek, `Failed to download and stream movie: ${err.message}`);
   }
 }
 
