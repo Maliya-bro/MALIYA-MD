@@ -214,7 +214,7 @@ function menuHeader(userName = "User") {
 ╰─────✦❘•❘✦────•┈➤
 👇 *Select a command category below to view commands:*
 
-🌐 *Web:* https://maliya-md.replit.app`;
+🌐 *Web:* https://maliya-md.vercel.app`;
 }
 
 function buildStyledMainMenu(state, userName) {
