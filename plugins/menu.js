@@ -202,14 +202,14 @@ function menuHeader(userName = "User") {
 
 ✨ 👋 *ʜɪ, ${styledUser}!*
 
-╔══════. .★.════════════╗
+╔══════. .★.══════════╗
 🤖 *ʙᴏᴛ ɴᴀᴍᴇ :* ${BOT_NAME}
 👤 *ᴜsᴇʀ :* ${styledUser}
 👑 *ᴏᴡɴᴇʀ :* ${OWNER_NUMBER}
 🕒 *ᴛɪᴍᴇ :* ${time}
 📅 *ᴅᴀᴛᴇ :* ${date}
 🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]
-╚════════════. .★.══════╝
+╚══════════. .★.══════╝
 
 ╰─────✦❘•❘✦────•┈➤
 👇 *Select a command category below to view commands:*
