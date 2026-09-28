@@ -1,140 +1,89 @@
 const { cmd } = require("../command");
 const axios = require("axios");
-const googleTTS = require("google-tts-api");
-const fs = require("fs");
-const path = require("path");
 
-/* ================= LANGUAGES ================= */
-const LANGS = {
-  si: "Sinhala",
-  en: "English",
-  ta: "Tamil",
-  hi: "Hindi",
-  fr: "French",
-  de: "German",
-  es: "Spanish",
-  it: "Italian",
-  pt: "Portuguese",
-  ru: "Russian",
-  ar: "Arabic",
-  tr: "Turkish",
-  id: "Indonesian",
-  th: "Thai",
-  ja: "Japanese",
-  ko: "Korean",
-  zh: "Chinese",
-  bn: "Bengali",
-  ur: "Urdu",
-};
+// ── Context Info (Channel Details) ─────────────
+const CHANNEL_JID = "120363427174988449@newsletter";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 
-/* ================= TRANSLATE ================= */
-async function translate(text, targetLang) {
-  const res = await axios.get(
-    "https://translate.googleapis.com/translate_a/single",
-    {
-      params: {
-        client: "gtx",
-        sl: "auto",
-        tl: targetLang,
-        dt: "t",
-        q: text,
-      },
-      timeout: 15000,
-    }
-  );
-
-  return (res.data?.[0] || []).map((x) => x?.[0]).join("").trim();
-}
-
-/* ================= SEND VOICE ================= */
-async function sendVoice(conn, mek, m, text, lang) {
-  const outDir = path.join(process.cwd(), "tmp");
-  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-
-  const outFile = path.join(outDir, `${Date.now()}.mp3`);
-
-  const ttsUrl = googleTTS.getAudioUrl(text, {
-    lang,
-    slow: false,
-    host: "https://translate.google.com",
-  });
-
-  const res = await axios.get(ttsUrl, {
-    responseType: "arraybuffer",
-    timeout: 20000,
-  });
-
-  fs.writeFileSync(outFile, Buffer.from(res.data));
-
-  await conn.sendMessage(
-    m.chat,
-    {
-      audio: fs.readFileSync(outFile),
-      mimetype: "audio/mpeg",
-      ptt: true,
+function channelContextInfo() {
+  return {
+    forwardingScore: 999,
+    isForwarded: true,
+    forwardedNewsletterMessageInfo: {
+      newsletterJid: CHANNEL_JID,
+      newsletterName: CHANNEL_NAME,
+      serverMessageId: -1,
     },
-    { quoted: mek }
-  );
-
-  if (fs.existsSync(outFile)) fs.unlinkSync(outFile);
+  };
 }
 
-/* ================= MAIN COMMAND ================= */
-cmd(
-  {
-    pattern: "tts",
-    alias: ["voice"],
-    desc: "Translate text and send as voice",
-    category: "utility",
-    react: "🗣️",
-    filename: __filename,
-  },
-  async (conn, mek, m, { q, reply }) => {
-    try {
-      if (!q) {
-        return reply(
-          "🗣️ *Text to Voice*\n\n" +
-            "Usage:\n" +
-            ".tts <lang> <text>\n\n" +
-            "Examples:\n" +
-            ".tts si mama oyata adarei\n" +
-            ".tts en mama oyata adarei\n" +
-            ".tts fr mama oyata adarei\n\n" +
-            "Languages:\n" +
-            Object.keys(LANGS).join(", ")
-        );
-      }
+async function sendErrorMsg(sock, from, mek, text) {
+  await sock.sendMessage(from, {
+    text: `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n🚫 _${text}_`,
+    contextInfo: channelContextInfo(),
+  }, { quoted: mek });
+}
 
-      const parts = q.trim().split(" ");
-      const lang = (parts.shift() || "").toLowerCase();
-      const text = parts.join(" ").trim();
+cmd({
+  pattern: "tts",
+  alias: ["aitts", "say", "speak", "voice"],
+  react: "🎵",
+  desc: "Convert text to AI speech (MP3 Audio)",
+  category: "ai",
+  filename: __filename,
+}, async (sock, mek, m, { from, q }) => {
+  try {
+    // User දීපු text එක හෝ Reply කරපු message එකේ text එක ගැනීම
+    const quotedText = 
+      m?.quoted?.text || 
+      m?.quoted?.body || 
+      mek?.message?.extendedTextMessage?.contextInfo?.quotedMessage?.conversation || 
+      mek?.message?.extendedTextMessage?.contextInfo?.quotedMessage?.extendedTextMessage?.text || 
+      "";
 
-      if (!lang || !LANGS[lang]) {
-        return reply(
-          "❌ Invalid language code.\n\n" +
-            "Example:\n" +
-            ".tts si mama oyata adarei\n\n" +
-            "Available:\n" +
-            Object.keys(LANGS).join(", ")
-        );
-      }
+    const textToSpeech = q ? q.trim() : quotedText.trim();
 
-      if (!text) {
-        return reply(`❌ Usage: .tts ${lang} <text>`);
-      }
-
-      await reply(`🔄 Translating to ${LANGS[lang]}...`);
-      const translated = await translate(text, lang);
-
-      if (!translated) {
-        return reply("❌ Translation failed.");
-      }
-
-      await reply("🎙️ Generating voice note from MALIYA-MD...");
-      await sendVoice(conn, mek, m, translated, lang);
-    } catch (err) {
-      console.error("TTS ERROR:", err);
-      return reply("❌ Failed (network / TTS error).");
+    if (!textToSpeech) {
+      return await sock.sendMessage(from, {
+        text: `⊱━━• ✿ •━━━━━• ✿ •━━⊰\n🎵 *𝐀𝐈 𝐓𝐄𝐗𝐓 𝐓𝐎 𝐌𝐏𝟑*\n⊱━━• ✿ •━━━━━• ✿ •━━⊰\n\n📌 *Usage:* \`.tts <text>\`\n💡 *Example:* \`.tts Hello how are you\`\n\nℹ️ _ඔබට ඕනෑම Text Message එකකට Reply කර \`.tts\` ලෙස ලබා දීමටද හැක._`,
+        contextInfo: channelContextInfo(),
+      }, { quoted: mek });
     }
+
+    await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
+
+    // API Request
+    const apiUrl = `https://api.omegatech.app/api/ai/text2speech-v3`;
+    const { data } = await axios.get(apiUrl, {
+      params: {
+        text: textToSpeech,
+        voice: "woman3",
+        language: "English",
+      },
+      timeout: 30000,
+    });
+
+    if (!data || !data.success || !data.audio) {
+      await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+      return await sendErrorMsg(sock, from, mek, "Failed to generate AI MP3 from the server.");
+    }
+
+    await sock.sendMessage(from, { react: { text: "⬆️", key: m.key } });
+
+    // ✅ Standard MP3 Audio එකක් ලෙස යැවීම
+    await sock.sendMessage(from, {
+      audio: { url: data.audio },
+      mimetype: "audio/mpeg",
+      ptt: false, // MP3 Audio player එකක් විදිහට යැවීමට false කර ඇත
+      fileName: `MALIYA-MD_TTS.mp3`,
+      contextInfo: channelContextInfo(),
+    }, { quoted: mek });
+
+    await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+
+  } catch (error) {
+    console.error("TTS Error:", error.message);
+    await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+    await sendErrorMsg(sock, from, mek, "Failed to connect to the Text-to-Speech API.");
   }
-);
+});
