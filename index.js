@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
 //  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
-//  FIX: Session reconnect loop with max attempts (403 fix) + Anti-Spam + Settings API
+//  FIX: Session reconnect loop with max attempts (403 fix) + Anti-Spam + Settings API + WA Web Button Fix
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -56,7 +56,7 @@ const path    = require("path");
 const { MongoClient } = require("mongodb");
 
 const cors              = require("cors");
-const os               = require("os");
+const os                = require("os");
 const config            = require("./config");
 const { readSettings, isWorkAllowed } = require("./lib/botSettings");
 const { sms }           = require("./lib/msg");
@@ -122,7 +122,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, "public")));
 
-const prefix         = ".";
+const prefix          = ".";
 const BOT_OWNER_NAME = config.OWNER_NAME || "Malindu Nadith";
 const baseOwnerNumber = [String(config.BOT_OWNER || "").replace(/\D/g, "")].filter(Boolean);
 const sessionsBaseDir = path.join(__dirname, "multi_auth_sessions");
@@ -196,7 +196,7 @@ async function updateSessionStatus(sessionId, data = {}) {
 
 async function restoreCredsToFile(sessionId, targetFilePath) {
   const doc = await getSessionById(sessionId);
-  if (!doc)                   throw new Error(`Session not found in MongoDB: ${sessionId}`);
+  if (!doc)                    throw new Error(`Session not found in MongoDB: ${sessionId}`);
   if (!doc.primaryFile?.data) throw new Error(`No primaryFile.data for session: ${sessionId}`);
   fs.mkdirSync(path.dirname(targetFilePath), { recursive: true });
   fs.writeFileSync(targetFilePath, Buffer.from(doc.primaryFile.data, "base64"));
@@ -427,6 +427,29 @@ async function startSessionBot(sessionId) {
       syncFullHistory:                true,
       markOnlineOnConnect:            true,
       generateHighQualityLinkPreview: true,
+      // ── WA Web Button & List Fix (Buttons වෙනස් නොකර Metadata එකතු කිරීම) ──
+      patchMessageBeforeSending: (message) => {
+        const requiresPatch = !!(
+          message.buttonsMessage ||
+          message.templateMessage ||
+          message.listMessage ||
+          message.interactiveMessage
+        );
+        if (requiresPatch) {
+          message = {
+            viewOnceMessage: {
+              message: {
+                messageContextInfo: {
+                  deviceListMetadataVersion: 2,
+                  deviceListMetadata: {},
+                },
+                ...message,
+              },
+            },
+          };
+        }
+        return message;
+      },
     });
 
     // ── 🔥 ASITHA-MD / LUNA LIB NATIVE FLOW SOCKET INJECTOR 🔥 ──
@@ -438,6 +461,38 @@ async function startSessionBot(sessionId) {
         console.log("⚠️ Injector notice:", injErr?.message || injErr);
       }
     }
+
+    // ── WA Web Relay Metadata Injector (ButtonV2 වෙනස් නොකර WA Web වලට සපෝට් දීම) ──
+    const origRelayMessage = sock.relayMessage.bind(sock);
+    sock.relayMessage = async (jid, message, options = {}) => {
+      try {
+        if (message && typeof message === "object") {
+          const targetMsg =
+            message.viewOnceMessage?.message ||
+            message.viewOnceMessageV2?.message ||
+            message.viewOnceMessageV2Extension?.message ||
+            message.documentWithCaptionMessage?.message ||
+            message;
+
+          if (
+            targetMsg?.interactiveMessage ||
+            targetMsg?.buttonsMessage ||
+            targetMsg?.listMessage ||
+            targetMsg?.templateMessage
+          ) {
+            targetMsg.messageContextInfo = targetMsg.messageContextInfo || {
+              deviceListMetadata: {},
+              deviceListMetadataVersion: 2,
+            };
+            message.messageContextInfo = message.messageContextInfo || {
+              deviceListMetadata: {},
+              deviceListMetadataVersion: 2,
+            };
+          }
+        }
+      } catch (_) {}
+      return await origRelayMessage(jid, message, options);
+    };
 
     sessionCtx.sock = sock;
     activeSessions.set(sessionId, sessionCtx);
@@ -778,7 +833,7 @@ function attachSessionHandlers(sock, sessionCtx) {
         //  NORMAL MESSAGE HANDLING
         // ============================================================
         const m    = sms(sock, mek);
-        let    body = String(getBodyFromMessage(mek.message) || "").trim();
+        let   body = String(getBodyFromMessage(mek.message) || "").trim();
 
         let isCmd       = body.startsWith(prefix);
         let commandName = isCmd
@@ -805,7 +860,7 @@ function attachSessionHandlers(sock, sessionCtx) {
         // ── PRESENCE ────────────────────────────────────────────
         try {
           const presenceMode = (await readSettings(sessionCtx.sessionId)).always_presence;
-          if (presenceMode === "typing")         await sock.sendPresenceUpdate("composing",  from);
+          if (presenceMode === "typing")          await sock.sendPresenceUpdate("composing",  from);
           else if (presenceMode === "recording") await sock.sendPresenceUpdate("recording",  from);
         } catch (_) {}
 
