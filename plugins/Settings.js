@@ -9,7 +9,7 @@ const {
 } = require("../lib/botSettings");
 
 const SETTINGS_IMAGE =
-  "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/ChatGPT%20Image%20Mar%2022,%202026,%2008_42_52%20AM.png";
+  "https://github.com/Maliya-bro/web-pair/blob/main/Gemini_Generated_Image_wnnf8jwnnf8jwnnf.jpg?raw=true";
 
 const pendingSettingsMenu = Object.create(null);
 const lastProcessedMsg = {};
