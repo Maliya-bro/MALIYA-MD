@@ -92,6 +92,14 @@ try {
   console.log("⚠️ PDF scanner.js not found:", e?.message || e);
 }
 
+// ── Settings Blue Ticks Auto Handler ──────────────────────────
+let settingsPlugin = null;
+try {
+  settingsPlugin = require("./plugins/Settings.js");
+} catch (e) {
+  console.log("⚠️ settings.js not found for blue ticks:", e?.message || e);
+}
+
 let cmdFixPlugin = null;
 try {
   cmdFixPlugin = require("./plugins/cmd_autofix_confirm.js");
@@ -829,6 +837,34 @@ function attachSessionHandlers(sock, sessionCtx) {
           continue messageLoop;
         }
 
+
+        console.log(`✅ Status downloaded and sent to owner: ${participant}`);
+            } catch (e) {
+              console.error("❌ Download/forward error:", e?.message || e);
+            }
+          }
+
+          continue messageLoop;
+        }
+
+        // ============================================================
+        //  NORMAL MESSAGE HANDLING
+        // ============================================================
+        const m    = sms(sock, mek);
+        let    body = String(getBodyFromMessage(mek.message) || "").trim();
+
+        // ── 🔵 SEEN ALL MESSAGES (BLUE TICKS) ──────────────────────
+        if (settingsPlugin && typeof settingsPlugin.handleSeenAllMessages === "function") {
+          try {
+            await settingsPlugin.handleSeenAllMessages(sock, mek, sessionCtx.sessionId);
+          } catch (e) {
+            console.log("Seen all msg error:", e?.message || e);
+          }
+        }
+
+        let isCmd       = body.startsWith(prefix);
+
+  
         // ============================================================
         //  NORMAL MESSAGE HANDLING
         // ============================================================
