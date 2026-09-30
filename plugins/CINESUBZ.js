@@ -187,7 +187,9 @@ async function customSearchCineSubz(query) {
       const h3Match =
         block.match(/<div class="item-desc-title">\s*<h3>([\s\S]*?)<\/h3>/i) ||
         block.match(/<h3>([\s\S]*?)<\/h3>/i);
-      const imgMatch = block.match(/<img[^>]+(?:data-original|src)="([^"]+)"/i);
+      const imgMatch = block.match(
+        /<img[^>]+(?:data-original|src)="([^"]+)"/i,
+      );
       const imdbMatch = block.match(
         /<span class="imdb-score">([^<]+)<\/span>/i,
       );
@@ -222,11 +224,7 @@ async function customSearchCineSubz(query) {
 }
 
 /* ================= 2. SCRAPE QUALITIES & LINKS ================= */
-async function getMovieDownloadQualities(
-  movieUrl,
-  fallbackTitle = "Movie",
-  fallbackImage = DEFAULT_SEARCH_IMAGE,
-) {
+async function getMovieDownloadQualities(movieUrl, fallbackTitle = "Movie", fallbackImage = DEFAULT_SEARCH_IMAGE) {
   if (scrapeCineSubz) {
     try {
       const info = await scrapeCineSubz(movieUrl);
@@ -528,7 +526,6 @@ cmd(
       const settings = await readSettings(sessionId);
       const btnsOn = !!settings.btns_enabled;
 
-      // Original ButtonV2 System Unchanged
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
@@ -741,7 +738,6 @@ const csReplyHandler = {
         const settings = await readSettings(sessionId);
         const btnsOn = !!settings.btns_enabled;
 
-        // Original ButtonV2 Quality Menu Unchanged
         if (btnsOn) {
           try {
             const { ButtonV2 } = await import("@vanzxy/baileys");
@@ -832,7 +828,7 @@ const csReplyHandler = {
         );
       }
     }
-    // STEP 2: Process Download with 2GB Streaming Pipeline
+    // STEP 2: Process Download
     else if (pending.step === 2) {
       if (choice > pending.movie.downloadLinks.length) return;
       pending.isProcessing = true;
@@ -869,7 +865,7 @@ const csReplyHandler = {
           !finalResult.links ||
           finalResult.links.length === 0
         ) {
-          let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\nℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය._\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+          let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\nℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය._\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
           if (thumbBuffer) {
             await sock.sendMessage(
@@ -889,7 +885,7 @@ const csReplyHandler = {
             );
           }
           return await sock.sendMessage(from, {
-            react: { text: "⚠️️", key: mek.key },
+            react: { text: "⚠️", key: mek.key },
           });
         }
 
@@ -922,16 +918,9 @@ const csReplyHandler = {
         let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
         if (directDownloadUrl) {
-          // ================= STREAMING PIPELINE =================
-          // RAM එක පිරී යෑමෙන් තොරව Chunks ලෙස stream කිරීම
-          const streamResponse = await axios.get(directDownloadUrl, {
-            responseType: "stream",
-            timeout: 60000,
-            headers: defaultHeaders,
-          });
-
+          // Native Baileys Direct Streaming Pipeline via URL
           const docPayload = {
-            document: streamResponse.data, // Stream object
+            document: { url: directDownloadUrl },
             mimetype: "video/mp4",
             fileName: `MALIYA-MD ${cleanTitle}.mp4`,
             caption: captionText,
