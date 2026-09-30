@@ -1,4 +1,6 @@
 const { cmd, replyHandlers } = require("../command");
+const axios = require("axios");
+const sharp = require("sharp");
 const config = require("../config");
 const {
   readSettings,
@@ -14,97 +16,243 @@ const lastProcessedMsg = {};
 const LOOP_COOLDOWN = 2500;
 
 function keyFor(sender, from) {
-  return `${from || ""}`;
+  if (from) {
+    return from;
+  }
+  return "";
 }
 
-function isRealOwner(sender = "") {
-  const owner = String(
-    config.BOT_OWNER || config.OWNER_NUMBER || config.SUDO || ""
-  ).replace(/\D/g, "");
+function isRealOwner(sender) {
+  let owner = "";
+  if (config.BOT_OWNER) {
+    owner = String(config.BOT_OWNER).replace(/\D/g, "");
+  } else if (config.OWNER_NUMBER) {
+    owner = String(config.OWNER_NUMBER).replace(/\D/g, "");
+  } else if (config.SUDO) {
+    owner = String(config.SUDO).replace(/\D/g, "");
+  }
 
-  let user = String(sender).split("@")[0].replace(/\D/g, "");
-  if (user.startsWith("0")) user = "94" + user.slice(1);
+  let user = "";
+  if (sender) {
+    user = String(sender).split("@")[0].replace(/\D/g, "");
+    if (user.startsWith("0")) {
+      user = "94" + user.slice(1);
+    }
+  }
 
-  return !!owner && user === owner;
+  if (owner) {
+    if (user === owner) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function onOff(val) {
-  return val ? "🟢 ON" : "🔴 OFF";
+  if (val) {
+    return "🟢 ON";
+  }
+  return "🔴 OFF";
 }
 
 function presenceText(val) {
-  if (val === "typing") return "⌨️ Typing";
-  if (val === "recording") return "🎙️ Recording";
+  if (val === "typing") {
+    return "⌨️ Typing";
+  } else if (val === "recording") {
+    return "🎙️ Recording";
+  }
   return "🔴 OFF";
 }
 
 function reactModeText(val) {
-  if (val === "private") return "🔒 Private";
-  if (val === "group") return "👥 Group";
+  if (val === "private") {
+    return "🔒 Private Only";
+  } else if (val === "group") {
+    return "👥 Group Only";
+  }
   return "🌍 All Chats";
 }
 
 function workScopeText(val) {
-  if (val === "private") return "🔒 Private Only";
-  if (val === "group") return "👥 Group Only";
+  if (val === "private") {
+    return "🔒 Private Only";
+  } else if (val === "group") {
+    return "👥 Group Only";
+  }
   return "🌍 All Chats";
 }
 
 function btnsModeText(val) {
-  return val ? "🔘 Buttons" : "🔢 Number Reply";
+  if (val) {
+    return "🔘 Buttons Mode";
+  }
+  return "🔢 Number Reply Mode";
 }
 
-// 📱 WhatsApp Mobile Screen එකට හරියටම Fit වන Compact Layout එක
+async function getFittedImageBuffer(url) {
+  try {
+    const res = await axios.get(url, { responseType: "arraybuffer", timeout: 10000 });
+    return await sharp(Buffer.from(res.data))
+      .resize(800, 800, {
+        fit: "contain",
+        background: { r: 18, g: 18, b: 24, alpha: 1 }
+      })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+  } catch (e) {
+    return url;
+  }
+}
+
 async function getStatusCard(sessionId) {
   const s = await readSettings(sessionId);
+  let modeStr = "PUBLIC";
+  if (s.mode) {
+    modeStr = String(s.mode).toUpperCase();
+  }
+
+  let workScopeStr = "private";
+  if (s.work_scope) {
+    workScopeStr = String(s.work_scope);
+  }
+
+  let presStr = "off";
+  if (s.always_presence) {
+    presStr = String(s.always_presence);
+  }
+
+  let reactModeStr = "all";
+  if (s.auto_react_mode) {
+    reactModeStr = String(s.auto_react_mode);
+  }
+
   return `╭───「 *BOT SETTINGS* 」───◆
-│ ⚙️ *Mode:* ${String(s.mode || "public").toUpperCase()}
-│ 🎯 *Scope:* ${workScopeText(String(s.work_scope || "private"))}
-│ 🕹️ *Menu:* ${btnsModeText(!!s.btns_enabled)}
-│ 🎭 *Presence:* ${presenceText(String(s.always_presence || "off"))}
-│ 🤖 *AI Chat:* ${onOff(!!s.auto_msg)}
-│ 👁️ *Seen Msg:* ${onOff(!!s.seen_all_msg)}
-│ 💖 *Auto React:* ${onOff(!!s.auto_react_msg)}
-│ 🔮 *React Mode:* ${reactModeText(String(s.auto_react_mode || "all"))}
-│ 🛡️ *Anti Delete:* ${onOff(!!s.anti_delete)}
-│ 🛡️ *Anti Spam:* ${onOff(!!s.anti_spam)}
-│ 🚫 *Anti Call:* ${onOff(!!s.auto_reject_calls)}
-│ 👁️ *Status Seen:* ${onOff(!!s.auto_status_seen)}
-│ ❤️ *Status React:* ${onOff(!!s.auto_status_react)}
-│ 📥 *Status Save:* ${onOff(!!s.auto_download_status)}
+│ 👑 *Main Access:* ${modeStr}
+│ 🎯 *Work Scope:* ${workScopeText(workScopeStr)}
+│ 🕹️️ *Menu UI:* ${btnsModeText(Boolean(s.btns_enabled))}
+│ 🎭 *Presence:* ${presenceText(presStr)}
+│ 🤖 *AI Chat:* ${onOff(Boolean(s.auto_msg))}
+│ 👁️ *Seen Msg (Blue Ticks):* ${onOff(Boolean(s.seen_all_msg))}
+│ 💖 *Auto React:* ${onOff(Boolean(s.auto_react_msg))}
+│ 🔮 *React Scope:* ${reactModeText(reactModeStr)}
+│ 🛡️ *Anti Delete:* ${onOff(Boolean(s.anti_delete))}
+│ 🛡️️ *Anti Spam:* ${onOff(Boolean(s.anti_spam))}
+│ 🚫 *Reject Calls:* ${onOff(Boolean(s.auto_reject_calls))}
+│ 👁️ *Status Seen:* ${onOff(Boolean(s.auto_status_seen))}
+│ ❤️ *Status React:* ${onOff(Boolean(s.auto_status_react))}
+│ 📥 *Status Save:* ${onOff(Boolean(s.auto_download_status))}
 ╰───────────────────────◆`.trim();
 }
 
-function mapKey(name = "") {
-  const k = String(name).toLowerCase().trim();
+function mapKey(name) {
+  let k = "";
+  if (name) {
+    k = String(name).toLowerCase().trim();
+  }
 
-  if (["autoseen", "auto_seen", "statusseen", "auto_status_seen"].includes(k)) return "auto_status_seen";
-  if (["autoreact", "auto_react", "statusreact", "auto_status_react"].includes(k)) return "auto_status_react";
-  if (["autodownloadstatus", "auto_download_status", "statusdownload", "downloadstatus"].includes(k)) return "auto_download_status";
-  if (["automsg", "auto_msg", "msg", "aichat", "ai"].includes(k)) return "auto_msg";
-  if (["seenallmsg", "seen_all_msg", "seenall", "allmsgseen"].includes(k)) return "seen_all_msg";
-  if (["antidelete", "anti_delete", "delete"].includes(k)) return "anti_delete";
-  if (["antispam", "anti_spam", "spam"].includes(k)) return "anti_spam";
-  if (["rejectcalls", "auto_reject_calls", "calls", "anticall"].includes(k)) return "auto_reject_calls";
-  if (["mode", "botmode", "privatepublic"].includes(k)) return "mode";
-  if (["autoreactmsg", "auto_react_msg", "msgreact"].includes(k)) return "auto_react_msg";
-  if (["reactmode", "auto_react_mode"].includes(k)) return "auto_react_mode";
-  if (["workscope", "work_scope", "worktype", "work_type", "scope"].includes(k)) return "work_scope";
-  if (["btns", "buttons", "btns_enabled", "menumode", "menu_mode"].includes(k)) return "btns_enabled";
+  if (k === "autoseen") return "auto_status_seen";
+  else if (k === "auto_seen") return "auto_status_seen";
+  else if (k === "statusseen") return "auto_status_seen";
+  else if (k === "auto_status_seen") return "auto_status_seen";
+  else if (k === "autoreact") return "auto_status_react";
+  else if (k === "auto_react") return "auto_status_react";
+  else if (k === "statusreact") return "auto_status_react";
+  else if (k === "auto_status_react") return "auto_status_react";
+  else if (k === "autodownloadstatus") return "auto_download_status";
+  else if (k === "auto_download_status") return "auto_download_status";
+  else if (k === "statusdownload") return "auto_download_status";
+  else if (k === "downloadstatus") return "auto_download_status";
+  else if (k === "automsg") return "auto_msg";
+  else if (k === "auto_msg") return "auto_msg";
+  else if (k === "aichat") return "auto_msg";
+  else if (k === "seenallmsg") return "seen_all_msg";
+  else if (k === "seen_all_msg") return "seen_all_msg";
+  else if (k === "seenall") return "seen_all_msg";
+  else if (k === "allmsgseen") return "seen_all_msg";
+  else if (k === "antidelete") return "anti_delete";
+  else if (k === "anti_delete") return "anti_delete";
+  else if (k === "antispam") return "anti_spam";
+  else if (k === "anti_spam") return "anti_spam";
+  else if (k === "rejectcalls") return "auto_reject_calls";
+  else if (k === "auto_reject_calls") return "auto_reject_calls";
+  else if (k === "anticall") return "auto_reject_calls";
+  else if (k === "mode") return "mode";
+  else if (k === "botmode") return "mode";
+  else if (k === "autoreactmsg") return "auto_react_msg";
+  else if (k === "auto_react_msg") return "auto_react_msg";
+  else if (k === "reactmode") return "auto_react_mode";
+  else if (k === "auto_react_mode") return "auto_react_mode";
+  else if (k === "workscope") return "work_scope";
+  else if (k === "work_scope") return "work_scope";
+  else if (k === "btns") return "btns_enabled";
+  else if (k === "buttons") return "btns_enabled";
+  else if (k === "btns_enabled") return "btns_enabled";
   return null;
 }
 
 function getQuotedId(m, mek) {
-  return (
-    m?.quoted?.id ||
-    mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
-    m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
-    m?.message?.imageMessage?.contextInfo?.stanzaId ||
-    mek?.message?.imageMessage?.contextInfo?.stanzaId ||
-    m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
-    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
-    null
-  );
+  if (m) {
+    if (m.quoted) {
+      if (m.quoted.id) {
+        return m.quoted.id;
+      }
+    }
+  }
+  if (mek) {
+    if (mek.message) {
+      if (mek.message.extendedTextMessage) {
+        if (mek.message.extendedTextMessage.contextInfo) {
+          if (mek.message.extendedTextMessage.contextInfo.stanzaId) {
+            return mek.message.extendedTextMessage.contextInfo.stanzaId;
+          }
+        }
+      }
+    }
+  }
+  if (m) {
+    if (m.message) {
+      if (m.message.extendedTextMessage) {
+        if (m.message.extendedTextMessage.contextInfo) {
+          if (m.message.extendedTextMessage.contextInfo.stanzaId) {
+            return m.message.extendedTextMessage.contextInfo.stanzaId;
+          }
+        }
+      }
+      if (m.message.imageMessage) {
+        if (m.message.imageMessage.contextInfo) {
+          if (m.message.imageMessage.contextInfo.stanzaId) {
+            return m.message.imageMessage.contextInfo.stanzaId;
+          }
+        }
+      }
+      if (m.message.interactiveResponseMessage) {
+        if (m.message.interactiveResponseMessage.contextInfo) {
+          if (m.message.interactiveResponseMessage.contextInfo.stanzaId) {
+            return m.message.interactiveResponseMessage.contextInfo.stanzaId;
+          }
+        }
+      }
+    }
+  }
+  if (mek) {
+    if (mek.message) {
+      if (mek.message.imageMessage) {
+        if (mek.message.imageMessage.contextInfo) {
+          if (mek.message.imageMessage.contextInfo.stanzaId) {
+            return mek.message.imageMessage.contextInfo.stanzaId;
+          }
+        }
+      }
+      if (mek.message.interactiveResponseMessage) {
+        if (mek.message.interactiveResponseMessage.contextInfo) {
+          if (mek.message.interactiveResponseMessage.contextInfo.stanzaId) {
+            return mek.message.interactiveResponseMessage.contextInfo.stanzaId;
+          }
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function extractTexts(body, mek, m) {
@@ -119,27 +267,35 @@ function extractTexts(body, mek, m) {
     mek?.message?.buttonsResponseMessage?.selectedButtonId,
     mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
   ];
-  for (const item of direct) {
-    if (item) texts.push(String(item).trim());
-  }
+  direct.forEach(item => {
+    if (item) {
+      texts.push(String(item).trim());
+    }
+  });
 
   const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  for (const raw of [p1, p2]) {
-    if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed.id) texts.push(String(parsed.id).trim());
-      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
-      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
-      if (parsed.title) texts.push(String(parsed.title).trim());
-    } catch {}
-  }
+  [p1, p2].forEach(raw => {
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.id) texts.push(String(parsed.id).trim());
+        if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+        if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+        if (parsed.title) texts.push(String(parsed.title).trim());
+        if (parsed.name) texts.push(String(parsed.name).trim());
+      } catch (e) {}
+    }
+  });
+
   return [...new Set(texts.filter(Boolean))];
 }
 
-function resolveSettingsActionFromText(text = "") {
-  const t = String(text).trim().toLowerCase();
+function resolveSettingsActionFromText(text) {
+  let t = "";
+  if (text) {
+    t = String(text).trim().toLowerCase();
+  }
   if (!t) return null;
 
   if (t.startsWith(".setting ")) {
@@ -157,108 +313,157 @@ async function applySettingAction(sessionId, action, value) {
   }
   if (action === "private") {
     await setSetting(sessionId, "mode", "private");
-    return "✅ *Bot Mode set to Private*";
+    return "✅ *Main Bot Mode Private kar diya gaya hai (Owner Only)*";
   }
   if (action === "public") {
     await setSetting(sessionId, "mode", "public");
-    return "✅ *Bot Mode set to Public*";
+    return "✅ *Main Bot Mode Public kar diya gaya hai (All Users)*";
   }
   if (action === "reactmode") {
-    if (!["private", "group", "all"].includes(value)) {
-      return "❌ *Invalid React Mode*";
+    const validModes = ["private", "group", "all"];
+    if (!validModes.includes(value)) {
+      return "❌ *Invalid React Scope*";
     }
     await setSetting(sessionId, "auto_react_mode", value);
-    return `✅ *React Mode:* ${reactModeText(value)}`;
+    return `✅ *Auto React Scope:* ${reactModeText(value)}`;
   }
   if (action === "workscope") {
-    if (!["private", "group", "all"].includes(value)) {
+    const validScopes = ["private", "group", "all"];
+    if (!validScopes.includes(value)) {
       return "❌ *Invalid Work Scope*";
     }
     await setSetting(sessionId, "work_scope", value);
     return `✅ *Work Scope:* ${workScopeText(value)}`;
   }
   if (action === "presence") {
-    if (!["off", "typing", "recording"].includes(value)) {
+    const validPres = ["off", "typing", "recording"];
+    if (!validPres.includes(value)) {
       return "❌ *Invalid Presence Mode*";
     }
     await setSetting(sessionId, "always_presence", value);
-    return `✅ *Presence:* ${presenceText(value)}`;
+    return `✅ *Presence Mode:* ${presenceText(value)}`;
   }
 
-  if (action === "on" || action === "off" || action === "toggle") {
+  let isToggle = false;
+  let isStateChange = false;
+  if (action === "toggle") {
+    isToggle = true;
+  } else if (action === "on") {
+    isStateChange = true;
+  } else if (action === "off") {
+    isStateChange = true;
+  }
+
+  if (isToggle) {
     const key = mapKey(value);
     if (!key) return "❌ *Invalid Setting Name*";
-
-    let updated;
-    if (action === "toggle") {
-      updated = await toggleSetting(sessionId, key);
-    } else {
-      const boolVal = action === "on";
-      updated = await setSetting(sessionId, key, boolVal);
+    const updated = await toggleSetting(sessionId, key);
+    return formatSettingReply(key, updated, action);
+  } else if (isStateChange) {
+    const key = mapKey(value);
+    if (!key) return "❌ *Invalid Setting Name*";
+    let boolVal = false;
+    if (action === "on") {
+      boolVal = true;
     }
-
-    const responses = {
-      auto_status_seen: `✅ *Auto Status Seen:* ${onOff(updated.auto_status_seen)}`,
-      auto_status_react: `✅ *Auto Status React:* ${onOff(updated.auto_status_react)}`,
-      auto_download_status: `✅ *Status Download:* ${onOff(updated.auto_download_status)}`,
-      auto_msg: `✅ *AI Chat:* ${onOff(updated.auto_msg)}`,
-      seen_all_msg: `✅ *Seen All Msg:* ${onOff(updated.seen_all_msg)}`,
-      anti_delete: `✅ *Anti Delete:* ${onOff(updated.anti_delete)}`,
-      anti_spam: `✅ *Anti Spam:* ${onOff(updated.anti_spam)}`,
-      auto_reject_calls: `✅ *Reject Calls:* ${onOff(updated.auto_reject_calls)}`,
-      auto_react_msg: `✅ *Msg Auto React:* ${onOff(updated.auto_react_msg)}`,
-      btns_enabled: `✅ *Menu Mode:* ${btnsModeText(!!updated.btns_enabled)}`,
-    };
-
-    return responses[key] || `✅ *Set ${key.toUpperCase()} to ${action.toUpperCase()}*`;
+    const updated = await setSetting(sessionId, key, boolVal);
+    return formatSettingReply(key, updated, action);
   }
 
   return await getStatusCard(sessionId);
 }
 
+function formatSettingReply(key, updated, action) {
+  if (key === "auto_status_seen") {
+    return `✅ *Status Auto Seen:* ${onOff(updated.auto_status_seen)}`;
+  } else if (key === "auto_status_react") {
+    return `✅ *Status Auto React:* ${onOff(updated.auto_status_react)}`;
+  } else if (key === "auto_download_status") {
+    return `✅ *Status Download & Save:* ${onOff(updated.auto_download_status)}`;
+  } else if (key === "auto_msg") {
+    return `✅ *AI Auto Chat:* ${onOff(updated.auto_msg)}`;
+  } else if (key === "seen_all_msg") {
+    return `✅ *Blue Ticks (Seen All Msg):* ${onOff(updated.seen_all_msg)}`;
+  } else if (key === "anti_delete") {
+    return `✅ *Anti Delete Guard:* ${onOff(updated.anti_delete)}`;
+  } else if (key === "anti_spam") {
+    return `✅ *Anti Spam Guard:* ${onOff(updated.anti_spam)}`;
+  } else if (key === "auto_reject_calls") {
+    return `✅ *Auto Reject Calls:* ${onOff(updated.auto_reject_calls)}`;
+  } else if (key === "auto_react_msg") {
+    return `✅ *Incoming Msg Auto React:* ${onOff(updated.auto_react_msg)}`;
+  } else if (key === "btns_enabled") {
+    return `✅ *Menu UI System:* ${btnsModeText(Boolean(updated.btns_enabled))}`;
+  }
+  return `✅ *Set ${key.toUpperCase()} to ${action.toUpperCase()}*`;
+}
+
 function getSections() {
   return [
     {
-      title: "🛠️ Main & Scope",
+      title: "👑 Main Bot Access Mode",
       rows: [
-        { title: "Public Mode", description: "Set bot to public", id: ".setting public" },
-        { title: "Private Mode", description: "Set bot to private", id: ".setting private" },
-        { title: "Scope: Private Only", description: "Work in PM only", id: ".setting workscope private" },
-        { title: "Scope: Group Only", description: "Work in groups only", id: ".setting workscope group" },
-        { title: "Scope: All Chats", description: "Work in PM + Groups", id: ".setting workscope all" },
+        { title: "Public Mode", description: "Sabhi users ke liye commands allow karein", id: ".setting public" },
+        { title: "Private Mode", description: "Sirf Owner ke liye commands limit karein", id: ".setting private" },
       ]
     },
     {
-      title: "🔘 Menu & Presence",
+      title: "🎯 Work Scope Management",
       rows: [
-        { title: "Buttons Mode ON", description: "Enable Interactive Buttons", id: ".setting on btns" },
-        { title: "Buttons Mode OFF", description: "Enable Plain Text Menus", id: ".setting off btns" },
-        { title: "Auto Typing ON", description: "Show typing status", id: ".setting presence typing" },
-        { title: "Auto Recording ON", description: "Show recording status", id: ".setting presence recording" },
-        { title: "Presence OFF", description: "Disable bot presence", id: ".setting presence off" },
+        { title: "Scope: Private Only", description: "Sirf Private PM / Inbox mein bot chalega", id: ".setting workscope private" },
+        { title: "Scope: Group Only", description: "Sirf WhatsApp Groups mein bot chalega", id: ".setting workscope group" },
+        { title: "Scope: All Chats", description: "Private PM aur Groups dono jagah chalega", id: ".setting workscope all" },
       ]
     },
     {
-      title: "🛡️ Protections",
+      title: "📱 WhatsApp Status Control",
       rows: [
-        { title: "Anti Spam ON", description: "Block spam messages", id: ".setting on antispam" },
-        { title: "Anti Spam OFF", description: "Disable spam blocker", id: ".setting off antispam" },
-        { title: "Anti Delete ON", description: "Save deleted PM messages", id: ".setting on antidelete" },
-        { title: "Anti Delete OFF", description: "Disable anti delete", id: ".setting off antidelete" },
-        { title: "Reject Calls ON", description: "Auto-reject calls", id: ".setting on rejectcalls" },
-        { title: "Reject Calls OFF", description: "Allow calls", id: ".setting off rejectcalls" },
+        { title: "Auto Seen Status ON", description: "Sabhi contacts ke status view karein", id: ".setting on autoseen" },
+        { title: "Auto Seen Status OFF", description: "Status auto-view band karein", id: ".setting off autoseen" },
+        { title: "Auto React Status ON", description: "Statuses par emoji reaction bhejein", id: ".setting on autoreact" },
+        { title: "Auto React Status OFF", description: "Status reaction band karein", id: ".setting off autoreact" },
+        { title: "Auto Save Status ON", description: "Contacts ka status media download karein", id: ".setting on autodownloadstatus" },
+        { title: "Auto Save Status OFF", description: "Status download band karein", id: ".setting off autodownloadstatus" },
       ]
     },
     {
-      title: "🤖 Auto Functions",
+      title: "🤖 Smart Chat Automation",
       rows: [
-        { title: "AI Chat ON", description: "Enable chatbot replies", id: ".setting on automsg" },
-        { title: "AI Chat OFF", description: "Disable chatbot replies", id: ".setting off automsg" },
-        { title: "Seen All Msg ON", description: "Auto-read all chats", id: ".setting on seenallmsg" },
-        { title: "Seen All Msg OFF", description: "Disable auto read", id: ".setting off seenallmsg" },
-        { title: "Status View ON", description: "Auto-read statuses", id: ".setting on autoseen" },
-        { title: "Status React ON", description: "Auto-react to status", id: ".setting on autoreact" },
-        { title: "Status Save ON", description: "Save contacts' status", id: ".setting on autodownloadstatus" },
+        { title: "AI Chatbot ON", description: "Automatic AI replies chalu karein", id: ".setting on automsg" },
+        { title: "AI Chatbot OFF", description: "AI chatbot band karein", id: ".setting off automsg" },
+        { title: "Seen All Msg ON (Blue Ticks)", description: "Sabhi aane wale messages par blue ticks lagayein", id: ".setting on seenallmsg" },
+        { title: "Seen All Msg OFF", description: "Blue ticks auto mark karna band karein", id: ".setting off seenallmsg" },
+        { title: "Msg Auto React ON", description: "Aane wale texts par emoji auto react karein", id: ".setting on autoreactmsg" },
+        { title: "Msg Auto React OFF", description: "Text auto reaction band karein", id: ".setting off autoreactmsg" },
+        { title: "React Scope: Private", description: "Sirf Private inbox mein react karein", id: ".setting reactmode private" },
+        { title: "React Scope: Group", description: "Sirf Groups mein react karein", id: ".setting reactmode group" },
+        { title: "React Scope: All", description: "Sabhi chats mein react karein", id: ".setting reactmode all" },
+      ]
+    },
+    {
+      title: "🎭 Bot Presence Automation",
+      rows: [
+        { title: "Auto Typing ON", description: "Chats mein hamesha Typing status dikhayein", id: ".setting presence typing" },
+        { title: "Auto Recording ON", description: "Chats mein Recording status dikhayein", id: ".setting presence recording" },
+        { title: "Presence OFF", description: "Presence indicators band karein", id: ".setting presence off" },
+      ]
+    },
+    {
+      title: "🔘 Menu UI Configuration",
+      rows: [
+        { title: "Buttons Mode ON", description: "Interactive popup/button menus chalu karein", id: ".setting on btns" },
+        { title: "Buttons Mode OFF", description: "Numbered text menus use karein", id: ".setting off btns" },
+      ]
+    },
+    {
+      title: "🛡️ Security & Protections",
+      rows: [
+        { title: "Anti Spam ON", description: "Spam command bhejne walo ko block karein", id: ".setting on antispam" },
+        { title: "Anti Spam OFF", description: "Spam protection band karein", id: ".setting off antispam" },
+        { title: "Anti Delete ON", description: "Delete kiye gaye messages save karein", id: ".setting on antidelete" },
+        { title: "Anti Delete OFF", description: "Anti-delete protection band karein", id: ".setting off antidelete" },
+        { title: "Reject Calls ON", description: "Incoming WhatsApp calls auto decline karein", id: ".setting on rejectcalls" },
+        { title: "Reject Calls OFF", description: "Calls aane ki ijaazat dein", id: ".setting off rejectcalls" },
       ]
     }
   ];
@@ -269,7 +474,7 @@ function getFlatOptions() {
   const list = [];
   sections.forEach(sec => {
     sec.rows.forEach(r => {
-      list.push({ label: r.title, cmd: r.id });
+      list.push({ label: r.title, cmd: r.id, category: sec.title });
     });
   });
   return list;
@@ -282,23 +487,31 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
   
   const state = {
     createdAt: Date.now(),
-    sessionId,
+    sessionId: sessionId,
     menuMsgId: null,
     options: flatOpts,
   };
 
-  const settings = await readSettings(sessionId);
-  const btnsOn = !!settings.btns_enabled;
+  let btnsOn = true;
+  try {
+    const settings = await readSettings(sessionId);
+    if (settings) {
+      if (typeof settings.btns_enabled !== "undefined") {
+        btnsOn = Boolean(settings.btns_enabled);
+      }
+    }
+  } catch (e) {}
 
   if (btnsOn) {
     try {
       const { ButtonV2 } = await import("@vanzxy/baileys");
       const sections = getSections();
+      const fittedThumb = await getFittedImageBuffer(SETTINGS_IMAGE);
 
       const btn = new ButtonV2(conn)
         .setBody(`${cardText}\n\n👇 *Select an option below to update settings:*`)
-        .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
-        .setThumbnail(SETTINGS_IMAGE);
+        .setFooter("© 2026 MALIYA-MD MINI BOT")
+        .setThumbnail(fittedThumb);
 
       btn.addRawButton({
         buttonId: ".setting menuopen",
@@ -307,7 +520,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
         nativeFlowInfo: {
           name: "single_select",
           paramsJson: JSON.stringify({
-            title: "Settings Categories ↯",
+            title: "Settings Menu ↯",
             sections: sections
           }),
         },
@@ -317,23 +530,35 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
 
       const sentMsg = await btn.send(from, { quoted: mek });
 
-      if (sentMsg?.key?.id) {
-        state.menuMsgId = sentMsg.key.id;
-        pendingSettingsMenu[key] = state;
-        return sentMsg;
+      if (sentMsg) {
+        if (sentMsg.key) {
+          if (sentMsg.key.id) {
+            state.menuMsgId = sentMsg.key.id;
+            pendingSettingsMenu[key] = state;
+            return sentMsg;
+          }
+        }
       }
     } catch (e) {
-      console.log("SETTINGS BUTTONV2 ERROR:", e?.message || e);
+      console.log("SETTINGS BUTTONV2 ERROR:", e);
     }
   }
 
-  // 📱 WhatsApp Mobile එකේ කැඩෙන්නේ නැති එක පෙළට සැකසූ Numbered Menu
-  let numberedCaption = `${cardText}\n\n╭─「 *CHANGE BY NUMBER* 」─◆\n`;
-  flatOpts.forEach((opt, idx) => {
-    const num = String(idx + 1).padStart(2, '0');
-    numberedCaption += `│ *[ ${num} ]* ${opt.label}\n`;
+  let numberedCaption = `${cardText}\n\n`;
+  let overallIdx = 1;
+
+  const sections = getSections();
+  sections.forEach(sec => {
+    numberedCaption += `*${sec.title}*\n`;
+    sec.rows.forEach(r => {
+      const num = String(overallIdx).padStart(2, '0');
+      numberedCaption += `│ *[ ${num} ]* ${r.title}\n`;
+      overallIdx++;
+    });
+    numberedCaption += `\n`;
   });
-  numberedCaption += `╰───────────────────────◆\n> 💬 *Swipe & Reply this message with a number...*`;
+
+  numberedCaption += `⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 💬 *Swipe & Reply this message with an option number...*`;
 
   const sentMsg = await conn.sendMessage(
     from,
@@ -344,9 +569,13 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     { quoted: mek }
   );
 
-  if (sentMsg?.key?.id) {
-    state.menuMsgId = sentMsg.key.id;
-    pendingSettingsMenu[key] = state;
+  if (sentMsg) {
+    if (sentMsg.key) {
+      if (sentMsg.key.id) {
+        state.menuMsgId = sentMsg.key.id;
+        pendingSettingsMenu[key] = state;
+      }
+    }
   }
   return sentMsg;
 }
@@ -361,23 +590,60 @@ cmd(
     filename: __filename,
   },
   async (conn, mek, m, { from, sender, args, reply, isOwner, sessionId }) => {
-    if (!(isOwner || isRealOwner(sender))) {
+    let hasOwnerPerms = false;
+    if (isOwner) {
+      hasOwnerPerms = true;
+    } else if (isRealOwner(sender)) {
+      hasOwnerPerms = true;
+    }
+
+    if (!hasOwnerPerms) {
       return reply("❌ *`[ ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ ɪs ᴏᴡɴᴇʀ ᴏɴʟʏ. ]`*");
     }
 
-    const action = String(args[0] || "menu").toLowerCase().trim();
-    const value = String(args.slice(1).join(" ") || "").toLowerCase().trim();
+    let action = "menu";
+    if (args) {
+      if (args[0]) {
+        action = String(args[0]).toLowerCase().trim();
+      }
+    }
+
+    let value = "";
+    if (args) {
+      if (args.length > 1) {
+        value = String(args.slice(1).join(" ")).toLowerCase().trim();
+      }
+    }
 
     try {
-      if (action === "menu" || action === "menuopen") {
+      if (action === "menu") {
         return await sendSettingsHome(conn, from, mek, reply, sender, sessionId);
-      }
-      
-      if (action === "status") return reply(await getStatusCard(sessionId));
-      if (action === "private") { await setSetting(sessionId, "mode", "private"); return reply("✅ *Bot Mode set to Private*"); }
-      if (action === "public") { await setSetting(sessionId, "mode", "public"); return reply("✅ *Bot Mode set to Public*"); }
-      
-      if (action === "on" || action === "off" || action === "toggle" || action === "workscope" || action === "presence" || action === "reactmode") {
+      } else if (action === "menuopen") {
+        return await sendSettingsHome(conn, from, mek, reply, sender, sessionId);
+      } else if (action === "status") {
+        return reply(await getStatusCard(sessionId));
+      } else if (action === "private") {
+        await setSetting(sessionId, "mode", "private");
+        return reply("✅ *Main Bot Mode set to Private*");
+      } else if (action === "public") {
+        await setSetting(sessionId, "mode", "public");
+        return reply("✅ *Main Bot Mode set to Public*");
+      } else if (action === "on") {
+        const result = await applySettingAction(sessionId, action, value);
+        return reply(result);
+      } else if (action === "off") {
+        const result = await applySettingAction(sessionId, action, value);
+        return reply(result);
+      } else if (action === "toggle") {
+        const result = await applySettingAction(sessionId, action, value);
+        return reply(result);
+      } else if (action === "workscope") {
+        const result = await applySettingAction(sessionId, action, value);
+        return reply(result);
+      } else if (action === "presence") {
+        const result = await applySettingAction(sessionId, action, value);
+        return reply(result);
+      } else if (action === "reactmode") {
         const result = await applySettingAction(sessionId, action, value);
         return reply(result);
       }
@@ -390,7 +656,7 @@ cmd(
   }
 );
 
-/* ================= EXACT MENU.JS STYLE REPLY HANDLER ================= */
+/* ================= EXACT MENU STYLE REPLY HANDLER ================= */
 const settingsReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
@@ -399,25 +665,55 @@ const settingsReplyHandler = {
 
     const texts = extractTexts(text, mek, m);
     for (const t of texts) {
-      if (resolveSettingsActionFromText(t)) return true;
+      if (resolveSettingsActionFromText(t)) {
+        return true;
+      }
     }
 
     const num = parseInt(String(text || "").trim(), 10);
-    const isNum = !isNaN(num) && num > 0 && num <= state.options.length;
+    let isNum = false;
+    if (!isNaN(num)) {
+      if (num > 0) {
+        if (num <= state.options.length) {
+          isNum = true;
+        }
+      }
+    }
 
     const quotedId = getQuotedId(m, mek);
-    const isQuoted = quotedId && quotedId === state.menuMsgId;
+    let isQuoted = false;
+    if (quotedId) {
+      if (quotedId === state.menuMsgId) {
+        isQuoted = true;
+      }
+    }
 
-    return isQuoted || isNum;
+    if (isQuoted) {
+      if (isNum) {
+        return true;
+      }
+    }
+    return false;
   },
   function: async (conn, mek, m, { from, body, sender, reply, isOwner, sessionId }) => {
-    if (!(isOwner || isRealOwner(sender))) return;
+    let hasOwnerPerms = false;
+    if (isOwner) {
+      hasOwnerPerms = true;
+    } else if (isRealOwner(sender)) {
+      hasOwnerPerms = true;
+    }
+
+    if (!hasOwnerPerms) return;
 
     const k = keyFor(sender, from);
     const state = pendingSettingsMenu[k];
     if (!state) return;
 
-    const sid = sessionId || state.sessionId;
+    let sid = state.sessionId;
+    if (sessionId) {
+      sid = sessionId;
+    }
+
     const texts = extractTexts(body, mek, m);
 
     let actionCmd = null;
@@ -431,8 +727,12 @@ const settingsReplyHandler = {
 
     if (!actionCmd) {
       const num = parseInt(String(body || "").trim(), 10);
-      if (!isNaN(num) && num > 0 && num <= state.options.length) {
-        actionCmd = resolveSettingsActionFromText(state.options[num - 1].cmd);
+      if (!isNaN(num)) {
+        if (num > 0) {
+          if (num <= state.options.length) {
+            actionCmd = resolveSettingsActionFromText(state.options[num - 1].cmd);
+          }
+        }
       }
     }
 
@@ -441,7 +741,13 @@ const settingsReplyHandler = {
     const now = Date.now();
     const sig = `${actionCmd.action}_${actionCmd.value}`;
     const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === sig && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+    if (lastMsg) {
+      if (lastMsg.text === sig) {
+        if (now - lastMsg.time < LOOP_COOLDOWN) {
+          return;
+        }
+      }
+    }
     lastProcessedMsg[k] = { text: sig, time: now };
 
     try {
@@ -455,6 +761,23 @@ const settingsReplyHandler = {
     }
   },
 };
+
+// 🔵 Blue Ticks Middleware: Jab `seen_all_msg` ON ho tab incoming message ko mark as read karega
+async function handleSeenAllMessages(conn, mek, sessionId) {
+  try {
+    if (!conn) return;
+    if (!mek) return;
+    if (!mek.key) return;
+    if (mek.key.fromMe) return;
+
+    const s = await readSettings(sessionId);
+    if (s) {
+      if (s.seen_all_msg) {
+        await conn.readMessages([mek.key]);
+      }
+    }
+  } catch (err) {}
+}
 
 if (Array.isArray(replyHandlers)) {
   replyHandlers.push(settingsReplyHandler);
@@ -474,4 +797,7 @@ setInterval(() => {
   }
 }, 30000);
 
-module.exports = { sendSettingsHome };
+module.exports = {
+  sendSettingsHome,
+  handleSeenAllMessages
+};
