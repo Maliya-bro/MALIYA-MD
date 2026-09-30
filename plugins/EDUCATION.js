@@ -53,7 +53,11 @@ const ALLOWED_YEARS = [
 ].map(y => ({ slug: y, name: y }));
 
 function keyFor(sender, from) {
-  return `${from || ""}`;
+  let res = "";
+  if (from) {
+    res = from;
+  }
+  return `${res}`;
 }
 
 function clearUserSession(k) {
@@ -89,16 +93,22 @@ async function getFittedImageBuffer(url) {
 
 // 🔥 Quoted Stanza ID හරියටම අල්ලා ගන්නා ශ්‍රිතය (Swipe to Reply)
 function getQuotedId(m, mek) {
-  return (
-    m?.quoted?.id ||
-    mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
-    m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
-    m?.message?.imageMessage?.contextInfo?.stanzaId ||
-    mek?.message?.imageMessage?.contextInfo?.stanzaId ||
-    m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
-    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
-    null
-  );
+  if (m && m.quoted && m.quoted.id) {
+    return m.quoted.id;
+  } else if (mek && mek.message && mek.message.extendedTextMessage && mek.message.extendedTextMessage.contextInfo && mek.message.extendedTextMessage.contextInfo.stanzaId) {
+    return mek.message.extendedTextMessage.contextInfo.stanzaId;
+  } else if (m && m.message && m.message.extendedTextMessage && m.message.extendedTextMessage.contextInfo && m.message.extendedTextMessage.contextInfo.stanzaId) {
+    return m.message.extendedTextMessage.contextInfo.stanzaId;
+  } else if (m && m.message && m.message.imageMessage && m.message.imageMessage.contextInfo && m.message.imageMessage.contextInfo.stanzaId) {
+    return m.message.imageMessage.contextInfo.stanzaId;
+  } else if (mek && mek.message && mek.message.imageMessage && mek.message.imageMessage.contextInfo && mek.message.imageMessage.contextInfo.stanzaId) {
+    return mek.message.imageMessage.contextInfo.stanzaId;
+  } else if (m && m.message && m.message.interactiveResponseMessage && m.message.interactiveResponseMessage.contextInfo && m.message.interactiveResponseMessage.contextInfo.stanzaId) {
+    return m.message.interactiveResponseMessage.contextInfo.stanzaId;
+  } else if (mek && mek.message && mek.message.interactiveResponseMessage && mek.message.interactiveResponseMessage.contextInfo && mek.message.interactiveResponseMessage.contextInfo.stanzaId) {
+    return mek.message.interactiveResponseMessage.contextInfo.stanzaId;
+  }
+  return null;
 }
 
 function extractTexts(body, mek, m) {
@@ -147,7 +157,10 @@ async function scrapePapersFromUrl(targetUrl) {
     const papers = [];
 
     $("section.section .categorycard a.custom-card").each((_, el) => {
-      let title = $(el).find("h5.cate-title").text().trim() \vert{}\vert{} $(el).text().trim();
+      let title = $(el).find("h5.cate-title").text().trim();
+      if (!title) {
+        title = $(el).text().trim();
+      }
       let href = $(el).attr("href");
       if (href && !href.startsWith("http")) href = BASE_URL + href;
       if (title && href) papers.push({ name: title, url: href });
@@ -165,7 +178,10 @@ async function scrapeMediumsFromPaperPage(paperUrl) {
     const mediums = [];
 
     $(".product-info .btn-row a").each((_, el) => {
-      let mediumName = $(el).find("button.btn").text().trim() \vert{}\vert{} $(el).text().trim();
+      let mediumName = $(el).find("button.btn").text().trim();
+      if (!mediumName) {
+        mediumName = $(el).text().trim();
+      }
       let link = $(el).attr("href");
       if (link && !link.startsWith("http")) link = BASE_URL + link;
 
@@ -296,10 +312,18 @@ const eduReplyHandler = {
     const isNum = !isNaN(num) && num > 0;
 
     const quotedId = getQuotedId(m, mek);
-    const isQuoted = quotedId && quotedId === state.expectedMsgId;
+    let isQuoted = false;
+    if (quotedId && quotedId === state.expectedMsgId) {
+      isQuoted = true;
+    }
 
     // Button click එකක් නම් හෝ Quoted Reply කර අංකයක් එවා ඇත්නම් පමණක් trigger වීම
-    return isQuoted || isNum;
+    if (isQuoted) {
+      return true;
+    } else if (isNum) {
+      return true;
+    }
+    return false;
   },
   function: async (sock, mek, m, { body, sender, from, sessionId }) => {
     const k = keyFor(sender, from);
@@ -332,12 +356,20 @@ const eduReplyHandler = {
     }
 
     // Quoted reply validation
-    if (!actionPayload && (!quotedId || quotedId !== pending.expectedMsgId)) {
-      return;
+    if (!actionPayload) {
+      if (!quotedId) {
+        return;
+      } else if (quotedId !== pending.expectedMsgId) {
+        return;
+      }
     }
 
     const now = Date.now();
-    const sig = `${pending.step}_${actionPayload || choiceNum}`;
+    let currentPayloadOrNum = actionPayload;
+    if (!currentPayloadOrNum) {
+      currentPayloadOrNum = choiceNum;
+    }
+    const sig = `${pending.step}_${currentPayloadOrNum}`;
     const lastMsg = lastProcessedMsg[k];
     if (lastMsg && lastMsg.text === sig && (now - lastMsg.time) < LOOP_COOLDOWN) return;
     lastProcessedMsg[k] = { text: sig, time: now };
@@ -463,7 +495,10 @@ const eduReplyHandler = {
     // ──────────────────────────────────────────────────────────
     else if (pending.step === "select_grade") {
       let chosenSlug = actionPayload;
-      const curList = pending.currentList || [];
+      let curList = [];
+      if (pending.currentList) {
+        curList = pending.currentList;
+      }
       if (!chosenSlug && choiceNum && choiceNum <= curList.length) {
         chosenSlug = curList[choiceNum - 1].slug;
       }
@@ -701,7 +736,14 @@ const eduReplyHandler = {
     // STEP 5: TERM SELECTED ➔ PAPERS LIST POPUP
     // ──────────────────────────────────────────────────────────
     else if (pending.step === "select_term") {
-      let termNum = actionPayload || (choiceNum ? String(choiceNum) : null);
+      let termNum = actionPayload;
+      if (!termNum) {
+        if (choiceNum) {
+          termNum = String(choiceNum);
+        } else {
+          termNum = null;
+        }
+      }
       if (!termNum || !["1", "2", "3"].includes(termNum)) return;
 
       pending.isProcessing = true;
@@ -727,7 +769,12 @@ const eduReplyHandler = {
     // STEP 6: PAPER SELECTED ➔ MEDIUM QUICK REPLY BUTTONS
     // ──────────────────────────────────────────────────────────
     else if (pending.step === "select_paper") {
-      let paperIdx = actionPayload ? parseInt(actionPayload, 10) : choiceNum;
+      let paperIdx = null;
+      if (actionPayload) {
+        paperIdx = parseInt(actionPayload, 10);
+      } else {
+        paperIdx = choiceNum;
+      }
       if (!paperIdx || paperIdx < 1 || paperIdx > pending.paperList.length) return;
 
       pending.isProcessing = true;
@@ -794,7 +841,12 @@ const eduReplyHandler = {
     // STEP 7: MEDIUM SELECTED ➔ DIRECT DOWNLOAD & SEND DOCUMENT/PDF
     // ──────────────────────────────────────────────────────────
     else if (pending.step === "select_medium") {
-      let medIdx = actionPayload ? parseInt(actionPayload, 10) : choiceNum;
+      let medIdx = null;
+      if (actionPayload) {
+        medIdx = parseInt(actionPayload, 10);
+      } else {
+        medIdx = choiceNum;
+      }
       if (!medIdx || medIdx < 1 || medIdx > pending.mediums.length) return;
 
       pending.isProcessing = true;
@@ -880,7 +932,11 @@ async function sendPdfDocument(sock, mek, from, fileUrl, rawTitle, medium) {
   try {
     await sock.sendMessage(from, { react: { text: "📥", key: mek.key } });
 
-    const cleanTitle = (rawTitle || "Document").replace(/[^\w\s.-]/gi, "").substring(0, 55).trim();
+    let titleBase = rawTitle;
+    if (!titleBase) {
+      titleBase = "Document";
+    }
+    const cleanTitle = titleBase.replace(/[^\w\s.-]/gi, "").substring(0, 55).trim();
 
     let caption = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *EDUCATION DOWNLOAD* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
     caption += `📑 *Document :* ${cleanTitle}\n`;
