@@ -132,7 +132,7 @@ async function getStatusCard(sessionId) {
 │ 🕹 *Menu UI:* ${btnsModeText(Boolean(s.btns_enabled))}
 │ 🎭 *Presence:* ${presenceText(presStr)}
 │ 🤖 *AI Chat:* ${onOff(Boolean(s.auto_msg))}
-│ 👁️ *Seen Msg (Blue Ticks):* ${onOff(Boolean(s.seen_all_msg))}
+│ 👁️ *Seen Msg:* ${onOff(Boolean(s.seen_all_msg))}
 │ 💖 *Auto React:* ${onOff(Boolean(s.auto_react_msg))}
 │ 🔮 *React Scope:* ${reactModeText(reactModeStr)}
 │ 🛡️ *Anti Delete:* ${onOff(Boolean(s.anti_delete))}
@@ -141,7 +141,7 @@ async function getStatusCard(sessionId) {
 │ 👁️️ *Status Seen:* ${onOff(Boolean(s.auto_status_seen))}
 │ ❤️ *Status React:* ${onOff(Boolean(s.auto_status_react))}
 │ 📥 *Status Save:* ${onOff(Boolean(s.auto_download_status))}
-╰───────────────────◆`.trim();
+╰───────────◆──◆──◆──◆`.trim();
 }
 
 function mapKey(name) {
@@ -389,7 +389,7 @@ function getSections() {
       rows: [
         { title: "🧠 AI Chatbot ON", description: "Enable smart automated AI replies", id: ".setting on automsg" },
         { title: "💤 AI Chatbot OFF", description: "Disable automated AI chatbot replies", id: ".setting off automsg" },
-        { title: "🔵 Seen All Msg ON (Blue Ticks)", description: "Mark all incoming messages as read instantly", id: ".setting on seenallmsg" },
+        { title: "🔵 Seen All Msg ON", description: "Mark all incoming messages as read instantly", id: ".setting on seenallmsg" },
         { title: "⚪ Seen All Msg OFF", description: "Disable instant blue tick read marks", id: ".setting off seenallmsg" },
         { title: "😍 Msg Auto React ON", description: "Automatically react to incoming chat messages", id: ".setting on autoreactmsg" },
         { title: "🤐 Msg Auto React OFF", description: "Disable message auto reactions", id: ".setting off autoreactmsg" },
