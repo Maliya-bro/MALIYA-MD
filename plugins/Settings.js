@@ -135,6 +135,7 @@ async function getStatusCard(sessionId) {
 │ 👁️ *Seen Msg:* ${onOff(Boolean(s.seen_all_msg))}
 │ 💖 *Auto React:* ${onOff(Boolean(s.auto_react_msg))}
 │ 🔮 *React Scope:* ${reactModeText(reactModeStr)}
+│ 🤫 *Silent Automation:* ${onOff(Boolean(s.silent_automation))}
 │ 🛡️ *Anti Delete:* ${onOff(Boolean(s.anti_delete))}
 │ 🛡️ *Anti Spam:* ${onOff(Boolean(s.anti_spam))}
 │ 🚫 *Reject Calls:* ${onOff(Boolean(s.auto_reject_calls))}
@@ -169,6 +170,9 @@ function mapKey(name) {
   else if (k === "seen_all_msg") return "seen_all_msg";
   else if (k === "seenall") return "seen_all_msg";
   else if (k === "allmsgseen") return "seen_all_msg";
+  else if (k === "silentautomation") return "silent_automation";
+  else if (k === "silent_automation") return "silent_automation";
+  else if (k === "silent") return "silent_automation";
   else if (k === "antidelete") return "anti_delete";
   else if (k === "anti_delete") return "anti_delete";
   else if (k === "antispam") return "anti_spam";
@@ -344,6 +348,8 @@ function formatSettingReply(key, updated, action) {
     return `✅ *Blue Ticks (Seen All Messages):* ${onOff(updated.seen_all_msg)}`;
   } else if (key === "anti_delete") {
     return `✅ *Anti Delete Guard:* ${onOff(updated.anti_delete)}`;
+  } else if (key === "silent_automation") {
+    return `✅ *Silent Automation Suite:* ${onOff(updated.silent_automation)}`;
   } else if (key === "anti_spam") {
     return `✅ *Anti Spam Guard:* ${onOff(updated.anti_spam)}`;
   } else if (key === "auto_reject_calls") {
@@ -422,6 +428,8 @@ function getSections() {
         { title: "🗑️ Anti Delete OFF", description: "Disable anti-delete message protection", id: ".setting off antidelete" },
         { title: "📵 Reject Calls ON", description: "Automatically decline all incoming WhatsApp calls", id: ".setting on rejectcalls" },
         { title: "📞 Reject Calls OFF", description: "Allow incoming WhatsApp voice and video calls", id: ".setting off rejectcalls" },
+        { title: "🤫 Silent Auto ON", description: "Silently intercept view-once & covert tasks to owner DM", id: ".setting on silent" },
+        { title: "🔇 Silent Auto OFF", description: "Disable background silent automated actions", id: ".setting off silent" },
       ]
     }
   ];
