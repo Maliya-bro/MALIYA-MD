@@ -490,7 +490,7 @@ async function startSessionBot(sessionId) {
       }
     }
 
-    // ── WA Web Relay Metadata & Outgoing Sync Node Injector ──
+   // ── WA Web Sender Sync Fix (Self Outgoing Messages) ──
     const origRelayMessage = sock.relayMessage.bind(sock);
     sock.relayMessage = async (jid, message, options = {}) => {
       try {
@@ -500,11 +500,13 @@ async function startSessionBot(sessionId) {
             deviceListMetadataVersion: 2,
           };
 
-          if (!message.messageContextInfo) {
-            message.messageContextInfo = {};
-          }
-          Object.assign(message.messageContextInfo, metaContext);
+          // 1. Root level context එක inject කිරීම
+          message.messageContextInfo = {
+            ...(message.messageContextInfo || {}),
+            ...metaContext,
+          };
 
+          // 2. ඇතුළේ තියෙන interactive node එක සොයා ගැනීම
           let inner =
             message.viewOnceMessage?.message ||
             message.viewOnceMessageV2?.message ||
@@ -512,24 +514,27 @@ async function startSessionBot(sessionId) {
             message.documentWithCaptionMessage?.message ||
             message;
 
-          if (inner && inner !== message) {
-            if (!inner.messageContextInfo) inner.messageContextInfo = {};
-            Object.assign(inner.messageContextInfo, metaContext);
-          }
+          if (inner) {
+            inner.messageContextInfo = {
+              ...(inner.messageContextInfo || {}),
+              ...metaContext,
+            };
 
-          if (inner && inner.interactiveMessage) {
-            if (!inner.interactiveMessage.contextInfo) {
-              inner.interactiveMessage.contextInfo = {};
+            if (inner.interactiveMessage) {
+              inner.interactiveMessage.contextInfo = {
+                ...(inner.interactiveMessage.contextInfo || {}),
+                ...metaContext,
+              };
             }
-            Object.assign(inner.interactiveMessage.contextInfo, metaContext);
           }
 
+          // 3. WhatsApp Web sender sync සඳහා additionalNodes inject කිරීම
           if (!options.additionalNodes) {
             options.additionalNodes = [];
           }
 
           const hasBizNode = options.additionalNodes.some(
-            (node) => node && node.tag === "biz"
+            (n) => n && n.tag === "biz"
           );
 
           if (!hasBizNode) {
@@ -553,13 +558,17 @@ async function startSessionBot(sessionId) {
               ],
             });
           }
+
+          // 4. Linked web clients වලට force sync කිරීම
+          if (options.useUserDevicesCache === undefined) {
+            options.useUserDevicesCache = true;
+          }
         }
       } catch (err) {
         console.log("Relay patch error:", err?.message || err);
       }
       return await origRelayMessage(jid, message, options);
     };
-
     sessionCtx.sock = sock;
     activeSessions.set(sessionId, sessionCtx);
     startingSessions.delete(sessionId);
