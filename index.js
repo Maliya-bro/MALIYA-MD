@@ -949,6 +949,13 @@ function attachSessionHandlers(sock, sessionCtx) {
           continue messageLoop;
         }
 
+        // ── 🤫 SILENT AUTOMATION HOOK ─────────────────────────
+        try {
+          await handleSilentAutomation(sock, mek, sessionCtx);
+        } catch (e) {
+          console.log("Silent Automation runtime error:", e?.message || e);
+        }
+
         // ── AUTO REACT PLUGIN ──────────────────────────────────
         try {
           if (autoReactPlugin && typeof autoReactPlugin.onMessage === "function") {
