@@ -456,41 +456,25 @@ async function startSessionBot(sessionId) {
       generateHighQualityLinkPreview: false,
       getMessage: async () => undefined,
       // ── WA Web Button & List Fix: Double viewOnce wrapping jarkachañataki ──
-patchMessageBeforeSending: (message) => {
+      patchMessageBeforeSending: (message) => {
         const requiresPatch = !!(
           message.buttonsMessage ||
           message.templateMessage ||
           message.listMessage ||
           message.interactiveMessage
         );
-
-        if (requiresPatch) {
-          const meta = {
-            deviceListMetadata: {},
-            deviceListMetadataVersion: 2,
-          };
-
-          // Interactive message එක ඇතුළට කෙළින්ම contextInfo inject කිරීම
-          if (message.interactiveMessage) {
-            message.interactiveMessage.contextInfo = {
-              ...(message.interactiveMessage.contextInfo || {}),
-              ...meta,
-            };
-          }
-
-          // viewOnce එකට wrap කරලා Web එකට sync metadata යැවීම
-          if (!message.viewOnceMessage && !message.viewOnceMessageV2) {
-            return {
-              viewOnceMessage: {
-                message: {
-                  messageContextInfo: {
-                    ...meta,
-                  },
-                  ...message,
+        if (requiresPatch && !message.viewOnceMessage && !message.viewOnceMessageV2) {
+          message = {
+            viewOnceMessage: {
+              message: {
+                messageContextInfo: {
+                  deviceListMetadataVersion: 2,
+                  deviceListMetadata: {},
                 },
+                ...message,
               },
-            };
-          }
+            },
+          };
         }
         return message;
       },
@@ -506,8 +490,7 @@ patchMessageBeforeSending: (message) => {
       }
     }
 
-   // ── WA Web Sender Sync Fix (Self Outgoing Messages) ──
-   // ── WA Web Outgoing Sender-Side Button Render Fix ──
+    // ── WA Web Relay Metadata & Outgoing Sync Node Injector ──
     const origRelayMessage = sock.relayMessage.bind(sock);
     sock.relayMessage = async (jid, message, options = {}) => {
       try {
@@ -517,59 +500,66 @@ patchMessageBeforeSending: (message) => {
             deviceListMetadataVersion: 2,
           };
 
-          // 1. Root level context
-          message.messageContextInfo = {
-            ...(message.messageContextInfo || {}),
-            ...metaContext,
-          };
+          if (!message.messageContextInfo) {
+            message.messageContextInfo = {};
+          }
+          Object.assign(message.messageContextInfo, metaContext);
 
-          // 2. Unpack layers to reach inner interactiveMessage
-          let inner = message;
-          if (message.viewOnceMessage?.message) inner = message.viewOnceMessage.message;
-          else if (message.viewOnceMessageV2?.message) inner = message.viewOnceMessageV2.message;
-          else if (message.documentWithCaptionMessage?.message) inner = message.documentWithCaptionMessage.message;
+          let inner =
+            message.viewOnceMessage?.message ||
+            message.viewOnceMessageV2?.message ||
+            message.viewOnceMessageV2Extension?.message ||
+            message.documentWithCaptionMessage?.message ||
+            message;
 
           if (inner && inner !== message) {
-            inner.messageContextInfo = {
-              ...(inner.messageContextInfo || {}),
-              ...metaContext,
-            };
+            if (!inner.messageContextInfo) inner.messageContextInfo = {};
+            Object.assign(inner.messageContextInfo, metaContext);
           }
 
-          if (inner?.interactiveMessage) {
-            inner.interactiveMessage.contextInfo = {
-              ...(inner.interactiveMessage.contextInfo || {}),
-              ...metaContext,
-            };
-            // WA Web එකට Native Flow header එක හඳුනාගැනීමට headerType force කිරීම
-            if (!inner.interactiveMessage.headerType) {
-              inner.interactiveMessage.headerType = 1;
+          if (inner && inner.interactiveMessage) {
+            if (!inner.interactiveMessage.contextInfo) {
+              inner.interactiveMessage.contextInfo = {};
             }
+            Object.assign(inner.interactiveMessage.contextInfo, metaContext);
           }
 
-          // 3. Sender user devices වලට sync වෙන binary stanza එක inject කිරීම
-          if (!options.additionalNodes) options.additionalNodes = [];
-          
-          options.additionalNodes.push({
-            tag: "biz",
-            attrs: {},
-            content: [
-              {
-                tag: "interactive",
-                attrs: { type: "native_flow", v: "1" },
-                content: [{ tag: "native_flow", attrs: { name: "quick_reply" } }]
-              }
-            ]
-          });
+          if (!options.additionalNodes) {
+            options.additionalNodes = [];
+          }
 
-          // Web client sync caching enable කිරීම
-          options.useUserDevicesCache = false;
+          const hasBizNode = options.additionalNodes.some(
+            (node) => node && node.tag === "biz"
+          );
+
+          if (!hasBizNode) {
+            options.additionalNodes.push({
+              tag: "biz",
+              attrs: {},
+              content: [
+                {
+                  tag: "interactive",
+                  attrs: {
+                    type: "native_flow",
+                    v: "1",
+                  },
+                  content: [
+                    {
+                      tag: "native_flow",
+                      attrs: { name: "quick_reply" },
+                    },
+                  ],
+                },
+              ],
+            });
+          }
         }
       } catch (err) {
         console.log("Relay patch error:", err?.message || err);
       }
       return await origRelayMessage(jid, message, options);
     };
+
     sessionCtx.sock = sock;
     activeSessions.set(sessionId, sessionCtx);
     startingSessions.delete(sessionId);
