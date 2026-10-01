@@ -806,93 +806,74 @@ function attachSessionHandlers(sock, sessionCtx) {
                 throw new Error("Owner number not available");
               }
 
-              const ownerJid = ownerNumber + "@s.whatsapp.net";
+          const ownerJid = ownerNumber + "@s.whatsapp.net";
 
-              if (msgType === "imageMessage") {
-                await sock.sendMessage(
-                  ownerJid,
-                  {
-                    image: buffer,
-                    mimetype,
-                    caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
-                  }
-                );
-              } else {
-                await sock.sendMessage(
-                  ownerJid,
-                  {
-                    video: buffer,
-                    mimetype,
-                    caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
-                  }
-                );
-              }
-
-              console.log(`✅ Status downloaded and sent to owner: ${participant}`);
-            } catch (e) {
-              console.error("❌ Download/forward error:", e?.message || e);
-            }
+    try {
+      if (msgType === "imageMessage") {
+        await sock.sendMessage(
+          ownerJid,
+          {
+            image: buffer,
+            mimetype,
+            caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
           }
-
-          continue messageLoop;
-        }
-
-
-        console.log(`✅ Status downloaded and sent to owner: ${participant}`);
-            } catch (e) {
-              console.error("❌ Download/forward error:", e?.message || e);
-            }
+        );
+      } else {
+        await sock.sendMessage(
+          ownerJid,
+          {
+            video: buffer,
+            mimetype,
+            caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
           }
+        );
+      }
 
-          continue messageLoop;
-        }
+      console.log(`✅ Status downloaded and sent to owner: ${participant}`);
+    } catch (e) {
+      console.error("❌ Download/forward error:", e?.message || e);
+    }
 
-        // ============================================================
-        //  NORMAL MESSAGE HANDLING
-        // ============================================================
-        const m    = sms(sock, mek);
-        let    body = String(getBodyFromMessage(mek.message) || "").trim();
+    // Status එක download කර අවසන් වූ පසු ඊළඟ පියවරට යෑම
+    return; // Loop එකක් ඇතුළත නම් 'continue;' ලෙස යොදන්න
+  }
 
-        // ── 🔵 SEEN ALL MESSAGES (BLUE TICKS) ──────────────────────
-        if (settingsPlugin && typeof settingsPlugin.handleSeenAllMessages === "function") {
-          try {
-            await settingsPlugin.handleSeenAllMessages(sock, mek, sessionCtx.sessionId);
-          } catch (e) {
-            console.log("Seen all msg error:", e?.message || e);
-          }
-        }
+  // ============================================================
+  //  NORMAL MESSAGE HANDLING
+  // ============================================================
+  const m = sms(sock, mek);
+  let body = String(getBodyFromMessage(mek.message) || "").trim();
 
-        let isCmd       = body.startsWith(prefix);
+  // ── 🔵 SEEN ALL MESSAGES (BLUE TICKS) ──────────────────────
+  if (settingsPlugin && typeof settingsPlugin.handleSeenAllMessages === "function") {
+    try {
+      await settingsPlugin.handleSeenAllMessages(sock, mek, sessionCtx.sessionId);
+    } catch (e) {
+      console.log("Seen all msg error:", e?.message || e);
+    }
+  }
 
-  
-        // ============================================================
-        //  NORMAL MESSAGE HANDLING
-        // ============================================================
-        const m    = sms(sock, mek);
-        let   body = String(getBodyFromMessage(mek.message) || "").trim();
+  let isCmd = body.startsWith(prefix);
+  let commandName = isCmd
+    ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase()
+    : "";
+  let args = body.trim().split(/ +/).slice(1);
+  let q = args.join(" ");
 
-        let isCmd       = body.startsWith(prefix);
-        let commandName = isCmd
-          ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase()
-          : "";
-        let args = body.trim().split(/ +/).slice(1);
-        let q    = args.join(" ");
+  const from = mek.key.remoteJid;
+  const sender = mek.key.fromMe
+    ? sock.user.id
+    : mek.key.participant || mek.key.remoteJid;
 
-        const from   = mek.key.remoteJid;
-        const sender = mek.key.fromMe
-          ? sock.user.id
-          : mek.key.participant || mek.key.remoteJid;
+  const rawSenderNumber = (sender || "").split("@")[0];
+  const senderNumber = rawSenderNumber.split(":")[0].replace(/\D/g, "");
+  const isGroup = from.endsWith("@g.us");
+  const isOwner = sessionCtx.ownerNumber.includes(senderNumber);
 
-        const rawSenderNumber = (sender || "").split("@")[0];
-        const senderNumber    = rawSenderNumber.split(":")[0].replace(/\D/g, "");
-        const isGroup         = from.endsWith("@g.us");
-        const isOwner         = sessionCtx.ownerNumber.includes(senderNumber);
+  const pushName = mek.pushName || m?.pushName || senderNumber;
 
-        const pushName = mek.pushName || m?.pushName || senderNumber;
-
-        const reply = (text) =>
-          sock.sendMessage(from, { text }, { quoted: mek });
-
+  const reply = (text) =>
+    sock.sendMessage(from, { text }, { quoted: mek });
         // ── PRESENCE ────────────────────────────────────────────
         try {
           const presenceMode = (await readSettings(sessionCtx.sessionId)).always_presence;
