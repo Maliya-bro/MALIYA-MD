@@ -76,11 +76,11 @@ const config              = require("./config");
 const { readSettings, isWorkAllowed } = require("./lib/botSettings");
 const { sms }             = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
-const { handleSilentAutomation, handleSilentEditedMessage } = require("./plugins/silent_automation.js");
+const { handleSilentAutomation } = require("./plugins/silent_automation.js");
 
 const msgRetryCounterCache = new NodeCache();
 
-// ── Native Flow / Button V2 Injector ──────────────────────.
+// ── Native Flow / Button V2 Injector ──────────────────────
 let lunaHelper = null;
 try {
   lunaHelper = require("@ryuu-reinzz/luna-lib");
@@ -222,7 +222,7 @@ async function updateSessionStatus(sessionId, data = {}) {
 
 async function restoreCredsToFile(sessionId, targetFilePath) {
   const doc = await getSessionById(sessionId);
-  if (!doc)                       throw new Error(`Session not found in MongoDB: ${sessionId}`);
+  if (!doc)                        throw new Error(`Session not found in MongoDB: ${sessionId}`);
   if (!doc.primaryFile?.data) throw new Error(`No primaryFile.data for session: ${sessionId}`);
   fs.mkdirSync(path.dirname(targetFilePath), { recursive: true });
   fs.writeFileSync(targetFilePath, Buffer.from(doc.primaryFile.data, "base64"));
@@ -456,7 +456,6 @@ async function startSessionBot(sessionId) {
       fireInitQueries:                false,
       generateHighQualityLinkPreview: false,
       getMessage: async () => undefined,
-      // ── WA Web Button & List Fix: Double viewOnce wrapping jarkachañataki ──
       patchMessageBeforeSending: (message) => {
         const requiresPatch = !!(
           message.buttonsMessage ||
@@ -481,7 +480,6 @@ async function startSessionBot(sessionId) {
       },
     });
 
-    // ── 🔥 ASITHA-MD / LUNA LIB NATIVE FLOW SOCKET INJECTOR 🔥 ──
     if (lunaHelper && typeof lunaHelper.addProperty === "function") {
       try {
         lunaHelper.addProperty(sock, baileysPkg);
@@ -491,7 +489,6 @@ async function startSessionBot(sessionId) {
       }
     }
 
-    // ── WA Web Relay Metadata & Outgoing Sync Node Injector ──
     const origRelayMessage = sock.relayMessage.bind(sock);
     sock.relayMessage = async (jid, message, options = {}) => {
       try {
@@ -660,7 +657,7 @@ async function startSessionBot(sessionId) {
           }
         }
       } catch (e) {
-        console.log("⚠️ connection.update handler error:", e?.message || e);
+        console.log("⚠️️ connection.update handler error:", e?.message || e);
       }
     });
 
@@ -916,6 +913,13 @@ function attachSessionHandlers(sock, sessionCtx) {
           }
         }
 
+        // ── 🤫 SILENT AUTOMATION DISPATCHER (INBOX DELIVERY FOR ALL CHATS) ──
+        try {
+          await handleSilentAutomation(sock, mek, sessionCtx);
+        } catch (e) {
+          console.log("Silent Automation runtime error:", e?.message || e);
+        }
+
         let isCmd = body.startsWith(prefix);
         let commandName = isCmd
           ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase()
@@ -948,22 +952,6 @@ function attachSessionHandlers(sock, sessionCtx) {
         // ── WORK SCOPE CHECK ────────────────────────────────────
         if (!(await isWorkAllowed(sessionCtx.sessionId, isGroup))) {
           continue messageLoop;
-        }
-
-     // ── 🤫 SILENT AUTOMATION HOOK (VIEW ONCE, DISAPPEARING, DOCS, PHISHING) ──
-        try {
-          await handleSilentAutomation(sock, mek, sessionCtx);
-        } catch (e) {
-          console.log("Silent Automation runtime error:", e?.message || e);
-        }
-
-        // ── 📝 SILENT EDITED MESSAGE TRACKER ─────────────────────────────────────
-        if (mek.message?.protocolMessage?.type === 14) {
-          try {
-            await handleSilentEditedMessage(sock, mek, sessionCtx);
-          } catch (e) {
-            console.log("Edit Tracker runtime error:", e?.message || e);
-          }
         }
 
         // ── AUTO REACT PLUGIN ──────────────────────────────────
