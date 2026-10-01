@@ -86,7 +86,8 @@
     "@vanzxy/baileys": "latest",
     "got-scraping": "latest",
     "tough-cookie": "latest",
-    "@ryuu-reinzz/luna-lib": "latest"
+    "@ryuu-reinzz/luna-lib": "latest",
+    "node-cache": "latest"
   
     
 
