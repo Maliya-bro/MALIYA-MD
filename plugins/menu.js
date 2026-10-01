@@ -203,18 +203,18 @@ function menuHeader(userName = "User") {
 ✨ 👋 *ʜɪ, ${styledUser}!*
 
 ╔═════. .★.══════════╗
-🤖 *ʙᴏᴛ ɴᴀᴍᴇ :* ${BOT_NAME}
+🤖 *ʙᴏᴛ :* ${BOT_NAME}
 👤 *ᴜsᴇʀ :* ${styledUser}
-👑 *ᴏᴡɴᴇʀ :* ${OWNER_NUMBER}
+👑 *ᴏᴡɴᴇʀ :* MALINDU NADITH
 🕒 *ᴛɪᴍᴇ :* ${time}
 📅 *ᴅᴀᴛᴇ :* ${date}
 🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]
 ╚══════════. .★.═════╝
 
-╰─────✦❘•❘✦────•┈➤
 👇 *Select a command category below to view commands:*
 
-🌐 *Web:* https://maliya-md.vercel.app`;
+🌐 *Web:* https://maliya-md.vercel.app
+🌸 *Video* https://youtube.com/shorts/sxWbUypZG64?si=ZNPWj8kLWEjRM1tf`;
 }
 
 function buildStyledMainMenu(state, userName) {
