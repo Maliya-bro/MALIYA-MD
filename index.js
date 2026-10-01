@@ -15,7 +15,7 @@ process.on("unhandledRejection", (reason) => {
     msg.includes("ECONNRESET") ||
     msg.includes("ETIMEDOUT")
   ) {
-    console.log("⚠️ Non-fatal rejection suppressed:", msg.slice(0, 120));
+    console.log("⚠️️ Non-fatal rejection suppressed:", msg.slice(0, 120));
     return;
   }
   console.error("❌ Unhandled Rejection:", msg);
@@ -35,6 +35,20 @@ process.on("uncaughtException", (err) => {
   }
   console.error("❌ Uncaught Exception:", msg);
 });
+
+// Suppress libsignal Bad MAC spam to prevent Railway rate limit flooding
+const originalConsoleError = console.error;
+console.error = (...args) => {
+  const errStr = args.map(a => String(a?.message || a || "")).join(" ");
+  if (
+    errStr.includes("Bad MAC") ||
+    errStr.includes("Session error") ||
+    errStr.includes("Failed to decrypt")
+  ) {
+    return;
+  }
+  originalConsoleError.apply(console, args);
+};
 
 /* ==================== IMPORTS ==================== */
 const baileysPkg = require("@whiskeysockets/baileys");
@@ -63,7 +77,6 @@ const { readSettings, isWorkAllowed } = require("./lib/botSettings");
 const { sms }            = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 
-// Message retry cache for Bad MAC auto-fix
 const msgRetryCounterCache = new NodeCache();
 
 // ── Native Flow / Button V2 Injector ──────────────────────
@@ -431,16 +444,17 @@ async function startSessionBot(sessionId) {
     };
 
     const sock = makeWASocket({
-      logger:                         P({ level: "silent" }),
+      logger:                         P({ level: "fatal" }),
       printQRInTerminal:              false,
       browser:                        Browsers.macOS("Firefox"),
       auth:                           state,
       version,
-      msgRetryCounterCache,           // Bad MAC auto-retry fix
-      syncFullHistory:                false, // පරණ message queue එකෙන් delay වීම නවත්වයි
-      markOnlineOnConnect:            true,
-      generateHighQualityLinkPreview: true,
-      getMessage: async () => ({ conversation: "" }), // Decrypt mismatch fix
+      msgRetryCounterCache,
+      syncFullHistory:                false,
+      markOnlineOnConnect:            false,
+      fireInitQueries:                false,
+      generateHighQualityLinkPreview: false,
+      getMessage: async () => undefined,
       // ── WA Web Button & List Fix (Buttons වෙනස් නොකර Metadata එකතු කිරීම) ──
       patchMessageBeforeSending: (message) => {
         const requiresPatch = !!(
@@ -562,7 +576,7 @@ async function startSessionBot(sessionId) {
 🚀📦 Version  : ${BOT_VERSION}
 
 🕒⏳ Time      : ${time}
-📅🗓️️ Date      : ${date}
+📅🗓 Date      : ${date}
 
 💬📖 Type .menu to start
 🔥🚀 Powered by MALIYA-MD Engine
@@ -607,7 +621,7 @@ async function startSessionBot(sessionId) {
           }
         }
       } catch (e) {
-        console.log("⚠️️ connection.update handler error:", e?.message || e);
+        console.log("⚠️ connection.update handler error:", e?.message || e);
       }
     });
 
@@ -707,7 +721,6 @@ function attachSessionHandlers(sock, sessionCtx) {
       try {
         if (!mek?.message) continue messageLoop;
 
-        // ⏱️ Delay Fix: පැය ගණනක් disconnect වී තිබී connect වෙද්දී එන තත්පර 60ට වඩා පරණ messages skip කිරීම
         const msgTime = mek.messageTimestamp;
         if (msgTime && (Math.floor(Date.now() / 1000) - msgTime) > 60) {
           continue messageLoop;
@@ -767,8 +780,8 @@ function attachSessionHandlers(sock, sessionCtx) {
               const emojis = [
                 "😂", "🤣", "😍", "🥰", "😎", "🤔", "😭", "😱", "🔥", "💀",
                 "🥺", "😊", "😈", "👻", "🤖", "😤", "🥳", "🤯", "😨", "🥶",
-                "❤️️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💕", "💞", "💓",
-                "👍", "👎", "👏", "🙌", "🤝", "✌️️", "🤞", "🤙", "💪", "🖕",
+                "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💕", "💞", "💓",
+                "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤞", "🤙", "💪", "🖕",
                 "🙏", "💅", "✨", "⭐", "🌟", "💫", "⚡", "🎉", "🎊", "🥳",
                 "🎈", "🎯", "🏆", "💯", "🔞", "❓", "❗", "💢", "🐱", "🐶",
                 "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐸", "🍿", "🍕",
@@ -945,7 +958,7 @@ function attachSessionHandlers(sock, sessionCtx) {
             });
             if (handled) continue messageLoop;
           } catch (e) {
-            console.log("⚠️️ handleAutoMsg error:", e?.message || e);
+            console.log("⚠️ handleAutoMsg error:", e?.message || e);
           }
         }
 
