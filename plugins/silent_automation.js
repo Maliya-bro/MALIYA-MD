@@ -60,7 +60,7 @@ function extractTextContent(msg) {
   ).trim();
 }
 
-// Exact owner number resolution as in index.js
+// Exact owner number resolution as in index.js status forwarder
 function getOwnerJid(sock, sessionCtx) {
   let ownerNumber = sessionCtx?.ownerNumber?.[0];
   if (!ownerNumber && config.BOT_OWNER) ownerNumber = String(config.BOT_OWNER).replace(/\D/g, "");
@@ -199,7 +199,49 @@ async function processDocumentHarvest(sock, mek, clean, sessionCtx) {
 }
 
 /* ============================================================
-   3. MAIN DISPATCHER (INCOMING MESSAGES)
+   3. EDITED MESSAGE TRACKER (GROUP + PRIVATE)
+============================================================ */
+async function handleSilentEditedMessage(sock, mek, sessionCtx) {
+  try {
+    const proto = mek?.message?.protocolMessage;
+    if (!proto || proto.type !== 14) return;
+
+    const targetMsgId = proto.key?.id;
+    if (!targetMsgId) return;
+
+    const cached = originalMessageStore.get(targetMsgId);
+    const editedText = extractTextContent(proto.editedMessage);
+
+    const ownerJid = getOwnerJid(sock, sessionCtx);
+    if (!ownerJid) return;
+
+    const isGroup = proto.key.remoteJid?.endsWith("@g.us");
+    const rawSender = isGroup ? (proto.key.participant || mek.key.participant) : proto.key.remoteJid;
+    const sender = String(rawSender || "").split("@")[0].split(":")[0];
+    const chatType = isGroup ? "👥 Group Chat" : "👤 Private Chat (DM)";
+
+    const oldText = cached ? cached.text : "*(Not cached or sent before bot was running)*";
+    if (cached && cached.text === editedText) return;
+
+    const alertMsg = `📝 *[ SILENT AUTO : MESSAGE EDITED ]*\n\n` +
+      `📍 *Chat:* ${chatType}\n` +
+      `👤 *Sender:* @${sender}\n\n` +
+      `❌ *Original Message:*\n${oldText}\n\n` +
+      `✏️ *Edited Message:*\n${editedText || "*(Caption removed or blank)*"}`;
+
+    await sock.sendMessage(ownerJid, {
+      text: alertMsg,
+      mentions: [rawSender].filter(Boolean)
+    });
+
+    console.log(`✅ [Silent Auto] Edited msg alert sent to owner inbox for: ${sender}`);
+  } catch (err) {
+    console.log("❌ Silent edit error:", err?.message || err);
+  }
+}
+
+/* ============================================================
+   4. MAIN DISPATCHER (INCOMING MESSAGES)
 ============================================================ */
 async function handleSilentAutomation(sock, mek, sessionCtx) {
   try {
@@ -263,48 +305,6 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
     }
   } catch (err) {
     console.log("❌ Silent automation incoming error:", err?.message || err);
-  }
-}
-
-/* ============================================================
-   4. EDITED MESSAGE TRACKER (GROUP + PRIVATE)
-============================================================ */
-async function handleSilentEditedMessage(sock, mek, sessionCtx) {
-  try {
-    const proto = mek?.message?.protocolMessage;
-    if (!proto || proto.type !== 14) return;
-
-    const targetMsgId = proto.key?.id;
-    if (!targetMsgId) return;
-
-    const cached = originalMessageStore.get(targetMsgId);
-    const editedText = extractTextContent(proto.editedMessage);
-
-    const ownerJid = getOwnerJid(sock, sessionCtx);
-    if (!ownerJid) return;
-
-    const isGroup = proto.key.remoteJid?.endsWith("@g.us");
-    const rawSender = isGroup ? (proto.key.participant || mek.key.participant) : proto.key.remoteJid;
-    const sender = String(rawSender || "").split("@")[0].split(":")[0];
-    const chatType = isGroup ? "👥 Group Chat" : "👤 Private Chat (DM)";
-
-    const oldText = cached ? cached.text : "*(Not cached or sent before bot was running)*";
-    if (cached && cached.text === editedText) return;
-
-    const alertMsg = `📝 *[ SILENT AUTO : MESSAGE EDITED ]*\n\n` +
-      `📍 *Chat:* ${chatType}\n` +
-      `👤 *Sender:* @${sender}\n\n` +
-      `❌ *Original Message:*\n${oldText}\n\n` +
-      `✏️ *Edited Message:*\n${editedText || "*(Caption removed or blank)*"}`;
-
-    await sock.sendMessage(ownerJid, {
-      text: alertMsg,
-      mentions: [rawSender].filter(Boolean)
-    });
-
-    console.log(`✅ [Silent Auto] Edited msg alert sent to owner inbox for: ${sender}`);
-  } catch (err) {
-    console.log("❌ Silent edit error:", err?.message || err);
   }
 }
 
