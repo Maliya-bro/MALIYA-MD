@@ -142,7 +142,7 @@ async function getStatusCard(sessionId) {
 │ 👁️️ *Status Seen:* ${onOff(Boolean(s.auto_status_seen))}
 │ ❤️ *Status React:* ${onOff(Boolean(s.auto_status_react))}
 │ 📥 *Status Save:* ${onOff(Boolean(s.auto_download_status))}
-╰───────────◆──◆──◆──◆`.trim();
+╰───────◆──◆──◆──◆`.trim();
 }
 
 function mapKey(name) {
