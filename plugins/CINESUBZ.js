@@ -4,11 +4,10 @@ const CryptoJS = require("crypto-js");
 const https = require("https");
 const crypto = require("crypto");
 const sharp = require("sharp");
-const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽Ｄ 🍁";
 const DEFAULT_SEARCH_IMAGE =
   "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
 const SESSION_TIMEOUT = 5 * 60 * 1000;
@@ -160,7 +159,7 @@ async function sendErrorMsg(sock, from, mek, text) {
   );
 }
 
-/* ================= 1. CINESUBZ SEARCH (https://cinesubz.co/?s=...) ================= */
+/* ================= 1. CINESUBZ ƝINI (SEARCH) ================= */
 async function customSearchCineSubz(query) {
   const formattedQuery = encodeURIComponent(query.trim()).replace(/%20/g, "+");
   const searchUrl = `https://cinesubz.co/?s=${formattedQuery}`;
@@ -211,125 +210,92 @@ async function customSearchCineSubz(query) {
       }
     }
 
-    if (results.length > 0) return results;
+    return results;
   } catch (err) {
     console.log("CUSTOM CINESUBZ SEARCH ERROR:", err?.message || err);
-  }
-
-  try {
-    return await searchCineSubz(query.trim());
-  } catch {
     return [];
   }
 }
 
-/* ================= 2. SCRAPE QUALITIES & LINKS ================= */
-async function getMovieDownloadQualities(movieUrl, fallbackTitle = "Movie", fallbackImage = DEFAULT_SEARCH_IMAGE) {
-  if (scrapeCineSubz) {
-    try {
-      const info = await scrapeCineSubz(movieUrl);
-      if (info && info.downloadLinks && info.downloadLinks.length > 0) {
-        return info;
-      }
-    } catch (e) {}
-  }
+/* ================= 2. FILIMU KA ƝƆGƆNYA SƆRƆ NI CSPLAYER LA ================= */
+async function scrapeMoviePage(movieUrl, fallbackTitle = "Movie", fallbackImage = DEFAULT_SEARCH_IMAGE) {
+  try {
+    const res = await axios.get(movieUrl, {
+      httpsAgent: sslAgent,
+      timeout: 15000,
+      headers: { ...defaultHeaders, Referer: "https://cinesubz.co/" },
+    });
 
-  const res = await axios.get(movieUrl, {
-    httpsAgent: sslAgent,
-    timeout: 15000,
-    headers: { ...defaultHeaders, Referer: "https://cinesubz.co/" },
-  });
+    const html = String(res.data || "");
+    const titleMatch = html.match(/<title>([\s\S]*?)<\/title>/i);
+    const title = titleMatch
+      ? decodeHtmlEntities(titleMatch[1].replace(/- CineSubz.*$/i, ""))
+      : fallbackTitle;
 
-  const html = String(res.data || "");
-  const titleMatch = html.match(/<title>([\s\S]*?)<\/title>/i);
-  const title = titleMatch
-    ? decodeHtmlEntities(titleMatch[1].replace(/- CineSubz.*$/i, ""))
-    : fallbackTitle;
+    const downloadLinks = [];
+    const seenUrls = new Set();
 
-  const rawLinks = [];
-  const seenLinkUrls = new Set();
-
-  const btnRegex =
-    /<a[^>]+href="([^"]+)"[^>]*class="[^"]*movie-download-button[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
-  let match;
-  while ((match = btnRegex.exec(html)) !== null) {
-    const linkUrl = match[1].trim();
-    const innerHtml = match[2];
-    const typeMatch = innerHtml.match(
-      /class="[^"]*movie-download-type[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
-    );
-    const metaMatch = innerHtml.match(
-      /class="[^"]*movie-download-meta[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
-    );
-
-    const qType = typeMatch ? decodeHtmlEntities(typeMatch[1]) : "";
-    const qMeta = metaMatch ? decodeHtmlEntities(metaMatch[1]) : "";
-    const qualityLabel =
-      [qType, qMeta].filter(Boolean).join(" • ") ||
-      decodeHtmlEntities(innerHtml);
-
-    if (linkUrl && !seenLinkUrls.has(linkUrl)) {
-      seenLinkUrls.add(linkUrl);
-      rawLinks.push({ quality: qualityLabel, url: linkUrl });
-    }
-  }
-
-  if (rawLinks.length === 0) {
-    const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-    while ((match = rowRegex.exec(html)) !== null) {
-      const row = match[1];
-      const aMatch = row.match(
-        /<a[^>]+href="(https?:\/\/[^"]*(?:\/api-|\/links\/)[^"]+)"[^>]*>([\s\S]*?)<\/a>/i,
+    const btnRegex =
+      /<a[^>]+href=['"]([^'"]+)['"][^>]*class=['"][^'"]*movie-download-button[^'"]*['"][^>]*>([\s\S]*?)<\/a>/gi;
+    let match;
+    while ((match = btnRegex.exec(html)) !== null) {
+      const rawLink = match[1].trim();
+      const innerHtml = match[2];
+      const metaMatch = innerHtml.match(
+        /class=['"][^'"]*movie-download-meta[^'"]*['"][^>]*>([\s\S]*?)<\/span>/i,
       );
-      if (aMatch) {
-        const linkUrl = aMatch[1].trim();
-        const rowText = decodeHtmlEntities(
-          row.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "),
+      const typeMatch = innerHtml.match(
+        /class=['"][^'"]*movie-download-type[^'"]*['"][^>]*>([\s\S]*?)<\/span>/i,
+      );
+
+      const qualityLabel = metaMatch
+        ? decodeHtmlEntities(metaMatch[1])
+        : (typeMatch ? decodeHtmlEntities(typeMatch[1]) : "Quality");
+
+      let directCsLink = "";
+
+      try {
+        const pageRes = await axios.get(rawLink, {
+          httpsAgent: sslAgent,
+          headers: { ...defaultHeaders, Referer: movieUrl },
+          timeout: 10000,
+        });
+        const pData = String(pageRes.data || "");
+
+        const pathMatch = pData.match(
+          /(?:https?:\/\/(?:google\.com|sonic-cloud\.online|drive\.csplayer2\.space))?\/(server\d+\/[^\s'"<>]+\.mp4)/i,
         );
-        if (!seenLinkUrls.has(linkUrl)) {
-          seenLinkUrls.add(linkUrl);
-          rawLinks.push({ quality: rowText, url: linkUrl });
+
+        if (pathMatch) {
+          let cleanPath = pathMatch[1].replace(/(server\d+\/)\d+:\//, "$1");
+          directCsLink = `https://drive.csplayer2.space/${cleanPath}`;
         }
+      } catch (e) {}
+
+      if (directCsLink && !seenUrls.has(directCsLink)) {
+        seenUrls.add(directCsLink);
+        downloadLinks.push({
+          quality: qualityLabel,
+          pageUrl: rawLink,
+          directUrl: directCsLink,
+        });
       }
     }
+
+    return { title, poster: fallbackImage, image: fallbackImage, downloadLinks };
+  } catch (e) {
+    console.log("CINESUBZ SCRAPING ERROR:", e?.message || e);
+    return null;
   }
-
-  const downloadLinks = [];
-  for (const item of rawLinks) {
-    try {
-      const linkPage = await axios.get(item.url, {
-        httpsAgent: sslAgent,
-        timeout: 12000,
-        headers: { ...defaultHeaders, Referer: movieUrl },
-      });
-      const lHtml = String(linkPage.data || "");
-      const directMatch =
-        lHtml.match(/id="link"[^>]+href="([^"]+)"/i) ||
-        lHtml.match(
-          /<a[^>]+href="(https?:\/\/[^"]*(?:csplayer|sonic-cloud|server\d+|drive\.)[^"]+)"/i,
-        ) ||
-        lHtml.match(/window\.location\.href\s*=\s*["']([^"']+)["']/i);
-
-      downloadLinks.push({
-        quality: item.quality,
-        pageUrl: item.url,
-        directUrl: directMatch ? directMatch[1].trim() : item.url,
-      });
-    } catch {
-      downloadLinks.push({
-        quality: item.quality,
-        pageUrl: item.url,
-        directUrl: item.url,
-      });
-    }
-  }
-
-  return { title, poster: fallbackImage, image: fallbackImage, downloadLinks };
 }
 
-/* ================= 3. RESOLVE FINAL DOWNLOAD LINKS ================= */
+/* ================= 3. LABAN DƆWUNLODI JƆRƆNW LAJA ================= */
 async function getCineSubzLinks(originalUrl) {
-  let baseServerMatch = originalUrl.match(/server(\d+)/);
+  let targetLink = originalUrl.replace(/^https:\/\/[^\/]+/, "https://drive.csplayer2.space");
+  targetLink = targetLink.replace(/(server\d+\/)\d+:\//, "$1");
+  targetLink = targetLink.replace(/\?ext=mp4/gi, "");
+
+  let baseServerMatch = targetLink.match(/server(\d+)/);
   let serversToTry = [];
   if (baseServerMatch) serversToTry.push(baseServerMatch[1]);
   ["1", "2", "3", "4", "5", "6", "8", "9", "7", "11"].forEach((s) => {
@@ -337,9 +303,10 @@ async function getCineSubzLinks(originalUrl) {
   });
 
   for (let serverNum of serversToTry) {
-    let movieUrl = originalUrl;
-    if (baseServerMatch)
+    let movieUrl = targetLink;
+    if (baseServerMatch) {
       movieUrl = movieUrl.replace(/server\d+/, `server${serverNum}`);
+    }
 
     try {
       const parsedUrl = new URL(movieUrl);
@@ -473,7 +440,7 @@ async function getCineSubzLinks(originalUrl) {
   return { error: "File not found on any server." };
 }
 
-/* ================= COMMAND: .cinesubz ================= */
+/* ================= CI KƆNƆ KAN (COMMAND) ================= */
 cmd(
   {
     pattern: "cinesubz",
@@ -615,7 +582,7 @@ cmd(
   },
 );
 
-/* ================= REPLY HANDLER ================= */
+/* ================= JAABILI LAMAGA (REPLY HANDLER) ================= */
 const csReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
@@ -675,7 +642,7 @@ const csReplyHandler = {
       return;
     lastProcessedMsg[k] = { text: String(choice), time: now };
 
-    // STEP 1: Select Movie
+    // YƆRƆ 1: Filimu sugandi
     if (pending.step === 1) {
       if (choice > pending.results.length) return;
       pending.isProcessing = true;
@@ -683,7 +650,7 @@ const csReplyHandler = {
 
       const selected = pending.results[choice - 1];
       try {
-        const movieInfo = await getMovieDownloadQualities(
+        const movieInfo = await scrapeMoviePage(
           selected.url,
           selected.title,
           selected.image,
@@ -729,8 +696,8 @@ const csReplyHandler = {
           selected.image ||
           DEFAULT_SEARCH_IMAGE;
         let qualityBody = `⊱━━━━━ • ✿ • ━━━━━⊰\n📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
-        if (movieInfo.imdb_rate)
-          qualityBody += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
+        if (movieInfo.imdb_rate || selected.imdb)
+          qualityBody += `⭐ *IMDb :* ${movieInfo.imdb_rate || selected.imdb}\n`;
         if (movieInfo.duration)
           qualityBody += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
         qualityBody += `Available formats below 2GB are listed. Choose one to start download.\n\n© 2026 MALIYA-MD BOT SYSTEM`;
@@ -790,8 +757,8 @@ const csReplyHandler = {
 
         // Fallback Quality Numbered Menu
         let qualityMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
-        if (movieInfo.imdb_rate)
-          qualityMsg += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
+        if (movieInfo.imdb_rate || selected.imdb)
+          qualityMsg += `⭐ *IMDb :* ${movieInfo.imdb_rate || selected.imdb}\n`;
         if (movieInfo.duration)
           qualityMsg += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
 
@@ -828,33 +795,18 @@ const csReplyHandler = {
         );
       }
     }
-    // STEP 2: Process Download
+    // YƆRƆ 2: Filimu dɔwunlodi
     else if (pending.step === 2) {
       if (choice > pending.movie.downloadLinks.length) return;
       pending.isProcessing = true;
-      await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
+      await sock.sendMessage(from, { react: { text: "⬆️️", key: mek.key } });
 
       const { movie } = pending;
       const selectedLink = movie.downloadLinks[choice - 1];
-      let originalServerLink = selectedLink.directUrl;
-      let targetServerLink = originalServerLink;
+      let targetServerLink = selectedLink.directUrl;
 
       clearUserSession(k);
       try {
-        targetServerLink = targetServerLink.replace(
-          /^https:\/\/[^\/]+/,
-          "https://drive.csplayer2.space",
-        );
-        targetServerLink = targetServerLink.replace(
-          /(server\d+\/)\d+:\//,
-          "$1",
-        );
-        if (
-          targetServerLink.endsWith(".mp4") &&
-          !targetServerLink.includes("?ext=")
-        )
-          targetServerLink = targetServerLink.replace(".mp4", "?ext=mp4");
-
         const finalResult = await getCineSubzLinks(targetServerLink);
         const correctPosterUrl =
           movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE;
@@ -865,7 +817,7 @@ const csReplyHandler = {
           !finalResult.links ||
           finalResult.links.length === 0
         ) {
-          let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\nℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය._\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+          let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\nℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය._\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
           if (thumbBuffer) {
             await sock.sendMessage(
@@ -918,7 +870,7 @@ const csReplyHandler = {
         let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
         if (directDownloadUrl) {
-          // Native Baileys Direct Streaming Pipeline via URL
+          // Baileys ka URL streaming fɛɛrɛ (Zero-RAM buffer direct upload)
           const docPayload = {
             document: { url: directDownloadUrl },
             mimetype: "video/mp4",
