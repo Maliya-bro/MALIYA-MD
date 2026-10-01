@@ -80,7 +80,7 @@ const { handleSilentAutomation, handleSilentEditedMessage } = require("./plugins
 
 const msgRetryCounterCache = new NodeCache();
 
-// ── Native Flow / Button V2 Injector ──────────────────────
+// ── Native Flow / Button V2 Injector ──────────────────────.
 let lunaHelper = null;
 try {
   lunaHelper = require("@ryuu-reinzz/luna-lib");
