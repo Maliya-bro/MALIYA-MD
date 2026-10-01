@@ -1,6 +1,7 @@
 const { downloadMediaMessage, getContentType } = require("@whiskeysockets/baileys");
 const P = require("pino");
 const { readSettings } = require("../lib/botSettings");
+console.log("✅ silent automation");
 
 // In-Memory Cache for Edited Messages tracking (stores for 10 minutes)
 const originalMessageStore = new Map();
