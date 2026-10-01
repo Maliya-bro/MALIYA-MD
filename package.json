@@ -54,7 +54,6 @@
     "qrcode": "latest",
     "cors": "latest",
     "mime-types": "latest",
-    "cinesubz-scraper": "latest",
     "lk21dl-core": "latest",
     "@gradio/client": "latest",
     "sharp": "latest",
