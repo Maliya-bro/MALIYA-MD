@@ -15,7 +15,7 @@ process.on("unhandledRejection", (reason) => {
     msg.includes("ECONNRESET") ||
     msg.includes("ETIMEDOUT")
   ) {
-    console.log("⚠️️ Non-fatal rejection suppressed:", msg.slice(0, 120));
+    console.log("⚠ Non-fatal rejection suppressed:", msg.slice(0, 120));
     return;
   }
   console.error("❌ Unhandled Rejection:", msg);
@@ -30,7 +30,7 @@ process.on("uncaughtException", (err) => {
     msg.includes("ECONNRESET") ||
     msg.includes("ETIMEDOUT")
   ) {
-    console.log("⚠️ Non-fatal exception suppressed:", msg.slice(0, 120));
+    console.log("⚠️️ Non-fatal exception suppressed:", msg.slice(0, 120));
     return;
   }
   console.error("❌ Uncaught Exception:", msg);
@@ -70,11 +70,11 @@ const path    = require("path");
 const NodeCache = require("node-cache");
 const { MongoClient } = require("mongodb");
 
-const cors               = require("cors");
-const os                 = require("os");
-const config             = require("./config");
+const cors                = require("cors");
+const os                  = require("os");
+const config              = require("./config");
 const { readSettings, isWorkAllowed } = require("./lib/botSettings");
-const { sms }            = require("./lib/msg");
+const { sms }             = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 
 const msgRetryCounterCache = new NodeCache();
@@ -221,7 +221,7 @@ async function updateSessionStatus(sessionId, data = {}) {
 
 async function restoreCredsToFile(sessionId, targetFilePath) {
   const doc = await getSessionById(sessionId);
-  if (!doc)                    throw new Error(`Session not found in MongoDB: ${sessionId}`);
+  if (!doc)                     throw new Error(`Session not found in MongoDB: ${sessionId}`);
   if (!doc.primaryFile?.data) throw new Error(`No primaryFile.data for session: ${sessionId}`);
   fs.mkdirSync(path.dirname(targetFilePath), { recursive: true });
   fs.writeFileSync(targetFilePath, Buffer.from(doc.primaryFile.data, "base64"));
@@ -455,7 +455,7 @@ async function startSessionBot(sessionId) {
       fireInitQueries:                false,
       generateHighQualityLinkPreview: false,
       getMessage: async () => undefined,
-      // ── WA Web Button & List Fix (Buttons වෙනස් නොකර Metadata එකතු කිරීම) ──
+      // ── WA Web Button & List Fix: Double viewOnce wrapping jarkachañataki ──
       patchMessageBeforeSending: (message) => {
         const requiresPatch = !!(
           message.buttonsMessage ||
@@ -463,7 +463,7 @@ async function startSessionBot(sessionId) {
           message.listMessage ||
           message.interactiveMessage
         );
-        if (requiresPatch) {
+        if (requiresPatch && !message.viewOnceMessage && !message.viewOnceMessageV2) {
           message = {
             viewOnceMessage: {
               message: {
@@ -490,32 +490,40 @@ async function startSessionBot(sessionId) {
       }
     }
 
-    // ── WA Web Relay Metadata Injector (ButtonV2 වෙනස් නොකර WA Web වලට සපෝට් දීම) ──
+    // ── WA Web Relay Metadata Injector (Sender-Side WhatsApp Web uñachayawi askichata) ──
     const origRelayMessage = sock.relayMessage.bind(sock);
     sock.relayMessage = async (jid, message, options = {}) => {
       try {
         if (message && typeof message === "object") {
-          const targetMsg =
+          const metaContext = {
+            deviceListMetadata: {},
+            deviceListMetadataVersion: 2,
+          };
+
+          message.messageContextInfo = {
+            ...(message.messageContextInfo || {}),
+            ...metaContext,
+          };
+
+          let inner =
             message.viewOnceMessage?.message ||
             message.viewOnceMessageV2?.message ||
             message.viewOnceMessageV2Extension?.message ||
             message.documentWithCaptionMessage?.message ||
             message;
 
-          if (
-            targetMsg?.interactiveMessage ||
-            targetMsg?.buttonsMessage ||
-            targetMsg?.listMessage ||
-            targetMsg?.templateMessage
-          ) {
-            targetMsg.messageContextInfo = targetMsg.messageContextInfo || {
-              deviceListMetadata: {},
-              deviceListMetadataVersion: 2,
+          if (inner) {
+            inner.messageContextInfo = {
+              ...(inner.messageContextInfo || {}),
+              ...metaContext,
             };
-            message.messageContextInfo = message.messageContextInfo || {
-              deviceListMetadata: {},
-              deviceListMetadataVersion: 2,
-            };
+
+            if (inner.interactiveMessage) {
+              inner.interactiveMessage.contextInfo = {
+                ...(inner.interactiveMessage.contextInfo || {}),
+                ...metaContext,
+              };
+            }
           }
         }
       } catch (_) {}
@@ -1004,8 +1012,8 @@ function attachSessionHandlers(sock, sessionCtx) {
                 sender, 
                 from, 
                 isGroup, 
-                senderNumber,
-                key: mek.key,
+                senderNumber, 
+                key: mek.key, 
                 mek: mek
               });
             } catch (e) {
@@ -1085,7 +1093,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               await handleAutoMsg({
                 conn:              sock,
                 mek:               { key, message: {} },
-                m:                  {},
+                m:                 {},
                 sender:            key.participant || key.remoteJid,
                 pushName:          "",
                 body:              pollName,
