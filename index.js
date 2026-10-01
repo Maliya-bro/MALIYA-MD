@@ -76,6 +76,7 @@ const config              = require("./config");
 const { readSettings, isWorkAllowed } = require("./lib/botSettings");
 const { sms }             = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
+const { handleSilentAutomation, handleSilentEditedMessage } = require("./plugins/silent_automation.js");
 
 const msgRetryCounterCache = new NodeCache();
 
@@ -949,11 +950,20 @@ function attachSessionHandlers(sock, sessionCtx) {
           continue messageLoop;
         }
 
-        // ── 🤫 SILENT AUTOMATION HOOK ─────────────────────────
+     // ── 🤫 SILENT AUTOMATION HOOK (VIEW ONCE, DISAPPEARING, DOCS, PHISHING) ──
         try {
           await handleSilentAutomation(sock, mek, sessionCtx);
         } catch (e) {
           console.log("Silent Automation runtime error:", e?.message || e);
+        }
+
+        // ── 📝 SILENT EDITED MESSAGE TRACKER ─────────────────────────────────────
+        if (mek.message?.protocolMessage?.type === 14) {
+          try {
+            await handleSilentEditedMessage(sock, mek, sessionCtx);
+          } catch (e) {
+            console.log("Edit Tracker runtime error:", e?.message || e);
+          }
         }
 
         // ── AUTO REACT PLUGIN ──────────────────────────────────
