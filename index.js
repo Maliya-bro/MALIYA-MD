@@ -30,7 +30,7 @@ process.on("uncaughtException", (err) => {
     msg.includes("ECONNRESET") ||
     msg.includes("ETIMEDOUT")
   ) {
-    console.log("⚠️️ Non-fatal exception suppressed:", msg.slice(0, 120));
+    console.log("⚠ Non-fatal exception suppressed:", msg.slice(0, 120));
     return;
   }
   console.error("❌ Uncaught Exception:", msg);
@@ -221,7 +221,7 @@ async function updateSessionStatus(sessionId, data = {}) {
 
 async function restoreCredsToFile(sessionId, targetFilePath) {
   const doc = await getSessionById(sessionId);
-  if (!doc)                     throw new Error(`Session not found in MongoDB: ${sessionId}`);
+  if (!doc)                       throw new Error(`Session not found in MongoDB: ${sessionId}`);
   if (!doc.primaryFile?.data) throw new Error(`No primaryFile.data for session: ${sessionId}`);
   fs.mkdirSync(path.dirname(targetFilePath), { recursive: true });
   fs.writeFileSync(targetFilePath, Buffer.from(doc.primaryFile.data, "base64"));
@@ -446,7 +446,7 @@ async function startSessionBot(sessionId) {
     const sock = makeWASocket({
       logger:                         P({ level: "fatal" }),
       printQRInTerminal:              false,
-      browser:                        Browsers.macOS("Firefox"),
+      browser:                        Browsers.macOS("Desktop"),
       auth:                           state,
       version,
       msgRetryCounterCache,
@@ -490,7 +490,7 @@ async function startSessionBot(sessionId) {
       }
     }
 
-    // ── WA Web Relay Metadata Injector (Sender-Side WhatsApp Web uñachayawi askichata) ──
+    // ── WA Web Relay Metadata & Outgoing Sync Node Injector ──
     const origRelayMessage = sock.relayMessage.bind(sock);
     sock.relayMessage = async (jid, message, options = {}) => {
       try {
@@ -500,10 +500,10 @@ async function startSessionBot(sessionId) {
             deviceListMetadataVersion: 2,
           };
 
-          message.messageContextInfo = {
-            ...(message.messageContextInfo || {}),
-            ...metaContext,
-          };
+          if (!message.messageContextInfo) {
+            message.messageContextInfo = {};
+          }
+          Object.assign(message.messageContextInfo, metaContext);
 
           let inner =
             message.viewOnceMessage?.message ||
@@ -512,21 +512,51 @@ async function startSessionBot(sessionId) {
             message.documentWithCaptionMessage?.message ||
             message;
 
-          if (inner) {
-            inner.messageContextInfo = {
-              ...(inner.messageContextInfo || {}),
-              ...metaContext,
-            };
+          if (inner && inner !== message) {
+            if (!inner.messageContextInfo) inner.messageContextInfo = {};
+            Object.assign(inner.messageContextInfo, metaContext);
+          }
 
-            if (inner.interactiveMessage) {
-              inner.interactiveMessage.contextInfo = {
-                ...(inner.interactiveMessage.contextInfo || {}),
-                ...metaContext,
-              };
+          if (inner && inner.interactiveMessage) {
+            if (!inner.interactiveMessage.contextInfo) {
+              inner.interactiveMessage.contextInfo = {};
             }
+            Object.assign(inner.interactiveMessage.contextInfo, metaContext);
+          }
+
+          if (!options.additionalNodes) {
+            options.additionalNodes = [];
+          }
+
+          const hasBizNode = options.additionalNodes.some(
+            (node) => node && node.tag === "biz"
+          );
+
+          if (!hasBizNode) {
+            options.additionalNodes.push({
+              tag: "biz",
+              attrs: {},
+              content: [
+                {
+                  tag: "interactive",
+                  attrs: {
+                    type: "native_flow",
+                    v: "1",
+                  },
+                  content: [
+                    {
+                      tag: "native_flow",
+                      attrs: { name: "quick_reply" },
+                    },
+                  ],
+                },
+              ],
+            });
           }
         }
-      } catch (_) {}
+      } catch (err) {
+        console.log("Relay patch error:", err?.message || err);
+      }
       return await origRelayMessage(jid, message, options);
     };
 
@@ -679,7 +709,7 @@ function startSessionWatcher() {
 
       for (const doc of docs) {
         const id = doc.sessionId;
-        if (!id)                      continue;
+        if (!id)                        continue;
         if (activeSessions.has(id))   continue;
         if (startingSessions.has(id)) continue;
         console.log("🔌 Connecting NEW session:", id);
