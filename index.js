@@ -53,14 +53,18 @@ const fs      = require("fs");
 const P       = require("pino");
 const express = require("express");
 const path    = require("path");
+const NodeCache = require("node-cache");
 const { MongoClient } = require("mongodb");
 
-const cors              = require("cors");
-const os                = require("os");
-const config            = require("./config");
+const cors               = require("cors");
+const os                 = require("os");
+const config             = require("./config");
 const { readSettings, isWorkAllowed } = require("./lib/botSettings");
-const { sms }           = require("./lib/msg");
+const { sms }            = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
+
+// Message retry cache for Bad MAC auto-fix
+const msgRetryCounterCache = new NodeCache();
 
 // ── Native Flow / Button V2 Injector ──────────────────────
 let lunaHelper = null;
@@ -360,7 +364,7 @@ async function cleanupSessionFolder(sessionId) {
 }
 
 async function scheduleReconnect(sessionId, delayMs = 5000) {
-  if (!sessionId)                     return;
+  if (!sessionId)                       return;
   if (reconnectTimers.has(sessionId)) return;
 
   const session = activeSessions.get(sessionId);
@@ -432,9 +436,11 @@ async function startSessionBot(sessionId) {
       browser:                        Browsers.macOS("Firefox"),
       auth:                           state,
       version,
-      syncFullHistory:                true,
+      msgRetryCounterCache,           // Bad MAC auto-retry fix
+      syncFullHistory:                false, // පරණ message queue එකෙන් delay වීම නවත්වයි
       markOnlineOnConnect:            true,
       generateHighQualityLinkPreview: true,
+      getMessage: async () => ({ conversation: "" }), // Decrypt mismatch fix
       // ── WA Web Button & List Fix (Buttons වෙනස් නොකර Metadata එකතු කිරීම) ──
       patchMessageBeforeSending: (message) => {
         const requiresPatch = !!(
@@ -550,13 +556,13 @@ async function startSessionBot(sessionId) {
 ⚡🧬 System     : STABLE | FAST | SECURE
 🛡️🔐 Mode       : ${String(settings.mode || "public").toUpperCase()}
 🎯🧩 Prefix     : ${prefix}
-📍 Work Scope  : ${String(settings.work_scope || "private").toUpperCase()}
+📍 Work Scope   : ${String(settings.work_scope || "private").toUpperCase()}
 
 🧑‍💻👑 Owner    : ${BOT_OWNER_NAME}
 🚀📦 Version  : ${BOT_VERSION}
 
 🕒⏳ Time      : ${time}
-📅🗓️ Date      : ${date}
+📅🗓️️ Date      : ${date}
 
 💬📖 Type .menu to start
 🔥🚀 Powered by MALIYA-MD Engine
@@ -601,7 +607,7 @@ async function startSessionBot(sessionId) {
           }
         }
       } catch (e) {
-        console.log("⚠️ connection.update handler error:", e?.message || e);
+        console.log("⚠️️ connection.update handler error:", e?.message || e);
       }
     });
 
@@ -701,6 +707,12 @@ function attachSessionHandlers(sock, sessionCtx) {
       try {
         if (!mek?.message) continue messageLoop;
 
+        // ⏱️ Delay Fix: පැය ගණනක් disconnect වී තිබී connect වෙද්දී එන තත්පර 60ට වඩා පරණ messages skip කිරීම
+        const msgTime = mek.messageTimestamp;
+        if (msgTime && (Math.floor(Date.now() / 1000) - msgTime) > 60) {
+          continue messageLoop;
+        }
+
         mek.message =
           getContentType(mek.message) === "ephemeralMessage"
             ? mek.message.ephemeralMessage.message
@@ -755,8 +767,8 @@ function attachSessionHandlers(sock, sessionCtx) {
               const emojis = [
                 "😂", "🤣", "😍", "🥰", "😎", "🤔", "😭", "😱", "🔥", "💀",
                 "🥺", "😊", "😈", "👻", "🤖", "😤", "🥳", "🤯", "😨", "🥶",
-                "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💕", "💞", "💓",
-                "👍", "👎", "👏", "🙌", "🤝", "✌️", "🤞", "🤙", "💪", "🖕",
+                "❤️️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💕", "💞", "💓",
+                "👍", "👎", "👏", "🙌", "🤝", "✌️️", "🤞", "🤙", "💪", "🖕",
                 "🙏", "💅", "✨", "⭐", "🌟", "💫", "⚡", "🎉", "🎊", "🥳",
                 "🎈", "🎯", "🏆", "💯", "🔞", "❓", "❗", "💢", "🐱", "🐶",
                 "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐸", "🍿", "🍕",
@@ -806,74 +818,74 @@ function attachSessionHandlers(sock, sessionCtx) {
                 throw new Error("Owner number not available");
               }
 
-          const ownerJid = ownerNumber + "@s.whatsapp.net";
+              const ownerJid = ownerNumber + "@s.whatsapp.net";
 
-    try {
-      if (msgType === "imageMessage") {
-        await sock.sendMessage(
-          ownerJid,
-          {
-            image: buffer,
-            mimetype,
-            caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
+              if (msgType === "imageMessage") {
+                await sock.sendMessage(
+                  ownerJid,
+                  {
+                    image: buffer,
+                    mimetype,
+                    caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
+                  }
+                );
+              } else {
+                await sock.sendMessage(
+                  ownerJid,
+                  {
+                    video: buffer,
+                    mimetype,
+                    caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
+                  }
+                );
+              }
+
+              console.log(`✅ Status downloaded and sent to owner: ${participant}`);
+            } catch (e) {
+              console.error("❌ Download/forward error:", e?.message || e);
+            }
           }
-        );
-      } else {
-        await sock.sendMessage(
-          ownerJid,
-          {
-            video: buffer,
-            mimetype,
-            caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
+
+          continue messageLoop;
+        }
+
+        // ============================================================
+        //  NORMAL MESSAGE HANDLING
+        // ============================================================
+        const m = sms(sock, mek);
+        let body = String(getBodyFromMessage(mek.message) || "").trim();
+
+        // ── 🔵 SEEN ALL MESSAGES (BLUE TICKS) ──────────────────────
+        if (settingsPlugin && typeof settingsPlugin.handleSeenAllMessages === "function") {
+          try {
+            await settingsPlugin.handleSeenAllMessages(sock, mek, sessionCtx.sessionId);
+          } catch (e) {
+            console.log("Seen all msg error:", e?.message || e);
           }
-        );
-      }
+        }
 
-      console.log(`✅ Status downloaded and sent to owner: ${participant}`);
-    } catch (e) {
-      console.error("❌ Download/forward error:", e?.message || e);
-    }
+        let isCmd = body.startsWith(prefix);
+        let commandName = isCmd
+          ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase()
+          : "";
+        let args = body.trim().split(/ +/).slice(1);
+        let q = args.join(" ");
 
-    // Status එක download කර අවසන් වූ පසු ඊළඟ පියවරට යෑම
-    return; // Loop එකක් ඇතුළත නම් 'continue;' ලෙස යොදන්න
-  }
+        const from = mek.key.remoteJid;
+        const sender = mek.key.fromMe
+          ? sock.user.id
+          : mek.key.participant || mek.key.remoteJid;
 
-  // ============================================================
-  //  NORMAL MESSAGE HANDLING
-  // ============================================================
-  const m = sms(sock, mek);
-  let body = String(getBodyFromMessage(mek.message) || "").trim();
+        const rawSenderNumber = (sender || "").split("@")[0];
+        const senderNumber = rawSenderNumber.split(":")[0].replace(/\D/g, "");
+        const isGroup = from.endsWith("@g.us");
+        const isOwner = sessionCtx.ownerNumber.includes(senderNumber);
 
-  // ── 🔵 SEEN ALL MESSAGES (BLUE TICKS) ──────────────────────
-  if (settingsPlugin && typeof settingsPlugin.handleSeenAllMessages === "function") {
-    try {
-      await settingsPlugin.handleSeenAllMessages(sock, mek, sessionCtx.sessionId);
-    } catch (e) {
-      console.log("Seen all msg error:", e?.message || e);
-    }
-  }
+        const pushName = mek.pushName || m?.pushName || senderNumber;
 
-  let isCmd = body.startsWith(prefix);
-  let commandName = isCmd
-    ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase()
-    : "";
-  let args = body.trim().split(/ +/).slice(1);
-  let q = args.join(" ");
+        const reply = (text) =>
+          sock.sendMessage(from, { text }, { quoted: mek });
 
-  const from = mek.key.remoteJid;
-  const sender = mek.key.fromMe
-    ? sock.user.id
-    : mek.key.participant || mek.key.remoteJid;
-
-  const rawSenderNumber = (sender || "").split("@")[0];
-  const senderNumber = rawSenderNumber.split(":")[0].replace(/\D/g, "");
-  const isGroup = from.endsWith("@g.us");
-  const isOwner = sessionCtx.ownerNumber.includes(senderNumber);
-
-  const pushName = mek.pushName || m?.pushName || senderNumber;
-
-  const reply = (text) =>
-    sock.sendMessage(from, { text }, { quoted: mek });
         // ── PRESENCE ────────────────────────────────────────────
         try {
           const presenceMode = (await readSettings(sessionCtx.sessionId)).always_presence;
@@ -933,7 +945,7 @@ function attachSessionHandlers(sock, sessionCtx) {
             });
             if (handled) continue messageLoop;
           } catch (e) {
-            console.log("⚠️ handleAutoMsg error:", e?.message || e);
+            console.log("⚠️️ handleAutoMsg error:", e?.message || e);
           }
         }
 
@@ -1060,7 +1072,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               await handleAutoMsg({
                 conn:              sock,
                 mek:               { key, message: {} },
-                m:                 {},
+                m:                  {},
                 sender:            key.participant || key.remoteJid,
                 pushName:          "",
                 body:              pollName,
