@@ -1,121 +1,139 @@
 const { downloadMediaMessage } = require("@whiskeysockets/baileys");
 const config = require("../config");
-const P = require("pino");
 
-console.log("✅ [SILENT AUTO] Ultimate Plugin Hook Loaded!");
+console.log("✅ [SILENT AUTO] Force-Enabled Version Loaded!");
 
 const editCache = new Map();
 
-// සියලුම Ephemeral / ViewOnce Layers ගැලවීමේ Foolproof ක්‍රමය
-function getCleanMsg(msg) {
+// සියලුම layers ගැලවීමේ Foolproof ක්‍රමය
+function unwrapMessage(msg) {
     if (!msg) return msg;
     let m = msg;
-    while (m.message || m.ephemeralMessage || m.viewOnceMessageV2 || m.viewOnceMessage || m.viewOnceMessageV2Extension || m.documentWithCaptionMessage) {
-        if (m.message) m = m.message;
-        else if (m.ephemeralMessage) m = m.ephemeralMessage;
-        else if (m.viewOnceMessageV2) m = m.viewOnceMessageV2;
-        else if (m.viewOnceMessage) m = m.viewOnceMessage;
-        else if (m.viewOnceMessageV2Extension) m = m.viewOnceMessageV2Extension;
-        else if (m.documentWithCaptionMessage) m = m.documentWithCaptionMessage;
-    }
+    if (m.message) m = m.message;
+    if (m.ephemeralMessage?.message) m = m.ephemeralMessage.message;
+    if (m.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
+    if (m.viewOnceMessage?.message) m = m.viewOnceMessage.message;
+    if (m.viewOnceMessageV2Extension?.message) m = m.viewOnceMessageV2Extension.message;
+    if (m.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
     return m;
 }
 
-const silentAutomationHook = {
-    onMessage: async (sock, mek) => {
-        try {
-            if (!mek?.message || mek.key.fromMe) return;
+// JSON Stringify මඟින් සැඟවුණු View Once දත්ත අල්ලන ක්‍රමය
+function isViewOnceMessage(rawMsg) {
+    if (!rawMsg) return false;
+    let str = JSON.stringify(rawMsg);
+    if (str.includes('viewOnceMessage') || str.includes('"viewOnce":true')) return true;
+    return false;
+}
 
-            const from = mek.key.remoteJid;
-            if (!from || from.endsWith("@newsletter") || from === "status@broadcast") return;
+function detectMediaType(m) {
+    if (m.imageMessage) return "image";
+    if (m.videoMessage) return "video";
+    if (m.audioMessage) return "audio";
+    return null;
+}
 
-            // 1. Bot Owner ගේ JID එක 100% ක් නිවැරදිව ගැනීම
-            let ownerNum = String(config.BOT_OWNER || config.OWNER_NUMBER || "").replace(/\D/g, "");
-            if (!ownerNum && sock.user?.id) {
-                ownerNum = sock.user.id.split("@")[0].split(":")[0];
+// Botගේ අංකය (Owner Inbox) හරියටම ගැනීම
+function getOwnerJid(sock, sessionCtx) {
+    let num = sock?.user?.id?.split(":")[0]?.split("@")[0];
+    if (!num && sessionCtx?.ownerNumber?.[0]) {
+        num = sessionCtx.ownerNumber[0].replace(/\D/g, "");
+    }
+    if (!num && config.BOT_OWNER) {
+        num = String(config.BOT_OWNER).replace(/\D/g, "");
+    }
+    return num ? `${num}@s.whatsapp.net` : null;
+}
+
+async function handleSilentAutomation(sock, mek, sessionCtx) {
+    try {
+        if (!mek?.message || mek.key.fromMe) return;
+
+        const from = mek.key.remoteJid || "";
+        // Channels සහ Status මඟ හැරීම
+        if (from.endsWith("@newsletter") || from === "status@broadcast") return;
+
+        // ⚠️ Settings Check එක අයින් කර ඇත. දැන් ඕනෑම Session එකකට 100% වැඩ කරයි.
+        const targetInbox = getOwnerJid(sock, sessionCtx);
+        if (!targetInbox) return;
+
+        const isGroup = from.endsWith("@g.us");
+        const rawSender = mek.key.participant || from;
+        const sender = rawSender.split("@")[0].split(":")[0];
+
+        // ── 1. EDITED MESSAGE TRACKER ──
+        const proto = mek.message.protocolMessage;
+        if (proto && proto.type === 14) {
+            console.log("🎯 [SILENT AUTO] Edited message detected!");
+            const targetId = proto.key?.id;
+            const cached = editCache.get(targetId);
+            
+            let newText = "";
+            if (proto.editedMessage) {
+                const cleanEdited = unwrapMessage(proto.editedMessage);
+                newText = cleanEdited?.conversation || cleanEdited?.extendedTextMessage?.text || "";
             }
-            const ownerJid = ownerNum ? `${ownerNum}@s.whatsapp.net` : null;
-            if (!ownerJid) return;
 
-            const sender = mek.key.participant || from;
-            const senderTag = `@${sender.split("@")[0].split(":")[0]}`;
-            const chatType = from.endsWith("@g.us") ? "👥 Group" : "👤 Private Chat";
+            const oldText = cached ? cached.text : "*(Not cached)*";
+            if (cached && cached.text === newText) return;
 
-            // 2. EDITED MESSAGE TRACKER 
-            const proto = mek.message.protocolMessage;
-            if (proto && proto.type === 14) {
-                const targetId = proto.key?.id;
-                const cached = editCache.get(targetId);
-                
-                let newText = "";
-                if (proto.editedMessage) {
-                    newText = proto.editedMessage.conversation || proto.editedMessage.extendedTextMessage?.text || "";
-                }
+            await sock.sendMessage(targetInbox, {
+                text: `📝 *[ MESSAGE EDITED ]*\n\n📍 *Chat:* ${isGroup ? "Group" : "Private"}\n👤 *Sender:* @${sender}\n\n❌ *Old:*\n${oldText}\n\n✏️ *New:*\n${newText || "*(Empty/Cleared)*"}`,
+                mentions: [rawSender]
+            });
+            return;
+        }
 
-                const oldText = cached ? cached.text : "*(Not cached)*";
-                if (cached && cached.text === newText) return;
+        // සාමාන්‍ය මැසේජ් Cache එකට දැමීම
+        const cleanMsg = unwrapMessage(mek.message);
+        let rawText = cleanMsg?.conversation || cleanMsg?.extendedTextMessage?.text || cleanMsg?.imageMessage?.caption || cleanMsg?.videoMessage?.caption || "";
+        if (mek.key.id && rawText) {
+            editCache.set(mek.key.id, { text: rawText, time: Date.now() });
+            if (editCache.size > 1500) editCache.delete(editCache.keys().next().value);
+        }
 
-                await sock.sendMessage(ownerJid, {
-                    text: `📝 *[ SILENT EDITS ]*\n\n📍 *Chat:* ${chatType}\n👤 *From:* ${senderTag}\n\n❌ *Old:*\n${oldText}\n\n✏️ *New:*\n${newText}`,
-                    mentions: [sender]
-                });
+        // ── 2. VIEW ONCE INTERCEPTOR ──
+        if (isViewOnceMessage(mek.message)) {
+            console.log("👁️ [SILENT AUTO] View Once detected! Extracting...");
+            
+            if (!cleanMsg) return;
+            
+            const mediaType = detectMediaType(cleanMsg);
+            if (!mediaType) return;
+
+            const mediaNode = cleanMsg[mediaType + "Message"];
+            if (!mediaNode || !mediaNode.mediaKey) return;
+
+            // ඔයාගේ .vv එකේ වැඩ කරපු Exact Download එක
+            const buffer = await downloadMediaMessage(
+                { key: mek.key, message: cleanMsg },
+                "buffer",
+                {},
+                { reuploadRequest: sock.updateMediaMessage }
+            );
+
+            if (!buffer || buffer.length === 0) {
+                console.log("❌ [SILENT AUTO] Download failed (empty buffer).");
                 return;
             }
 
-            // සාමාන්‍‍ය මැසේජ් Text එක Cache එකට දැමීම (Edits අල්ලන්න)
-            let rawText = mek.message.conversation || mek.message.extendedTextMessage?.text || "";
-            if (mek.key.id && rawText) {
-                editCache.set(mek.key.id, { text: rawText, time: Date.now() });
-                if (editCache.size > 1000) editCache.delete(editCache.keys().next().value);
+            console.log("✅ [SILENT AUTO] Downloaded! Forwarding to Inbox...");
+
+            const caption = `🤫 *[ VIEW ONCE CAPTURED ]*\n\n📍 *Chat:* ${isGroup ? "Group" : "Private"}\n👤 *Sender:* @${sender}\n💬 *Caption:* ${mediaNode.caption || "None"}`;
+
+            if (mediaType === "image") {
+                await sock.sendMessage(targetInbox, { image: buffer, caption: caption, mentions: [rawSender] });
+            } else if (mediaType === "video") {
+                await sock.sendMessage(targetInbox, { video: buffer, caption: caption, mentions: [rawSender] });
+            } else if (mediaType === "audio") {
+                await sock.sendMessage(targetInbox, { audio: buffer, mimetype: mediaNode.ptt ? "audio/ogg; codecs=opus" : "audio/mpeg", ptt: mediaNode.ptt === true });
+                await sock.sendMessage(targetInbox, { text: caption, mentions: [rawSender] });
             }
-
-            // 3. VIEW ONCE INTERCEPTOR (JSON Stringify මගින් කවදාවත් Miss නොවන ලෙස සෙවීම)
-            const msgStr = JSON.stringify(mek.message);
-            const isViewOnce = msgStr.includes('viewOnceMessage') || msgStr.includes('"viewOnce":true');
-
-            if (isViewOnce) {
-                let clean = getCleanMsg(mek.message);
-                if (!clean) return;
-
-                let mediaNode = clean.imageMessage || clean.videoMessage || clean.audioMessage;
-                let type = clean.imageMessage ? "image" : clean.videoMessage ? "video" : clean.audioMessage ? "audio" : null;
-
-                if (!mediaNode || !type) return;
-
-                // ඔයාගේ .vv එකේ වැඩ කරපු Exact Download එක
-                const buffer = await downloadMediaMessage(
-                    { key: mek.key, message: mek.message },
-                    "buffer",
-                    {},
-                    { logger: P({ level: "silent" }), reuploadRequest: sock.updateMediaMessage }
-                );
-
-                if (!buffer) return;
-
-                const caption = `🤫 *[ VIEW ONCE CAPTURED ]*\n\n📍 *Chat:* ${chatType}\n👤 *From:* ${senderTag}\n💬 *Caption:* ${mediaNode.caption || "None"}`;
-
-                if (type === "image") {
-                    await sock.sendMessage(ownerJid, { image: buffer, caption: caption, mentions: [sender] });
-                } else if (type === "video") {
-                    await sock.sendMessage(ownerJid, { video: buffer, caption: caption, mentions: [sender] });
-                } else if (type === "audio") {
-                    await sock.sendMessage(ownerJid, { audio: buffer, mimetype: "audio/ogg; codecs=opus", ptt: true });
-                    await sock.sendMessage(ownerJid, { text: caption, mentions: [sender] });
-                }
-            }
-
-        } catch (e) {
-            console.log("❌ Silent Auto Hook Error:", e.message);
         }
+
+    } catch (e) {
+        console.log("❌ [SILENT AUTO FATAL ERROR]:", e.message);
     }
-};
+}
 
-// ── අතිශය වැදගත්: මේකෙන් index.js එකේ block වීම් bypass කරලා කෙලින්ම global hook එකට Auto Plug වෙනවා ──
-global.pluginHooks = global.pluginHooks || [];
-global.pluginHooks.push(silentAutomationHook);
-
-// index.js එකෙන් තවමත් call කරන්න හැදුවොත් crash නොවෙන්න Dummy Export එකක් දෙනවා
-module.exports = {
-    handleSilentAutomation: async () => {},
-    handleSilentEditedMessage: async () => {}
-};
+module.exports = { handleSilentAutomation };
