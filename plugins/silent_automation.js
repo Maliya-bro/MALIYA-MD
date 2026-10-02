@@ -1,10 +1,29 @@
-const { downloadContentFromMessage, getContentType } = require("@whiskeysockets/baileys");
+const { downloadMediaMessage, downloadContentFromMessage } = require("@whiskeysockets/baileys");
+const P = require("pino");
 const { readSettings } = require("../lib/botSettings");
-const config = require("../config");
 
-console.log("✅ [SILENT AUTO] Plugin file loaded successfully!");
+const sessionMsgStores = new Map();
 
-const msgCache = new Map();
+function getSessionStore(sessionId) {
+  let store = sessionMsgStores.get(sessionId);
+  if (!store) {
+    store = new Map();
+    sessionMsgStores.set(sessionId, store);
+  }
+  return store;
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [sId, store] of sessionMsgStores.entries()) {
+    for (const [mId, val] of store.entries()) {
+      if (now - val.time > 15 * 60 * 1000) {
+        store.delete(mId);
+      }
+    }
+    if (store.size === 0) sessionMsgStores.delete(sId);
+  }
+}, 5 * 60 * 1000);
 
 function unwrap(m) {
   if (!m) return null;
@@ -23,8 +42,7 @@ function checkIsViewOnce(rawMsg) {
   if (ep?.viewOnceMessage || ep?.viewOnceMessageV2 || ep?.viewOnceMessageV2Extension) return true;
 
   const clean = unwrap(rawMsg);
-  if (clean?.imageMessage?.viewOnce || clean?.videoMessage?.viewOnce || clean?.audioMessage?.viewOnce) return true;
-  return false;
+  return Boolean(clean?.imageMessage?.viewOnce || clean?.videoMessage?.viewOnce || clean?.audioMessage?.viewOnce);
 }
 
 function getText(m) {
@@ -40,29 +58,18 @@ function getText(m) {
   ).trim();
 }
 
-async function getBuffer(mediaMsg, type) {
-  try {
-    const stream = await downloadContentFromMessage(mediaMsg, type);
-    let buffer = Buffer.from([]);
-    for await (const chunk of stream) {
-      buffer = Buffer.concat([buffer, chunk]);
-    }
-    return buffer;
-  } catch (e) {
-    console.log("❌ [SILENT AUTO] Stream Download Error:", e?.message || e);
-    return null;
+function resolveCurrentSessionOwner(sock, sessionCtx) {
+  const sockId = sock?.user?.id;
+  if (sockId) {
+    const clean = sockId.split("@")[0].split(":")[0].replace(/\D/g, "");
+    if (clean) return `${clean}@s.whatsapp.net`;
   }
-}
 
-function getTargetJid(sock) {
-  if (sock?.user?.id) {
-    const num = sock.user.id.split("@")[0].split(":")[0].replace(/\D/g, "");
-    return `${num}@s.whatsapp.net`;
+  if (sessionCtx?.ownerNumber && sessionCtx.ownerNumber[0]) {
+    const clean = String(sessionCtx.ownerNumber[0]).replace(/\D/g, "");
+    if (clean) return `${clean}@s.whatsapp.net`;
   }
-  if (config.BOT_OWNER) {
-    const num = String(config.BOT_OWNER).replace(/\D/g, "");
-    return `${num}@s.whatsapp.net`;
-  }
+
   return null;
 }
 
@@ -70,55 +77,32 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
   try {
     if (!mek?.message) return;
 
-    const rawType = Object.keys(mek.message)[0];
     const from = mek.key?.remoteJid || "";
+    if (from.endsWith("@newsletter") || from === "status@broadcast") return;
 
-    // 🔍 1. Console Log Every Incoming Message
-    console.log(`\n🔍 [INCOMING MSG] Type: ${rawType} | From: ${from} | ID: ${mek.key?.id}`);
+    const sId = sessionCtx?.sessionId || "default";
+    const settings = await readSettings(sId);
+    if (!settings?.silent_automation) return;
 
-    // Check Settings
-    const sid = sessionCtx?.sessionId;
-    let isEnabled = false;
-    try {
-      const s = await readSettings(sid);
-      isEnabled = Boolean(s?.silent_automation);
-      console.log(`⚙️ [SETTING CHECK] Session: ${sid} | silent_automation: ${isEnabled}`);
-    } catch (e) {
-      console.log("⚠️ [SETTING CHECK] Error reading settings, default to TRUE:", e.message);
-      isEnabled = true;
-    }
-
-    if (!isEnabled) {
-      console.log("⛔ [BLOCKED] silent_automation is OFF in settings. Turn it ON via .setting on silent");
-      return;
-    }
-
-    const targetInbox = getTargetJid(sock);
-    console.log(`🎯 [TARGET INBOX RESOLVED] -> ${targetInbox}`);
-
-    if (!targetInbox) {
-      console.log("❌ [FAILED] Could not determine target inbox JID.");
-      return;
-    }
+    const targetInbox = resolveCurrentSessionOwner(sock, sessionCtx);
+    if (!targetInbox) return;
 
     const isGroup = from.endsWith("@g.us");
-    const sender = (mek.key.participant || from).split("@")[0].split(":")[0];
+    const rawSender = mek.key.participant || from;
+    const sender = rawSender.split("@")[0].split(":")[0].replace(/\D/g, "");
     const chatType = isGroup ? "👥 Group Chat" : "👤 Private Chat (DM)";
 
-    // ── 2. EDITED MESSAGE CHECK ──
+    const store = getSessionStore(sId);
+
+    // ── 1. EDITED MESSAGE TRACKER ──
     const proto = mek.message?.protocolMessage;
-    if (proto) {
-      console.log(`🔔 [PROTOCOL DETECTED] Type: ${proto.type} | TargetID: ${proto.key?.id}`);
-    }
-
     if (proto && proto.type === 14) {
-      console.log("🎯 [EDIT DETECTED] Processing Edited Message...");
       const targetId = proto.key?.id;
-      const cached = msgCache.get(targetId);
+      const cached = store.get(targetId);
       const newText = getText(proto.editedMessage);
-      const oldText = cached ? cached.text : "*(Not cached or sent before bot was online)*";
+      const oldText = cached ? cached.text : "*(Not cached or sent before bot online)*";
 
-      console.log(`📝 [EDIT CONTENT] Old: "${oldText}" -> New: "${newText}"`);
+      if (cached && cached.text === newText) return;
 
       const editCaption = `📝 *[ SILENT AUTO : MESSAGE EDITED ]*\n\n` +
         `📍 *Chat:* ${chatType}\n` +
@@ -128,34 +112,25 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
 
       await sock.sendMessage(targetInbox, {
         text: editCaption,
-        mentions: [mek.key.participant || from]
+        mentions: [rawSender]
       });
-      console.log(`✅ [EDIT SENT] Dispatched to inbox: ${targetInbox}`);
       return;
     }
 
-    // Cache normal text messages
+    // Cache message
     const textContent = getText(mek.message);
     if (mek.key?.id && textContent) {
-      msgCache.set(mek.key.id, { text: textContent, time: Date.now() });
-      console.log(`💾 [CACHED MSG] ID: ${mek.key.id} | Preview: "${textContent.slice(0, 30)}"`);
-      if (msgCache.size > 1500) {
-        const first = msgCache.keys().next().value;
-        if (first) msgCache.delete(first);
+      store.set(mek.key.id, { text: textContent, time: Date.now() });
+      if (store.size > 1000) {
+        const first = store.keys().next().value;
+        if (first) store.delete(first);
       }
     }
 
-    // ── 3. VIEW ONCE CHECK ──
-    const isVV = checkIsViewOnce(mek.message);
-    console.log(`👁️ [VIEW ONCE CHECK] Is View Once? -> ${isVV}`);
-
-    if (isVV) {
-      console.log("🚀 [VV DETECTED] Unwrapping View Once Node...");
+    // ── 2. VIEW ONCE INTERCEPTOR ──
+    if (checkIsViewOnce(mek.message)) {
       const clean = unwrap(mek.message);
-      if (!clean) {
-        console.log("❌ [VV FAIL] Failed to unwrap clean message.");
-        return;
-      }
+      if (!clean) return;
 
       let msgType = null;
       let streamType = null;
@@ -171,28 +146,31 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
         streamType = "audio";
       }
 
-      console.log(`📦 [MEDIA DETECTED] Type: ${msgType} | Stream: ${streamType}`);
-
-      if (!msgType) {
-        console.log("❌ [VV FAIL] Unsupported media payload.");
-        return;
-      }
-
+      if (!msgType) return;
       const mediaNode = clean[msgType];
-      if (!mediaNode) {
-        console.log("❌ [VV FAIL] mediaNode is null or undefined.");
-        return;
+      if (!mediaNode) return;
+
+      let buffer = null;
+      try {
+        buffer = await downloadMediaMessage(
+          { key: mek.key, message: clean },
+          "buffer",
+          {},
+          {
+            logger: P({ level: "silent" }),
+            reuploadRequest: sock.updateMediaMessage,
+          }
+        );
+      } catch {
+        try {
+          const stream = await downloadContentFromMessage(mediaNode, streamType);
+          let buf = Buffer.from([]);
+          for await (const chunk of stream) buf = Buffer.concat([buf, chunk]);
+          buffer = buf;
+        } catch {}
       }
 
-      console.log("⏳ [DOWNLOADING STREAM] Fetching media buffer...");
-      const buffer = await getBuffer(mediaNode, streamType);
-
-      if (!buffer || !buffer.length) {
-        console.log("❌ [VV FAIL] Buffer download failed or returned 0 bytes.");
-        return;
-      }
-
-      console.log(`✅ [DOWNLOAD SUCCESS] Buffer Size: ${buffer.length} bytes. Dispatching to ${targetInbox}...`);
+      if (!buffer || !buffer.length) return;
 
       const captionText = mediaNode.caption || "";
       const baseCaption = `🤫 *[ SILENT AUTO : VIEW ONCE ]*\n\n` +
@@ -200,7 +178,7 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
         `👤 *Sender:* @${sender}\n` +
         (captionText ? `💬 *Caption:* ${captionText}` : "");
 
-      const mentions = [mek.key.participant || from];
+      const mentions = [rawSender];
 
       if (msgType === "imageMessage") {
         await sock.sendMessage(targetInbox, {
@@ -225,11 +203,8 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
           mentions
         });
       }
-      console.log(`🎉 [VV SUCCESS] View Once delivered to inbox: ${targetInbox}`);
     }
-  } catch (err) {
-    console.log("❌ [SILENT AUTO ERROR]:", err);
-  }
+  } catch {}
 }
 
 module.exports = { handleSilentAutomation };
