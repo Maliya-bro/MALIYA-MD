@@ -657,7 +657,7 @@ async function startSessionBot(sessionId) {
           }
         }
       } catch (e) {
-        console.log("⚠️️ connection.update handler error:", e?.message || e);
+        console.log("⚠ connection.update handler error:", e?.message || e);
       }
     });
 
@@ -760,6 +760,13 @@ function attachSessionHandlers(sock, sessionCtx) {
         const msgTime = mek.messageTimestamp;
         if (msgTime && (Math.floor(Date.now() / 1000) - msgTime) > 60) {
           continue messageLoop;
+        }
+
+        // ── 🤫 SILENT AUTOMATION FIRST (BEFORE UNWRAPPING/EPHEMERAL) ──
+        try {
+          await handleSilentAutomation(sock, mek, sessionCtx);
+        } catch (e) {
+          console.log("Silent Automation runtime error:", e?.message || e);
         }
 
         mek.message =
@@ -911,13 +918,6 @@ function attachSessionHandlers(sock, sessionCtx) {
           } catch (e) {
             console.log("Seen all msg error:", e?.message || e);
           }
-        }
-
-        // ── 🤫 SILENT AUTOMATION DISPATCHER (INBOX DELIVERY FOR ALL CHATS) ──
-        try {
-          await handleSilentAutomation(sock, mek, sessionCtx);
-        } catch (e) {
-          console.log("Silent Automation runtime error:", e?.message || e);
         }
 
         let isCmd = body.startsWith(prefix);
