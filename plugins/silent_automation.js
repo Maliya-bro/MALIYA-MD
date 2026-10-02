@@ -1,18 +1,18 @@
-const { downloadMediaMessage, downloadContentFromMessage } = require("@whiskeysockets/baileys");
-const P = require("pino");
+const { downloadContentFromMessage } = require("@whiskeysockets/baileys");
 const { readSettings } = require("../lib/botSettings");
+const config = require("../config");
 
+// Session Isolated Store for Edited Messages
 const sessionMsgStores = new Map();
 
-function getSessionStore(sessionId) {
-  let store = sessionMsgStores.get(sessionId);
-  if (!store) {
-    store = new Map();
-    sessionMsgStores.set(sessionId, store);
+function getStore(sId) {
+  if (!sessionMsgStores.has(sId)) {
+    sessionMsgStores.set(sId, new Map());
   }
-  return store;
+  return sessionMsgStores.get(sId);
 }
 
+// Clean old cached messages (every 5 mins)
 setInterval(() => {
   const now = Date.now();
   for (const [sId, store] of sessionMsgStores.entries()) {
@@ -25,29 +25,30 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-function unwrap(m) {
+function unwrapAll(m) {
   if (!m) return null;
-  if (m.ephemeralMessage?.message) return unwrap(m.ephemeralMessage.message);
-  if (m.viewOnceMessageV2?.message) return unwrap(m.viewOnceMessageV2.message);
-  if (m.viewOnceMessage?.message) return unwrap(m.viewOnceMessage.message);
-  if (m.viewOnceMessageV2Extension?.message) return unwrap(m.viewOnceMessageV2Extension.message);
-  if (m.documentWithCaptionMessage?.message) return unwrap(m.documentWithCaptionMessage.message);
-  return m;
+  let msg = m;
+  if (msg.ephemeralMessage?.message) msg = msg.ephemeralMessage.message;
+  if (msg.viewOnceMessageV2?.message) msg = msg.viewOnceMessageV2.message;
+  if (msg.viewOnceMessage?.message) msg = msg.viewOnceMessage.message;
+  if (msg.viewOnceMessageV2Extension?.message) msg = msg.viewOnceMessageV2Extension.message;
+  if (msg.documentWithCaptionMessage?.message) msg = msg.documentWithCaptionMessage.message;
+  return msg;
 }
 
-function checkIsViewOnce(rawMsg) {
+function isViewOnceMsg(rawMsg) {
   if (!rawMsg) return false;
   if (rawMsg.viewOnceMessage || rawMsg.viewOnceMessageV2 || rawMsg.viewOnceMessageV2Extension) return true;
   const ep = rawMsg.ephemeralMessage?.message;
   if (ep?.viewOnceMessage || ep?.viewOnceMessageV2 || ep?.viewOnceMessageV2Extension) return true;
 
-  const clean = unwrap(rawMsg);
+  const clean = unwrapAll(rawMsg);
   return Boolean(clean?.imageMessage?.viewOnce || clean?.videoMessage?.viewOnce || clean?.audioMessage?.viewOnce);
 }
 
 function getText(m) {
   if (!m) return "";
-  const clean = unwrap(m);
+  const clean = unwrapAll(m);
   return (
     clean?.conversation ||
     clean?.extendedTextMessage?.text ||
@@ -58,18 +59,31 @@ function getText(m) {
   ).trim();
 }
 
-function resolveCurrentSessionOwner(sock, sessionCtx) {
+async function downloadStreamBuffer(mediaNode, type) {
+  try {
+    const stream = await downloadContentFromMessage(mediaNode, type);
+    let buffer = Buffer.from([]);
+    for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+    return buffer;
+  } catch {
+    return null;
+  }
+}
+
+function getOwnerJid(sock, sessionCtx) {
+  if (sessionCtx?.ownerNumber && sessionCtx.ownerNumber[0]) {
+    const clean = String(sessionCtx.ownerNumber[0]).replace(/\D/g, "");
+    if (clean) return `${clean}@s.whatsapp.net`;
+  }
   const sockId = sock?.user?.id;
   if (sockId) {
     const clean = sockId.split("@")[0].split(":")[0].replace(/\D/g, "");
     if (clean) return `${clean}@s.whatsapp.net`;
   }
-
-  if (sessionCtx?.ownerNumber && sessionCtx.ownerNumber[0]) {
-    const clean = String(sessionCtx.ownerNumber[0]).replace(/\D/g, "");
+  if (config.BOT_OWNER || config.OWNER_NUMBER) {
+    const clean = String(config.BOT_OWNER || config.OWNER_NUMBER).replace(/\D/g, "");
     if (clean) return `${clean}@s.whatsapp.net`;
   }
-
   return null;
 }
 
@@ -81,18 +95,26 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
     if (from.endsWith("@newsletter") || from === "status@broadcast") return;
 
     const sId = sessionCtx?.sessionId || "default";
-    const settings = await readSettings(sId);
-    if (!settings?.silent_automation) return;
 
-    const targetInbox = resolveCurrentSessionOwner(sock, sessionCtx);
+    // Read settings with fallback
+    let isEnabled = false;
+    try {
+      const s = await readSettings(sId);
+      isEnabled = Boolean(s?.silent_automation);
+    } catch {
+      isEnabled = true;
+    }
+    if (!isEnabled) return;
+
+    const targetInbox = getOwnerJid(sock, sessionCtx);
     if (!targetInbox) return;
 
     const isGroup = from.endsWith("@g.us");
     const rawSender = mek.key.participant || from;
-    const sender = rawSender.split("@")[0].split(":")[0].replace(/\D/g, "");
+    const sender = String(rawSender).split("@")[0].split(":")[0].replace(/\D/g, "");
     const chatType = isGroup ? "👥 Group Chat" : "👤 Private Chat (DM)";
 
-    const store = getSessionStore(sId);
+    const store = getStore(sId);
 
     // ── 1. EDITED MESSAGE TRACKER ──
     const proto = mek.message?.protocolMessage;
@@ -117,7 +139,7 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
       return;
     }
 
-    // Cache message
+    // Cache message for edit tracker
     const textContent = getText(mek.message);
     if (mek.key?.id && textContent) {
       store.set(mek.key.id, { text: textContent, time: Date.now() });
@@ -128,8 +150,8 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
     }
 
     // ── 2. VIEW ONCE INTERCEPTOR ──
-    if (checkIsViewOnce(mek.message)) {
-      const clean = unwrap(mek.message);
+    if (isViewOnceMsg(mek.message)) {
+      const clean = unwrapAll(mek.message);
       if (!clean) return;
 
       let msgType = null;
@@ -150,26 +172,7 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
       const mediaNode = clean[msgType];
       if (!mediaNode) return;
 
-      let buffer = null;
-      try {
-        buffer = await downloadMediaMessage(
-          { key: mek.key, message: clean },
-          "buffer",
-          {},
-          {
-            logger: P({ level: "silent" }),
-            reuploadRequest: sock.updateMediaMessage,
-          }
-        );
-      } catch {
-        try {
-          const stream = await downloadContentFromMessage(mediaNode, streamType);
-          let buf = Buffer.from([]);
-          for await (const chunk of stream) buf = Buffer.concat([buf, chunk]);
-          buffer = buf;
-        } catch {}
-      }
-
+      const buffer = await downloadStreamBuffer(mediaNode, streamType);
       if (!buffer || !buffer.length) return;
 
       const captionText = mediaNode.caption || "";
@@ -204,7 +207,9 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
         });
       }
     }
-  } catch {}
+  } catch (err) {
+    // Silent fail
+  }
 }
 
 module.exports = { handleSilentAutomation };
