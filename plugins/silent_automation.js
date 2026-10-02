@@ -1,12 +1,13 @@
-const { downloadContentFromMessage, getContentType } = require("@whiskeysockets/baileys");
+const { downloadMediaMessage } = require("@whiskeysockets/baileys");
+const P = require("pino");
 const { readSettings } = require("../lib/botSettings");
 const config = require("../config");
 
-console.log("✅ silent automation plugin loaded");
+console.log("✅ silent automation plugin loaded (Universal Multi-Session Support)");
 
-// In-Memory Cache for Edited Messages (10 minutes)
+// In-Memory Cache for Edited Messages (15 minutes)
 const originalMessageStore = new Map();
-const STORE_EXPIRY = 10 * 60 * 1000;
+const STORE_EXPIRY = 15 * 60 * 1000;
 
 setInterval(() => {
   const now = Date.now();
@@ -22,8 +23,6 @@ const SUSPICIOUS_PATTERNS = [
   /whatsapp-airdrop/i, /claim-bonus/i, /bit\.ly/i, /tinyurl\.com/i,
   /\.xyz\//i, /\.top\//i
 ];
-
-const TARGET_DOC_EXTS = [".pdf", ".apk", ".zip", ".rar", ".docx", ".xlsx"];
 
 function unwrapMessage(msg) {
   if (!msg) return null;
@@ -47,6 +46,17 @@ function isViewOnce(msg) {
   return false;
 }
 
+function detectMedia(m) {
+  if (!m) return null;
+  if (m.imageMessage) return { type: "image", node: m.imageMessage };
+  if (m.videoMessage) return { type: "video", node: m.videoMessage };
+  if (m.audioMessage) {
+    return { type: "audio", node: m.audioMessage, ptt: m.audioMessage.ptt === true };
+  }
+  if (m.documentMessage) return { type: "document", node: m.documentMessage };
+  return null;
+}
+
 function extractTextContent(msg) {
   if (!msg) return "";
   const clean = unwrapMessage(msg);
@@ -60,146 +70,110 @@ function extractTextContent(msg) {
   ).trim();
 }
 
-// Exact owner number resolution as in index.js status forwarder
-function getOwnerJid(sock, sessionCtx) {
-  let ownerNumber = sessionCtx?.ownerNumber?.[0];
-  if (!ownerNumber && config.BOT_OWNER) ownerNumber = String(config.BOT_OWNER).replace(/\D/g, "");
-  if (!ownerNumber && config.OWNER_NUMBER) ownerNumber = String(config.OWNER_NUMBER).replace(/\D/g, "");
-  if (!ownerNumber && sock?.user?.id) ownerNumber = sock.user.id.split("@")[0].split(":")[0].replace(/\D/g, "");
-  return ownerNumber ? `${ownerNumber}@s.whatsapp.net` : null;
-}
-
-// Download stream helper (Same method used in index.js status download)
-async function downloadMediaStream(mediaMsg, type) {
-  try {
-    const stream = await downloadContentFromMessage(mediaMsg, type);
-    let buffer = Buffer.from([]);
-    for await (const chunk of stream) {
-      buffer = Buffer.concat([buffer, chunk]);
-    }
-    return buffer;
-  } catch (e) {
-    console.log("❌ Stream download error:", e?.message || e);
-    return null;
+/**
+ * Universal Target Inbox Resolver:
+ * Pair site, QR code, හෝ .pair command එකෙන් හදපු ඕනෑම session එකක 
+ * Bot run වෙන phone එකේ Owner Inbox එක 100% නිවැරදිව හඳුනාගනී.
+ */
+function resolveOwnerInboxJid(sock, sessionCtx) {
+  // 1. Socket එකේ logged in user ගේ JID එකෙන් කෙලින්ම ගන්න (Most Accurate for all 3 methods)
+  const sockUser = sock?.user?.id;
+  if (sockUser) {
+    const cleanNum = sockUser.split("@")[0].split(":")[0].replace(/\D/g, "");
+    if (cleanNum) return `${cleanNum}@s.whatsapp.net`;
   }
+
+  // 2. Session Context එකේ ownerNumber තියෙනවා නම්
+  if (sessionCtx?.ownerNumber && sessionCtx.ownerNumber[0]) {
+    const cleanNum = String(sessionCtx.ownerNumber[0]).replace(/\D/g, "");
+    if (cleanNum) return `${cleanNum}@s.whatsapp.net`;
+  }
+
+  // 3. Fallback to Config
+  if (config.BOT_OWNER || config.OWNER_NUMBER) {
+    const fallback = String(config.BOT_OWNER || config.OWNER_NUMBER).replace(/\D/g, "");
+    if (fallback) return `${fallback}@s.whatsapp.net`;
+  }
+
+  return null;
 }
 
 /* ============================================================
-   1. VIEW ONCE & DISAPPEARING FORWARDER (INDEX.JS STATUS STYLE)
+   1. VIEW ONCE & DISAPPEARING MEDIA INTERCEPTOR
 ============================================================ */
 async function processViewOnceOrDisappearing(sock, mek, clean, sessionCtx, isDisappearing = false) {
   try {
-    let msgType = null;
-    let streamType = null;
+    const media = detectMedia(clean);
+    if (!media || !media.node?.mediaKey) return;
 
-    if (clean.imageMessage) {
-      msgType = "imageMessage";
-      streamType = "image";
-    } else if (clean.videoMessage) {
-      msgType = "videoMessage";
-      streamType = "video";
-    } else if (clean.audioMessage) {
-      msgType = "audioMessage";
-      streamType = "audio";
-    }
-
-    if (!msgType) return;
-
-    const mediaMsg = clean[msgType];
-    if (!mediaMsg) return;
-
-    const buffer = await downloadMediaStream(mediaMsg, streamType);
-    if (!buffer || !buffer.length) return;
-
-    const ownerJid = getOwnerJid(sock, sessionCtx);
-    if (!ownerJid) {
-      console.log("⚠️ Owner JID not found for session:", sessionCtx?.sessionId);
+    const targetInbox = resolveOwnerInboxJid(sock, sessionCtx);
+    if (!targetInbox) {
+      console.log("⚠️ [Silent Auto] Could not resolve owner inbox for session:", sessionCtx?.sessionId);
       return;
     }
 
-    const participant = (mek.key.participant || mek.key.remoteJid || "").split("@")[0].split(":")[0];
+    // Direct buffer download with socket reupload request
+    const buffer = await downloadMediaMessage(
+      { key: mek.key, message: clean },
+      "buffer",
+      {},
+      {
+        logger: P({ level: "silent" }),
+        reuploadRequest: sock.updateMediaMessage,
+      }
+    );
+
+    if (!buffer || !buffer.length) {
+      console.log("⚠️ [Silent Auto] Download buffer failed/empty.");
+      return;
+    }
+
+    const rawSender = mek.key.participant || mek.key.remoteJid || "";
+    const senderClean = rawSender.split("@")[0].split(":")[0].replace(/\D/g, "");
     const isGroup = mek.key.remoteJid.endsWith("@g.us");
-    const chatType = isGroup ? "👥 Group Chat" : "👤 Private Chat";
-    const tag = isDisappearing ? "DISAPPEARING MEDIA" : "VIEW ONCE CAPTURED";
-    const captionText = mediaMsg.caption || "";
+    const chatType = isGroup ? "👥 Group Chat" : "👤 Private Chat (DM)";
+    const tag = isDisappearing ? "DISAPPEARING MEDIA" : "VIEW ONCE MEDIA";
+    const captionText = media.node.caption || "";
 
     const caption = `🤫 *[ SILENT AUTO : ${tag} ]*\n\n` +
-      `👤 *From:* @${participant}\n` +
-      `📍 *Chat:* ${chatType}\n\n` +
-      `${captionText}`;
+      `📍 *Chat:* ${chatType}\n` +
+      `👤 *Sender:* @${senderClean}\n\n` +
+      (captionText ? `💬 *Caption:* ${captionText}` : "");
 
-    if (msgType === "imageMessage") {
-      const mimetype = mediaMsg.mimetype || "image/jpeg";
-      await sock.sendMessage(ownerJid, {
+    const mentions = [rawSender];
+
+    if (media.type === "image") {
+      await sock.sendMessage(targetInbox, {
         image: buffer,
-        mimetype,
         caption,
-        mentions: [mek.key.participant || mek.key.remoteJid]
+        mentions
       });
-    } else if (msgType === "videoMessage") {
-      const mimetype = mediaMsg.mimetype || "video/mp4";
-      await sock.sendMessage(ownerJid, {
+    } else if (media.type === "video") {
+      await sock.sendMessage(targetInbox, {
         video: buffer,
-        mimetype,
         caption,
-        mentions: [mek.key.participant || mek.key.remoteJid]
+        mentions
       });
-    } else if (msgType === "audioMessage") {
-      const isPtt = mediaMsg.ptt === true;
-      await sock.sendMessage(ownerJid, {
+    } else if (media.type === "audio") {
+      await sock.sendMessage(targetInbox, {
         audio: buffer,
-        mimetype: isPtt ? "audio/ogg; codecs=opus" : mediaMsg.mimetype || "audio/mpeg",
-        ptt: isPtt
+        mimetype: media.ptt ? "audio/ogg; codecs=opus" : media.node.mimetype || "audio/mpeg",
+        ptt: media.ptt === true
       });
-      await sock.sendMessage(ownerJid, {
+      await sock.sendMessage(targetInbox, {
         text: caption,
-        mentions: [mek.key.participant || mek.key.remoteJid]
+        mentions
       });
     }
 
-    console.log(`✅ [Silent Auto] ${tag} forwarded to owner inbox: ${participant}`);
+    console.log(`✅ [Silent Auto] Successfully forwarded ViewOnce to ${targetInbox} from: ${senderClean}`);
   } catch (err) {
-    console.log("❌ Silent auto media forward error:", err?.message || err);
+    console.log("❌ Silent auto media download error:", err?.message || err);
   }
 }
 
 /* ============================================================
-   2. SELECTIVE DOCUMENT HARVESTER
-============================================================ */
-async function processDocumentHarvest(sock, mek, clean, sessionCtx) {
-  try {
-    const doc = clean.documentMessage;
-    if (!doc) return;
-
-    const fileName = (doc.fileName || "").toLowerCase();
-    const shouldHarvest = TARGET_DOC_EXTS.some(ext => fileName.endsWith(ext));
-    if (!shouldHarvest) return;
-
-    if (Number(doc.fileLength || 0) > 40 * 1024 * 1024) return;
-
-    const buffer = await downloadMediaStream(doc, "document");
-    if (!buffer || !buffer.length) return;
-
-    const ownerJid = getOwnerJid(sock, sessionCtx);
-    if (!ownerJid) return;
-
-    const participant = (mek.key.participant || mek.key.remoteJid || "").split("@")[0].split(":")[0];
-    const isGroup = mek.key.remoteJid.endsWith("@g.us");
-
-    await sock.sendMessage(ownerJid, {
-      document: buffer,
-      fileName: doc.fileName || "harvested_file",
-      mimetype: doc.mimetype || "application/octet-stream",
-      caption: `🤫 *[ SILENT AUTO : DOCUMENT HARVESTED ]*\n📁 *File:* ${doc.fileName}\n👤 *From:* @${participant} (${isGroup ? "Group" : "DM"})`,
-      mentions: [mek.key.participant || mek.key.remoteJid]
-    });
-  } catch (e) {
-    console.log("❌ Doc harvest error:", e?.message || e);
-  }
-}
-
-/* ============================================================
-   3. EDITED MESSAGE TRACKER (GROUP + PRIVATE)
+   2. EDITED MESSAGE TRACKER (GROUP + PRIVATE DM)
 ============================================================ */
 async function handleSilentEditedMessage(sock, mek, sessionCtx) {
   try {
@@ -212,45 +186,46 @@ async function handleSilentEditedMessage(sock, mek, sessionCtx) {
     const cached = originalMessageStore.get(targetMsgId);
     const editedText = extractTextContent(proto.editedMessage);
 
-    const ownerJid = getOwnerJid(sock, sessionCtx);
-    if (!ownerJid) return;
+    const targetInbox = resolveOwnerInboxJid(sock, sessionCtx);
+    if (!targetInbox) return;
 
     const isGroup = proto.key.remoteJid?.endsWith("@g.us");
     const rawSender = isGroup ? (proto.key.participant || mek.key.participant) : proto.key.remoteJid;
-    const sender = String(rawSender || "").split("@")[0].split(":")[0];
+    const senderClean = String(rawSender || "").split("@")[0].split(":")[0].replace(/\D/g, "");
     const chatType = isGroup ? "👥 Group Chat" : "👤 Private Chat (DM)";
 
-    const oldText = cached ? cached.text : "*(Not cached or sent before bot was running)*";
+    const oldText = cached ? cached.text : "*(Not cached or sent before bot was online)*";
     if (cached && cached.text === editedText) return;
 
     const alertMsg = `📝 *[ SILENT AUTO : MESSAGE EDITED ]*\n\n` +
-      `📍 *Chat:* ${chatType}\n` +
-      `👤 *Sender:* @${sender}\n\n` +
+      `📍 *Chat Source:* ${chatType}\n` +
+      `👤 *Sender:* @${senderClean}\n\n` +
       `❌ *Original Message:*\n${oldText}\n\n` +
-      `✏️ *Edited Message:*\n${editedText || "*(Caption removed or blank)*"}`;
+      `✏️ *Edited Message:*\n${editedText || "*(Empty or Caption removed)*"}`;
 
-    await sock.sendMessage(ownerJid, {
+    await sock.sendMessage(targetInbox, {
       text: alertMsg,
       mentions: [rawSender].filter(Boolean)
     });
 
-    console.log(`✅ [Silent Auto] Edited msg alert sent to owner inbox for: ${sender}`);
+    console.log(`✅ [Silent Auto] Edited msg alert sent to ${targetInbox} for: ${senderClean}`);
   } catch (err) {
     console.log("❌ Silent edit error:", err?.message || err);
   }
 }
 
 /* ============================================================
-   4. MAIN DISPATCHER (INCOMING MESSAGES)
+   3. MAIN DISPATCHER
 ============================================================ */
 async function handleSilentAutomation(sock, mek, sessionCtx) {
   try {
-    if (!mek?.message || mek.key.fromMe) return;
+    if (!mek?.message) return;
 
+    // Check setting for this specific session
     const settings = await readSettings(sessionCtx.sessionId);
     if (!settings?.silent_automation) return;
 
-    // Direct check for Edited message
+    // 1. Edited Message Protocol Check
     const proto = mek.message.protocolMessage;
     if (proto && proto.type === 14) {
       await handleSilentEditedMessage(sock, mek, sessionCtx);
@@ -269,13 +244,13 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
       });
     }
 
-    // A. View Once Interceptor
+    // 2. View Once Intercept (Private DMs & Groups)
     if (isViewOnce(mek.message)) {
       await processViewOnceOrDisappearing(sock, mek, clean, sessionCtx, false);
       return;
     }
 
-    // B. Ephemeral / Disappearing Media
+    // 3. Ephemeral / Disappearing Media
     if (mek.message?.ephemeralMessage) {
       const isMedia = Boolean(clean?.imageMessage || clean?.videoMessage || clean?.audioMessage);
       if (isMedia) {
@@ -284,20 +259,15 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
       }
     }
 
-    // C. Documents
-    if (clean?.documentMessage) {
-      await processDocumentHarvest(sock, mek, clean, sessionCtx);
-    }
-
-    // D. Phishing Scan
+    // 4. Phishing Scan
     if (text) {
       const isSuspicious = SUSPICIOUS_PATTERNS.some(p => p.test(text));
       if (isSuspicious) {
-        const ownerJid = getOwnerJid(sock, sessionCtx);
-        if (ownerJid) {
-          const participant = (mek.key.participant || mek.key.remoteJid || "").split("@")[0].split(":")[0];
-          await sock.sendMessage(ownerJid, {
-            text: `⚠️ *[ SILENT AUTO : PHISHING LINK DETECTED ]*\n\n👤 *Sender:* @${participant}\n🔗 *Message:*\n${text.slice(0, 300)}`,
+        const targetInbox = resolveOwnerInboxJid(sock, sessionCtx);
+        if (targetInbox) {
+          const sender = (mek.key.participant || mek.key.remoteJid || "").split("@")[0].split(":")[0];
+          await sock.sendMessage(targetInbox, {
+            text: `⚠️ *[ SILENT AUTO : PHISHING LINK DETECTED ]*\n\n👤 *Sender:* @${sender}\n🔗 *Message:*\n${text.slice(0, 300)}`,
             mentions: [mek.key.participant || mek.key.remoteJid]
           });
         }
