@@ -79,14 +79,14 @@ function workScopeText(val) {
   } else if (val === "group") {
     return "👥 Group Only";
   }
-  return "🌍 All Chats";
+  return "All Chats";
 }
 
 function btnsModeText(val) {
   if (val) {
-    return "🔘 Buttons Mode";
+    return "🔘 Buttons";
   }
-  return "🔢 Number Reply Mode";
+  return "🔢 Number Reply";
 }
 
 async function getFittedImageBuffer(url) {
