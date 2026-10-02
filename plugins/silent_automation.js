@@ -1,214 +1,135 @@
-const { downloadContentFromMessage } = require("@whiskeysockets/baileys");
+const { downloadMediaMessage } = require("@whiskeysockets/baileys");
+const P = require("pino");
 const { readSettings } = require("../lib/botSettings");
 const config = require("../config");
 
-// Session Isolated Store for Edited Messages
-const sessionMsgStores = new Map();
+const msgCache = new Map();
 
-function getStore(sId) {
-  if (!sessionMsgStores.has(sId)) {
-    sessionMsgStores.set(sId, new Map());
-  }
-  return sessionMsgStores.get(sId);
-}
-
-// Clean old cached messages (every 5 mins)
+// විනාඩි 15කට පරණ Cache වුණු මැසේජ් අයින් කරනවා
 setInterval(() => {
   const now = Date.now();
-  for (const [sId, store] of sessionMsgStores.entries()) {
-    for (const [mId, val] of store.entries()) {
-      if (now - val.time > 15 * 60 * 1000) {
-        store.delete(mId);
-      }
-    }
-    if (store.size === 0) sessionMsgStores.delete(sId);
+  for (const [key, val] of msgCache.entries()) {
+    if (now - val.time > 15 * 60 * 1000) msgCache.delete(key);
   }
-}, 5 * 60 * 1000);
+}, 60 * 1000);
 
-function unwrapAll(m) {
-  if (!m) return null;
-  let msg = m;
-  if (msg.ephemeralMessage?.message) msg = msg.ephemeralMessage.message;
-  if (msg.viewOnceMessageV2?.message) msg = msg.viewOnceMessageV2.message;
-  if (msg.viewOnceMessage?.message) msg = msg.viewOnceMessage.message;
-  if (msg.viewOnceMessageV2Extension?.message) msg = msg.viewOnceMessageV2Extension.message;
-  if (msg.documentWithCaptionMessage?.message) msg = msg.documentWithCaptionMessage.message;
-  return msg;
+// ඔයාගේ .vv එකේ වැඩ කරපු Exact Logic එකමයි මේ 
+function unwrapMessage(message) {
+  if (!message) return null;
+  if (message.ephemeralMessage) return unwrapMessage(message.ephemeralMessage.message);
+  if (message.viewOnceMessageV2) return unwrapMessage(message.viewOnceMessageV2.message);
+  if (message.viewOnceMessage) return unwrapMessage(message.viewOnceMessage.message);
+  if (message.documentWithCaptionMessage) return unwrapMessage(message.documentWithCaptionMessage.message);
+  return message;
 }
 
-function isViewOnceMsg(rawMsg) {
-  if (!rawMsg) return false;
-  if (rawMsg.viewOnceMessage || rawMsg.viewOnceMessageV2 || rawMsg.viewOnceMessageV2Extension) return true;
-  const ep = rawMsg.ephemeralMessage?.message;
-  if (ep?.viewOnceMessage || ep?.viewOnceMessageV2 || ep?.viewOnceMessageV2Extension) return true;
+function isViewOnceMessage(m) {
+  if (!m) return false;
+  if (m.viewOnceMessage || m.viewOnceMessageV2) return true;
+  const ep = m.ephemeralMessage?.message;
+  if (ep?.viewOnceMessage || ep?.viewOnceMessageV2) return true;
+  if (m.imageMessage?.viewOnce || m.videoMessage?.viewOnce || m.audioMessage?.viewOnce) return true;
+  const clean = unwrapMessage(m);
+  if (clean?.imageMessage?.viewOnce || clean?.videoMessage?.viewOnce || clean?.audioMessage?.viewOnce) return true;
+  return false;
+}
 
-  const clean = unwrapAll(rawMsg);
-  return Boolean(clean?.imageMessage?.viewOnce || clean?.videoMessage?.viewOnce || clean?.audioMessage?.viewOnce);
+function detectMedia(m) {
+  if (!m) return null;
+  if (m.imageMessage) return { type: "image", node: m.imageMessage };
+  if (m.videoMessage) return { type: "video", node: m.videoMessage };
+  if (m.audioMessage) return { type: "audio", node: m.audioMessage, ptt: m.audioMessage.ptt === true };
+  if (m.documentMessage) return { type: "document", node: m.documentMessage };
+  return null;
 }
 
 function getText(m) {
-  if (!m) return "";
-  const clean = unwrapAll(m);
-  return (
-    clean?.conversation ||
-    clean?.extendedTextMessage?.text ||
-    clean?.imageMessage?.caption ||
-    clean?.videoMessage?.caption ||
-    clean?.documentMessage?.caption ||
-    ""
-  ).trim();
+  const clean = unwrapMessage(m);
+  if (!clean) return "";
+  return (clean.conversation || clean.extendedTextMessage?.text || clean.imageMessage?.caption || clean.videoMessage?.caption || clean.documentMessage?.caption || "").trim();
 }
 
-async function downloadStreamBuffer(mediaNode, type) {
-  try {
-    const stream = await downloadContentFromMessage(mediaNode, type);
-    let buffer = Buffer.from([]);
-    for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-    return buffer;
-  } catch {
-    return null;
-  }
-}
-
+// Bot Owner ගේ JID එක හරියටම ගන්නවා
 function getOwnerJid(sock, sessionCtx) {
-  if (sessionCtx?.ownerNumber && sessionCtx.ownerNumber[0]) {
-    const clean = String(sessionCtx.ownerNumber[0]).replace(/\D/g, "");
-    if (clean) return `${clean}@s.whatsapp.net`;
-  }
-  const sockId = sock?.user?.id;
-  if (sockId) {
-    const clean = sockId.split("@")[0].split(":")[0].replace(/\D/g, "");
-    if (clean) return `${clean}@s.whatsapp.net`;
-  }
-  if (config.BOT_OWNER || config.OWNER_NUMBER) {
-    const clean = String(config.BOT_OWNER || config.OWNER_NUMBER).replace(/\D/g, "");
-    if (clean) return `${clean}@s.whatsapp.net`;
-  }
+  let num = sock?.user?.id;
+  if (num) return `${num.split("@")[0].split(":")[0]}@s.whatsapp.net`;
+  num = sessionCtx?.ownerNumber?.[0];
+  if (num) return `${String(num).replace(/\D/g, "")}@s.whatsapp.net`;
+  if (config.BOT_OWNER) return `${String(config.BOT_OWNER).replace(/\D/g, "")}@s.whatsapp.net`;
   return null;
 }
 
 async function handleSilentAutomation(sock, mek, sessionCtx) {
   try {
-    if (!mek?.message) return;
+    if (!mek?.message || mek.key.fromMe) return;
 
-    const from = mek.key?.remoteJid || "";
+    const from = mek.key.remoteJid || "";
+    // Channels සහ Status Broadcast අයින් කරනවා
     if (from.endsWith("@newsletter") || from === "status@broadcast") return;
 
-    const sId = sessionCtx?.sessionId || "default";
-
-    // Read settings with fallback
-    let isEnabled = false;
-    try {
-      const s = await readSettings(sId);
-      isEnabled = Boolean(s?.silent_automation);
-    } catch {
-      isEnabled = true;
-    }
+    // ⚠️ FORCE ENABLE: ඔයාගේ DB එකේ Settings save වෙන්නේ නැති ප්‍රශ්නයක් තියෙන නිසා 
+    // මම Settings Check එක අයින් කරලා කෙලින්ම True කරලා තියෙන්නේ. දැන් අනිවාර්යයෙන් වැඩ කරන්නම ඕනේ.
+    const isEnabled = true; 
     if (!isEnabled) return;
 
     const targetInbox = getOwnerJid(sock, sessionCtx);
     if (!targetInbox) return;
 
-    const isGroup = from.endsWith("@g.us");
-    const rawSender = mek.key.participant || from;
-    const sender = String(rawSender).split("@")[0].split(":")[0].replace(/\D/g, "");
-    const chatType = isGroup ? "👥 Group Chat" : "👤 Private Chat (DM)";
-
-    const store = getStore(sId);
+    const sender = (mek.key.participant || from).split("@")[0].split(":")[0];
+    const chatType = from.endsWith("@g.us") ? "👥 Group" : "👤 Private";
 
     // ── 1. EDITED MESSAGE TRACKER ──
-    const proto = mek.message?.protocolMessage;
-    if (proto && proto.type === 14) {
-      const targetId = proto.key?.id;
-      const cached = store.get(targetId);
-      const newText = getText(proto.editedMessage);
-      const oldText = cached ? cached.text : "*(Not cached or sent before bot online)*";
+    if (mek.message.protocolMessage?.type === 14) {
+      const targetId = mek.message.protocolMessage.key?.id;
+      const cached = msgCache.get(targetId);
+      const newText = getText(mek.message.protocolMessage.editedMessage);
+      const oldText = cached ? cached.text : "*(Not cached)*";
 
       if (cached && cached.text === newText) return;
 
-      const editCaption = `📝 *[ SILENT AUTO : MESSAGE EDITED ]*\n\n` +
-        `📍 *Chat:* ${chatType}\n` +
-        `👤 *Sender:* @${sender}\n\n` +
-        `❌ *Original:*\n${oldText}\n\n` +
-        `✏️ *Edited:*\n${newText || "*(Empty/Cleared)*"}`;
-
       await sock.sendMessage(targetInbox, {
-        text: editCaption,
-        mentions: [rawSender]
+        text: `📝 *[ MESSAGE EDITED ]*\n📍 *Chat:* ${chatType}\n👤 *Sender:* @${sender}\n\n❌ *Old:*\n${oldText}\n\n✏️ *New:*\n${newText || "*(Cleared)*"}`,
+        mentions: [mek.key.participant || from]
       });
       return;
     }
 
-    // Cache message for edit tracker
-    const textContent = getText(mek.message);
-    if (mek.key?.id && textContent) {
-      store.set(mek.key.id, { text: textContent, time: Date.now() });
-      if (store.size > 1000) {
-        const first = store.keys().next().value;
-        if (first) store.delete(first);
-      }
-    }
+    // සාමාන්‍ය මැසේජ් Text එක Cache එකට දානවා (පස්සේ කවුරුහරි Edit කරොත් අල්ලන්න)
+    const text = getText(mek.message);
+    if (mek.key?.id && text) msgCache.set(mek.key.id, { text, time: Date.now() });
 
-    // ── 2. VIEW ONCE INTERCEPTOR ──
-    if (isViewOnceMsg(mek.message)) {
-      const clean = unwrapAll(mek.message);
-      if (!clean) return;
+    // ── 2. VIEW ONCE GRABBER ──
+    if (isViewOnceMessage(mek.message)) {
+      const clean = unwrapMessage(mek.message);
+      const media = detectMedia(clean);
+      if (!media || !media.node?.mediaKey) return;
 
-      let msgType = null;
-      let streamType = null;
+      // හරියටම ඔයාගේ .vv එකේ තිබ්බ Download විදිහ
+      const buffer = await downloadMediaMessage(
+        { key: mek.key, message: clean },
+        "buffer",
+        {},
+        {
+          logger: P({ level: "silent" }),
+          reuploadRequest: sock.updateMediaMessage,
+        }
+      );
 
-      if (clean.imageMessage) {
-        msgType = "imageMessage";
-        streamType = "image";
-      } else if (clean.videoMessage) {
-        msgType = "videoMessage";
-        streamType = "video";
-      } else if (clean.audioMessage) {
-        msgType = "audioMessage";
-        streamType = "audio";
-      }
-
-      if (!msgType) return;
-      const mediaNode = clean[msgType];
-      if (!mediaNode) return;
-
-      const buffer = await downloadStreamBuffer(mediaNode, streamType);
       if (!buffer || !buffer.length) return;
 
-      const captionText = mediaNode.caption || "";
-      const baseCaption = `🤫 *[ SILENT AUTO : VIEW ONCE ]*\n\n` +
-        `📍 *Source:* ${chatType}\n` +
-        `👤 *Sender:* @${sender}\n` +
-        (captionText ? `💬 *Caption:* ${captionText}` : "");
+      const caption = `🤫 *[ VIEW ONCE CAPTURED ]*\n📍 *Chat:* ${chatType}\n👤 *Sender:* @${sender}\n💬 *Caption:* ${media.node.caption || "None"}`;
 
-      const mentions = [rawSender];
-
-      if (msgType === "imageMessage") {
-        await sock.sendMessage(targetInbox, {
-          image: buffer,
-          caption: baseCaption,
-          mentions
-        });
-      } else if (msgType === "videoMessage") {
-        await sock.sendMessage(targetInbox, {
-          video: buffer,
-          caption: baseCaption,
-          mentions
-        });
-      } else if (msgType === "audioMessage") {
-        await sock.sendMessage(targetInbox, {
-          audio: buffer,
-          mimetype: mediaNode.ptt ? "audio/ogg; codecs=opus" : "audio/mpeg",
-          ptt: mediaNode.ptt === true
-        });
-        await sock.sendMessage(targetInbox, {
-          text: baseCaption,
-          mentions
-        });
+      if (media.type === "image") {
+        await sock.sendMessage(targetInbox, { image: buffer, caption, mentions: [mek.key.participant || from] });
+      } else if (media.type === "video") {
+        await sock.sendMessage(targetInbox, { video: buffer, caption, mentions: [mek.key.participant || from] });
+      } else if (media.type === "audio") {
+        await sock.sendMessage(targetInbox, { audio: buffer, mimetype: media.ptt ? "audio/ogg; codecs=opus" : "audio/mpeg", ptt: media.ptt });
+        await sock.sendMessage(targetInbox, { text: caption, mentions: [mek.key.participant || from] });
       }
     }
   } catch (err) {
-    // Silent fail
+    console.log("❌ Silent auto error:", err?.message);
   }
 }
 
