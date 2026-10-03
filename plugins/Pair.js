@@ -139,12 +139,12 @@ cmd(
     try {
       let targetPhone = "";
 
-      // 1. Argument එකක් ලබා දී ඇත්නම් එය ලබා ගැනීම
+      // 1. Argument එකක් තිබේ නම් ලබා ගැනීම
       if (args && args[0]) {
         targetPhone = normalizePhone(args[0]);
       }
 
-      // 2. Argument එකක් නැතිනම් එවූ කෙනාගේ අංකය (Sender) auto ලබා ගැනීම
+      // 2. නැතිනම් Command එක එවූ පුද්ගලයාගේ Number එක auto ලබා ගැනීම
       if (!targetPhone) {
         if (sender) {
           const rawNum = String(sender).split("@")[0].split(":")[0];
@@ -164,6 +164,7 @@ cmd(
       return await generatePairCode({
         conn,
         from,
+        mek,
         reply,
         phone: targetPhone,
       });
@@ -176,7 +177,7 @@ cmd(
 
 /* ================= CORE ================= */
 
-async function generatePairCode({ conn, from, reply, phone }) {
+async function generatePairCode({ conn, from, mek, reply, phone }) {
   const sessionId = generateSessionId(phone);
   const tempSessionId = `pair_${phone}_${Date.now()}`;
   const authDir = path.join(__dirname, "../temp", tempSessionId);
@@ -311,62 +312,53 @@ async function generatePairCode({ conn, from, reply, phone }) {
         codeSent = true;
 
         const bodyMsg =
-          `╔═════ ≪ • ❈ • ≫ ═════╗\n` +
-          `   🍁 *MALIYA-MD PAIR* 🍁\n` +
-          `╚═════ ≪ • ❈ • ≫ ═════╝\n\n` +
+          "╔═════ ≪ • ❈ • ≫ ═════╗\n" +
+          "   🍁 *MALIYA-MD PAIR* 🍁\n" +
+          "╚═════ ≪ • ❈ • ≫ ═════╝\n\n" +
           `  📲 *Phone Number :* +${phone}\n` +
           `  🔑 *Pairing Code :* \`${code}\`\n\n` +
-          `┌─── ❖ 『 How to Connect 』 ❖ ───┐\n` +
-          `  1. Go to WhatsApp > Linked Devices > Link with phone number\n` +
-          `  2. Click *Copy Code* below and paste it into WhatsApp\n` +
-          `  3. Or tap *Get QR* to pair using QR code instead\n` +
-          `└─────────────────────────────────┘\n\n` +
-          `⏱️ _Code expires in approximately 60 seconds._`;
+          "┌─── ❖ 『 How to Connect 』 ❖ ───┐\n" +
+          "  1. Go to WhatsApp > Linked Devices > Link with phone number\n" +
+          "  2. Click *Copy Code* below and paste it into WhatsApp\n" +
+          "  3. Or tap *Get QR* to pair using QR code instead\n" +
+          "└─────────────────────────────────┘\n\n" +
+          "⏱️ _Code expires in approximately 60 seconds._";
 
         let buttonSent = false;
 
-        // ── 🔘 @vanzxy/baileys Button Builder භාවිතා කිරීම ──
+        // ── 🔘 Other Plugins Style (ButtonV2 with Dynamic Import) ──
         try {
-          const { Button } = await import("@vanzxy/baileys");
-
-          const btn = new Button(conn)
-            .setTitle("MALIYA-MD PAIR SYSTEM")
+          const { ButtonV2 } = await import("@vanzxy/baileys");
+          const btn = new ButtonV2(conn)
             .setBody(bodyMsg)
             .setFooter("© 2026 MALIYA-MD BOT SYSTEM");
 
-          // Native Copy Button සහ Quick Reply Buttons
-          if (typeof btn.addCopy === "function") {
-            btn.addCopy("📋 Copy Code", code);
-          } else if (typeof btn.addRawButton === "function") {
-            btn.addRawButton({
-              buttonId: "copy_pair_code",
-              buttonText: { displayText: "📋 Copy Code" },
-              type: 1,
-              nativeFlowInfo: {
-                name: "cta_copy",
-                paramsJson: JSON.stringify({
-                  display_text: "📋 Copy Code",
-                  id: code,
-                  copy_code: code,
-                }),
-              },
-            });
-          } else {
-            btn.addReply("📋 Copy Code", code);
-          }
+          btn.addRawButton({
+            buttonId: "copy_pair_code",
+            buttonText: { displayText: "📋 Copy Code" },
+            type: 1,
+            nativeFlowInfo: {
+              name: "cta_copy",
+              paramsJson: JSON.stringify({
+                display_text: "📋 Copy Code",
+                id: code,
+                copy_code: code,
+              }),
+            },
+          });
 
-          btn.addReply("📷 Get QR", ".qr");
+          btn.addButton("📷 Get QR", ".qr");
 
-          await btn.send(from);
-          buttonSent = true;
+          const sentMsg = await btn.send(from, { quoted: mek });
+          if (sentMsg) buttonSent = true;
         } catch (btnErr) {
-          console.error("VANZXY BUTTON ERROR:", btnErr?.message || btnErr);
+          console.log("PAIR BUTTONV2 ERROR:", btnErr?.message || btnErr);
         }
 
-        // ── 🔘 Fallback: Plain Text (බොත්තම් අසමත් වුවහොත් පමණි) ──
+        // ── 🔘 Fallback to Plain Text (if button fails) ──
         if (!buttonSent) {
-          await conn.sendMessage(from, { text: bodyMsg });
-          await conn.sendMessage(from, { text: code });
+          await conn.sendMessage(from, { text: bodyMsg }, { quoted: mek });
+          await conn.sendMessage(from, { text: code }, { quoted: mek });
         }
 
       } catch (e) {
