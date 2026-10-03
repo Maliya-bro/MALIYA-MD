@@ -192,7 +192,6 @@ async function getFittedImageBuffer(url) {
   }
 }
 
-// Menu Header with label-formatted backticks & latency
 function menuHeader(userName = "User", latency = "0ms") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
@@ -582,17 +581,20 @@ const menuReplyHandler = {
     const state = pendingMenu[k];
     if (!state) return false;
 
+    // Quoted message එකේ ID එක සහ checks
+    const quotedId = getQuotedId(m, mek);
+    const isQuoted = !!(quotedId && state.expectedMsgId && quotedId === state.expectedMsgId);
+
+    // Interactive button / list clicks සඳහා
     const texts = extractTexts(text, mek, m);
     const action = resolveMenuAction(texts, state);
     if (action) return true;
 
+    // Number එකක් ගහනවා නම් අනිවාර්යයෙන්ම quote කරලා තියෙන්නම ඕනෙ
     const num = parseInt(String(text || "").trim(), 10);
     const isNum = !isNaN(num) && num > 0 && num <= state.categories.length;
 
-    const quotedId = getQuotedId(m, mek);
-    const isQuoted = quotedId && quotedId === state.expectedMsgId;
-
-    return isQuoted || isNum;
+    return isQuoted && isNum;
   },
   function: async (sock, mek, m, { from, body, sender, pushname, reply }) => {
     try {
@@ -606,10 +608,16 @@ const menuReplyHandler = {
       if (lastMsg && lastMsg.text === inputStr && (now - lastMsg.time) < LOOP_COOLDOWN) return;
       lastProcessedMsg[k] = { text: inputStr, time: now };
 
+      const quotedId = getQuotedId(m, mek);
+      const isQuoted = !!(quotedId && state.expectedMsgId && quotedId === state.expectedMsgId);
+
       const texts = extractTexts(body, mek, m);
       let action = resolveMenuAction(texts, state);
 
+      // Action එකක් නැතිව number එකක් විදිහට එනවා නම් quote කරලා තියෙන එක අනිවාර්යයි
       if (!action) {
+        if (!isQuoted) return; // Quote කරලා නැත්නම් run වෙන්නේ නෑ
+
         const num = parseInt(inputStr, 10);
         if (!isNaN(num) && num > 0 && num <= state.categories.length) {
           action = { type: "view", cat: state.categories[num - 1] };
