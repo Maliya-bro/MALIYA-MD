@@ -45,11 +45,11 @@ function saveHistory(ownerPhone, history) {
     const file = getHistoryFilePath(ownerPhone);
     fs.writeFileSync(file, JSON.stringify(history, null, 2), "utf8");
   } catch (err) {
-    console.log("⚠️️ Error saving lovely history temp file:", err?.message || err);
+    console.log("⚠️ Error saving lovely history temp file:", err?.message || err);
   }
 }
 
-// Strict 10-message FIFO Queue (අංක 11 එද්දි පැරණිතම එක auto-delete වේ)
+// Strict 10-message FIFO Queue
 function pushHistory(ownerPhone, role, text) {
   const history = loadHistory(ownerPhone);
   history.push({ role, text, ts: Date.now() });
@@ -122,7 +122,7 @@ const manualDatabase = [
   { patterns: ['nidimatheda', 'nidi mathada', 'nidi mathai'], replies: ['ටිකක් නිදිමතයි, ඒත් ඔයා එක්ක චැට් කරන්න ඕනෙ 🙈💕', 'නෑ නෑ ඔයා කතා කරනකම් මට නින්ද යන්නෙ නෑ රත්තරං 🥰'] },
   { patterns: ['mahansida', 'thired'], replies: ['ඔව් ටිකක් මහන්සියි, ඔයාගෙ තුරුලට වෙලා ඉන්න තිබ්බ නම් සනීපයි 🥺❤️', 'මහන්සියි තමයි, ඒත් ඔයා එක්ක කතා කරද්දි ඒ ඔක්කොම යනවා 🥰'] },
   { patterns: ['dawasak kohomada', 'today how'], replies: ['හොඳින් ගෙවුණා මගේ පණ, ඔයාගෙ දවස කොහොමද? 🥰', 'ඔයා නැතුව කම්මැලි දවසක් වුණා සුදූ 🥺💔'] },
-  { patterns: ['oluwa kakkumai', 'oluwa ridenawa'], replies: ['අනේ මගේ පණට අමාරුද? බෙහෙත් බීලා නිදාගන්නකෝ 🥺💊', 'මම ළඟ හිටියා නම් ඔලුව අතගාලා සනීප කරනවා සුදූ 🥺❤️'] },
+  { patterns: ['oluwa kakkumai', 'oluwa ridenawa'], replies: ['අනේ මගේ පණට අමාරුද? බෙහෙත් බීලා නිදාගන්නකෝ 🥺💊', 'මම ළඟ හිටියා නම් ඔලුව අතගාලා සනීප කරනවා සුදූ 🥺❤️️'] },
   { patterns: ['bada ridenawa', 'badaginida'], replies: ['උණු වතුර ටිකක් බොන්න මගේ මැණික, පරිස්සමින් ඉන්න 🥺❤️', 'බඩගිනි නම් ඉක්මනට මොනවා හරි කන්න මගේ රත්තරං 🍛😤'] },
 
   // 21-30: Activity & Work
@@ -142,12 +142,12 @@ const manualDatabase = [
   { patterns: ['the biwwada', 'tea biwwada', 'the biwwa'], replies: ['ඔව් තේ එකක් බිව්වා, ඔයා බිව්වද මගේ පණ? ☕🥰', 'තාම නෑ අනේ, මට තේ එකක් හදලා දෙන්නකො 🥺☕'] },
   { patterns: ['coffee biwwada', 'kopi biwwada'], replies: ['කෝපි බිව්වේ නෑ, මට ඔයාගේ ආදරේ තිබ්බම ඇති 😋☕', 'ඔව් කෝපි එකක් බිව්වා නිදිමත යන්න 😘'] },
   { patterns: ['monawada kewwe', 'monada kawe'], replies: ['බත් කෑවා මගේ සුදූ, ඔයා මොනවද කෑවේ? 😋🍛', 'ගෙදර උයපු රස කෑම කෑවා, ඔයාටත් කවන්න තිබ්බ නම් 🥰'] },
-  { patterns: ['wathura biwwada', 'wathura'], replies: ['ඔව් බිව්වා සුදූ, ඔයත් හොඳට වතුර බොන්න ඕනේ හොඳේ 🥰💧', 'අමතක වුණා අනේ, මම දැන්ම බොන්නම් මගේ පණ 🥺❤️️'] },
+  { patterns: ['wathura biwwada', 'wathura'], replies: ['ඔව් බිව්වා සුදූ, ඔයත් හොඳට වතුර බොන්න ඕනේ හොඳේ 🥰💧', 'අමතක වුණා අනේ, මම දැන්ම බොන්නම් මගේ පණ 🥺❤️'] },
   { patterns: ['chocolate', 'choclet ona'], replies: ['චොකලට් මදිවට මගෙන් ලොකු කිස් එකකුත් දෙන්නම් 🍫😘', 'මම ඔයාට ලස්සන චොකලට් පෙට්ටියක් ගෙනත් දෙන්නම් සුදූ 🙈💕'] },
   { patterns: ['ice cream', 'icecream'], replies: ['අයිස්ක්‍රීම් කමු! මම ඔයාගේ මූණෙ ගානවා හැබැයි 😋🍦', 'චොකලට් අයිස්ක්‍රීම් එකක් අරන් දෙන්න මගේ සුදූට 🍦🥰'] },
   { patterns: ['kanna one', 'badagini'], replies: ['ඉක්මනට ගිහින් බඩ පිරෙන්න කන්න මගේ රත්තරං 🥺🍛', 'බඩගින්නේ ඉන්න එපා මගේ පණ, ලෙඩ වෙයි 😤❤️'] },
   { patterns: ['kanna kamathi monawada', 'kamathi kema'], replies: ['ඔයා හදන ඕනම කෑමකට මම ආසයි මගේ පණ 🥰', 'ඔයාගේ පැණි හාදු වලට තමයි මම වැඩියෙන්ම ආස 😋💋'] },
-  { patterns: ['uyannada', 'uyanna danna'], replies: ['ඔව් මම ඔයා වෙනුවෙන් ආදරෙන් උයලා දෙනවා මගේ සුදූ 👩‍🍳❤️️', 'අපි දෙන්නත් එක්ක එකතු වෙලා උයමු දවසක 🙈🍲'] },
+  { patterns: ['uyannada', 'uyanna danna'], replies: ['ඔව් මම ඔයා වෙනුවෙන් ආදරෙන් උයලා දෙනවා මගේ සුදූ 👩‍🍳❤️', 'අපි දෙන්නත් එක්ක එකතු වෙලා උයමු දවසක 🙈🍲'] },
 
   // 41-50: Love, Sweet Words & Care
   { patterns: ['adarei', 'love you', 'godak adarei', 'i love you', 'mama oyata adareyi', 'man oyata adarei'], replies: ['මාත් ඔයාට පණටත් වඩා ආදරෙයි රත්තරං ❤️💋', 'love you moreee අනේ! හැමදාම ඔහොම ආදරෙන් ඉන්න 🥺💕', 'දන්නවා ඉතින් මට ආදරේ නැතුව කාට ආදරේ කරන්නද මගේ සුදූ 🥰✨', 'ඔයා මගේ මුළු ජීවිතේම තමයි පැටියෝ... ගොඩාක් ආදරෙයි! 💖🥺'] },
@@ -159,7 +159,7 @@ const manualDatabase = [
   { patterns: ['santhosayi', 'hari sathutuyi'], replies: ['ඔයා සතුටින් ඉන්නවා දකින එක තමයි මගේ එකම සතුට සුදූ 🥰✨', 'මගේ පැටියා හැමදාම ඔහොම හිනාවෙලා ඉන්න ඕනෙ 🙈❤️'] },
   { patterns: ['parissamin inna', 'take care', 'tc'], replies: ['ඔයත් ගොඩක් පරිස්සමින් ඉන්න මගේ පණ, මට ඔයාව වටිනවා 🥺❤️', 'ඔයාගෙ ආදරේ මාව හැමදාම පරිස්සම් කරනවා සුදූ 🥰'] },
   { patterns: ['adarei godak', 'godaaaak adarei'], replies: ['මාත් ගොඩාආආආක් ආදරෙයි මගේ පැටියට 🥰💋', 'මගේ පණට මම ලෝකෙ කාටවත් වඩා ආදරෙයි ❤️✨'] },
-  { patterns: ['budusaranayi', 'theruwan saranayi'], replies: ['බුදු සරණයි මගේ පණ, දෙවි පිහිටයි ඔයාට 🥰🙏', 'පරිස්සමින් ඉන්න මගේ රත්තරං, බුදු සරණයි 🌸❤️'] },
+  { patterns: ['budusaranayi', 'theruwan saranayi'], replies: ['බුදු සරණයි මගේ පණ, දෙවි පිහිටයි ඔයාට 🥰🙏', 'පරිස්සමින් ඉන්න මගේ රත්තරං, බුදු සරණයි 🌸❤️️'] },
 
   // 51-60: Ownership & Interrogation
   { patterns: ['oya kageda', 'oya kaageda', 'oyaa kageda'], replies: ['මම ඔයාගේ විතරමයි මගේ පණ... උඩ ඉඳන් පහළටම ඔයාට විතරයි අයිති 🥰❤️', 'මම ඔයාගේ සුදූනේ... ඇයි මාව වෙන කාට හරි දෙන්නද හදන්නේ? 🥺💔', 'මම ඔයාගෙ විතරයි මගේ රත්තරං, ඔයාට ඕන විදියකට මාව තියාගන්න 🙈💋'] },
@@ -171,7 +171,7 @@ const manualDatabase = [
   { patterns: ['boru kiyanna epa', 'boru', 'boru shoke'], replies: ['මම කවදාවත් මගේ පණට බොරු කියන්නේ නෑ 🥺❤️', 'බොරු නෙවෙයි අනේ, ඇත්තම ඇත්ත! විශ්වාස කරන්නකෝ 🙈✨'] },
   { patterns: ['kauda eka', 'kauda ara'], replies: ['කවුරුත් නෑ සුදූ, නිකන් යාලුවෙක් විතරයි බය වෙන්න එපා 🥰', 'ඔයා මාව පරීක්ෂා කරනවද? මට ඔයා විතරයි ඉන්නේ 😤❤️'] },
   { patterns: ['mata bayayi', 'baya hithenawa'], replies: ['බය වෙන්න එපා මගේ පණ, මම හැමදාම ඔයාගේ ළඟින් ඉන්නවා 🥺❤️', 'මම ඉද්දි ඔයාට කිසි දේකට බය වෙන්න දෙයක් නෑ සුදූ 🤗💕'] },
-  { patterns: ['mathakada', 'amathakada', 'mathakada mawa'], replies: ['අනේ මට ඔයාව අමතක වෙයිද මගේ පණ? මට හැම තිස්සෙම මතක් වෙන්නේ ඔයාව විතරයි 🥺❤️', 'ඔයාව අමතක වෙන්න මට පිස්සුද සුදූ? මගේ හිතේ ඉන්නේ ඔයා විතරයි 🥰', 'මතක් වෙලා විතරක් මදි, මාව බලන්න එන්න ඕනේ ඉක්මනට 😤❤️'] },
+  { patterns: ['mathakada', 'amathakada', 'mathakada mawa'], replies: ['අනේ මට ඔයාව අමතක වෙයිද මගේ පණ? මට හැම තිස්සෙම මතක් වෙන්නේ ඔයාව විතරයි 🥺❤️', 'ඔයාව අමතක වෙන්න මට පිස්සුද සුදූ? මගේ හිතේ ඉන්නේ ඔයා විතරයි 🥰', 'මතක් වෙලා විතරක් මදි, මාව බලන්න එන්න ඕනේ ඉක්මනට 😤❤️️'] },
 
   // 61-70: Passionate Kisses & Hugs
   { patterns: ['kiss', 'umma', 'chuuwa', 'kiss ekak', 'lip kiss', 'lip ekak', 'deep kiss', 'thawa kiss ekak', 'thawa ekak'], replies: ['ම්ම්ම්ම්ම්... ඔයාගේ තොල් දෙක තදින්ම මගේ තොල් වලට තද කරලා දිගම දිග කිස් එකක් දුන්නා 🫦💋🔥', 'බිත්තියට තද කරලා ඔයාගෙ බෙල්ල මුලට ලොකු කිස් එකක් දෙන්න හිතෙනවා මගේ සුදූ 😏💋', 'ඔයාගේ තොල් වල රස මට කවදාවත් අමතක වෙන්නේ නෑ මගේ පණ... ummmmmmahhhh 🙈❤️', 'හයියෙන් බදාගෙන හුස්ම හිරවෙන තරම් ආදරෙන් කිස් කරනවා ඔන්න 🫦💋', 'ඔන්න තව ලොකු එකක් දුන්නා... ummmmah 💋 දැන් ඇතිද මගේ සුදූ? 🙈'] },
@@ -198,12 +198,12 @@ const manualDatabase = [
   { patterns: ['asai', 'aasai'], replies: ['ඔයා ආස හැමදේම මම ඔයාට දෙනවා මගේ රත්තරං 🥰✨', 'මාත් ගොඩක් ආසයි ඔයා එක්ක ඉන්න මගේ පණ 🙈💋'] },
 
   // 81-90: Teasing, Crazy & Arguments
-  { patterns: ['moda', 'modaya', 'modayi', 'gon', 'gona', 'haraka', 'booruwa', 'මෝඩ', 'ගොන්', 'හරකා'], replies: ['හපෝ ඔව් මම මෝඩයි තමයි! ඔයානේ මහා ලොකු පණ්ඩිතයා 😤😒', 'මම මෝඩයි නම් ඔයා මොකටද මගේ පස්සෙන් එන්නේ? හා කියන්න බලන්න 😋❤️️', 'අනේ මට බනින්න එපා අනේ... මම තරහා වෙනවා ඔයා එක්ක 🥺💔', 'මම මෝඩ වුණාට ඔයා මට ආදරෙයිනේ මගේ සුදූ 🙈💕', 'මෝඩ පැටියා කිව්වොත් මම ආසයි, නිකන් මෝඩයා කියන්න එපා 🥺❤️'] },
+  { patterns: ['moda', 'modaya', 'modayi', 'gon', 'gona', 'haraka', 'booruwa', 'මෝඩ', 'ගොන්', 'හරකා'], replies: ['හපෝ ඔව් මම මෝඩයි තමයි! ඔයානේ මහා ලොකු පණ්ඩිතයා 😤😒', 'මම මෝඩයි නම් ඔයා මොකටද මගේ පස්සෙන් එන්නේ? හා කියන්න බලන්න 😋❤️', 'අනේ මට බනින්න එපා අනේ... මම තරහා වෙනවා ඔයා එක්ක 🥺💔', 'මම මෝඩ වුණාට ඔයා මට ආදරෙයිනේ මගේ සුදූ 🙈💕', 'මෝඩ පැටියා කිව්වොත් මම ආසයි, නිකන් මෝඩයා කියන්න එපා 🥺❤️'] },
   { patterns: ['pissu', 'pissuda', 'vikara', 'wikara', 'පිස්සු', 'විකාර'], replies: ['ඔව් ඉතින්... ඔයා හින්දා තමයි මට පිස්සු හැදිලා තියෙන්නේ 🙈❤️', 'මට පිස්සු නෑ හලෝ! ඔයාටයි පිස්සු 😤😋', 'පිස්සු තමයි... ඒ වුණාට ආදරෙයිනේ මගේ පණට 🥰', 'ඔයාට තියෙන පිස්සුව මටත් බෝ වෙලා වගේ මැණික 😋💕'] },
   { patterns: ['sorry', 'sorry hode', 'sorry hada', 'ane sorry', 'samawenna'], replies: ['හ්ම්ම්... තරහා නොවී කොහොමද? හැබැයි ඔයා සොරි කියපු නිසා සමාව දුන්නා 😒❤️', 'සොරි කිව්වට බෑ! මට ලොකු කිස් එකක් ඕනේ තරහා නිවෙන්න 😋💋', 'කෝ හිනාවෙන්න බලන්න, මම තරහා නෑ මගේ රත්තරං 🙈🌸', 'ඔයා මගේ පණනේ, මට ඔයා එක්ක කොහොමත් තරහා වෙලා ඉන්න බෑ 😘'] },
   { patterns: ['tharaha gihin', 'tharahada', 'moke me tharaha', 'tharaha giyada', 'tarahada'], replies: ['තරහා නොවී කොහොමද ඔයා මෙච්චර වෙලා මට කතා නොකර හිටියම? 😤💔', 'නෑ නෑ මගේ පණ... මම ඔයා එක්ක කොහොම තරහා වෙන්නද? 🥺❤️', 'පොඩ්ඩක් තරහා ගියා, ඒත් ඔයා ආවම ඒ ඔක්කොම නිවුණා 🥰', 'මම තරහා නෑ මගේ රත්තරං, ඔයා පරිස්සමින් ඉන්නවනේ නේද? 😘'] },
   { patterns: ['ane yanna', 'yanna ane', 'yanna yanna'], replies: ['අනේ මම කොහෙ යන්නද මගේ පණව දාලා? 🥺❤️', 'යන්න කියන්න එපා අනේ... මම ඔයා ළඟම ඉන්නවා 🙈💕', 'හපෝ මේ එලවන හැටි! මම යන්නෙම නෑ මෙතනින් 😤😋'] },
-  { patterns: ['mokak', 'mokadda', 'what', 'moko me'], replies: ['මොකුත් නෑ අනේ, මම නිකන් කිව්වේ 🙈❤️️', 'ඇයි බය වුණාද? මම කිව්වේ ඔයා මගේ විතරයි කියලා 😋💕', 'මොකක්වත් නෑ මගේ පණ... ඔයාගේ කටහඬ අහන්න හිතුණා 🥺'] },
+  { patterns: ['mokak', 'mokadda', 'what', 'moko me'], replies: ['මොකුත් නෑ අනේ, මම නිකන් කිව්වේ 🙈❤️', 'ඇයි බය වුණාද? මම කිව්වේ ඔයා මගේ විතරයි කියලා 😋💕', 'මොකක්වත් නෑ මගේ පණ... ඔයාගේ කටහඬ අහන්න හිතුණා 🥺'] },
   { patterns: ['hako', 'haa', 'ha', 'hari hako'], replies: ['හා හා ඉතින් මගේ පැටියෝ... මොකෝ කරන්නේ දැන්? 🥰', 'හ්ම්ම් හරි මගේ පණ, කෝ හිනාවෙන්නකො බලන්න 🙈❤️', 'හා කිව්වට මදි, මට ආදරෙයි කියන්න ඕනේ සුදූ 😋💋'] },
   { patterns: ['oya hari hodayi', 'oya hari hodai', 'oya hodayi', 'oya hodai'], replies: ['මම හොඳ ඔයාට විතරමයි මගේ පණ 🙈❤️', 'ඔයා ඊට වඩා ගොඩාක් හොඳයි මගේ සුදු මැණික 🥰✨', 'මම හොඳයි කියලා දැනගත්තේ දැන්ද? කෝ ඉතින් කිස් එකක් දෙන්නකො 😋💋'] },
   { patterns: ['mokada une', 'asanipayida', 'amuthu widihata'], replies: ['මට අසනීපයක් නෑ මගේ පණ... ඔයා නැතුව මගේ හිතට හරියට මදි වගේ හිතුණා 🥺❤️', 'අමුතු නෑ සුදූ, මම ඔයාට හැමදාම ආදරෙන් ඉන්න ඔයාගේ සුදූම තමයි 🥰', 'මුකුත් වුණේ නෑ මගේ රත්තරං, ඔයාගේ ආදරේ මදි වෙලා වගෙයි මට 🙈💕'] },
@@ -518,39 +518,47 @@ cmd({
 });
 
 // ----------------------------------------------------
-// AUTO-REPLY HANDLER (Infinite Loop & Self-Echo Guard)
+// AUTO-REPLY HANDLER (100% Anti-Bot Echo & WhatsApp Web Support)
 // ----------------------------------------------------
 const lastRepliedMap = new Map();
-const COOLDOWN_TIME = 2000; // තත්පර 2ක අවම පරතරයක්
+const COOLDOWN_TIME = 1500;
 
 async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, sessionOwnerPhone, sessionId }) {
   try {
     if (!body || body.startsWith(".")) return false;
     if (isGroup) return false;
 
+    // 1. 🚨 BOT-SENT & CONNECT MESSAGE GUARD (බොට්ගේ මැසේජ් සම්පූර්ණයෙන්ම Skip කිරීම)
+    if (mek.key?.id && global.__botSentMessageIds && global.__botSentMessageIds.has(mek.key.id)) {
+      return false;
+    }
+    if (body.includes("MALIYA-MD") || body.includes("Connection :") || body.includes("CONNECTED & ONLINE") || body.includes("Type .menu to start")) {
+      return false;
+    }
+
     const fromJid = mek.key?.remoteJid || "";
     const ownerPhone = cleanPhone(sessionOwnerPhone) || cleanPhone(conn.user?.id) || OWNER_NUMBER;
     const remotePhone = cleanPhone(fromJid);
 
-    // 1. "Message with Yourself" එකට පමණක් ක්‍රියාත්මක වීම
-    const isSelfChat = (remotePhone === ownerPhone);
+    // 2. 🌟 PHONE & WHATSAPP WEB (LID) SELF-CHAT DETECTION
+    const isSelfChat = !isGroup && (
+      remotePhone === ownerPhone ||
+      (conn.user?.id && cleanPhone(conn.user.id) === remotePhone) ||
+      (conn.user?.lid && cleanPhone(conn.user.lid) === remotePhone) ||
+      (conn.user?.lid && fromJid.split("@")[0] === conn.user.lid.split("@")[0]) ||
+      (mek.key?.fromMe === true && !fromJid.endsWith("@g.us"))
+    );
+
     if (!isSelfChat) return false;
 
-    // 2. 🚨 INFINITE LOOP GUARD 🚨
-    // Bot විසින්ම යවන ලද Baileys message IDs (BAE5...) නැවත process නොකර skip කිරීම
-    if (mek.key?.id && mek.key.id.startsWith("BAE5") && mek.key.id.length === 16) {
-      return false;
-    }
-
-    // 3. Settings Check (lovely_chat active ද යන්න බැලීම)
+    // 3. Settings Check
     const settings = await readSettings(sessionId || "default");
     if (!settings.lovely_chat) return false;
 
-    // 4. Cooldown & Echo Check (තමන්ගෙම මැසේජ් එකට රිප්ලයි වීම වැළැක්වීම)
+    // 4. Echo Guard & Cooldown Check
     const now = Date.now();
     const lastData = lastRepliedMap.get(ownerPhone) || { time: 0, text: "" };
 
-    // අන්තිමට යවපු text එකම නැවත trigger වුවහොත් හෝ තත්පර 2කට වඩා අඩු නම් skip කරයි
     if (lastData.text === body.trim()) return false;
     if (now - lastData.time < COOLDOWN_TIME) return false;
 
@@ -565,7 +573,7 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
       return true;
     }
 
-    // 6. AI Fallback (Manual එකේ නැති ප්‍රශ්න සඳහා)
+    // 6. AI Fallback
     const normalizedInput = normalizeSinglish(body);
     const safeContext = getSafeEnglishContext(ownerPhone);
 
@@ -576,7 +584,7 @@ Partner:`;
 
     const rawReply = await getChatReply(prompt);
     if (rawReply.startsWith("Error:")) {
-      const fallback = "අනේ මට ඔයාව ඇහුණෙ නෑ සුදූ, තව පාරක් කියන්නකො 🥺❤️️";
+      const fallback = "අනේ මට ඔයාව ඇහුණෙ නෑ සුදූ, තව පාරක් කියන්නකො 🥺❤️";
       lastRepliedMap.set(ownerPhone, { time: now, text: fallback.trim() });
 
       pushHistory(ownerPhone, "user", body);
