@@ -141,15 +141,26 @@ cmd(
   },
   async (conn, mek, m, { from, sender, args, reply }) => {
     try {
-      const phoneArg = normalizePhone(args[0] || "");
+      let targetPhone = "";
 
-      if (phoneArg) {
-        if (!isValidPhone(phoneArg)) {
+      if (args && args[0]) {
+        targetPhone = normalizePhone(args[0]);
+      }
+
+      if (!targetPhone) {
+        if (sender) {
+          const rawNum = String(sender).split("@")[0].split(":")[0];
+          targetPhone = normalizePhone(rawNum);
+        }
+      }
+
+      if (targetPhone) {
+        if (!isValidPhone(targetPhone)) {
           return reply(
-            "╔═━─━─━─━─〖 ⚠️ *INVALID NUMBER* 〗─━─━─━─━═╗\n" +
-            "║ ❌ Invalid phone number. Please include country code.\n" +
-            "║ 💡 *Example:* `.pair 94712345678`\n" +
-            "╚═━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━═╝"
+            "╭━━━〔 ⚠️ *INVALID NUMBER* 〕━━━╮\n" +
+            "┃ ❌ Invalid phone number format.\n" +
+            "┃ 💡 *Example:* `.pair 94712345678`\n" +
+            "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯"
           );
         }
 
@@ -158,7 +169,7 @@ cmd(
           from,
           reply,
           sender,
-          phone: phoneArg,
+          phone: targetPhone,
         });
       }
 
@@ -167,15 +178,15 @@ cmd(
       };
 
       return reply(
-        "╭───────────────「 🔗 *PAIRING PORTAL* 」───────────────╮\n" +
+        "╭───「 🔗 *PAIRING PORTAL* 」───╮\n" +
         "│\n" +
-        "│ 📱 Send your phone number to receive a pairing code:\n" +
+        "│ 📱 Send your phone number:\n" +
         "│ 💡 *Format:* `94712345678`\n" +
         "│\n" +
-        "│ ⚡ Or run the command directly:\n" +
+        "│ ⚡ Or run directly:\n" +
         "│ ➔ `.pair 94712345678`\n" +
         "│\n" +
-        "╰────────────────────────────────────────────────────────╯"
+        "╰──────────────────────────────╯"
       );
     } catch (e) {
       console.error("PAIR CMD ERROR:", e);
@@ -208,10 +219,10 @@ replyHandlers.push({
 
       if (!isValidPhone(phone)) {
         await reply(
-          "╔═━─━─━─━─〖 ⚠️ *INVALID NUMBER* 〗─━─━─━─━═╗\n" +
-          "║ ❌ Please enter a valid phone number.\n" +
-          "║ 💡 *Example:* `94712345678`\n" +
-          "╚═━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━═╝"
+          "╭━━━〔 ⚠️ *INVALID NUMBER* 〕━━━╮\n" +
+          "┃ ❌ Please enter a valid number.\n" +
+          "┃ 💡 *Example:* `94712345678`\n" +
+          "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯"
         );
         return;
       }
@@ -309,16 +320,15 @@ async function generatePairCode({ conn, from, reply, phone }) {
                 source: "bot-pair",
               });
 
-              // Sensitive Session ID is completely hidden from chat output
               const successText =
-                "➽──[LINK SUCCESSFUL]──❥\n\n" +
-                "✅ *Your WhatsApp account is successfully linked!*\n\n" +
-                "┏──────────────────┓\n" +
-                `│ 📱 *Linked Number :* +${phone}\n` +
+                "░▒▓█►─═ [ 🌟 LINK SUCCESSFUL 🌟 ] ═─◄█▓▒░\n\n" +
+                "✅ *Device successfully connected!*\n\n" +
+                "╭───────────────────────────────╮\n" +
+                `│ 📱 *Target Number :* +${phone}\n` +
                 "│ 🔐 *Security Level :* End-to-End Encrypted\n" +
                 "│ 💾 *Database State :* Cloud Synced & Saved\n" +
-                "│ 🤖 *Bot Engine     :* Online & Connecting...\n" +
-                "┗──────────────────┛\n\n" +
+                "│ 🤖 *Bot Engine     :* Online & Ready\n" +
+                "╰───────────────────────────────╯\n\n" +
                 "> 🍁 ᴍᴀʟɪʏᴀ-ᴍᴅ ᴀᴜᴛᴏᴍᴀᴛɪᴏɴ sʏsᴛᴇᴍ";
 
               await conn.sendMessage(from, { text: successText });
@@ -371,15 +381,17 @@ async function generatePairCode({ conn, from, reply, phone }) {
         codeSent = true;
 
         const bodyMsg =
-          "╔═[ MALIYA-MD PAIR ]═╗\n\n" +
+          "╔═════ ≪ • ❈ • ≫ ═════╗\n" +
+          "   🍁 *MALIYA-MD PAIR* 🍁\n" +
+          "╚═════ ≪ • ❈ • ≫ ═════╝\n\n" +
           `  📲 *Phone Number :* +${phone}\n` +
           `  🔑 *Pairing Code :* \`${code}\`\n\n` +
-          "╟『 How to Connect 』╢\n" +
-          "  1. *_Go to WhatsApp > Linked Devices > Link with phone number_*\n" +
-          "  2. *_Click *Copy Code* below and paste it into WhatsApp_*\n" +
-          "  3. *_Or tap *Get QR* to pair using QR code instead_*\n\n" +
-          "  ⏱️ *_Code expires in approximately 60 seconds._*\n\n" +
-          "╚════════════════╝";
+          "┌─── ❖ 『 How to Connect 』 ❖ ───┐\n" +
+          "  1. Go to WhatsApp > Linked Devices > Link with phone number\n" +
+          "  2. Click *Copy Code* below and paste it into WhatsApp\n" +
+          "  3. Or tap *Get QR* to pair using QR code instead\n" +
+          "└─────────────────────────────────┘\n\n" +
+          "⏱️ _Code expires in approximately 60 seconds._";
 
         let buttonSent = false;
 
@@ -388,7 +400,7 @@ async function generatePairCode({ conn, from, reply, phone }) {
           const { ButtonV2 } = require("@vanzxy/baileys");
           const btn = new ButtonV2(conn)
             .setBody(bodyMsg)
-            .setFooter("© 2026 MALIYA-MD MINI BOT ");
+            .setFooter("© 2026 MALIYA-MD BOT SYSTEM");
 
           btn.addRawButton({
             buttonId: "copy_pair_code",
