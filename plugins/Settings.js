@@ -131,7 +131,7 @@ async function getStatusCard(sessionId) {
 │ 🎯 *Work Scope:* ${workScopeText(workScopeStr)}
 │ 🕹 *Menu UI:* ${btnsModeText(Boolean(s.btns_enabled))}
 │ 🎭 *Presence:* ${presenceText(presStr)}
-│ 🤖 *AI Chat:* ${onOff(Boolean(s.auto_msg))}
+│ ❤️ *Lovely Chat:* ${onOff(Boolean(s.lovely_chat))}
 │ 👁️ *Seen Msg:* ${onOff(Boolean(s.seen_all_msg))}
 │ 💖 *Auto React:* ${onOff(Boolean(s.auto_react_msg))}
 │ 🔮 *React Scope:* ${reactModeText(reactModeStr)}
@@ -139,7 +139,7 @@ async function getStatusCard(sessionId) {
 │ 🛡️ *Anti Delete:* ${onOff(Boolean(s.anti_delete))}
 │ 🛡️ *Anti Spam:* ${onOff(Boolean(s.anti_spam))}
 │ 🚫 *Reject Calls:* ${onOff(Boolean(s.auto_reject_calls))}
-│ 👁️️ *Status Seen:* ${onOff(Boolean(s.auto_status_seen))}
+│ 👁 *Status Seen:* ${onOff(Boolean(s.auto_status_seen))}
 │ ❤️ *Status React:* ${onOff(Boolean(s.auto_status_react))}
 │ 📥 *Status Save:* ${onOff(Boolean(s.auto_download_status))}
 ╰───────◆──◆──◆──◆`.trim();
@@ -151,46 +151,20 @@ function mapKey(name) {
     k = String(name).toLowerCase().trim();
   }
 
-  if (k === "autoseen") return "auto_status_seen";
-  else if (k === "auto_seen") return "auto_status_seen";
-  else if (k === "statusseen") return "auto_status_seen";
-  else if (k === "auto_status_seen") return "auto_status_seen";
-  else if (k === "autoreact") return "auto_status_react";
-  else if (k === "auto_react") return "auto_status_react";
-  else if (k === "statusreact") return "auto_status_react";
-  else if (k === "auto_status_react") return "auto_status_react";
-  else if (k === "autodownloadstatus") return "auto_download_status";
-  else if (k === "auto_download_status") return "auto_download_status";
-  else if (k === "statusdownload") return "auto_download_status";
-  else if (k === "downloadstatus") return "auto_download_status";
-  else if (k === "automsg") return "auto_msg";
-  else if (k === "auto_msg") return "auto_msg";
-  else if (k === "aichat") return "auto_msg";
-  else if (k === "seenallmsg") return "seen_all_msg";
-  else if (k === "seen_all_msg") return "seen_all_msg";
-  else if (k === "seenall") return "seen_all_msg";
-  else if (k === "allmsgseen") return "seen_all_msg";
-  else if (k === "silentautomation") return "silent_automation";
-  else if (k === "silent_automation") return "silent_automation";
-  else if (k === "silent") return "silent_automation";
-  else if (k === "antidelete") return "anti_delete";
-  else if (k === "anti_delete") return "anti_delete";
-  else if (k === "antispam") return "anti_spam";
-  else if (k === "anti_spam") return "anti_spam";
-  else if (k === "rejectcalls") return "auto_reject_calls";
-  else if (k === "auto_reject_calls") return "auto_reject_calls";
-  else if (k === "anticall") return "auto_reject_calls";
-  else if (k === "mode") return "mode";
-  else if (k === "botmode") return "mode";
-  else if (k === "autoreactmsg") return "auto_react_msg";
-  else if (k === "auto_react_msg") return "auto_react_msg";
-  else if (k === "reactmode") return "auto_react_mode";
-  else if (k === "auto_react_mode") return "auto_react_mode";
-  else if (k === "workscope") return "work_scope";
-  else if (k === "work_scope") return "work_scope";
-  else if (k === "btns") return "btns_enabled";
-  else if (k === "buttons") return "btns_enabled";
-  else if (k === "btns_enabled") return "btns_enabled";
+  if (k === "autoseen" || k === "auto_seen" || k === "statusseen" || k === "auto_status_seen") return "auto_status_seen";
+  else if (k === "autoreact" || k === "auto_react" || k === "statusreact" || k === "auto_status_react") return "auto_status_react";
+  else if (k === "autodownloadstatus" || k === "auto_download_status" || k === "statusdownload" || k === "downloadstatus") return "auto_download_status";
+  else if (k === "lovelychat" || k === "lovely_chat" || k === "lovely" || k === "aichat" || k === "automsg" || k === "auto_msg") return "lovely_chat";
+  else if (k === "seenallmsg" || k === "seen_all_msg" || k === "seenall" || k === "allmsgseen") return "seen_all_msg";
+  else if (k === "silentautomation" || k === "silent_automation" || k === "silent") return "silent_automation";
+  else if (k === "antidelete" || k === "anti_delete") return "anti_delete";
+  else if (k === "antispam" || k === "anti_spam") return "anti_spam";
+  else if (k === "rejectcalls" || k === "auto_reject_calls" || k === "anticall") return "auto_reject_calls";
+  else if (k === "mode" || k === "botmode") return "mode";
+  else if (k === "autoreactmsg" || k === "auto_react_msg") return "auto_react_msg";
+  else if (k === "reactmode" || k === "auto_react_mode") return "auto_react_mode";
+  else if (k === "workscope" || k === "work_scope") return "work_scope";
+  else if (k === "btns" || k === "buttons" || k === "btns_enabled") return "btns_enabled";
   return null;
 }
 
@@ -342,8 +316,8 @@ function formatSettingReply(key, updated, action) {
     return `✅ *Status Auto React:* ${onOff(updated.auto_status_react)}`;
   } else if (key === "auto_download_status") {
     return `✅ *Status Download & Save:* ${onOff(updated.auto_download_status)}`;
-  } else if (key === "auto_msg") {
-    return `✅ *AI Auto Chat:* ${onOff(updated.auto_msg)}`;
+  } else if (key === "lovely_chat") {
+    return `✅ *Lovely Romantic Chat:* ${onOff(updated.lovely_chat)}`;
   } else if (key === "seen_all_msg") {
     return `✅ *Blue Ticks (Seen All Messages):* ${onOff(updated.seen_all_msg)}`;
   } else if (key === "anti_delete") {
@@ -393,8 +367,8 @@ function getSections() {
     {
       title: "🤖 Smart Chat Automation",
       rows: [
-        { title: "🧠 AI Chatbot ON", description: "Enable smart automated AI replies", id: ".setting on automsg" },
-        { title: "💤 AI Chatbot OFF", description: "Disable automated AI chatbot replies", id: ".setting off automsg" },
+        { title: "❤️ Lovely Chat ON", description: "Enable romantic AI self-chat in owner DM", id: ".setting on lovelychat" },
+        { title: "💔 Lovely Chat OFF", description: "Disable romantic AI self-chat", id: ".setting off lovelychat" },
         { title: "🔵 Seen All Msg ON", description: "Mark all incoming messages as read instantly", id: ".setting on seenallmsg" },
         { title: "⚪ Seen All Msg OFF", description: "Disable instant blue tick read marks", id: ".setting off seenallmsg" },
         { title: "😍 Msg Auto React ON", description: "Automatically react to incoming chat messages", id: ".setting on autoreactmsg" },
