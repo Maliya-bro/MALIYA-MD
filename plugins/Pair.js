@@ -11,7 +11,7 @@ const {
   DisconnectReason,
 } = require("@whiskeysockets/baileys");
 
-const { cmd, replyHandlers } = require("../command");
+const { cmd } = require("../command");
 const config = require("../config");
 
 /* ================= MONGODB ================= */
@@ -124,10 +124,6 @@ async function uploadSessionToMongo({
   return normalizedId;
 }
 
-/* ================= PENDING ================= */
-
-const pendingPairRequests = Object.create(null);
-
 /* ================= COMMAND ================= */
 
 cmd(
@@ -143,10 +139,12 @@ cmd(
     try {
       let targetPhone = "";
 
+      // 1. Argument එකක් ලබා දී ඇත්නම් එය ලබා ගැනීම
       if (args && args[0]) {
         targetPhone = normalizePhone(args[0]);
       }
 
+      // 2. Argument එකක් නැතිනම් එවූ කෙනාගේ අංකය (Sender) auto ලබා ගැනීම
       if (!targetPhone) {
         if (sender) {
           const rawNum = String(sender).split("@")[0].split(":")[0];
@@ -154,95 +152,27 @@ cmd(
         }
       }
 
-      if (targetPhone) {
-        if (!isValidPhone(targetPhone)) {
-          return reply(
-            "╭━━━〔 ⚠️ *INVALID NUMBER* 〕━━━╮\n" +
-            "┃ ❌ Invalid phone number format.\n" +
-            "┃ 💡 *Example:* `.pair 94712345678`\n" +
-            "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯"
-          );
-        }
-
-        return await generatePairCode({
-          conn,
-          from,
-          reply,
-          sender,
-          phone: targetPhone,
-        });
+      if (!targetPhone || !isValidPhone(targetPhone)) {
+        return reply(
+          "╭━━━〔 ⚠️ *INVALID NUMBER* 〕━━━╮\n" +
+          "┃ ❌ Could not detect a valid phone number.\n" +
+          "┃ 💡 *Usage:* `.pair` or `.pair 94712345678`\n" +
+          "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯"
+        );
       }
 
-      pendingPairRequests[sender] = {
-        createdAt: Date.now(),
-      };
-
-      return reply(
-        "╭───「 🔗 *PAIRING PORTAL* 」───╮\n" +
-        "│\n" +
-        "│ 📱 Send your phone number:\n" +
-        "│ 💡 *Format:* `94712345678`\n" +
-        "│\n" +
-        "│ ⚡ Or run directly:\n" +
-        "│ ➔ `.pair 94712345678`\n" +
-        "│\n" +
-        "╰──────────────────────────────╯"
-      );
+      return await generatePairCode({
+        conn,
+        from,
+        reply,
+        phone: targetPhone,
+      });
     } catch (e) {
       console.error("PAIR CMD ERROR:", e);
       return reply("❌ Failed to initiate pairing process.");
     }
   }
 );
-
-/* ================= REPLY HANDLER ================= */
-
-replyHandlers.push({
-  react: "🔗",
-  filter: (body, { sender }) => {
-    if (!pendingPairRequests[sender]) return false;
-    return true;
-  },
-  function: async (conn, mek, m, { from, sender, body, reply }) => {
-    try {
-      if (!pendingPairRequests[sender]) return;
-
-      const req = pendingPairRequests[sender];
-
-      if (Date.now() - req.createdAt > 3 * 60 * 1000) {
-        delete pendingPairRequests[sender];
-        await reply("⌛ Pairing request expired. Please type `.pair` again.");
-        return;
-      }
-
-      const phone = normalizePhone(body || "");
-
-      if (!isValidPhone(phone)) {
-        await reply(
-          "╭━━━〔 ⚠️ *INVALID NUMBER* 〕━━━╮\n" +
-          "┃ ❌ Please enter a valid number.\n" +
-          "┃ 💡 *Example:* `94712345678`\n" +
-          "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯"
-        );
-        return;
-      }
-
-      delete pendingPairRequests[sender];
-
-      await generatePairCode({
-        conn,
-        from,
-        reply,
-        sender,
-        phone,
-      });
-    } catch (e) {
-      console.error("PAIR REPLY HANDLER ERROR:", e);
-      delete pendingPairRequests[sender];
-      await reply("❌ Failed to parse phone number.");
-    }
-  },
-});
 
 /* ================= CORE ================= */
 
@@ -381,84 +311,62 @@ async function generatePairCode({ conn, from, reply, phone }) {
         codeSent = true;
 
         const bodyMsg =
-          "╔═════ ≪ • ❈ • ≫ ═════╗\n" +
-          "   🍁 *MALIYA-MD PAIR* 🍁\n" +
-          "╚═════ ≪ • ❈ • ≫ ═════╝\n\n" +
+          `╔═════ ≪ • ❈ • ≫ ═════╗\n` +
+          `   🍁 *MALIYA-MD PAIR* 🍁\n` +
+          `╚═════ ≪ • ❈ • ≫ ═════╝\n\n` +
           `  📲 *Phone Number :* +${phone}\n` +
           `  🔑 *Pairing Code :* \`${code}\`\n\n` +
-          "┌─── ❖ 『 How to Connect 』 ❖ ───┐\n" +
-          "  1. Go to WhatsApp > Linked Devices > Link with phone number\n" +
-          "  2. Click *Copy Code* below and paste it into WhatsApp\n" +
-          "  3. Or tap *Get QR* to pair using QR code instead\n" +
-          "└─────────────────────────────────┘\n\n" +
-          "⏱️ _Code expires in approximately 60 seconds._";
+          `┌─── ❖ 『 How to Connect 』 ❖ ───┐\n` +
+          `  1. Go to WhatsApp > Linked Devices > Link with phone number\n` +
+          `  2. Click *Copy Code* below and paste it into WhatsApp\n` +
+          `  3. Or tap *Get QR* to pair using QR code instead\n` +
+          `└─────────────────────────────────┘\n\n` +
+          `⏱️ _Code expires in approximately 60 seconds._`;
 
         let buttonSent = false;
 
-        // ── 🔘 Native Flow Copy Button + QR Button (ButtonV2) ──
+        // ── 🔘 @vanzxy/baileys Button Builder භාවිතා කිරීම ──
         try {
-          const { ButtonV2 } = require("@vanzxy/baileys");
-          const btn = new ButtonV2(conn)
+          const { Button } = await import("@vanzxy/baileys");
+
+          const btn = new Button(conn)
+            .setTitle("MALIYA-MD PAIR SYSTEM")
             .setBody(bodyMsg)
             .setFooter("© 2026 MALIYA-MD BOT SYSTEM");
 
-          btn.addRawButton({
-            buttonId: "copy_pair_code",
-            buttonText: { displayText: "📋 Copy Code" },
-            type: 1,
-            nativeFlowInfo: {
-              name: "cta_copy",
-              paramsJson: JSON.stringify({
-                display_text: "📋 Copy Code",
-                id: code,
-                copy_code: code,
-              }),
-            },
-          });
+          // Native Copy Button සහ Quick Reply Buttons
+          if (typeof btn.addCopy === "function") {
+            btn.addCopy("📋 Copy Code", code);
+          } else if (typeof btn.addRawButton === "function") {
+            btn.addRawButton({
+              buttonId: "copy_pair_code",
+              buttonText: { displayText: "📋 Copy Code" },
+              type: 1,
+              nativeFlowInfo: {
+                name: "cta_copy",
+                paramsJson: JSON.stringify({
+                  display_text: "📋 Copy Code",
+                  id: code,
+                  copy_code: code,
+                }),
+              },
+            });
+          } else {
+            btn.addReply("📋 Copy Code", code);
+          }
 
-          btn.addButton("📷 Get QR", ".qr");
+          btn.addReply("📷 Get QR", ".qr");
 
-          await btn.send(from, { quoted: null });
+          await btn.send(from);
           buttonSent = true;
         } catch (btnErr) {
-          console.log("PAIR BUTTONV2 ERROR:", btnErr?.message || btnErr);
+          console.error("VANZXY BUTTON ERROR:", btnErr?.message || btnErr);
         }
 
-        // ── 🔘 Raw CTA Fallback ──
+        // ── 🔘 Fallback: Plain Text (බොත්තම් අසමත් වුවහොත් පමණි) ──
         if (!buttonSent) {
-          try {
-            await conn.sendMessage(from, {
-              text: bodyMsg,
-              footer: "© 2026 MALIYA-MD BOT SYSTEM",
-              buttons: [
-                {
-                  buttonId: "copy_pair_code",
-                  buttonText: { displayText: "📋 Copy Code" },
-                  type: 1,
-                  nativeFlowInfo: {
-                    name: "cta_copy",
-                    paramsJson: JSON.stringify({
-                      display_text: "📋 Copy Code",
-                      id: code,
-                      copy_code: code,
-                    }),
-                  },
-                },
-                {
-                  buttonId: ".qr",
-                  buttonText: { displayText: "📷 Get QR" },
-                  type: 1,
-                }
-              ]
-            }, { quoted: null });
-            buttonSent = true;
-          } catch (_) {}
-        }
-
-        // ── 🔘 Plain Text Fallback ──
-        if (!buttonSent) {
-          await conn.sendMessage(from, { text: bodyMsg }, { quoted: null });
-          await conn.sendMessage(from, { text: code }, { quoted: null });
+          await conn.sendMessage(from, { text: bodyMsg });
+          await conn.sendMessage(from, { text: code });
         }
 
       } catch (e) {
