@@ -192,8 +192,8 @@ async function getFittedImageBuffer(url) {
   }
 }
 
-// Kalin use karelu original stylish box border
-function menuHeader(userName = "User") {
+// Menu Header with label-formatted backticks & latency
+function menuHeader(userName = "User", latency = "0ms") {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
   return `┏━━━━━━◥◣◆◢◤━━━━━━┓
@@ -203,12 +203,13 @@ function menuHeader(userName = "User") {
 ✨ 👋 *ʜɪ, ${styledUser}!*
 
 ╔═════. .★.══════════╗
-🤖 *ʙᴏᴛ :* ${BOT_NAME}
-👤 *ᴜsᴇʀ :* ${styledUser}
-👑 *ᴏᴡɴᴇʀ :* MALINDU NADITH
-🕒 *ᴛɪᴍᴇ :* ${time}
-📅 *ᴅᴀᴛᴇ :* ${date}
-🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]
+🤖 *\`ʙᴏᴛ\` :* ${BOT_NAME}
+👤 *\`ᴜsᴇʀ\` :* ${styledUser}
+👑 *\`ᴏᴡɴᴇʀ\` :* MALINDU NADITH
+🕒 *\`ᴛɪᴍᴇ\` :* ${time}
+📅 *\`ᴅᴀᴛᴇ\` :* ${date}
+🎯 *\`ᴘʀᴇғɪx\` :* [ ${PREFIX} ]
+⚡ *\`ʟᴀᴛᴇɴᴄʏ\` :* ${latency}
 ╚══════════. .★.═════╝
 
 👇 *Select a command category below to view commands:*
@@ -217,11 +218,22 @@ function menuHeader(userName = "User") {
 🌸 *Video* https://youtube.com/shorts/sxWbUypZG64?si=ZNPWj8kLWEjRM1tf`;
 }
 
-function buildStyledMainMenu(state, userName) {
+function buildStyledMainMenu(state, userName, latency = "0ms") {
   const { categories } = state;
   const styledUser = toSmallCaps(userName);
+  const { time, date } = nowLK();
   let msg = `┏━━━━━━◥◣◆◢◤━━━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━━━━◢◤◆◥◣━━━━━━┛\n\n`;
   msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
+  msg += `╔═════. .★.══════════╗\n`;
+  msg += `🤖 *\`ʙᴏᴛ\` :* ${BOT_NAME}\n`;
+  msg += `👤 *\`ᴜsᴇʀ\` :* ${styledUser}\n`;
+  msg += `👑 *\`ᴏᴡɴᴇʀ\` :* MALINDU NADITH\n`;
+  msg += `🕒 *\`ᴛɪᴍᴇ\` :* ${time}\n`;
+  msg += `📅 *\`ᴅᴀᴛᴇ\` :* ${date}\n`;
+  msg += `🎯 *\`ᴘʀᴇғɪx\` :* [ ${PREFIX} ]\n`;
+  msg += `⚡ *\`ʟᴀᴛᴇɴᴄʏ\` :* ${latency}\n`;
+  msg += `╚══════════. .★.═════╝\n\n`;
+
   categories.forEach((cat, idx) => {
     const emo = getCategoryEmoji(cat);
     const numStr = String(idx + 1).padStart(2, "0");
@@ -237,14 +249,14 @@ function commandListCaption(cat, list, userName = "User") {
   const styledCat = toSmallCaps(cat);
   const styledUser = toSmallCaps(userName);
   let txt = `╭─── ⋆ ⋅ 𖤐 ⋅ ⋆ ━─┈➤\n${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n╰──━ ⋆ ⋅ 𖤐 ⋅ ⋆ ──┈➤\n\n`;
-  txt += `👤 *ᴜsᴇʀ :* ${styledUser}\n📦 *ᴛᴏᴛᴀʟ :* ${list.length} Commands\n🎯 *ᴘʀᴇғɪx :* [ ${PREFIX} ]\n\n`;
+  txt += `👤 *\`ᴜsᴇʀ\` :* ${styledUser}\n📦 *\`ᴛᴏᴛᴀʟ\` :* ${list.length} Commands\n🎯 *\`ᴘʀᴇғɪx\` :* [ ${PREFIX} ]\n\n`;
 
   list.forEach((c) => {
     const primary = c.pattern ? `${PREFIX}${toSmallCaps(c.pattern)}` : "No Pattern";
     const aliases = (c.alias || []).filter(Boolean).map((a) => `${PREFIX}${toSmallCaps(a)}`);
     txt += `🔹 *${primary}*\n`;
-    if (aliases.length) txt += `  ├ 💬 *ᴀʟɪᴀs:* \`${aliases.join(", ")}\`\n`;
-    txt += `  ╰ 📌 *ᴅᴇsᴄ:* _${c.desc || "No description"}_\n\n`;
+    if (aliases.length) txt += `  ├ 💬 *\`ᴀʟɪᴀs\` :* \`${aliases.join(", ")}\`\n`;
+    txt += `  ╰ 📌 *\`ᴅᴇsᴄ\` :* _${c.desc || "No description"}_\n\n`;
   });
 
   txt += `────━──✦❘•❘✦──━───\n> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
@@ -379,7 +391,11 @@ cmd(
   },
   async (sock, mek, m, { from, sender, pushname, reply, sessionId }) => {
     try {
+      const startTimestamp = Date.now();
       await sock.sendMessage(from, { react: { text: "📜", key: mek.key } });
+
+      const latencyMs = Date.now() - startTimestamp;
+      const latencyStr = `${latencyMs}ms`;
 
       const { map, categories } = buildCommandMapCached();
       if (!categories.length) return reply("❌ No commands found!");
@@ -427,7 +443,7 @@ cmd(
           const fittedThumb = await getFittedImageBuffer(headerImg);
 
           const btn = new ButtonV2(sock)
-            .setBody(menuHeader(userName))
+            .setBody(menuHeader(userName, latencyStr))
             .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
             .setThumbnail(fittedThumb);
 
@@ -467,7 +483,7 @@ cmd(
         sock,
         from,
         headerImg,
-        buildStyledMainMenu(state, userName),
+        buildStyledMainMenu(state, userName, latencyStr),
         mek
       );
 
@@ -491,6 +507,9 @@ cmd(
   },
   async (sock, mek, m, { from, sender, pushname, sessionId }) => {
     try {
+      const startTimestamp = Date.now();
+      const latencyStr = `${Date.now() - startTimestamp}ms`;
+
       const { map, categories } = buildCommandMapCached();
       const userName = getUserName(pushname, m, mek, sender);
       const k = keyFor(sender, from);
@@ -516,7 +535,7 @@ cmd(
         sock,
         from,
         headerImg,
-        buildStyledMainMenu(state, userName),
+        buildStyledMainMenu(state, userName, latencyStr),
         mek
       );
 
@@ -614,7 +633,7 @@ const menuReplyHandler = {
           sock,
           from,
           headerImg,
-          buildStyledMainMenu(state, userName),
+          buildStyledMainMenu(state, userName, "0ms"),
           mek
         );
         if (sent?.key?.id) state.expectedMsgId = sent.key.id;
