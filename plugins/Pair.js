@@ -48,6 +48,20 @@ function isValidPhone(num) {
   return /^[1-9][0-9]{7,14}$/.test(num);
 }
 
+// 🛡️ LID හෝ Device Port ගැටලුවලින් තොරව නිවැරදි Phone Number එක ලබා ගැනීම
+function getCleanSenderPhone(from, sender, m) {
+  if (from && from.endsWith("@s.whatsapp.net")) {
+    return normalizePhone(from.split("@")[0].split(":")[0]);
+  }
+  if (sender && sender.endsWith("@s.whatsapp.net")) {
+    return normalizePhone(sender.split("@")[0].split(":")[0]);
+  }
+  if (m && m.sender && m.sender.endsWith("@s.whatsapp.net")) {
+    return normalizePhone(m.sender.split("@")[0].split(":")[0]);
+  }
+  return "";
+}
+
 function normalizeSessionId(value) {
   return String(value || "").trim();
 }
@@ -124,7 +138,7 @@ async function uploadSessionToMongo({
   return normalizedId;
 }
 
-/* ================= COMMAND ================= */
+/* ================= COMMAND: .pair ================= */
 
 cmd(
   {
@@ -139,17 +153,14 @@ cmd(
     try {
       let targetPhone = "";
 
-      // 1. Argument එකක් තිබේ නම් ලබා ගැනීම
+      // 1. Argument එකක් ලබා දී ඇත්නම්
       if (args && args[0]) {
         targetPhone = normalizePhone(args[0]);
       }
 
-      // 2. නැතිනම් Command එක එවූ පුද්ගලයාගේ Number එක auto ලබා ගැනීම
+      // 2. නැතහොත් නිවැරදි Sender Phone Number එක ස්වයංක්‍රීයව ගැනීම
       if (!targetPhone) {
-        if (sender) {
-          const rawNum = String(sender).split("@")[0].split(":")[0];
-          targetPhone = normalizePhone(rawNum);
-        }
+        targetPhone = getCleanSenderPhone(from, sender, m);
       }
 
       if (!targetPhone || !isValidPhone(targetPhone)) {
@@ -164,7 +175,6 @@ cmd(
       return await generatePairCode({
         conn,
         from,
-        mek,
         reply,
         phone: targetPhone,
       });
@@ -175,9 +185,30 @@ cmd(
   }
 );
 
-/* ================= CORE ================= */
+/* ================= COMMAND: .pairqr (Conflicting .qr Fix) ================= */
 
-async function generatePairCode({ conn, from, mek, reply, phone }) {
+cmd(
+  {
+    pattern: "pairqr",
+    alias: ["botqr", "linkqr"],
+    react: "📷",
+    category: "main",
+    desc: "Get WhatsApp Pair QR Code directly",
+    filename: __filename,
+  },
+  async (conn, mek, m, { from, reply }) => {
+    try {
+      return await generatePairQR({ conn, from, reply });
+    } catch (e) {
+      console.error("PAIR QR ERROR:", e);
+      return reply("❌ Failed to start QR pairing process.");
+    }
+  }
+);
+
+/* ================= CORE: PAIR CODE ================= */
+
+async function generatePairCode({ conn, from, reply, phone }) {
   const sessionId = generateSessionId(phone);
   const tempSessionId = `pair_${phone}_${Date.now()}`;
   const authDir = path.join(__dirname, "../temp", tempSessionId);
@@ -252,14 +283,14 @@ async function generatePairCode({ conn, from, mek, reply, phone }) {
               });
 
               const successText =
-                "░▒▓█►─═ [ 🌟 LINK SUCCESSFUL 🌟 ] ═─◄█▓▒░\n\n" +
+                " [ 🌟 LINK SUCCESSFUL 🌟 ]\n\n" +
                 "✅ *Device successfully connected!*\n\n" +
-                "╭───────────────────────────────╮\n" +
-                `│ 📱 *Target Number :* +${phone}\n` +
-                "│ 🔐 *Security Level :* End-to-End Encrypted\n" +
-                "│ 💾 *Database State :* Cloud Synced & Saved\n" +
-                "│ 🤖 *Bot Engine     :* Online & Ready\n" +
-                "╰───────────────────────────────╯\n\n" +
+                "╭────────────────────╮\n" +
+                `│ 📱 *\`Target Number\` :* +${phone}\n` +
+                "│ 🔐 *\`Security Level\` :* End-to-End Encrypted\n" +
+                "│ 💾 *\`Database State\` :* Cloud Synced & Saved\n" +
+                "│ 🤖 *\`Bot Engine\`     :* Online & Ready\n" +
+                "╰────────────────────╯\n\n" +
                 "> 🍁 ᴍᴀʟɪʏᴀ-ᴍᴅ ᴀᴜᴛᴏᴍᴀᴛɪᴏɴ sʏsᴛᴇᴍ";
 
               await conn.sendMessage(from, { text: successText });
@@ -312,53 +343,62 @@ async function generatePairCode({ conn, from, mek, reply, phone }) {
         codeSent = true;
 
         const bodyMsg =
-          "╔═════ ≪ • ❈ • ≫ ═════╗\n" +
-          "   🍁 *MALIYA-MD PAIR* 🍁\n" +
-          "╚═════ ≪ • ❈ • ≫ ═════╝\n\n" +
+          `╔═════ ≪ • ❈ • ≫ ═════╗\n` +
+          `   🍁 *MALIYA-MD PAIR* 🍁\n` +
+          `╚═════ ≪ • ❈ • ≫ ═════╝\n\n` +
           `  📲 *Phone Number :* +${phone}\n` +
           `  🔑 *Pairing Code :* \`${code}\`\n\n` +
-          "┌─── ❖ 『 How to Connect 』 ❖ ───┐\n" +
-          "  1. Go to WhatsApp > Linked Devices > Link with phone number\n" +
-          "  2. Click *Copy Code* below and paste it into WhatsApp\n" +
-          "  3. Or tap *Get QR* to pair using QR code instead\n" +
-          "└─────────────────────────────────┘\n\n" +
-          "⏱️ _Code expires in approximately 60 seconds._";
+          `┌ ❖『 How to Connect 』❖ ┐\n` +
+          `  1. Go to *WhatsApp > Linked Devices > Link with phone number*\n` +
+          `  2. Click *Copy Code* below and paste it into WhatsApp\n` +
+          `  3. Or tap *Get Pair QR* to pair using QR code instead\n` +
+          `└────────────────────┘\n\n` +
+          `⏱️ _Code expires in approximately 60 seconds._`;
 
         let buttonSent = false;
 
-        // ── 🔘 Other Plugins Style (ButtonV2 with Dynamic Import) ──
+        // ── 🔘 @vanzxy/baileys Button Builder ──
         try {
-          const { ButtonV2 } = await import("@vanzxy/baileys");
-          const btn = new ButtonV2(conn)
+          const { Button } = await import("@vanzxy/baileys");
+
+          const btn = new Button(conn)
+            .setTitle("MALIYA-MD PAIR SYSTEM")
             .setBody(bodyMsg)
             .setFooter("© 2026 MALIYA-MD BOT SYSTEM");
 
-          btn.addRawButton({
-            buttonId: "copy_pair_code",
-            buttonText: { displayText: "📋 Copy Code" },
-            type: 1,
-            nativeFlowInfo: {
-              name: "cta_copy",
-              paramsJson: JSON.stringify({
-                display_text: "📋 Copy Code",
-                id: code,
-                copy_code: code,
-              }),
-            },
-          });
+          if (typeof btn.addCopy === "function") {
+            btn.addCopy("📋 Copy Code", code);
+          } else if (typeof btn.addRawButton === "function") {
+            btn.addRawButton({
+              buttonId: "copy_pair_code",
+              buttonText: { displayText: "📋 Copy Code" },
+              type: 1,
+              nativeFlowInfo: {
+                name: "cta_copy",
+                paramsJson: JSON.stringify({
+                  display_text: "📋 Copy Code",
+                  id: code,
+                  copy_code: code,
+                }),
+              },
+            });
+          } else {
+            btn.addReply("📋 Copy Code", code);
+          }
 
-          btn.addButton("📷 Get QR", ".qr");
+          // 💡 .qr වෙනුවට .pairqr භාවිතා කිරීමෙන් වෙනත් QR plugins සමඟ පැටලීම වළකී
+          btn.addReply("📷 Get Pair QR", ".pairqr");
 
-          const sentMsg = await btn.send(from, { quoted: mek });
-          if (sentMsg) buttonSent = true;
+          await btn.send(from);
+          buttonSent = true;
         } catch (btnErr) {
-          console.log("PAIR BUTTONV2 ERROR:", btnErr?.message || btnErr);
+          console.error("VANZXY BUTTON ERROR:", btnErr?.message || btnErr);
         }
 
-        // ── 🔘 Fallback to Plain Text (if button fails) ──
+        // ── 🔘 Fallback to Plain Text (බොත්තම් අසමත් වුවහොත්) ──
         if (!buttonSent) {
-          await conn.sendMessage(from, { text: bodyMsg }, { quoted: mek });
-          await conn.sendMessage(from, { text: code }, { quoted: mek });
+          await conn.sendMessage(from, { text: bodyMsg });
+          await conn.sendMessage(from, { text: code });
         }
 
       } catch (e) {
@@ -392,6 +432,123 @@ async function generatePairCode({ conn, from, mek, reply, phone }) {
       );
       await deleteFolderSafe(authDir);
     }
+  }
+}
+
+/* ================= CORE: PAIR QR CODE ================= */
+
+async function generatePairQR({ conn, from, reply }) {
+  const tempSessionId = `qr_${Date.now()}`;
+  const authDir = path.join(__dirname, "../temp", tempSessionId);
+
+  let finished = false;
+  let qrSent = false;
+  let overallTimeout = null;
+
+  overallTimeout = setTimeout(async () => {
+    if (finished) return;
+    finished = true;
+    try { await reply("⌛ QR Code timed out. Please try `.pairqr` again."); } catch {}
+    await deleteFolderSafe(authDir);
+  }, 60 * 1000);
+
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    const { version } = await fetchLatestBaileysVersion();
+
+    const sock = makeWASocket({
+      version,
+      auth: state,
+      logger: P({ level: "silent" }),
+      printQRInTerminal: false,
+      browser: Browsers.macOS("Safari"),
+      markOnlineOnConnect: false,
+      syncFullHistory: false,
+      generateHighQualityLinkPreview: false,
+    });
+
+    sock.ev.on("creds.update", saveCreds);
+
+    sock.ev.on("connection.update", async (update) => {
+      if (finished) return;
+
+      const { connection, qr, lastDisconnect } = update;
+
+      // 📷 QR එක ලැබුණු සැනින් Image එකක් ලෙස යැවීම
+      if (qr && !qrSent) {
+        qrSent = true;
+        const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(qr)}`;
+        
+        await conn.sendMessage(
+          from,
+          {
+            image: { url: qrImageUrl },
+            caption:
+              "╭━〔 📷 *MALIYA-MD PAIR QR* 〕━╮\n" +
+              "┃ 1. Open WhatsApp Settings\n" +
+              "┃ 2. Go to *Linked Devices*\n" +
+              "┃ 3. Scan this QR code within 30 seconds!\n" +
+              "╰━━━━━━━━━━━━━━━━╯",
+          }
+        );
+      }
+
+      if (connection === "open") {
+        finished = true;
+        clearTimeout(overallTimeout);
+
+        try {
+          const credsPath = path.join(authDir, "creds.json");
+          const phone = (sock.user?.id || "").split("@")[0].split(":")[0];
+          const sessionId = generateSessionId(phone);
+
+          if (fs.existsSync(credsPath)) {
+            await uploadSessionToMongo({
+              sessionId,
+              phone,
+              filePath: credsPath,
+              fileName: `creds_${phone}_${Date.now()}.json`,
+              source: "bot-pair-qr",
+            });
+
+            await conn.sendMessage(from, {
+              text:
+                "[ 🌟 LINK SUCCESSFUL 🌟 ]\n\n" +
+                "✅ *QR Scan Successful! Device Connected!*\n\n" +
+                `📱 *Target Number :* +${phone}\n` +
+                "💾 *Database State :* Cloud Synced & Saved\n" +
+                "🤖 *Bot Engine :* Online & Ready\n\n" +
+                "> 🍁 ᴍᴀʟɪʏᴀ-ᴍᴅ ᴀᴜᴛᴏᴍᴀᴛɪᴏɴ sʏsᴛᴇᴍ",
+            });
+          }
+        } catch (e) {
+          console.error("QR Mongo Upload Error:", e);
+        }
+
+        sock.ev.removeAllListeners();
+        try { sock.ws.close(); } catch {}
+        await deleteFolderSafe(authDir);
+      }
+
+      if (connection === "close") {
+        const statusCode =
+          lastDisconnect?.error?.output?.statusCode ||
+          lastDisconnect?.error?.data?.statusCode;
+
+        if (statusCode === DisconnectReason.loggedOut) {
+          finished = true;
+          clearTimeout(overallTimeout);
+          await reply("❌ QR process closed. Try `.pairqr` again.");
+          await deleteFolderSafe(authDir);
+        }
+      }
+    });
+
+    await reply("⏳ Generating pairing QR Code... Please wait.");
+  } catch (e) {
+    console.error("QR GENERATE ERROR:", e);
+    await reply("❌ Failed to generate QR code.");
+    await deleteFolderSafe(authDir);
   }
 }
 
