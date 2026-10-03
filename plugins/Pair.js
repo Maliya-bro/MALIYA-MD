@@ -116,8 +116,7 @@ async function uploadSessionToMongo({
   await col.updateOne(
     { sessionId: normalizedId },
     {
-      $set: uploadDoc,
-      $setOnInsert: { createdAt: now },
+      $set: uploadDoc,$setOnInsert: { createdAt: now },
     },
     { upsert: true }
   );
@@ -146,7 +145,12 @@ cmd(
 
       if (phoneArg) {
         if (!isValidPhone(phoneArg)) {
-          return reply("❌ Invalid number.\n\nExample:\n.pair 94712345678");
+          return reply(
+            "╔═━─━─━─━─〖 ⚠️ *INVALID NUMBER* 〗─━─━─━─━═╗\n" +
+            "║ ❌ Invalid phone number. Please include country code.\n" +
+            "║ 💡 *Example:* `.pair 94712345678`\n" +
+            "╚═━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━═╝"
+          );
         }
 
         return await generatePairCode({
@@ -163,15 +167,19 @@ cmd(
       };
 
       return reply(
-        "📱 *Send the phone number to generate pair code.*\n\n" +
-          "Example:\n" +
-          "`94712345678`\n\n" +
-          "Or use directly:\n" +
-          "`.pair 94712345678`"
+        "╭───────────────「 🔗 *PAIRING PORTAL* 」───────────────╮\n" +
+        "│\n" +
+        "│ 📱 Send your phone number to receive a pairing code:\n" +
+        "│ 💡 *Format:* `94712345678`\n" +
+        "│\n" +
+        "│ ⚡ Or run the command directly:\n" +
+        "│ ➔ `.pair 94712345678`\n" +
+        "│\n" +
+        "╰────────────────────────────────────────────────────────╯"
       );
     } catch (e) {
       console.error("PAIR CMD ERROR:", e);
-      return reply("❌ Failed to start pair process.");
+      return reply("❌ Failed to initiate pairing process.");
     }
   }
 );
@@ -192,14 +200,19 @@ replyHandlers.push({
 
       if (Date.now() - req.createdAt > 3 * 60 * 1000) {
         delete pendingPairRequests[sender];
-        await reply("⌛ Pair request expired. Use `.pair` again.");
+        await reply("⌛ Pairing request expired. Please type `.pair` again.");
         return;
       }
 
       const phone = normalizePhone(body || "");
 
       if (!isValidPhone(phone)) {
-        await reply("❌ Invalid number.\n\nSend like this:\n`94712345678`");
+        await reply(
+          "╔═━─━─━─━─〖 ⚠️ *INVALID NUMBER* 〗─━─━─━─━═╗\n" +
+          "║ ❌ Please enter a valid phone number.\n" +
+          "║ 💡 *Example:* `94712345678`\n" +
+          "╚═━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━─━═╝"
+        );
         return;
       }
 
@@ -215,7 +228,7 @@ replyHandlers.push({
     } catch (e) {
       console.error("PAIR REPLY HANDLER ERROR:", e);
       delete pendingPairRequests[sender];
-      await reply("❌ Failed to read number.");
+      await reply("❌ Failed to parse phone number.");
     }
   },
 });
@@ -234,7 +247,7 @@ async function generatePairCode({ conn, from, reply, phone }) {
   overallTimeout = setTimeout(async () => {
     if (finished) return;
     finished = true;
-    try { await reply("⌛ Pair code timed out. Please try again."); } catch {}
+    try { await reply("⌛ Pairing code timed out. Please try again."); } catch {}
     await deleteFolderSafe(authDir);
   }, 90 * 1000);
 
@@ -288,7 +301,7 @@ async function generatePairCode({ conn, from, reply, phone }) {
             const credsPath = path.join(authDir, "creds.json");
 
             if (fs.existsSync(credsPath)) {
-              const savedSessionId = await uploadSessionToMongo({
+              await uploadSessionToMongo({
                 sessionId,
                 phone,
                 filePath: credsPath,
@@ -296,20 +309,25 @@ async function generatePairCode({ conn, from, reply, phone }) {
                 source: "bot-pair",
               });
 
-              await conn.sendMessage(from, {
-                text:
-                  "✅ *Number linked successfully!*\n\n" +
-                  `📱 Number: ${phone}\n` +
-                  `🔑 Session ID:\n\`${savedSessionId}\`\n\n` +
-                  "💾 Session saved to database.\n" +
-                  "🤖 Session watcher will connect this bot automatically.",
-              });
+              // Sensitive Session ID is completely hidden from chat output
+              const successText =
+                "➽──[LINK SUCCESSFUL]──❥\n\n" +
+                "✅ *Your WhatsApp account is successfully linked!*\n\n" +
+                "┏──────────────────┓\n" +
+                `│ 📱 *Linked Number :* +${phone}\n` +
+                "│ 🔐 *Security Level :* End-to-End Encrypted\n" +
+                "│ 💾 *Database State :* Cloud Synced & Saved\n" +
+                "│ 🤖 *Bot Engine     :* Online & Connecting...\n" +
+                "┗──────────────────┛\n\n" +
+                "> 🍁 ᴍᴀʟɪʏᴀ-ᴍᴅ ᴀᴜᴛᴏᴍᴀᴛɪᴏɴ sʏsᴛᴇᴍ";
+
+              await conn.sendMessage(from, { text: successText });
             } else {
-              await reply("✅ Number linked, but session file was not found.");
+              await reply("✅ Device linked, but session credentials file was not found.");
             }
           } catch (uploadErr) {
             console.error("PAIR UPLOAD ERROR:", uploadErr);
-            await reply("✅ Linked, but failed to save session to database.");
+            await reply("✅ Device linked, but failed to save session to database.");
           }
 
           sock.ev.removeAllListeners();
@@ -326,12 +344,12 @@ async function generatePairCode({ conn, from, reply, phone }) {
           if (statusCode === DisconnectReason.loggedOut) {
             finished = true;
             clearTimeout(overallTimeout);
-            await reply("❌ Logged out. Try `.pair` again.");
+            await reply("❌ Device was logged out. Please try `.pair` again.");
             await deleteFolderSafe(authDir);
             return;
           }
 
-          console.log(`PAIR: socket closed (code ${statusCode}) — reconnecting to await pairing...`);
+          console.log(`PAIR: Socket closed (code ${statusCode}) — reconnecting...`);
           sock.ev.removeAllListeners();
           try { sock.ws.close(); } catch {}
 
@@ -352,27 +370,92 @@ async function generatePairCode({ conn, from, reply, phone }) {
         const code = formatPairCode(rawCode);
         codeSent = true;
 
-        await conn.sendMessage(
-          from,
-          {
-            text:
-              "🔗 *MALIYA-MD PAIR CODE*\n\n" +
-              `📱 Number: ${phone}\n\n` +
-              "📌 Open WhatsApp > Linked Devices > Link with phone number\n" +
-              "Then enter the code sent below.\n\n" +
-              "⏱️ Code expires in about 1 minute.",
-          },
-          { quoted: null }
-        );
+        const bodyMsg =
+          "╔═[ MALIYA-MD PAIR ]═╗\n\n" +
+          `  📲 *Phone Number :* +${phone}\n` +
+          `  🔑 *Pairing Code :* \`${code}\`\n\n` +
+          "╟『 How to Connect 』╢\n" +
+          "  1. *_Go to WhatsApp > Linked Devices > Link with phone number_*\n" +
+          "  2. *_Click *Copy Code* below and paste it into WhatsApp_*\n" +
+          "  3. *_Or tap *Get QR* to pair using QR code instead_*\n\n" +
+          "  ⏱️ *_Code expires in approximately 60 seconds._*\n\n" +
+          "╚════════════════╝";
 
-        await conn.sendMessage(from, { text: code }, { quoted: null });
+        let buttonSent = false;
+
+        // ── 🔘 Native Flow Copy Button + QR Button (ButtonV2) ──
+        try {
+          const { ButtonV2 } = require("@vanzxy/baileys");
+          const btn = new ButtonV2(conn)
+            .setBody(bodyMsg)
+            .setFooter("© 2026 MALIYA-MD MINI BOT ");
+
+          btn.addRawButton({
+            buttonId: "copy_pair_code",
+            buttonText: { displayText: "📋 Copy Code" },
+            type: 1,
+            nativeFlowInfo: {
+              name: "cta_copy",
+              paramsJson: JSON.stringify({
+                display_text: "📋 Copy Code",
+                id: code,
+                copy_code: code,
+              }),
+            },
+          });
+
+          btn.addButton("📷 Get QR", ".qr");
+
+          await btn.send(from, { quoted: null });
+          buttonSent = true;
+        } catch (btnErr) {
+          console.log("PAIR BUTTONV2 ERROR:", btnErr?.message || btnErr);
+        }
+
+        // ── 🔘 Raw CTA Fallback ──
+        if (!buttonSent) {
+          try {
+            await conn.sendMessage(from, {
+              text: bodyMsg,
+              footer: "© 2026 MALIYA-MD BOT SYSTEM",
+              buttons: [
+                {
+                  buttonId: "copy_pair_code",
+                  buttonText: { displayText: "📋 Copy Code" },
+                  type: 1,
+                  nativeFlowInfo: {
+                    name: "cta_copy",
+                    paramsJson: JSON.stringify({
+                      display_text: "📋 Copy Code",
+                      id: code,
+                      copy_code: code,
+                    }),
+                  },
+                },
+                {
+                  buttonId: ".qr",
+                  buttonText: { displayText: "📷 Get QR" },
+                  type: 1,
+                }
+              ]
+            }, { quoted: null });
+            buttonSent = true;
+          } catch (_) {}
+        }
+
+        // ── 🔘 Plain Text Fallback ──
+        if (!buttonSent) {
+          await conn.sendMessage(from, { text: bodyMsg }, { quoted: null });
+          await conn.sendMessage(from, { text: code }, { quoted: null });
+        }
+
       } catch (e) {
         console.error("PAIR CODE REQUEST ERROR:", e);
         if (!finished) {
           finished = true;
           clearTimeout(overallTimeout);
           await reply(
-            "❌ Failed to generate pair code.\n\n" +
+            "❌ Failed to request pair code.\n\n" +
               (e?.message ? `Error: ${e.message}` : "")
           );
           sock.ev.removeAllListeners();
@@ -384,7 +467,7 @@ async function generatePairCode({ conn, from, reply, phone }) {
   }
 
   try {
-    await reply("⏳ Generating pair code... Please wait.");
+    await reply("⏳ Generating pairing code... Please wait a moment.");
     await connectSocket();
   } catch (e) {
     console.error("PAIR GENERATE ERROR:", e);
@@ -392,10 +475,12 @@ async function generatePairCode({ conn, from, reply, phone }) {
       finished = true;
       clearTimeout(overallTimeout);
       await reply(
-        "❌ Failed to generate pair code.\n\n" +
+        "❌ Failed to initiate pairing code.\n\n" +
           (e?.message ? `Error: ${e.message}` : "")
       );
       await deleteFolderSafe(authDir);
     }
   }
 }
+
+module.exports = {};
