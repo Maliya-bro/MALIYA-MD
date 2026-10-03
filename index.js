@@ -384,7 +384,7 @@ async function scheduleReconnect(sessionId, delayMs = 5000) {
   const session = activeSessions.get(sessionId);
   const attempts = session?.reconnectAttempts || 0;
   if (attempts >= 3) {
-    console.log(`⛔ Max reconnect attempts (${attempts}) reached for ${sessionId}. Marking as invalid.`);
+    console.log(`⛔ Max reconnect attempts (${attempts}) reached for${sessionId}. Marking as invalid.`);
     await updateSessionStatus(sessionId, {
       status: "invalid",
       connectBot: false,
@@ -396,7 +396,7 @@ async function scheduleReconnect(sessionId, delayMs = 5000) {
   const timer = setTimeout(async () => {
     reconnectTimers.delete(sessionId);
     if (activeSessions.has(sessionId)) return;
-    console.log(`🔁 Reconnecting session ${sessionId} (attempt ${attempts + 1})...`);
+    console.log(`🔁 Reconnecting session ${sessionId} (attempt${attempts + 1})...`);
     await startSessionBot(sessionId);
   }, delayMs);
 
@@ -479,6 +479,21 @@ async function startSessionBot(sessionId) {
         return message;
       },
     });
+
+    // ── 🚨 BOT SENT TRACKER (බොට්ගේ මැසේජ් වලට බොට්ම Reply කිරීම වළක්වයි) ──
+    global.__botSentMessageIds = global.__botSentMessageIds || new Set();
+    const origSendMessage = sock.sendMessage.bind(sock);
+    sock.sendMessage = async (...args) => {
+      const res = await origSendMessage(...args);
+      if (res?.key?.id) {
+        global.__botSentMessageIds.add(res.key.id);
+        if (global.__botSentMessageIds.size > 1000) {
+          const first = global.__botSentMessageIds.values().next().value;
+          global.__botSentMessageIds.delete(first);
+        }
+      }
+      return res;
+    };
 
     if (lunaHelper && typeof lunaHelper.addProperty === "function") {
       try {
@@ -628,7 +643,7 @@ async function startSessionBot(sessionId) {
               });
             }
           } catch (e) {
-            console.log("⚠️ Connect msg send failed:", e?.message || e);
+            console.log("⚠️️ Connect msg send failed:", e?.message || e);
           }
         }
 
@@ -641,7 +656,7 @@ async function startSessionBot(sessionId) {
 
           if (code !== DisconnectReason.loggedOut) {
             sessionCtx.reconnectAttempts = (sessionCtx.reconnectAttempts || 0) + 1;
-            console.log(`🔁 Session disconnected, reconnecting: ${sessionId} (code: ${code}, attempt: ${sessionCtx.reconnectAttempts})`);
+            console.log(`🔁 Session disconnected, reconnecting: ${sessionId} (code: ${code}, attempt:${sessionCtx.reconnectAttempts})`);
             await updateSessionStatus(sessionId, {
               status:     "disconnected",
               connectBot: true,
@@ -838,12 +853,12 @@ function attachSessionHandlers(sock, sessionCtx) {
                   { react: { text: randomEmoji, key: mek.key } },
                   { statusJidList: [participant] }
                 );
-                console.log(`[✓] Reacted (new): ${participant} ${randomEmoji}`);
+                console.log(`[✓] Reacted (new): ${participant}${randomEmoji}`);
               } catch {
                 await sock.sendMessage(participant, {
                   react: { text: randomEmoji, key: mek.key },
                 });
-                console.log(`[✓] Reacted (fallback): ${participant} ${randomEmoji}`);
+                console.log(`[✓] Reacted (fallback): ${participant}${randomEmoji}`);
               }
             } catch (e) {
               console.error("❌ React error:", e?.message || e);
@@ -998,7 +1013,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               isGroup,
               sessionOwnerPhone:  sessionCtx.ownerNumber[0] || "",
               sessionOwnerName:   BOT_OWNER_NAME,
-              sessionId:          sessionCtx.sessionId, // 👈 Connected session id
+              sessionId:          sessionCtx.sessionId,
             });
             if (handled) continue messageLoop;
           } catch (e) {
@@ -1136,7 +1151,7 @@ function attachSessionHandlers(sock, sessionCtx) {
                 isGroup:           key.remoteJid.endsWith("@g.us"),
                 sessionOwnerPhone: sessionCtx.ownerNumber[0] || "",
                 sessionOwnerName:  BOT_OWNER_NAME,
-                sessionId:         sessionCtx.sessionId, // 👈 Connected session id
+                sessionId:         sessionCtx.sessionId,
               });
             } catch (_) {}
           }
