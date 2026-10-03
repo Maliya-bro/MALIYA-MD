@@ -985,7 +985,7 @@ function attachSessionHandlers(sock, sessionCtx) {
           if (isCmd) continue messageLoop;
         }
 
-        // ── AUTO MSG PLUGIN ────────────────────────────────────
+        // ── AUTO MSG PLUGIN (LOVELY CHAT) ─────────────────────
         if (!isCmd) {
           try {
             const handled = await handleAutoMsg({
@@ -998,6 +998,7 @@ function attachSessionHandlers(sock, sessionCtx) {
               isGroup,
               sessionOwnerPhone:  sessionCtx.ownerNumber[0] || "",
               sessionOwnerName:   BOT_OWNER_NAME,
+              sessionId:          sessionCtx.sessionId, // 👈 Connected session id
             });
             if (handled) continue messageLoop;
           } catch (e) {
@@ -1135,6 +1136,7 @@ function attachSessionHandlers(sock, sessionCtx) {
                 isGroup:           key.remoteJid.endsWith("@g.us"),
                 sessionOwnerPhone: sessionCtx.ownerNumber[0] || "",
                 sessionOwnerName:  BOT_OWNER_NAME,
+                sessionId:         sessionCtx.sessionId, // 👈 Connected session id
               });
             } catch (_) {}
           }
