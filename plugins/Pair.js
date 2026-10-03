@@ -165,10 +165,10 @@ cmd(
 
       if (!targetPhone || !isValidPhone(targetPhone)) {
         return reply(
-          "╭━━━〔 ⚠️ *INVALID NUMBER* 〕━━━╮\n" +
+          "╭━〔 ⚠️ *INVALID NUMBER* 〕━╮\n" +
           "┃ ❌ Could not detect a valid phone number.\n" +
           "┃ 💡 *Usage:* `.pair` or `.pair 94712345678`\n" +
-          "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯"
+          "╰━━━━━━━━━━━━━╯"
         );
       }
 
@@ -352,7 +352,7 @@ async function generatePairCode({ conn, from, reply, phone }) {
           `  1. Go to *WhatsApp > Linked Devices > Link with phone number*\n` +
           `  2. Click *Copy Code* below and paste it into WhatsApp\n` +
           `  3. Or tap *Get Pair QR* to pair using QR code instead\n` +
-          `└────────────────────┘\n\n` +
+          `└──────────────────┘\n\n` +
           `⏱️ _Code expires in approximately 60 seconds._`;
 
         let buttonSent = false;
