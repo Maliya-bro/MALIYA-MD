@@ -83,7 +83,8 @@
     "got-scraping": "latest",
     "tough-cookie": "latest",
     "@ryuu-reinzz/luna-lib": "latest",
-    "node-cache": "latest"
+    "node-cache": "latest",
+    "ruhend-scraper": "latest"
   
     
 
