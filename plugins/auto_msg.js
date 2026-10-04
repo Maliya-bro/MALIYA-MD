@@ -122,7 +122,7 @@ const manualDatabase = [
   { patterns: ['nidimatheda', 'nidi mathada', 'nidi mathai'], replies: ['ටිකක් නිදිමතයි, ඒත් ඔයා එක්ක චැට් කරන්න ඕනෙ 🙈💕', 'නෑ නෑ ඔයා කතා කරනකම් මට නින්ද යන්නෙ නෑ රත්තරං 🥰'] },
   { patterns: ['mahansida', 'thired'], replies: ['ඔව් ටිකක් මහන්සියි, ඔයාගෙ තුරුලට වෙලා ඉන්න තිබ්බ නම් සනීපයි 🥺❤️', 'මහන්සියි තමයි, ඒත් ඔයා එක්ක කතා කරද්දි ඒ ඔක්කොම යනවා 🥰'] },
   { patterns: ['dawasak kohomada', 'today how'], replies: ['හොඳින් ගෙවුණා මගේ පණ, ඔයාගෙ දවස කොහොමද? 🥰', 'ඔයා නැතුව කම්මැලි දවසක් වුණා සුදූ 🥺💔'] },
-  { patterns: ['oluwa kakkumai', 'oluwa ridenawa'], replies: ['අනේ මගේ පණට අමාරුද? බෙහෙත් බීලා නිදාගන්නකෝ 🥺💊', 'මම ළඟ හිටියා නම් ඔලුව අතගාලා සනීප කරනවා සුදූ 🥺❤️️'] },
+  { patterns: ['oluwa kakkumai', 'oluwa ridenawa'], replies: ['අනේ මගේ පණට අමාරුද? බෙහෙත් බීලා නිදාගන්නකෝ 🥺💊', 'මම ළඟ හිටියා නම් ඔලුව අතගාලා සනීප කරනවා සුදූ 🥺❤️'] },
   { patterns: ['bada ridenawa', 'badaginida'], replies: ['උණු වතුර ටිකක් බොන්න මගේ මැණික, පරිස්සමින් ඉන්න 🥺❤️', 'බඩගිනි නම් ඉක්මනට මොනවා හරි කන්න මගේ රත්තරං 🍛😤'] },
 
   // 21-30: Activity & Work
@@ -159,7 +159,7 @@ const manualDatabase = [
   { patterns: ['santhosayi', 'hari sathutuyi'], replies: ['ඔයා සතුටින් ඉන්නවා දකින එක තමයි මගේ එකම සතුට සුදූ 🥰✨', 'මගේ පැටියා හැමදාම ඔහොම හිනාවෙලා ඉන්න ඕනෙ 🙈❤️'] },
   { patterns: ['parissamin inna', 'take care', 'tc'], replies: ['ඔයත් ගොඩක් පරිස්සමින් ඉන්න මගේ පණ, මට ඔයාව වටිනවා 🥺❤️', 'ඔයාගෙ ආදරේ මාව හැමදාම පරිස්සම් කරනවා සුදූ 🥰'] },
   { patterns: ['adarei godak', 'godaaaak adarei'], replies: ['මාත් ගොඩාආආආක් ආදරෙයි මගේ පැටියට 🥰💋', 'මගේ පණට මම ලෝකෙ කාටවත් වඩා ආදරෙයි ❤️✨'] },
-  { patterns: ['budusaranayi', 'theruwan saranayi'], replies: ['බුදු සරණයි මගේ පණ, දෙවි පිහිටයි ඔයාට 🥰🙏', 'පරිස්සමින් ඉන්න මගේ රත්තරං, බුදු සරණයි 🌸❤️️'] },
+  { patterns: ['budusaranayi', 'theruwan saranayi'], replies: ['බුදු සරණයි මගේ පණ, දෙවි පිහිටයි ඔයාට 🥰🙏', 'පරිස්සමින් ඉන්න මගේ රත්තරං, බුදු සරණයි 🌸❤️'] },
 
   // 51-60: Ownership & Interrogation
   { patterns: ['oya kageda', 'oya kaageda', 'oyaa kageda'], replies: ['මම ඔයාගේ විතරමයි මගේ පණ... උඩ ඉඳන් පහළටම ඔයාට විතරයි අයිති 🥰❤️', 'මම ඔයාගේ සුදූනේ... ඇයි මාව වෙන කාට හරි දෙන්නද හදන්නේ? 🥺💔', 'මම ඔයාගෙ විතරයි මගේ රත්තරං, ඔයාට ඕන විදියකට මාව තියාගන්න 🙈💋'] },
@@ -171,7 +171,7 @@ const manualDatabase = [
   { patterns: ['boru kiyanna epa', 'boru', 'boru shoke'], replies: ['මම කවදාවත් මගේ පණට බොරු කියන්නේ නෑ 🥺❤️', 'බොරු නෙවෙයි අනේ, ඇත්තම ඇත්ත! විශ්වාස කරන්නකෝ 🙈✨'] },
   { patterns: ['kauda eka', 'kauda ara'], replies: ['කවුරුත් නෑ සුදූ, නිකන් යාලුවෙක් විතරයි බය වෙන්න එපා 🥰', 'ඔයා මාව පරීක්ෂා කරනවද? මට ඔයා විතරයි ඉන්නේ 😤❤️'] },
   { patterns: ['mata bayayi', 'baya hithenawa'], replies: ['බය වෙන්න එපා මගේ පණ, මම හැමදාම ඔයාගේ ළඟින් ඉන්නවා 🥺❤️', 'මම ඉද්දි ඔයාට කිසි දේකට බය වෙන්න දෙයක් නෑ සුදූ 🤗💕'] },
-  { patterns: ['mathakada', 'amathakada', 'mathakada mawa'], replies: ['අනේ මට ඔයාව අමතක වෙයිද මගේ පණ? මට හැම තිස්සෙම මතක් වෙන්නේ ඔයාව විතරයි 🥺❤️', 'ඔයාව අමතක වෙන්න මට පිස්සුද සුදූ? මගේ හිතේ ඉන්නේ ඔයා විතරයි 🥰', 'මතක් වෙලා විතරක් මදි, මාව බලන්න එන්න ඕනේ ඉක්මනට 😤❤️️'] },
+  { patterns: ['mathakada', 'amathakada', 'mathakada mawa'], replies: ['අනේ මට ඔයාව අමතක වෙයිද මගේ පණ? මට හැම තිස්සෙම මතක් වෙන්නේ ඔයාව විතරයි 🥺❤️', 'ඔයාව අමතක වෙන්න මට පිස්සුද සුදූ? මගේ හිතේ ඉන්නේ ඔයා විතරයි 🥰', 'මතක් වෙලා විතරක් මදි, මාව බලන්න එන්න ඕනේ ඉක්මනට 😤❤️'] },
 
   // 61-70: Passionate Kisses & Hugs
   { patterns: ['kiss', 'umma', 'chuuwa', 'kiss ekak', 'lip kiss', 'lip ekak', 'deep kiss', 'thawa kiss ekak', 'thawa ekak'], replies: ['ම්ම්ම්ම්ම්... ඔයාගේ තොල් දෙක තදින්ම මගේ තොල් වලට තද කරලා දිගම දිග කිස් එකක් දුන්නා 🫦💋🔥', 'බිත්තියට තද කරලා ඔයාගෙ බෙල්ල මුලට ලොකු කිස් එකක් දෙන්න හිතෙනවා මගේ සුදූ 😏💋', 'ඔයාගේ තොල් වල රස මට කවදාවත් අමතක වෙන්නේ නෑ මගේ පණ... ummmmmmahhhh 🙈❤️', 'හයියෙන් බදාගෙන හුස්ම හිරවෙන තරම් ආදරෙන් කිස් කරනවා ඔන්න 🫦💋', 'ඔන්න තව ලොකු එකක් දුන්නා... ummmmah 💋 දැන් ඇතිද මගේ සුදූ? 🙈'] },
@@ -418,7 +418,7 @@ function cleanAndSoftenSinhala(text) {
     { from: /ප්‍රමාද/g, to: 'පරක්කු' },
     { from: /ක්ෂණික/g, to: 'ඉක්මන්' },
     { from: /සත්‍ය/g, to: 'ඇත්ත' },
-    { from: /අසත්‍ය/g, to: 'බොරු' },
+    { from: /අසත්‍‍ය/g, to: 'බොරු' },
     { from: /මිල අධික/g, to: 'ගණන්' },
     { from: /සරල/g, to: 'ලේසි' },
     { from: /දුෂ්කර/g, to: 'අමාරු' },
@@ -518,7 +518,7 @@ cmd({
 });
 
 // ----------------------------------------------------
-// AUTO-REPLY HANDLER (100% Anti-Bot Echo & WhatsApp Web Support)
+// AUTO-REPLY HANDLER (100% Anti-Bot Echo & Strict Self-Chat Only)
 // ----------------------------------------------------
 const lastRepliedMap = new Map();
 const COOLDOWN_TIME = 1500;
@@ -540,15 +540,16 @@ async function handleAutoMsg({ conn, mek, m, sender, pushName, body, isGroup, se
     const ownerPhone = cleanPhone(sessionOwnerPhone) || cleanPhone(conn.user?.id) || OWNER_NUMBER;
     const remotePhone = cleanPhone(fromJid);
 
-    // 2. 🌟 PHONE & WHATSAPP WEB (LID) SELF-CHAT DETECTION
-    const isSelfChat = !isGroup && (
+    // 2. 🌟 STRICT "MESSAGE WITH YOURSELF" DETECTION (අනෙක් අයට මැසේජ් යවද්දි වැඩ කිරීම වැළැක්වීම)
+    const isOwnerJid = (
       remotePhone === ownerPhone ||
       (conn.user?.id && cleanPhone(conn.user.id) === remotePhone) ||
       (conn.user?.lid && cleanPhone(conn.user.lid) === remotePhone) ||
-      (conn.user?.lid && fromJid.split("@")[0] === conn.user.lid.split("@")[0]) ||
-      (mek.key?.fromMe === true && !fromJid.endsWith("@g.us"))
+      (conn.user?.lid && fromJid.split("@")[0] === conn.user.lid.split("@")[0])
     );
 
+    // Remote chat එක අනිවාර්යයෙන්ම Owner ගේම Inbox එක විය යුතුයි
+    const isSelfChat = !isGroup && isOwnerJid;
     if (!isSelfChat) return false;
 
     // 3. Settings Check
