@@ -129,7 +129,7 @@ let antiSpamPlugin = null;
 try {
   antiSpamPlugin = require("./plugins/anti-spam.js");
 } catch (e) {
-  console.log("⚠️ anti-spam.js not found:", e?.message || e);
+  console.log("⚠️️ anti-spam.js not found:", e?.message || e);
 }
 
 const app  = express();
@@ -416,7 +416,7 @@ async function startSessionBot(sessionId) {
   startingSessions.add(sessionId);
 
   if (activeSessions.size >= MAX_ACTIVE_SESSIONS) {
-    console.log(`⚠️ Active session limit reached (${MAX_ACTIVE_SESSIONS}). Skipping ${sessionId}`);
+    console.log(`⚠️️ Active session limit reached (${MAX_ACTIVE_SESSIONS}). Skipping ${sessionId}`);
     startingSessions.delete(sessionId);
     return null;
   }
@@ -643,7 +643,7 @@ async function startSessionBot(sessionId) {
               });
             }
           } catch (e) {
-            console.log("⚠️️ Connect msg send failed:", e?.message || e);
+            console.log("⚠️ Connect msg send failed:", e?.message || e);
           }
         }
 
