@@ -40,8 +40,13 @@ function cookiesStatus() {
 
 const pendingAudioType = Object.create(null);
 
-function makeTempFile(ext = ".mp3") { return path.join(TEMP_DIR, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${ext}`); }
-function safeUnlink(file) { try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {} }
+function makeTempFile(ext = ".mp3") { 
+  return path.join(TEMP_DIR, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${ext}`); 
+}
+
+function safeUnlink(file) { 
+  try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {} 
+}
 
 function isValidMediaFile(filePath) {
   try { if (!fs.existsSync(filePath)) return false; return fs.statSync(filePath).size > 10240; } 
@@ -49,6 +54,7 @@ function isValidMediaFile(filePath) {
 }
 
 function formatViews(num) { return !num ? "Unknown" : Number(num).toLocaleString(); }
+
 function formatSeconds(seconds) {
   if (!seconds || isNaN(seconds)) return "Unknown";
   seconds = Number(seconds);
@@ -72,8 +78,7 @@ function toSmallCaps(str = "") {
 function getTypeFromChoice(choice) {
   switch (String(choice).trim().toLowerCase()) {
     case "1": case "audio": return "audio";
-    case "2": case "ptt": case "voice": return "ptt";
-    case "3": case "doc": case "document": return "doc";
+    case "2": case "doc": case "document": return "doc";
     default: return null;
   }
 }
@@ -81,8 +86,7 @@ function getTypeFromChoice(choice) {
 function getTypeLabel(choice) {
   switch (String(choice).trim().toLowerCase()) {
     case "1": case "audio": return "Audio (Standard)";
-    case "2": case "ptt": case "voice": return "Voice Note (PTT)";
-    case "3": case "doc": case "document": return "Document (Audio)";
+    case "2": case "doc": case "document": return "Document (Audio)";
     default: return "Unknown";
   }
 }
@@ -141,8 +145,7 @@ function extractTypeFromTexts(texts) {
   const normalized = texts.map((t) => normalizeText(t));
   for (const text of normalized) {
     if (text === "AUDIO" || text.includes("AUDIO") || text === "1") return "audio";
-    if (text === "PTT" || text.includes("PTT") || text.includes("VOICE") || text === "2") return "ptt";
-    if (text === "DOC" || text.includes("DOC") || text.includes("DOCUMENT") || text === "3") return "doc";
+    if (text === "DOC" || text.includes("DOC") || text.includes("DOCUMENT") || text === "2") return "doc";
   }
   return null;
 }
@@ -185,7 +188,6 @@ async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
         .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
         .setThumbnail(video.thumbnail)
         .addButton("🎵 Audio", "audio")
-        .addButton("🎙️ Voice Note", "ptt")
         .addButton("📄 Document", "doc");
 
       const sentMsg = await btn.send(from, { quoted: mek });
@@ -199,7 +201,7 @@ async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
     from,
     {
       image: { url: video.thumbnail },
-      caption: buildAudioDetails(video) + `\n\n╭─[ 🎵 *${toSmallCaps("SELECT FORMAT")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 🎵 Audio Format (MP3)\n├ 📱 *[ 02 ]* ➔ 🎙️ Voice Note (PTT)\n├ 📱 *[ 03 ]* ➔ 📄 Send Document\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`,
+      caption: buildAudioDetails(video) + `\n\n╭─[ 🎵 *${toSmallCaps("SELECT FORMAT")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 🎵 Audio Format (MP3)\n├ 📱 *[ 02 ]* ➔ 📄 Send Document (MP3)\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`,
       contextInfo: channelContextInfo()
     },
     { quoted: mek }
@@ -215,7 +217,9 @@ function isDuplicateTypeAction(state, type) {
   return false;
 }
 
-async function sendErrorMsg(reply, text) { await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`); }
+async function sendErrorMsg(reply, text) { 
+  await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`); 
+}
 
 async function downloadFromLaguAPI(videoId, outPath) {
   const apiUrl = `https://api.download-lagu-mp3.com/@api/json/mp3/${videoId}`;
@@ -261,19 +265,24 @@ async function fallbackAudioAPIs(url, outPath) {
   throw new Error("All Backup APIs Failed");
 }
 
-async function convertAudio(inputPath, outputPath, isPtt = false) {
+// Filter graph crash ගැටලුව fix කළ FFmpeg converter function එක
+async function convertAudio(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     if (!isValidMediaFile(inputPath)) return reject(new Error("Input file is corrupted or empty before conversion."));
-    let command = ffmpeg(inputPath);
-    if (isPtt) {
-      command.audioCodec("libopus").format("ogg").audioBitrate("64k").audioChannels(1).audioFrequency(48000)
-        .outputOptions(["-vn", "-map", "0:a"])
-        .on("end", () => resolve(outputPath)).on("error", (err) => reject(new Error(`FFmpeg Error (PTT): ${err.message}`))).save(outputPath);
-    } else {
-      command.audioCodec("libmp3lame").format("mp3").audioBitrate("192k")
-        .outputOptions(["-vn", "-map", "0:a"])
-        .on("end", () => resolve(outputPath)).on("error", (err) => reject(new Error(`FFmpeg Error (MP3): ${err.message}`))).save(outputPath);
-    }
+    
+    ffmpeg(inputPath)
+      .noVideo()
+      .audioCodec("libmp3lame")
+      .audioBitrate("192k")
+      .audioChannels(2)
+      .audioFrequency(44100)
+      .outputOptions([
+        "-map", "0:a:0?", // Filter graph error වලක්වාලීමට primary audio stream එක පමණක් තෝරාගැනීම
+        "-id3v2_version", "3"
+      ])
+      .on("end", () => resolve(outputPath))
+      .on("error", (err) => reject(new Error(`FFmpeg Error (MP3): ${err.message}`)))
+      .save(outputPath);
   });
 }
 
@@ -288,50 +297,77 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
 
   pending.isProcessing = true;
   let rawFile = makeTempFile(".m4a");
-  let finalFile = makeTempFile(type === "ptt" ? ".opus" : ".mp3");
+  let finalFile = makeTempFile(".mp3");
   let downloadedSuccessfully = false;
   let videoId = pending.video.videoId;
 
   try {
     await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
     try {
-      const ytArgs = { format: "bestaudio[ext=m4a]/bestaudio/best", output: rawFile, ffmpegLocation: ffmpegPath, noWarnings: true, noCheckCertificates: true, noPlaylist: true, extractorArgs: "youtube:player_client=android,web", addHeader: ["referer:youtube.com"] };
+      const ytArgs = { 
+        format: "bestaudio[ext=m4a]/bestaudio/best", 
+        output: rawFile, 
+        ffmpegLocation: ffmpegPath, 
+        noWarnings: true, 
+        noCheckCertificates: true, 
+        noPlaylist: true, 
+        extractorArgs: "youtube:player_client=android,web", 
+        addHeader: ["referer:youtube.com"] 
+      };
       const cookies = cookiesStatus();
       if (cookies.exists && cookies.sizeBytes > 0) ytArgs.cookies = COOKIES_PATH;
       await ytDlp(pending.video.url, ytArgs);
       if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
       else throw new Error("YT-DLP file is invalid or empty");
-    } catch (ytErr) { console.log("YT-DLP AUDIO ERROR:", ytErr.message.substring(0, 100)); }
+    } catch (ytErr) { 
+      console.log("YT-DLP AUDIO ERROR:", ytErr.message?.substring(0, 100)); 
+    }
 
     if (!downloadedSuccessfully && videoId) {
-      try { safeUnlink(rawFile); rawFile = makeTempFile(".mp3"); await downloadFromLaguAPI(videoId, rawFile); if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; else throw new Error("Lagu MP3 file is invalid"); } catch (laguErr) { console.log("LAGU MP3 API ERROR:", laguErr.message); }
+      try { 
+        safeUnlink(rawFile); 
+        rawFile = makeTempFile(".mp3"); 
+        await downloadFromLaguAPI(videoId, rawFile); 
+        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; 
+        else throw new Error("Lagu MP3 file is invalid"); 
+      } catch (laguErr) { console.log("LAGU MP3 API ERROR:", laguErr.message); }
     }
 
     if (!downloadedSuccessfully) {
-      try { safeUnlink(rawFile); rawFile = makeTempFile(".mp3"); await downloadFromYTmp3GeAPI(pending.video.url, rawFile); if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; else throw new Error("YTMP3.GE file is invalid"); } catch (ytgeErr) { console.log("YTMP3.GE API ERROR:", ytgeErr.message); }
+      try { 
+        safeUnlink(rawFile); 
+        rawFile = makeTempFile(".mp3"); 
+        await downloadFromYTmp3GeAPI(pending.video.url, rawFile); 
+        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; 
+        else throw new Error("YTMP3.GE file is invalid"); 
+      } catch (ytgeErr) { console.log("YTMP3.GE API ERROR:", ytgeErr.message); }
     }
 
     if (!downloadedSuccessfully) {
-      try { safeUnlink(rawFile); rawFile = makeTempFile(".mp3"); await fallbackAudioAPIs(pending.video.url, rawFile); if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; else throw new Error("Fallback file is invalid"); } catch (fbErr) { console.log("OLD FALLBACK API ERROR:", fbErr.message); }
+      try { 
+        safeUnlink(rawFile); 
+        rawFile = makeTempFile(".mp3"); 
+        await fallbackAudioAPIs(pending.video.url, rawFile); 
+        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; 
+        else throw new Error("Fallback file is invalid"); 
+      } catch (fbErr) { console.log("OLD FALLBACK API ERROR:", fbErr.message); }
     }
 
     if (!downloadedSuccessfully) throw new Error("All download methods failed to provide a valid audio file.");
 
     await sock.sendMessage(from, { react: { text: "🛠", key: mek.key } });
-    await convertAudio(rawFile, finalFile, type === "ptt");
+    await convertAudio(rawFile, finalFile);
 
     const sizeMB = getFileSizeMB(finalFile);
     const cleanTitle = sanitizeFileName(pending.video.title);
 
-    await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
+    await sock.sendMessage(from, { react: { text: "⬆️️", key: mek.key } });
 
     const caption = buildFinalCaption(pending.video, typeLabel, sizeMB);
     const buffer = fs.readFileSync(finalFile);
 
     if (type === "doc") {
       await sock.sendMessage(from, { document: buffer, mimetype: "audio/mpeg", fileName: `${cleanTitle}.mp3`, caption: caption, contextInfo: channelContextInfo() }, { quoted: mek });
-    } else if (type === "ptt") {
-      await sock.sendMessage(from, { audio: buffer, mimetype: "audio/ogg; codecs=opus", ptt: true, contextInfo: channelContextInfo() }, { quoted: mek });
     } else {
       await sock.sendMessage(from, { audio: buffer, mimetype: "audio/mpeg", contextInfo: channelContextInfo() }, { quoted: mek });
     }
@@ -344,7 +380,8 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
     const cleanErr = String(errText).replace(/\n/g, " ").trim();
     await sendErrorMsg(reply, `Audio Download Failed: ${cleanErr.substring(0, 100)}`);
   } finally {
-    safeUnlink(rawFile); safeUnlink(finalFile);
+    safeUnlink(rawFile); 
+    safeUnlink(finalFile);
     if (pendingAudioType[key]) pendingAudioType[key].isProcessing = false;
     delete pendingAudioType[key];
   }
@@ -352,15 +389,13 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
 
 /* ================= COMMAND: .song ================= */
 cmd({ 
-  
   pattern: "song",
   alias: ["ytmp3", "yta", "mp3", "play"],
   react: "🎵",
   desc: "Download YouTube audio",
   category: "download",
-  filename: __filename },
-    
-  async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
+  filename: __filename 
+}, async (sock, mek, m, { from, q, sender, reply, sessionId }) => {
   try {
     if (!q) return await sendErrorMsg(reply, "Please provide a YouTube link or song name.");
     const video = await getYoutube(q);
@@ -391,7 +426,7 @@ replyHandlers.push({
     if (type) return true;
 
     const num = parseInt(String(text || "").trim(), 10);
-    const isNum = !isNaN(num) && num >= 1 && num <= 3;
+    const isNum = !isNaN(num) && num >= 1 && num <= 2;
     const quotedId = getQuotedId(m, mek);
     const isQuoted = quotedId && quotedId === state.expectedMsgId;
 
@@ -403,7 +438,7 @@ replyHandlers.push({
     if (!state || state.isProcessing) return;
 
     let type = extractTypeFromTexts(extractTexts(body, mek, m));
-    if (!type && /^[1-3]$/.test(String(body || "").trim())) {
+    if (!type && /^[1-2]$/.test(String(body || "").trim())) {
       type = getTypeFromChoice(body);
     }
     if (type) return handleAudioDownload(sock, mek, from, sender, reply, type);
