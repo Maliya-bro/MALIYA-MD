@@ -175,6 +175,7 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
+/* ================= 🔘 SINGLE ROW BUTTONS ================= */
 async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
@@ -183,6 +184,7 @@ async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
     try {
       const { ButtonV2 } = await import("@vanzxy/baileys");
 
+      // ButtonV2 හරහා එකම පේළියේ (Horizontal Row) පිහිටන පරිදි Quick Action Buttons දෙක එකතු කිරීම
       const btn = new ButtonV2(sock)
         .setBody(buildAudioDetails(video) + `\n\n👇 *Tap a button below to download:*`)
         .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
@@ -197,6 +199,7 @@ async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
     }
   }
 
+  // Fallback Numbered Menu
   return sock.sendMessage(
     from,
     {
@@ -265,7 +268,6 @@ async function fallbackAudioAPIs(url, outPath) {
   throw new Error("All Backup APIs Failed");
 }
 
-// Filter graph crash ගැටලුව fix කළ FFmpeg converter function එක
 async function convertAudio(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     if (!isValidMediaFile(inputPath)) return reject(new Error("Input file is corrupted or empty before conversion."));
@@ -277,7 +279,7 @@ async function convertAudio(inputPath, outputPath) {
       .audioChannels(2)
       .audioFrequency(44100)
       .outputOptions([
-        "-map", "0:a:0?", // Filter graph error වලක්වාලීමට primary audio stream එක පමණක් තෝරාගැනීම
+        "-map", "0:a:0?",
         "-id3v2_version", "3"
       ])
       .on("end", () => resolve(outputPath))
@@ -361,7 +363,7 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
     const sizeMB = getFileSizeMB(finalFile);
     const cleanTitle = sanitizeFileName(pending.video.title);
 
-    await sock.sendMessage(from, { react: { text: "⬆️️", key: mek.key } });
+    await sock.sendMessage(from, { react: { text: "⬆", key: mek.key } });
 
     const caption = buildFinalCaption(pending.video, typeLabel, sizeMB);
     const buffer = fs.readFileSync(finalFile);
@@ -451,3 +453,5 @@ setInterval(() => {
     if (now - pendingAudioType[key].createdAt > 2 * 60 * 1000) delete pendingAudioType[key];
   }
 }, 30000);
+
+module.exports = {};
