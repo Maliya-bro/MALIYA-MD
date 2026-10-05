@@ -1,4 +1,3 @@
-
 const { cmd, replyHandlers } = require("../command");
 const ytDlp = require("youtube-dl-exec");
 const yts = require("yt-search");
@@ -222,6 +221,37 @@ async function sendErrorMsg(reply, text) {
   await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`); 
 }
 
+/* ================= YTMP3.GE v2.0 API ================= */
+async function downloadFromYTmp3GeAPI(url, outPath) {
+  const requestData = new URLSearchParams({
+    youtube_url: url,
+    quality: '320'
+  }).toString();
+
+  const response = await axios.post("https://ytmp3.ge/api/convert", requestData, { 
+    headers: { "Content-Type": "application/x-www-form-urlencoded" }, 
+    timeout: 300000 
+  });
+
+  if (response.data && response.data.success && response.data.downloadUrl) {
+    const writer = fs.createWriteStream(outPath);
+    const fileRes = await axios({ 
+      url: response.data.downloadUrl, 
+      method: "GET", 
+      responseType: "stream", 
+      timeout: 120000 
+    });
+    fileRes.data.pipe(writer);
+    return new Promise((resolve, reject) => { 
+      writer.on("finish", () => resolve(true)); 
+      writer.on("error", reject); 
+    });
+  } else {
+    throw new Error(response.data?.error || "YTMP3.GE API returned an invalid response.");
+  }
+}
+
+/* ================= OTHER APIs ================= */
 async function downloadFromLaguAPI(videoId, outPath) {
   const apiUrl = `https://api.download-lagu-mp3.com/@api/json/mp3/${videoId}`;
   const response = await axios.get(apiUrl, { timeout: 20000 });
@@ -236,17 +266,6 @@ async function downloadFromLaguAPI(videoId, outPath) {
     }
   }
   throw new Error("Lagu API returned invalid JSON structure.");
-}
-
-async function downloadFromYTmp3GeAPI(url, outPath) {
-  const requestData = `youtube_url=${encodeURIComponent(url)}&quality=320`;
-  const response = await axios.post("https://ytmp3.ge/api/convert", requestData, { headers: { "Content-Type": "application/x-www-form-urlencoded" }, timeout: 300000 });
-  if (response.data && response.data.success && response.data.downloadUrl) {
-    const writer = fs.createWriteStream(outPath);
-    const fileRes = await axios({ url: response.data.downloadUrl, method: "GET", responseType: "stream", timeout: 120000 });
-    fileRes.data.pipe(writer);
-    return new Promise((resolve, reject) => { writer.on("finish", () => resolve(true)); writer.on("error", reject); });
-  } else throw new Error(response.data?.error || "YTMP3.GE API returned an invalid response.");
 }
 
 async function fallbackAudioAPIs(url, outPath) {
@@ -266,19 +285,19 @@ async function fallbackAudioAPIs(url, outPath) {
   throw new Error("All Backup APIs Failed");
 }
 
-// Filter graph crash ගැටලුව fix කළ FFmpeg converter function එක
+/* ================= FFMPEG CONVERT ================= */
 async function convertAudio(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     if (!isValidMediaFile(inputPath)) return reject(new Error("Input file is corrupted or empty before conversion."));
     
     ffmpeg(inputPath)
       .noVideo()
+      .toFormat('mp3')
       .audioCodec("libmp3lame")
       .audioBitrate("192k")
       .audioChannels(2)
       .audioFrequency(44100)
       .outputOptions([
-        "-map", "0:a:0?", // Filter graph error වලක්වාලීමට primary audio stream එක පමණක් තෝරාගැනීම
         "-id3v2_version", "3"
       ])
       .on("end", () => resolve(outputPath))
@@ -287,6 +306,7 @@ async function convertAudio(inputPath, outputPath) {
   });
 }
 
+/* ================= MAIN HANDLER ================= */
 async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
   const key = keyFor(sender, from);
   const pending = pendingAudioType[key];
@@ -303,7 +323,9 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
   let videoId = pending.video.videoId;
 
   try {
-    await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
+    await sock.sendMessage(from, { react: { text: "⬇", key: mek.key } });
+    
+    // Method 1: youtube-dl-exec (Native) with Timeout & Options
     try {
       const ytArgs = { 
         format: "bestaudio[ext=m4a]/bestaudio/best", 
@@ -315,25 +337,23 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
         extractorArgs: "youtube:player_client=android,web", 
         addHeader: ["referer:youtube.com"] 
       };
+      
       const cookies = cookiesStatus();
       if (cookies.exists && cookies.sizeBytes > 0) ytArgs.cookies = COOKIES_PATH;
-      await ytDlp(pending.video.url, ytArgs);
+      
+      // Added Timeout and killSignal based on youtube-dl-exec Docs to prevent hanging
+      await ytDlp(pending.video.url, ytArgs, {
+        timeout: 180000, // 3 Minutes maximum time for download
+        killSignal: 'SIGKILL'
+      });
+      
       if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
       else throw new Error("YT-DLP file is invalid or empty");
     } catch (ytErr) { 
       console.log("YT-DLP AUDIO ERROR:", ytErr.message?.substring(0, 100)); 
     }
 
-    if (!downloadedSuccessfully && videoId) {
-      try { 
-        safeUnlink(rawFile); 
-        rawFile = makeTempFile(".mp3"); 
-        await downloadFromLaguAPI(videoId, rawFile); 
-        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; 
-        else throw new Error("Lagu MP3 file is invalid"); 
-      } catch (laguErr) { console.log("LAGU MP3 API ERROR:", laguErr.message); }
-    }
-
+    // Method 2: YTMP3.GE v2.0 API (Priority Fallback)
     if (!downloadedSuccessfully) {
       try { 
         safeUnlink(rawFile); 
@@ -344,6 +364,18 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
       } catch (ytgeErr) { console.log("YTMP3.GE API ERROR:", ytgeErr.message); }
     }
 
+    // Method 3: Lagu API
+    if (!downloadedSuccessfully && videoId) {
+      try { 
+        safeUnlink(rawFile); 
+        rawFile = makeTempFile(".mp3"); 
+        await downloadFromLaguAPI(videoId, rawFile); 
+        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; 
+        else throw new Error("Lagu MP3 file is invalid"); 
+      } catch (laguErr) { console.log("LAGU MP3 API ERROR:", laguErr.message); }
+    }
+
+    // Method 4: Other Fallback APIs
     if (!downloadedSuccessfully) {
       try { 
         safeUnlink(rawFile); 
@@ -362,7 +394,7 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
     const sizeMB = getFileSizeMB(finalFile);
     const cleanTitle = sanitizeFileName(pending.video.title);
 
-    await sock.sendMessage(from, { react: { text: "⬆️️", key: mek.key } });
+    await sock.sendMessage(from, { react: { text: "⬆", key: mek.key } });
 
     const caption = buildFinalCaption(pending.video, typeLabel, sizeMB);
     const buffer = fs.readFileSync(finalFile);
