@@ -565,6 +565,47 @@ cmd(
   }
 );
 
+/* ================= COMMAND: .silentauto ================= */
+cmd(
+  {
+    pattern: "silentauto",
+    alias: ["silent"],
+    desc: "Turn on/off Silent Automation (Forward View Once & Edits to Owner)",
+    type: "owner",
+    react: "🤫",
+    filename: __filename,
+  },
+  async (conn, mek, m, { args, sessionId, reply, isOwner, sender }) => {
+    let hasOwnerPerms = false;
+    if (isOwner) {
+      hasOwnerPerms = true;
+    } else if (isRealOwner(sender)) {
+      hasOwnerPerms = true;
+    }
+
+    if (!hasOwnerPerms) {
+      return reply("❌ *`[ THIS COMMAND IS OWNER ONLY. ]`*");
+    }
+
+    const sub = (args[0] || "").toLowerCase().trim();
+    const id = sessionId || "default";
+
+    if (sub === "on") {
+      await setSetting(id, "silent_automation", true);
+      return reply("🤫 *Silent Automation: ACTIVATED!* ✅\n\n> දැන් ගෲප් වල හෝ Private Chat වල එන View Once මැසේජ් සහ Edit කරන මැසේජ් කෙලින්ම ඔයාගේ Inbox එකට එනවා.");
+    }
+
+    if (sub === "off") {
+      await setSetting(id, "silent_automation", false);
+      return reply("🔕 *Silent Automation: DEACTIVATED!* ❌\n\n> View Once සහ Edited මැසේජ් Owner ට එවීම නතර කර ඇත.");
+    }
+
+    const settings = await readSettings(id);
+    const status = settings.silent_automation ? "ON 🤫" : "OFF 🔕";
+    return reply(`🤫 *Silent Automation Settings*\n\nStatus: ${status}\n\nUse:\n*.silent on* - සක්‍රීය කරන්න\n*.silent off* - අක්‍රීය කරන්න`);
+  }
+);
+
 /* ================= EXACT MENU STYLE REPLY HANDLER ================= */
 const settingsReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
