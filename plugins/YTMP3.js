@@ -184,7 +184,7 @@ async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
       const { ButtonV2 } = await import("@vanzxy/baileys");
 
       const btn = new ButtonV2(sock)
-        .setBody(buildAudioDetails(video) + `\n\n👇 *Tap a button below to download:*`)
+        .setBody(buildAudioDetails(video) + `\n\n👇 *Tap a button below to download:.*`)
         .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
         .setThumbnail(video.thumbnail)
         .addButton("🎵 Audio", "audio")
