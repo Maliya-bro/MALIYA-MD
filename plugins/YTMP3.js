@@ -291,15 +291,11 @@ async function convertAudio(inputPath, outputPath) {
     if (!isValidMediaFile(inputPath)) return reject(new Error("Input file is corrupted or empty before conversion."));
     
     ffmpeg(inputPath)
-      .noVideo()
-      .toFormat('mp3')
+      .noVideo() // Ensures no video streams interfere
+      .toFormat('mp3') 
       .audioCodec("libmp3lame")
       .audioBitrate("192k")
-      .audioChannels(2)
-      .audioFrequency(44100)
-      .outputOptions([
-        "-id3v2_version", "3"
-      ])
+      // REMOVED: .audioChannels(2) සහ .audioFrequency(44100) -> මේවා තමයි Filter Graph crash එකට හේතුව!
       .on("end", () => resolve(outputPath))
       .on("error", (err) => reject(new Error(`FFmpeg Error (MP3): ${err.message}`)))
       .save(outputPath);
@@ -325,7 +321,7 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
   try {
     await sock.sendMessage(from, { react: { text: "⬇", key: mek.key } });
     
-    // Method 1: youtube-dl-exec (Native) with Timeout & Options
+    // Method 1: youtube-dl-exec (Native)
     try {
       const ytArgs = { 
         format: "bestaudio[ext=m4a]/bestaudio/best", 
@@ -341,9 +337,8 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
       const cookies = cookiesStatus();
       if (cookies.exists && cookies.sizeBytes > 0) ytArgs.cookies = COOKIES_PATH;
       
-      // Added Timeout and killSignal based on youtube-dl-exec Docs to prevent hanging
       await ytDlp(pending.video.url, ytArgs, {
-        timeout: 180000, // 3 Minutes maximum time for download
+        timeout: 180000,
         killSignal: 'SIGKILL'
       });
       
