@@ -8,8 +8,9 @@ const pendingMenu = Object.create(null);
 const lastProcessedMsg = {};
 const LOOP_COOLDOWN = 2500;
 
-/* ============ CONFIG ============ */
-const BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
+/* ============ PERMANENT BRANDING (DO NOT CHANGE) ============ */
+const BRAND_BASE = "MALIYA-MD";
+const DEFAULT_BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
@@ -35,8 +36,7 @@ const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
   ? `+${OWNER_NUMBER_RAW}`
   : "Not Set";
 
-const OWNER_NAME =
-  String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
+const OWNER_NAME = "MALINDU NADITH";
 
 const DEFAULT_HEADER_IMAGE = "https://github.com/Maliya-bro/web-pair/blob/main/ChatGPT%20Image%20Sep%2027,%202026,%2007_25_52%20PM.png?raw=true";
 
@@ -192,19 +192,19 @@ async function getFittedImageBuffer(url) {
   }
 }
 
-function menuHeader(userName = "User", latency = "0ms") {
+function menuHeader(userName = "User", latency = "0ms", botDisplayName = DEFAULT_BOT_NAME) {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
   return `┏━━━━━━◥◣◆◢◤━━━━━━┓
-★彡 *${BOT_NAME}* 彡★
+★彡 *${botDisplayName}* 彡★
 ┗━━━━━━◢◤◆◥◣━━━━━━┛
 
 ✨ 👋 *ʜɪ, ${styledUser}!*
 
 ╔═════. .★.══════════╗
-🤖 *\`ʙᴏᴛ\` :* ${BOT_NAME}
+🤖 *\`ʙᴏᴛ\` :* ${botDisplayName}
 👤 *\`ᴜsᴇʀ\` :* ${styledUser}
-👑 *\`ᴏᴡɴᴇʀ\` :* MALINDU NADITH
+👑 *\`ᴏᴡɴᴇʀ\` :* ${OWNER_NAME}
 🕒 *\`ᴛɪᴍᴇ\` :* ${time}
 📅 *\`ᴅᴀᴛᴇ\` :* ${date}
 🎯 *\`ᴘʀᴇғɪx\` :* [ ${PREFIX} ]
@@ -217,16 +217,16 @@ function menuHeader(userName = "User", latency = "0ms") {
 🌸 *Video* https://youtube.com/shorts/sxWbUypZG64?si=ZNPWj8kLWEjRM1tf`;
 }
 
-function buildStyledMainMenu(state, userName, latency = "0ms") {
+function buildStyledMainMenu(state, userName, latency = "0ms", botDisplayName = DEFAULT_BOT_NAME) {
   const { categories } = state;
   const styledUser = toSmallCaps(userName);
   const { time, date } = nowLK();
-  let msg = `┏━━━━━━◥◣◆◢◤━━━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━━━━◢◤◆◥◣━━━━━━┛\n\n`;
+  let msg = `┏━━━━━━◥◣◆◢◤━━━━━━┓\n★彡 *${botDisplayName}* 彡★\n┗━━━━━━◢◤◆◥◣━━━━━━┛\n\n`;
   msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
   msg += `╔═════. .★.══════════╗\n`;
-  msg += `🤖 *\`ʙᴏᴛ\` :* ${BOT_NAME}\n`;
+  msg += `🤖 *\`ʙᴏᴛ\` :* ${botDisplayName}\n`;
   msg += `👤 *\`ᴜsᴇʀ\` :* ${styledUser}\n`;
-  msg += `👑 *\`ᴏᴡɴᴇʀ\` :* MALINDU NADITH\n`;
+  msg += `👑 *\`ᴏᴡɴᴇʀ\` :* ${OWNER_NAME}\n`;
   msg += `🕒 *\`ᴛɪᴍᴇ\` :* ${time}\n`;
   msg += `📅 *\`ᴅᴀᴛᴇ\` :* ${date}\n`;
   msg += `🎯 *\`ᴘʀᴇғɪx\` :* [ ${PREFIX} ]\n`;
@@ -239,11 +239,11 @@ function buildStyledMainMenu(state, userName, latency = "0ms") {
     const styledCat = toSmallCaps(cat);
     msg += `*[ ${numStr} ]*  ${emo}  *${styledCat}*  _(${state.map[cat].length})_\n`;
   });
-  msg += `\n━─ ⋆ ⋅ 𖤐 ⋅ ⋆ ─━┈➤\n> 💬 *Swipe & Reply this message with a number...*`;
+  msg += `\n━─ ⋆ ⋅ 𖤐 ⋅ ⋆ ─━┈➤\n> 💬 *Swipe & Reply this message with a number...*\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
   return msg;
 }
 
-function commandListCaption(cat, list, userName = "User") {
+function commandListCaption(cat, list, userName = "User", botDisplayName = DEFAULT_BOT_NAME) {
   const emo = getCategoryEmoji(cat);
   const styledCat = toSmallCaps(cat);
   const styledUser = toSmallCaps(userName);
@@ -258,7 +258,7 @@ function commandListCaption(cat, list, userName = "User") {
     txt += `  ╰ 📌 *\`ᴅᴇsᴄ\` :* _${c.desc || "No description"}_\n\n`;
   });
 
-  txt += `────━──✦❘•❘✦──━───\n> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
+  txt += `────━──✦❘•❘✦──━───\n> 👑 ${botDisplayName} | ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
   return txt;
 }
 
@@ -361,7 +361,7 @@ async function safeSendImageOrText(sock, from, imgUrl, caption, mek) {
   }
 }
 
-async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId) {
+async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId, botDisplayName) {
   let headerImg = DEFAULT_HEADER_IMAGE;
   if (sessionId) {
     try {
@@ -373,7 +373,7 @@ async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId)
     sock,
     from,
     headerImg,
-    commandListCaption(cat, list, userName),
+    commandListCaption(cat, list, userName, botDisplayName),
     mek
   );
 }
@@ -402,24 +402,30 @@ cmd(
       const userName = getUserName(pushname, m, mek, sender);
       const k = keyFor(sender, from);
 
+      // 🔥 Settings වලින් User ගේ Custom Bot Name එක කියවමු
+      let botDisplayName = DEFAULT_BOT_NAME;
+      let btnsOn = true;
+      try {
+        const settings = await readSettings(sessionId);
+        if (settings?.bot_name) {
+          botDisplayName = String(settings.bot_name).trim();
+        }
+        if (settings && typeof settings.btns_enabled !== "undefined") {
+          btnsOn = !!settings.btns_enabled;
+        }
+      } catch (e) {}
+
       const state = {
         expectedMsgId: null,
         map,
         categories,
         userName,
         sessionId,
+        botDisplayName,
         timestamp: Date.now(),
         lastActionSig: "",
         lastActionAt: 0,
       };
-
-      let btnsOn = true;
-      try {
-        const settings = await readSettings(sessionId);
-        if (settings && typeof settings.btns_enabled !== "undefined") {
-          btnsOn = !!settings.btns_enabled;
-        }
-      } catch (e) {}
 
       let headerImg = DEFAULT_HEADER_IMAGE;
       if (sessionId) {
@@ -442,8 +448,8 @@ cmd(
           const fittedThumb = await getFittedImageBuffer(headerImg);
 
           const btn = new ButtonV2(sock)
-            .setBody(menuHeader(userName, latencyStr))
-            .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
+            .setBody(menuHeader(userName, latencyStr, botDisplayName))
+            .setFooter(`© 2026 ${BRAND_BASE} SYSTEM`)
             .setThumbnail(fittedThumb);
 
           btn.addRawButton({
@@ -482,7 +488,7 @@ cmd(
         sock,
         from,
         headerImg,
-        buildStyledMainMenu(state, userName, latencyStr),
+        buildStyledMainMenu(state, userName, latencyStr, botDisplayName),
         mek
       );
 
@@ -514,8 +520,11 @@ cmd(
       const k = keyFor(sender, from);
 
       let headerImg = DEFAULT_HEADER_IMAGE;
+      let botDisplayName = DEFAULT_BOT_NAME;
       if (sessionId) {
         try {
+          const settings = await readSettings(sessionId);
+          if (settings?.bot_name) botDisplayName = String(settings.bot_name).trim();
           const custom = await getCustomImage(sessionId, "menu_header");
           if (custom && custom.data) headerImg = custom.data;
         } catch (e) {}
@@ -527,6 +536,7 @@ cmd(
         categories,
         userName,
         sessionId,
+        botDisplayName,
         timestamp: Date.now(),
       };
 
@@ -534,7 +544,7 @@ cmd(
         sock,
         from,
         headerImg,
-        buildStyledMainMenu(state, userName, latencyStr),
+        buildStyledMainMenu(state, userName, latencyStr, botDisplayName),
         mek
       );
 
@@ -563,11 +573,19 @@ cmd(
       if (!list.length) return reply("❌ No commands found in this category.");
 
       const userName = getUserName(pushname, m, mek, sender);
+      let botDisplayName = DEFAULT_BOT_NAME;
+      if (sessionId) {
+        try {
+          const settings = await readSettings(sessionId);
+          if (settings?.bot_name) botDisplayName = String(settings.bot_name).trim();
+        } catch (e) {}
+      }
+
       await sock.sendMessage(from, {
         react: { text: getCategoryEmoji(cat), key: mek.key },
       });
 
-      await sendCommandsList(sock, from, mek, cat, list, userName, sessionId);
+      await sendCommandsList(sock, from, mek, cat, list, userName, sessionId, botDisplayName);
     } catch (e) {
       console.log("MENU VIEW ERROR:", e);
     }
@@ -590,7 +608,7 @@ const menuReplyHandler = {
     const action = resolveMenuAction(texts, state);
     if (action) return true;
 
-    // Number එකක් ගහනවා නම් අනිවාර්යයෙන්ම quote කරලා තියෙන්නම ඕනෙ
+    // Number එකක් ගහනවා නම් quote කරලා තිබීම අනිවාර්යයි
     const num = parseInt(String(text || "").trim(), 10);
     const isNum = !isNaN(num) && num > 0 && num <= state.categories.length;
 
@@ -616,7 +634,7 @@ const menuReplyHandler = {
 
       // Action එකක් නැතිව number එකක් විදිහට එනවා නම් quote කරලා තියෙන එක අනිවාර්යයි
       if (!action) {
-        if (!isQuoted) return; // Quote කරලා නැත්නම් run වෙන්නේ නෑ
+        if (!isQuoted) return;
 
         const num = parseInt(inputStr, 10);
         if (!isNaN(num) && num > 0 && num <= state.categories.length) {
@@ -628,6 +646,7 @@ const menuReplyHandler = {
       if (isDuplicateAction(state, action)) return;
 
       const userName = state.userName || getUserName(pushname, m, mek, sender);
+      const botDisplayName = state.botDisplayName || DEFAULT_BOT_NAME;
 
       if (action.type === "all") {
         let headerImg = DEFAULT_HEADER_IMAGE;
@@ -641,7 +660,7 @@ const menuReplyHandler = {
           sock,
           from,
           headerImg,
-          buildStyledMainMenu(state, userName, "0ms"),
+          buildStyledMainMenu(state, userName, "0ms", botDisplayName),
           mek
         );
         if (sent?.key?.id) state.expectedMsgId = sent.key.id;
@@ -660,7 +679,7 @@ const menuReplyHandler = {
         react: { text: getCategoryEmoji(cat), key: mek.key },
       });
 
-      return await sendCommandsList(sock, from, mek, cat, list, userName, state.sessionId);
+      return await sendCommandsList(sock, from, mek, cat, list, userName, state.sessionId, botDisplayName);
     } catch (e) {
       console.log("MENU ACTION ERROR:", e?.message || e);
     }
