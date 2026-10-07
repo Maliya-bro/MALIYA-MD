@@ -17,7 +17,7 @@ const LOOP_COOLDOWN = 2500;
 
 // 🔥 Menu State එක User සහ Chat එක අනුව වෙන් කිරීම
 function keyFor(sender, from) {
-  return `${sender \vert{}\vert{} "unknown"}_${from || "unknown"}`;
+  return `${sender || "unknown"}_${from || "unknown"}`;
 }
 
 // 🔥 Multi-Device Owner Check
@@ -322,7 +322,7 @@ function formatSettingReply(key, updated, action) {
   } else if (key === "btns_enabled") {
     return `✅ *Menu UI System:* ${btnsModeText(Boolean(updated.btns_enabled))}`;
   }
-  return `✅ *Set ${key.toUpperCase()} to${action.toUpperCase()}*`;
+  return `✅ *Set ${key.toUpperCase()} to ${action.toUpperCase()}*`;
 }
 
 function getSections() {
@@ -486,7 +486,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     numberedCaption += `*${sec.title}*\n`;
     sec.rows.forEach(r => {
       const num = String(overallIdx).padStart(2, '0');
-      numberedCaption += `│ *[ ${num} ]*${r.title}\n`;
+      numberedCaption += `│ *[ ${num} ]* ${r.title}\n`;
       overallIdx++;
     });
     numberedCaption += `\n`;
@@ -643,4 +643,56 @@ const settingsReplyHandler = {
     if (!actionCmd) return;
 
     const now = Date.now();
-    const sig = `${actionCmd.action}_${
+    const sig = `${actionCmd.action}_${actionCmd.value}`;
+    const lastMsg = lastProcessedMsg[k];
+    if (lastMsg && lastMsg.text === sig && now - lastMsg.time < LOOP_COOLDOWN) {
+      return;
+    }
+    lastProcessedMsg[k] = { text: sig, time: now };
+
+    try {
+      const result = await applySettingAction(sid, actionCmd.action, actionCmd.value);
+      state.createdAt = Date.now();
+      await conn.sendMessage(from, { react: { text: "✅", key: mek.key } });
+      return reply(result);
+    } catch (e) {
+      console.log("SETTINGS EXECUTE ERROR:", e);
+      return reply("❌ *Error occurred while applying setting.*");
+    }
+  },
+};
+
+// 🔵 Blue Ticks Middleware: Marks incoming messages as read when `seen_all_msg` is enabled
+async function handleSeenAllMessages(conn, mek, sessionId) {
+  try {
+    if (!conn || !mek?.key || mek.key.fromMe) return;
+
+    const s = await readSettings(sessionId);
+    if (s?.seen_all_msg) {
+      await conn.readMessages([mek.key]);
+    }
+  } catch (err) {}
+}
+
+if (Array.isArray(replyHandlers)) {
+  replyHandlers.push(settingsReplyHandler);
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const key of Object.keys(pendingSettingsMenu)) {
+    if (now - pendingSettingsMenu[key].createdAt > 3 * 60 * 1000) {
+      delete pendingSettingsMenu[key];
+    }
+  }
+  for (const key of Object.keys(lastProcessedMsg)) {
+    if (now - lastProcessedMsg[key].time > LOOP_COOLDOWN) {
+      delete lastProcessedMsg[key];
+    }
+  }
+}, 30000);
+
+module.exports = {
+  sendSettingsHome,
+  handleSeenAllMessages
+};
