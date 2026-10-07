@@ -5,6 +5,8 @@ const sharp = require("sharp");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const BASE_URL = "https://govdoc.lk";
+const BRAND_BASE = "MALIYA-MD";
+const DEFAULT_BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 const DEFAULT_IMAGE = "https://github.com/Maliya-bro/web-pair/blob/main/ChatGPT%20Image%20Sep%2030,%202026,%2004_22_09%20PM.png?raw=true";
@@ -53,10 +55,7 @@ const ALLOWED_YEARS = [
 ].map(y => ({ slug: y, name: y }));
 
 function keyFor(sender, from) {
-  if (from) {
-    return from;
-  }
-  return "";
+  return from ? String(from) : "";
 }
 
 function clearUserSession(k) {
@@ -91,22 +90,16 @@ async function getFittedImageBuffer(url) {
 }
 
 function getQuotedId(m, mek) {
-  if (m && m.quoted && m.quoted.id) {
-    return m.quoted.id;
-  } else if (mek && mek.message && mek.message.extendedTextMessage && mek.message.extendedTextMessage.contextInfo && mek.message.extendedTextMessage.contextInfo.stanzaId) {
-    return mek.message.extendedTextMessage.contextInfo.stanzaId;
-  } else if (m && m.message && m.message.extendedTextMessage && m.message.extendedTextMessage.contextInfo && m.message.extendedTextMessage.contextInfo.stanzaId) {
-    return m.message.extendedTextMessage.contextInfo.stanzaId;
-  } else if (m && m.message && m.message.imageMessage && m.message.imageMessage.contextInfo && m.message.imageMessage.contextInfo.stanzaId) {
-    return m.message.imageMessage.contextInfo.stanzaId;
-  } else if (mek && mek.message && mek.message.imageMessage && mek.message.imageMessage.contextInfo && mek.message.imageMessage.contextInfo.stanzaId) {
-    return mek.message.imageMessage.contextInfo.stanzaId;
-  } else if (m && m.message && m.message.interactiveResponseMessage && m.message.interactiveResponseMessage.contextInfo && m.message.interactiveResponseMessage.contextInfo.stanzaId) {
-    return m.message.interactiveResponseMessage.contextInfo.stanzaId;
-  } else if (mek && mek.message && mek.message.interactiveResponseMessage && mek.message.interactiveResponseMessage.contextInfo && mek.message.interactiveResponseMessage.contextInfo.stanzaId) {
-    return mek.message.interactiveResponseMessage.contextInfo.stanzaId;
-  }
-  return null;
+  return (
+    m?.quoted?.id ||
+    mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.imageMessage?.contextInfo?.stanzaId ||
+    mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+    m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    null
+  );
 }
 
 function extractTexts(body, mek, m) {
@@ -158,10 +151,7 @@ async function scrapePapersFromUrl(targetUrl) {
     const papers = [];
 
     $("section.section .categorycard a.custom-card").each((_, el) => {
-      let title = $(el).find("h5.cate-title").text().trim();
-      if (!title) {
-        title = $(el).text().trim();
-      }
+      let title = $(el).find("h5.cate-title").text().trim() || $(el).text().trim();
       let href = $(el).attr("href");
       if (href && !href.startsWith("http")) href = BASE_URL + href;
       if (title && href) papers.push({ name: title, url: href });
@@ -179,10 +169,7 @@ async function scrapeMediumsFromPaperPage(paperUrl) {
     const mediums = [];
 
     $(".product-info .btn-row a").each((_, el) => {
-      let mediumName = $(el).find("button.btn").text().trim();
-      if (!mediumName) {
-        mediumName = $(el).text().trim();
-      }
+      let mediumName = $(el).find("button.btn").text().trim() || $(el).text().trim();
       let link = $(el).attr("href");
       if (link && !link.startsWith("http")) link = BASE_URL + link;
 
@@ -224,13 +211,9 @@ cmd({
     const k = keyFor(sender, from);
     clearUserSession(k);
 
-    let btnsOn = true;
-    try {
-      const settings = await readSettings(sessionId);
-      if (settings && typeof settings.btns_enabled !== "undefined") {
-        btnsOn = !!settings.btns_enabled;
-      }
-    } catch (e) {}
+    const settings = await readSettings(sessionId);
+    const btnsOn = !!settings?.btns_enabled;
+    const botDisplayName = settings?.bot_name?.trim() || DEFAULT_BOT_NAME;
 
     let headerImg = DEFAULT_IMAGE;
     if (sessionId) {
@@ -240,7 +223,7 @@ cmd({
       } catch (e) {}
     }
 
-    const bodyText = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *EDUCATION HUB* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n👋 *Welcome to Sri Lanka Educational Portal!*\n\n👇 *Select an option below to start:*`;
+    const bodyText = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *${botDisplayName.toUpperCase()} EDU HUB* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n👋 *Welcome to Sri Lanka Educational Portal!*\n\n👇 *Select an option below to start:*`;
 
     if (btnsOn) {
       try {
@@ -249,7 +232,7 @@ cmd({
 
         const btn = new ButtonV2(sock)
           .setBody(bodyText)
-          .setFooter("WaBot by MALIYA-MD Team ツ")
+          .setFooter(`WaBot by ${botDisplayName}`)
           .setThumbnail(fittedThumb);
 
         btn.addButton("📝 Term Test Papers", ".edu_cat term-test-papers");
@@ -258,12 +241,13 @@ cmd({
 
         const sentMsg = await btn.send(from, { quoted: mek });
 
-        if (sentMsg && sentMsg.key && sentMsg.key.id) {
+        if (sentMsg?.key?.id) {
           pendingEdu[k] = {
             expectedMsgId: sentMsg.key.id,
             step: "main_category",
             timestamp: Date.now(),
             isProcessing: false,
+            botDisplayName,
           };
           return;
         }
@@ -282,12 +266,13 @@ cmd({
       contextInfo: channelContextInfo(),
     }, { quoted: mek });
 
-    if (sentMsg && sentMsg.key && sentMsg.key.id) {
+    if (sentMsg?.key?.id) {
       pendingEdu[k] = {
         expectedMsgId: sentMsg.key.id,
         step: "main_category",
         timestamp: Date.now(),
         isProcessing: false,
+        botDisplayName,
       };
     }
 
@@ -296,12 +281,11 @@ cmd({
   }
 });
 
-// ── Master Logic Processor (Buttons සහ Number Replies දෙකම මෙතනින් run වේ) ──
+// ── Master Logic Processor ──
 async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
   const k = keyFor(sender, from);
   const pending = pendingEdu[k];
-  if (!pending) return;
-  if (pending.isProcessing) return;
+  if (!pending || pending.isProcessing) return;
 
   const quotedId = getQuotedId(m, mek);
   const texts = extractTexts(body, mek, m);
@@ -312,45 +296,27 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
     if (t.startsWith(".edu_")) {
       const parts = t.split(" ");
       actionCmd = parts[0].trim();
-      if (parts[1]) {
-        actionPayload = parts.slice(1).join(" ").trim();
-      }
+      if (parts[1]) actionPayload = parts.slice(1).join(" ").trim();
       break;
     }
   }
 
   let choiceNum = null;
   const rawNumber = parseInt(String(body || "").trim(), 10);
-  if (!isNaN(rawNumber)) {
-    choiceNum = rawNumber;
-  }
+  if (!isNaN(rawNumber)) choiceNum = rawNumber;
 
-  // Quoted reply validation
-  if (!actionCmd) {
-    if (!quotedId) {
-      return;
-    } else if (quotedId !== pending.expectedMsgId) {
-      return;
-    }
-  }
+  if (!actionCmd && (!quotedId || quotedId !== pending.expectedMsgId)) return;
 
   const now = Date.now();
-  let currentToken = actionPayload;
-  if (!currentToken) {
-    currentToken = choiceNum;
-  }
+  let currentToken = actionPayload || choiceNum;
   const sig = `${pending.step}_${currentToken}`;
   const lastMsg = lastProcessedMsg[k];
-  if (lastMsg && lastMsg.text === sig && (now - lastMsg.time) < LOOP_COOLDOWN) return;
+  if (lastMsg && lastMsg.text === sig && now - lastMsg.time < LOOP_COOLDOWN) return;
   lastProcessedMsg[k] = { text: sig, time: now };
 
-  let btnsOn = true;
-  try {
-    const settings = await readSettings(sessionId);
-    if (settings && typeof settings.btns_enabled !== "undefined") {
-      btnsOn = !!settings.btns_enabled;
-    }
-  } catch (e) {}
+  const settings = await readSettings(sessionId);
+  const btnsOn = !!settings?.btns_enabled;
+  const botDisplayName = pending.botDisplayName || settings?.bot_name?.trim() || DEFAULT_BOT_NAME;
 
   let headerImg = DEFAULT_IMAGE;
   if (sessionId) {
@@ -360,9 +326,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
     } catch (e) {}
   }
 
-  // ──────────────────────────────────────────────────────────
-  // STEP 1: MAIN CATEGORY CHOSEN ➔ GRADE / EXAM LIST POPUP
-  // ──────────────────────────────────────────────────────────
+  // STEP 1
   if (pending.step === "main_category") {
     let selectedCat = actionPayload;
     if (!selectedCat && choiceNum) {
@@ -414,7 +378,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
 
         const btn = new ButtonV2(sock)
           .setBody(cardText)
-          .setFooter("WaBot by MALIYA-MD Team ツ")
+          .setFooter(`WaBot by ${botDisplayName}`)
           .setThumbnail(fittedThumb);
 
         btn.addRawButton({
@@ -433,7 +397,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
         btn.addButton("⚡ Alive", ".alive");
 
         const sentMsg = await btn.send(from, { quoted: mek });
-        if (sentMsg && sentMsg.key && sentMsg.key.id) {
+        if (sentMsg?.key?.id) {
           pending.expectedMsgId = sentMsg.key.id;
           pending.step = "select_grade";
           pending.category = selectedCat;
@@ -457,7 +421,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
       contextInfo: channelContextInfo(),
     }, { quoted: mek });
 
-    if (sentMsg && sentMsg.key && sentMsg.key.id) {
+    if (sentMsg?.key?.id) {
       pending.expectedMsgId = sentMsg.key.id;
       pending.step = "select_grade";
       pending.category = selectedCat;
@@ -467,15 +431,10 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
     }
   }
 
-  // ──────────────────────────────────────────────────────────
-  // STEP 2: GRADE / EXAM SELECTED ➔ SUBJECT LIST POPUP (24 SUBJECTS)
-  // ──────────────────────────────────────────────────────────
+  // STEP 2
   else if (pending.step === "select_grade") {
     let chosenSlug = actionPayload;
-    let curList = [];
-    if (pending.currentList) {
-      curList = pending.currentList;
-    }
+    let curList = pending.currentList || [];
     if (!chosenSlug && choiceNum && choiceNum <= curList.length) {
       chosenSlug = curList[choiceNum - 1].slug;
     }
@@ -499,7 +458,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
 
         const btn = new ButtonV2(sock)
           .setBody(cardText)
-          .setFooter("WaBot by MALIYA-MD Team ツ")
+          .setFooter(`WaBot by ${botDisplayName}`)
           .setThumbnail(fittedThumb);
 
         btn.addRawButton({
@@ -518,7 +477,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
         btn.addButton("⚡ Alive", ".alive");
 
         const sentMsg = await btn.send(from, { quoted: mek });
-        if (sentMsg && sentMsg.key && sentMsg.key.id) {
+        if (sentMsg?.key?.id) {
           pending.expectedMsgId = sentMsg.key.id;
           pending.step = "select_subject";
           pending.gradeSlug = chosenSlug;
@@ -541,7 +500,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
       contextInfo: channelContextInfo(),
     }, { quoted: mek });
 
-    if (sentMsg && sentMsg.key && sentMsg.key.id) {
+    if (sentMsg?.key?.id) {
       pending.expectedMsgId = sentMsg.key.id;
       pending.step = "select_subject";
       pending.gradeSlug = chosenSlug;
@@ -550,9 +509,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
     }
   }
 
-  // ──────────────────────────────────────────────────────────
-  // STEP 3: SUBJECT SELECTED ➔ YEAR LIST POPUP OR DIRECT BOOKS
-  // ──────────────────────────────────────────────────────────
+  // STEP 3
   else if (pending.step === "select_subject") {
     let subSlug = actionPayload;
     if (!subSlug && choiceNum && choiceNum <= ALLOWED_SUBJECTS.length) {
@@ -572,7 +529,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
         return await sendErrorMsg(sock, from, mek, "No Text Books found for this subject.");
       }
 
-      return await sendPapersListMenu(sock, mek, from, books, "Text Books", pending, k, headerImg, btnsOn);
+      return await sendPapersListMenu(sock, mek, from, books, "Text Books", pending, k, headerImg, btnsOn, botDisplayName);
     }
 
     const yearRows = ALLOWED_YEARS.map((y, idx) => ({
@@ -590,7 +547,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
 
         const btn = new ButtonV2(sock)
           .setBody(cardText)
-          .setFooter("WaBot by MALIYA-MD Team ツ")
+          .setFooter(`WaBot by ${botDisplayName}`)
           .setThumbnail(fittedThumb);
 
         btn.addRawButton({
@@ -609,7 +566,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
         btn.addButton("⚡ Alive", ".alive");
 
         const sentMsg = await btn.send(from, { quoted: mek });
-        if (sentMsg && sentMsg.key && sentMsg.key.id) {
+        if (sentMsg?.key?.id) {
           pending.expectedMsgId = sentMsg.key.id;
           pending.step = "select_year";
           pending.subjectSlug = subSlug;
@@ -632,7 +589,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
       contextInfo: channelContextInfo(),
     }, { quoted: mek });
 
-    if (sentMsg && sentMsg.key && sentMsg.key.id) {
+    if (sentMsg?.key?.id) {
       pending.expectedMsgId = sentMsg.key.id;
       pending.step = "select_year";
       pending.subjectSlug = subSlug;
@@ -641,9 +598,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
     }
   }
 
-  // ──────────────────────────────────────────────────────────
-  // STEP 4: YEAR SELECTED ➔ TERM QUICK REPLY (FOR TERM PAPERS) OR PAPERS LIST (PAST PAPERS)
-  // ──────────────────────────────────────────────────────────
+  // STEP 4
   else if (pending.step === "select_year") {
     let yearSlug = actionPayload;
     if (!yearSlug && choiceNum && choiceNum <= ALLOWED_YEARS.length) {
@@ -663,7 +618,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
         return await sendErrorMsg(sock, from, mek, "No Past Papers found for this selection.");
       }
 
-      return await sendPapersListMenu(sock, mek, from, papers, "Past Papers", pending, k, headerImg, btnsOn);
+      return await sendPapersListMenu(sock, mek, from, papers, "Past Papers", pending, k, headerImg, btnsOn, botDisplayName);
     }
 
     const cardText = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *STEP 4: TERM* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n📌 *Year :* ${yearSlug}\n👇 *Select the School Term:*`;
@@ -675,7 +630,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
 
         const btn = new ButtonV2(sock)
           .setBody(cardText)
-          .setFooter("WaBot by MALIYA-MD Team ツ")
+          .setFooter(`WaBot by ${botDisplayName}`)
           .setThumbnail(fittedThumb);
 
         btn.addButton("1️⃣ 1st Term", ".edu_term 1");
@@ -683,7 +638,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
         btn.addButton("3️⃣ 3rd Term", ".edu_term 3");
 
         const sentMsg = await btn.send(from, { quoted: mek });
-        if (sentMsg && sentMsg.key && sentMsg.key.id) {
+        if (sentMsg?.key?.id) {
           pending.expectedMsgId = sentMsg.key.id;
           pending.step = "select_term";
           pending.yearSlug = yearSlug;
@@ -706,7 +661,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
       contextInfo: channelContextInfo(),
     }, { quoted: mek });
 
-    if (sentMsg && sentMsg.key && sentMsg.key.id) {
+    if (sentMsg?.key?.id) {
       pending.expectedMsgId = sentMsg.key.id;
       pending.step = "select_term";
       pending.yearSlug = yearSlug;
@@ -715,18 +670,9 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
     }
   }
 
-  // ──────────────────────────────────────────────────────────
-  // STEP 5: TERM SELECTED ➔ PAPERS LIST POPUP
-  // ──────────────────────────────────────────────────────────
+  // STEP 5
   else if (pending.step === "select_term") {
-    let termNum = actionPayload;
-    if (!termNum) {
-      if (choiceNum) {
-        termNum = String(choiceNum);
-      } else {
-        termNum = null;
-      }
-    }
+    let termNum = actionPayload || (choiceNum ? String(choiceNum) : null);
     if (!termNum || !["1", "2", "3"].includes(termNum)) return;
 
     pending.isProcessing = true;
@@ -736,28 +682,19 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
     let targetUrl = `${baseFilter}?term=${termNum}`;
 
     let papers = await scrapePapersFromUrl(targetUrl);
-    if (!papers.length) {
-      papers = await scrapePapersFromUrl(baseFilter);
-    }
+    if (!papers.length) papers = await scrapePapersFromUrl(baseFilter);
 
     if (!papers.length) {
       clearUserSession(k);
       return await sendErrorMsg(sock, from, mek, "No Term Test papers found for this selection.");
     }
 
-    return await sendPapersListMenu(sock, mek, from, papers, `Term ${termNum} Papers`, pending, k, headerImg, btnsOn);
+    return await sendPapersListMenu(sock, mek, from, papers, `Term ${termNum} Papers`, pending, k, headerImg, btnsOn, botDisplayName);
   }
 
-  // ──────────────────────────────────────────────────────────
-  // STEP 6: PAPER SELECTED ➔ MEDIUM QUICK REPLY BUTTONS
-  // ──────────────────────────────────────────────────────────
+  // STEP 6
   else if (pending.step === "select_paper") {
-    let paperIdx = null;
-    if (actionPayload) {
-      paperIdx = parseInt(actionPayload, 10);
-    } else {
-      paperIdx = choiceNum;
-    }
+    let paperIdx = actionPayload ? parseInt(actionPayload, 10) : choiceNum;
     if (!paperIdx || paperIdx < 1 || paperIdx > pending.paperList.length) return;
 
     pending.isProcessing = true;
@@ -780,7 +717,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
 
         const btn = new ButtonV2(sock)
           .setBody(cardText)
-          .setFooter("WaBot by MALIYA-MD Team ツ")
+          .setFooter(`WaBot by ${botDisplayName}`)
           .setThumbnail(fittedThumb);
 
         mediums.forEach((mObj, i) => {
@@ -788,7 +725,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
         });
 
         const sentMsg = await btn.send(from, { quoted: mek });
-        if (sentMsg && sentMsg.key && sentMsg.key.id) {
+        if (sentMsg?.key?.id) {
           pending.expectedMsgId = sentMsg.key.id;
           pending.step = "select_medium";
           pending.selectedPaper = chosenPaper;
@@ -812,7 +749,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
       contextInfo: channelContextInfo(),
     }, { quoted: mek });
 
-    if (sentMsg && sentMsg.key && sentMsg.key.id) {
+    if (sentMsg?.key?.id) {
       pending.expectedMsgId = sentMsg.key.id;
       pending.step = "select_medium";
       pending.selectedPaper = chosenPaper;
@@ -822,16 +759,9 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
     }
   }
 
-  // ──────────────────────────────────────────────────────────
-  // STEP 7: MEDIUM SELECTED ➔ DIRECT DOWNLOAD & SEND DOCUMENT/PDF
-  // ──────────────────────────────────────────────────────────
+  // STEP 7
   else if (pending.step === "select_medium") {
-    let medIdx = null;
-    if (actionPayload) {
-      medIdx = parseInt(actionPayload, 10);
-    } else {
-      medIdx = choiceNum;
-    }
+    let medIdx = actionPayload ? parseInt(actionPayload, 10) : choiceNum;
     if (!medIdx || medIdx < 1 || medIdx > pending.mediums.length) return;
 
     pending.isProcessing = true;
@@ -844,7 +774,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
   }
 }
 
-// ── 3. Registered Button Commands (No unknown command error) ──
+// ── 3. Registered Button Commands ──
 [
   "edu_cat",
   "edu_grade",
@@ -863,7 +793,7 @@ async function processEduStep(sock, mek, m, { body, sender, from, sessionId }) {
   });
 });
 
-// ── 4. Unified Reply Handler (Swipe to Reply via Number) ───────
+// ── 4. Unified Reply Handler ───────
 const eduReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
@@ -871,21 +801,11 @@ const eduReplyHandler = {
     if (!state) return false;
 
     const num = parseInt(String(text || "").trim(), 10);
-    let isNum = false;
-    if (!isNaN(num) && num > 0) {
-      isNum = true;
-    }
-
+    const isNum = !isNaN(num) && num > 0;
     const quotedId = getQuotedId(m, mek);
-    let isQuoted = false;
-    if (quotedId && quotedId === state.expectedMsgId) {
-      isQuoted = true;
-    }
+    const isQuoted = quotedId && quotedId === state.expectedMsgId;
 
-    if (isQuoted && isNum) {
-      return true;
-    }
-    return false;
+    return isQuoted && isNum;
   },
   function: async (sock, mek, m, extra) => {
     await processEduStep(sock, mek, m, extra);
@@ -893,7 +813,7 @@ const eduReplyHandler = {
 };
 
 // Helper: Send Papers List Popup Menu
-async function sendPapersListMenu(sock, mek, from, papers, titleLabel, pending, k, headerImg, btnsOn) {
+async function sendPapersListMenu(sock, mek, from, papers, titleLabel, pending, k, headerImg, btnsOn, botDisplayName) {
   const topPapers = papers.slice(0, 30);
   const cardText = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *AVAILABLE PAPERS* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n📚 *Category :* ${titleLabel}\n🍿 *Results :* ${topPapers.length}\n👇 *Select the document you need:*`;
 
@@ -910,7 +830,7 @@ async function sendPapersListMenu(sock, mek, from, papers, titleLabel, pending, 
 
       const btn = new ButtonV2(sock)
         .setBody(cardText)
-        .setFooter("WaBot by MALIYA-MD Team ツ")
+        .setFooter(`WaBot by ${botDisplayName}`)
         .setThumbnail(fittedThumb);
 
       btn.addRawButton({
@@ -929,7 +849,7 @@ async function sendPapersListMenu(sock, mek, from, papers, titleLabel, pending, 
       btn.addButton("⚡ Alive", ".alive");
 
       const sentMsg = await btn.send(from, { quoted: mek });
-      if (sentMsg && sentMsg.key && sentMsg.key.id) {
+      if (sentMsg?.key?.id) {
         pending.expectedMsgId = sentMsg.key.id;
         pending.step = "select_paper";
         pending.paperList = topPapers;
@@ -952,7 +872,7 @@ async function sendPapersListMenu(sock, mek, from, papers, titleLabel, pending, 
     contextInfo: channelContextInfo(),
   }, { quoted: mek });
 
-  if (sentMsg && sentMsg.key && sentMsg.key.id) {
+  if (sentMsg?.key?.id) {
     pending.expectedMsgId = sentMsg.key.id;
     pending.step = "select_paper";
     pending.paperList = topPapers;
@@ -966,10 +886,7 @@ async function sendPdfDocument(sock, mek, from, fileUrl, rawTitle, medium) {
   try {
     await sock.sendMessage(from, { react: { text: "📥", key: mek.key } });
 
-    let titleBase = rawTitle;
-    if (!titleBase) {
-      titleBase = "Document";
-    }
+    let titleBase = rawTitle || "Document";
     const cleanTitle = titleBase.replace(/[^\w\s.-]/gi, "").substring(0, 55).trim();
 
     let caption = `┏━━━◥◣◆◢◤━━━━┓\n★彡 *EDUCATION DOWNLOAD* 彡★\n┗━━━◢◤◆◥◣━━━━┛\n\n`;
