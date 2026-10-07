@@ -1,11 +1,11 @@
 const { cmd, replyHandlers } = require("../command");
 const axios = require("axios");
 const sharp = require("sharp");
-const config = require("../config");
 const {
   readSettings,
   setSetting,
   toggleSetting,
+  getCustomImage // 🔥 Web Image එක ගන්න මේක අනිවාර්යයි
 } = require("../lib/botSettings");
 
 const SETTINGS_IMAGE =
@@ -15,35 +15,20 @@ const pendingSettingsMenu = Object.create(null);
 const lastProcessedMsg = {};
 const LOOP_COOLDOWN = 2500;
 
+// 🔥 Menu State එක User සහ Chat එක අනුව වෙන් කිරීම
 function keyFor(sender, from) {
-  if (from) {
-    return from;
-  }
-  return "";
+  return `${sender \vert{}\vert{} "unknown"}_${from || "unknown"}`;
 }
 
-function isRealOwner(sender) {
-  let owner = "";
-  if (config.BOT_OWNER) {
-    owner = String(config.BOT_OWNER).replace(/\D/g, "");
-  } else if (config.OWNER_NUMBER) {
-    owner = String(config.OWNER_NUMBER).replace(/\D/g, "");
-  } else if (config.SUDO) {
-    owner = String(config.SUDO).replace(/\D/g, "");
-  }
-
-  let user = "";
-  if (sender) {
-    user = String(sender).split("@")[0].replace(/\D/g, "");
-    if (user.startsWith("0")) {
-      user = "94" + user.slice(1);
-    }
-  }
-
-  if (owner) {
-    if (user === owner) {
-      return true;
-    }
+// 🔥 Multi-Device Owner Check
+function checkOwner(conn, sender, isOwner) {
+  if (isOwner) return true; 
+  
+  let botNumber = conn?.user?.id?.split(':')[0]?.split('@')[0];
+  let senderNumber = sender?.split('@')[0];
+  
+  if (botNumber && senderNumber && botNumber === senderNumber) {
+    return true;
   }
   return false;
 }
@@ -136,6 +121,7 @@ async function getStatusCard(sessionId) {
 │ 💖 *Auto React:* ${onOff(Boolean(s.auto_react_msg))}
 │ 🔮 *React Scope:* ${reactModeText(reactModeStr)}
 │ 🤫 *Silent Automation:* ${onOff(Boolean(s.silent_automation))}
+│ 💬 *Custom Reply:* ${onOff(Boolean(s.custom_auto_reply))}
 │ 🛡️ *Anti Delete:* ${onOff(Boolean(s.anti_delete))}
 │ 🛡️ *Anti Spam:* ${onOff(Boolean(s.anti_spam))}
 │ 🚫 *Reject Calls:* ${onOff(Boolean(s.auto_reject_calls))}
@@ -157,6 +143,7 @@ function mapKey(name) {
   else if (k === "lovelychat" || k === "lovely_chat" || k === "lovely" || k === "aichat" || k === "automsg" || k === "auto_msg") return "lovely_chat";
   else if (k === "seenallmsg" || k === "seen_all_msg" || k === "seenall" || k === "allmsgseen") return "seen_all_msg";
   else if (k === "silentautomation" || k === "silent_automation" || k === "silent") return "silent_automation";
+  else if (k === "customautoreply" || k === "custom_auto_reply" || k === "customreply") return "custom_auto_reply";
   else if (k === "antidelete" || k === "anti_delete") return "anti_delete";
   else if (k === "antispam" || k === "anti_spam") return "anti_spam";
   else if (k === "rejectcalls" || k === "auto_reject_calls" || k === "anticall") return "auto_reject_calls";
@@ -324,6 +311,8 @@ function formatSettingReply(key, updated, action) {
     return `✅ *Anti Delete Guard:* ${onOff(updated.anti_delete)}`;
   } else if (key === "silent_automation") {
     return `✅ *Silent Automation Suite:* ${onOff(updated.silent_automation)}`;
+  } else if (key === "custom_auto_reply") {
+    return `✅ *Custom Auto Reply:* ${onOff(updated.custom_auto_reply)}`;
   } else if (key === "anti_spam") {
     return `✅ *Anti Spam Guard:* ${onOff(updated.anti_spam)}`;
   } else if (key === "auto_reject_calls") {
@@ -333,7 +322,7 @@ function formatSettingReply(key, updated, action) {
   } else if (key === "btns_enabled") {
     return `✅ *Menu UI System:* ${btnsModeText(Boolean(updated.btns_enabled))}`;
   }
-  return `✅ *Set ${key.toUpperCase()} to ${action.toUpperCase()}*`;
+  return `✅ *Set ${key.toUpperCase()} to${action.toUpperCase()}*`;
 }
 
 function getSections() {
@@ -373,6 +362,8 @@ function getSections() {
         { title: "⚪ Seen All Msg OFF", description: "Disable instant blue tick read marks", id: ".setting off seenallmsg" },
         { title: "😍 Msg Auto React ON", description: "Automatically react to incoming chat messages", id: ".setting on autoreactmsg" },
         { title: "🤐 Msg Auto React OFF", description: "Disable message auto reactions", id: ".setting off autoreactmsg" },
+        { title: "💬 Custom Reply ON", description: "Enable custom word replies", id: ".setting on customautoreply" },
+        { title: "🔇 Custom Reply OFF", description: "Disable custom word replies", id: ".setting off customautoreply" },
         { title: "💬 React Scope: Private", description: "React only in private direct messages", id: ".setting reactmode private" },
         { title: "📢 React Scope: Group", description: "React only in WhatsApp groups", id: ".setting reactmode group" },
         { title: "✨ React Scope: All", description: "React across both private chats and groups", id: ".setting reactmode all" },
@@ -432,6 +423,15 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     options: flatOpts,
   };
 
+  // 🔥 Web එකෙන් Settings Image එක ගන්නවා
+  let finalSettingsImage = SETTINGS_IMAGE; 
+  if (sessionId) {
+    try {
+      const customImg = await getCustomImage(sessionId, "settings_header");
+      if (customImg && customImg.data) finalSettingsImage = customImg.data;
+    } catch (e) {}
+  }
+
   let btnsOn = true;
   try {
     const settings = await readSettings(sessionId);
@@ -444,7 +444,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     try {
       const { ButtonV2 } = await import("@vanzxy/baileys");
       const sections = getSections();
-      const fittedThumb = await getFittedImageBuffer(SETTINGS_IMAGE);
+      const fittedThumb = await getFittedImageBuffer(finalSettingsImage);
 
       const btn = new ButtonV2(conn)
         .setBody(`${cardText}\n\n👇 *Select an option below to update settings:*`)
@@ -486,7 +486,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     numberedCaption += `*${sec.title}*\n`;
     sec.rows.forEach(r => {
       const num = String(overallIdx).padStart(2, '0');
-      numberedCaption += `│ *[ ${num} ]* ${r.title}\n`;
+      numberedCaption += `│ *[ ${num} ]*${r.title}\n`;
       overallIdx++;
     });
     numberedCaption += `\n`;
@@ -497,7 +497,7 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
   const sentMsg = await conn.sendMessage(
     from,
     {
-      image: { url: SETTINGS_IMAGE },
+      image: { url: finalSettingsImage },
       caption: numberedCaption
     },
     { quoted: mek }
@@ -520,14 +520,7 @@ cmd(
     filename: __filename,
   },
   async (conn, mek, m, { from, sender, args, reply, isOwner, sessionId }) => {
-    let hasOwnerPerms = false;
-    if (isOwner) {
-      hasOwnerPerms = true;
-    } else if (isRealOwner(sender)) {
-      hasOwnerPerms = true;
-    }
-
-    if (!hasOwnerPerms) {
+    if (!checkOwner(conn, sender, isOwner)) {
       return reply("❌ *`[ THIS COMMAND IS OWNER ONLY. ]`*");
     }
 
@@ -576,14 +569,7 @@ cmd(
     filename: __filename,
   },
   async (conn, mek, m, { args, sessionId, reply, isOwner, sender }) => {
-    let hasOwnerPerms = false;
-    if (isOwner) {
-      hasOwnerPerms = true;
-    } else if (isRealOwner(sender)) {
-      hasOwnerPerms = true;
-    }
-
-    if (!hasOwnerPerms) {
+    if (!checkOwner(conn, sender, isOwner)) {
       return reply("❌ *`[ THIS COMMAND IS OWNER ONLY. ]`*");
     }
 
@@ -629,14 +615,7 @@ const settingsReplyHandler = {
     return Boolean(isQuoted && isNum);
   },
   function: async (conn, mek, m, { from, body, sender, reply, isOwner, sessionId }) => {
-    let hasOwnerPerms = false;
-    if (isOwner) {
-      hasOwnerPerms = true;
-    } else if (isRealOwner(sender)) {
-      hasOwnerPerms = true;
-    }
-
-    if (!hasOwnerPerms) return;
+    if (!checkOwner(conn, sender, isOwner)) return;
 
     const k = keyFor(sender, from);
     const state = pendingSettingsMenu[k];
@@ -664,56 +643,4 @@ const settingsReplyHandler = {
     if (!actionCmd) return;
 
     const now = Date.now();
-    const sig = `${actionCmd.action}_${actionCmd.value}`;
-    const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === sig && now - lastMsg.time < LOOP_COOLDOWN) {
-      return;
-    }
-    lastProcessedMsg[k] = { text: sig, time: now };
-
-    try {
-      const result = await applySettingAction(sid, actionCmd.action, actionCmd.value);
-      state.createdAt = Date.now();
-      await conn.sendMessage(from, { react: { text: "✅", key: mek.key } });
-      return reply(result);
-    } catch (e) {
-      console.log("SETTINGS EXECUTE ERROR:", e);
-      return reply("❌ *Error occurred while applying setting.*");
-    }
-  },
-};
-
-// 🔵 Blue Ticks Middleware: Marks incoming messages as read when `seen_all_msg` is enabled
-async function handleSeenAllMessages(conn, mek, sessionId) {
-  try {
-    if (!conn || !mek?.key || mek.key.fromMe) return;
-
-    const s = await readSettings(sessionId);
-    if (s?.seen_all_msg) {
-      await conn.readMessages([mek.key]);
-    }
-  } catch (err) {}
-}
-
-if (Array.isArray(replyHandlers)) {
-  replyHandlers.push(settingsReplyHandler);
-}
-
-setInterval(() => {
-  const now = Date.now();
-  for (const key of Object.keys(pendingSettingsMenu)) {
-    if (now - pendingSettingsMenu[key].createdAt > 3 * 60 * 1000) {
-      delete pendingSettingsMenu[key];
-    }
-  }
-  for (const key of Object.keys(lastProcessedMsg)) {
-    if (now - lastProcessedMsg[key].time > LOOP_COOLDOWN) {
-      delete lastProcessedMsg[key];
-    }
-  }
-}, 30000);
-
-module.exports = {
-  sendSettingsHome,
-  handleSeenAllMessages
-};
+    const sig = `${actionCmd.action}_${
