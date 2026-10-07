@@ -12,6 +12,8 @@ const SESSION_TIMEOUT = 10 * 60 * 1000;
 const LOOP_COOLDOWN = 2500;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+const BRAND_BASE = "MALIYA-MD";
+const DEFAULT_BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
 const DEFAULT_SEARCH_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
@@ -105,19 +107,27 @@ async function getThumbnailBuffer(url) {
   }
 }
 
+// 🔥 FIX: Cartoon Name එක "HD" නොවී නියම නම ගන්න scraper එක clean කිරීම
 async function getSearchResults(searchTerm) {
   const url = `https://sinhalacartoons.com/?s=${encodeURIComponent(searchTerm)}`;
   const { data } = await axios.get(url, { headers: { 'User-Agent': UA } });
   const $ = cheerio.load(data);
   const results = [];
 
-  $('.post, article, .search-result, .movie-item, .post-item').each((i, el) => {
+  $('.post, article, .search-result, .movie-item, .post-item, .item-article').each((i, el) => {
     const link = $(el).find('a[href*="sinhalacartoons.com"]').first();
     const href = link.attr('href');
-    let title = link.text().trim() || $(el).find('h2, h3').text().trim();
+    
+    // Quality badge (HD) එක අයින් කර නියම title එක ගැනීම
+    let titleEl = $(el).find('h2.entry-title, h3.entry-title, .post-title, h2, h3').first();
+    let title = titleEl.text().trim();
+    if (!title) {
+      title = link.attr('title') || link.text().trim();
+    }
+    title = title.replace(/^(HD|FHD|CAM|DVD|4K|SD)\s*[:|-]?\s*/i, '').trim();
     
     if (href && title) {
-      if (href.startsWith('https://sinhalacartoons.com/') && !href.includes('/category/') && !href.includes('/tag/') && !href.includes('/page/') && !href.includes('/about-us/') && href !== 'https://sinhalacartoons.com' && title.length > 5) {
+      if (href.startsWith('https://sinhalacartoons.com/') && !href.includes('/category/') && !href.includes('/tag/') && !href.includes('/page/') && !href.includes('/about-us/') && href !== 'https://sinhalacartoons.com' && title.length > 2) {
         if (!results.some(r => r.href === href)) results.push({ title, href });
       }
     }
@@ -153,12 +163,13 @@ async function getMovieAndEpisodes(moviePageUrl) {
   const { data } = await axios.get(moviePageUrl, { headers: { 'User-Agent': UA } });
   const $ = cheerio.load(data);
 
-  let pageTitle = $('h1.movie-title').text().trim() || $('title').text().trim();
-  let poster = $('.info-poster img').attr('src') || '';
+  let pageTitle = $('h1.movie-title, h1.entry-title, h1').first().text().trim() || $('title').text().trim();
+  pageTitle = pageTitle.replace(/^(HD|FHD|CAM|DVD)\s*[:|-]?\s*/i, '').trim();
+  let poster = $('.info-poster img, .poster img, .featured-image img').first().attr('src') || '';
 
-  const details = { title: pageTitle, poster: poster, year: 'N/A', rating: 'N/A', quality: 'N/A', isSeries: false };
+  const details = { title: pageTitle, poster: poster, year: 'N/A', rating: 'N/A', quality: 'HD', isSeries: false };
 
-  $('.details-list li').each((i, el) => {
+  $('.details-list li, .movie-info li').each((i, el) => {
     const text = $(el).text().trim();
     if (text.includes('Release Year:')) details.year = text.replace('Release Year:', '').trim();
     if (text.includes('IMDb Rating:')) details.rating = text.replace('IMDb Rating:', '').trim();
@@ -210,6 +221,7 @@ cmd({
 
     const settings = await readSettings(sessionId);
     const btnsOn = !!settings.btns_enabled;
+    const botDisplayName = settings?.bot_name?.trim() || DEFAULT_BOT_NAME;
 
     let searchImg = DEFAULT_SEARCH_IMAGE;
     if (sessionId) {
@@ -229,11 +241,11 @@ cmd({
           id: `.sc_select ${index + 1}`
         }));
 
-        const bodyText = `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡𝗦 ]─╮*\n│\n├─ 🔍 *Search :* ${q}\n├─ 📊 *Total Results :* ${results.length}\n│\n╰──────────────────╯\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+        const bodyText = `*╭─[ 🎬 ${botDisplayName.toUpperCase()} CARTOONS ]─╮*\n│\n├─ 🔍 *Search :* ${q}\n├─ 📊 *Total Results :* ${results.length}\n│\n╰──────────────────╯\n\n© 2026 ${BRAND_BASE} SYSTEM`;
 
         const btn = new ButtonV2(bot)
           .setBody(bodyText)
-          .setFooter("WaBot by MALIYA-MD Team ツ")
+          .setFooter(`WaBot by ${botDisplayName}`)
           .setThumbnail(searchImg);
 
         btn.addRawButton({
@@ -254,7 +266,7 @@ cmd({
         const sentMsg = await btn.send(from, { quoted: mek });
 
         if (sentMsg?.key?.id) {
-          pendingCartoonSearch[k] = { results, timestamp: Date.now(), expectedMsgId: sentMsg.key.id };
+          pendingCartoonSearch[k] = { results, timestamp: Date.now(), expectedMsgId: sentMsg.key.id, botDisplayName };
           await bot.sendMessage(from, { react: { text: "✅", key: mek.key } });
           return;
         }
@@ -264,7 +276,7 @@ cmd({
     }
 
     // Numbered Fallback
-    let text = `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡𝗦 ]─╮*\n│\n├─ 📊 *𝗥𝗲𝘀𝘂𝗹𝘁𝘀:* ${results.length}\n│\n`;
+    let text = `*╭─[ 🎬 ${botDisplayName.toUpperCase()} CARTOONS ]─╮*\n│\n├─ 📊 *𝗥𝗲𝘀𝘂𝗹𝘁𝘀:* ${results.length}\n│\n`;
     results.forEach((v, idx) => {
       let numStr = String(idx + 1).padStart(2, "0");
       text += `├─ 📱 *[ ${numStr} ]* 🎬 *${toSmallCaps(v.title.slice(0, 40))}*\n`;
@@ -274,7 +286,7 @@ cmd({
     const channelMeta = getChannelContext();
     const sentMsg = await bot.sendMessage(from, { image: { url: searchImg }, caption: text, ...channelMeta }, { quoted: mek });
 
-    pendingCartoonSearch[k] = { results, timestamp: Date.now(), expectedMsgId: sentMsg.key.id };
+    pendingCartoonSearch[k] = { results, timestamp: Date.now(), expectedMsgId: sentMsg.key.id, botDisplayName };
     await bot.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
   } catch (error) {
@@ -335,6 +347,7 @@ const cartoonReplyHandler = {
       if (num === null || isNaN(num) || num <= 0 || num > session.results.length) return;
 
       const selectedMovie = session.results[num - 1];
+      const botDisplayName = session.botDisplayName || DEFAULT_BOT_NAME;
       delete pendingCartoonSearch[k];
 
       await bot.sendMessage(from, { react: { text: "⏳", key: mek.key } });
@@ -348,14 +361,14 @@ const cartoonReplyHandler = {
         let dispTitle = details.title || selectedMovie.title;
         let typeName = details.isSeries ? 'TV Series' : 'Movie';
 
-        let captionText = `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡 ]─╮*\n│\n`;
+        let captionText = `*╭─[ 🎬 ${botDisplayName.toUpperCase()} CARTOON ]─╮*\n│\n`;
         captionText += `├─ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(dispTitle)}\n`;
         captionText += `├─ 📅 *𝗬𝗲𝗮𝗿:* ${details.year}\n`;
         captionText += `├─ ⭐ *𝗥𝗮𝘁𝗶𝗻𝗴:* ${details.rating}\n`;
         captionText += `├─ 🎥 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${details.quality}\n`;
         captionText += `├─ 📺 *𝗧𝘆𝗽𝗲:* ${typeName}\n`;
         if (details.isSeries) captionText += `├─ 📥 *𝗔𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲 𝗘𝗽𝗶𝘀𝗼𝗱𝗲𝘀:* ${items.length}\n`;
-        captionText += `│\n╰──────────────────╯\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+        captionText += `│\n╰──────────────────╯\n\n© 2026 ${BRAND_BASE} SYSTEM`;
 
         const settings = await readSettings(sessionId);
         const btnsOn = !!settings.btns_enabled;
@@ -367,7 +380,7 @@ const cartoonReplyHandler = {
 
             const btn = new ButtonV2(bot)
               .setBody(captionText)
-              .setFooter("WaBot by MALIYA-MD Team ツ")
+              .setFooter(`WaBot by ${botDisplayName}`)
               .setThumbnail(posterImg);
 
             if (details.isSeries) {
@@ -401,7 +414,7 @@ const cartoonReplyHandler = {
             const sentDetailsMsg = await btn.send(from, { quoted: mek });
 
             if (sentDetailsMsg?.key?.id) {
-              pendingCartoonSelection[k] = { details, items, timestamp: Date.now(), expectedMsgId: sentDetailsMsg.key.id };
+              pendingCartoonSelection[k] = { details, items, timestamp: Date.now(), expectedMsgId: sentDetailsMsg.key.id, botDisplayName };
               await bot.sendMessage(from, { react: { text: "✅", key: mek.key } });
               return;
             }
@@ -426,7 +439,7 @@ const cartoonReplyHandler = {
         const channelMeta = getChannelContext();
         const sentDetailsMsg = await bot.sendMessage(from, { image: { url: posterImg }, caption: fallbackMsg, ...channelMeta }, { quoted: mek });
 
-        pendingCartoonSelection[k] = { details, items, timestamp: Date.now(), expectedMsgId: sentDetailsMsg.key.id };
+        pendingCartoonSelection[k] = { details, items, timestamp: Date.now(), expectedMsgId: sentDetailsMsg.key.id, botDisplayName };
         await bot.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
       } catch (err) {
@@ -440,7 +453,7 @@ const cartoonReplyHandler = {
     // STEP 2: Episode Selection & Download
     if (pendingCartoonSelection[k]) {
       const session = pendingCartoonSelection[k];
-      const { details, items } = session;
+      const { details, items, botDisplayName = DEFAULT_BOT_NAME } = session;
       let selectedIndices = [];
 
       let cmdInput = payload;
@@ -483,7 +496,7 @@ const cartoonReplyHandler = {
 
         try {
           await bot.sendMessage(from, { react: { text: "📥", key: mek.key } });
-          await reply(`⚙️ *[${i + 1}/${selectedIndices.length}] Fetching & Uploading${selectedItem.title}...*`);
+          await reply(`⚙️ *[${i + 1}/${selectedIndices.length}] Fetching & Uploading ${selectedItem.title}...*`);
 
           const finalDirectLink = await getFinalDownloadLink(selectedItem.landingUrl);
           if (!finalDirectLink) {
@@ -496,13 +509,13 @@ const cartoonReplyHandler = {
           const cleanTitle = rawTitle.replace(/[^\w\s.-]/gi, "").substring(0, 40);
           const cleanSubTitle = rawItemTitle.replace(/[^\w\s.-]/gi, "").substring(0, 20);
           
-          let finalFileName = details.isSeries ? `MALIYA-MD ${cleanTitle} -${cleanSubTitle}.mp4` : `MALIYA-MD ${cleanTitle}.mp4`;
+          let finalFileName = details.isSeries ? `MALIYA-MD ${cleanTitle} - ${cleanSubTitle}.mp4` : `MALIYA-MD ${cleanTitle}.mp4`;
 
           const docPayload = {
             document: { url: finalDirectLink },
             mimetype: "video/mp4",
             fileName: finalFileName,
-            caption: `*╭─[ 🎬 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗖𝗔𝗥𝗧𝗢𝗢𝗡 ]─╮*\n│\n├─ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(details.title)}\n├─ 📌 *𝗜𝘁𝗲𝗺:* ${selectedItem.title}\n├─ 📊 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${details.quality}\n│\n╰──────────────────╯\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`,
+            caption: `*╭─[ 🎬 ${botDisplayName.toUpperCase()} CARTOON ]─╮*\n│\n├─ 🎬 *𝗧𝗶𝘁𝗹𝗲:* ${toSmallCaps(details.title)}\n├─ 📌 *𝗜𝘁𝗲𝗺:* ${selectedItem.title}\n├─ 📊 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* ${details.quality}\n│\n╰──────────────────╯\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`,
             ...channelMeta
           };
 
