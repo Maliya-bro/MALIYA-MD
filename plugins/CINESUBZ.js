@@ -6,6 +6,8 @@ const crypto = require("crypto");
 const sharp = require("sharp");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
+const BRAND_BASE = "MALIYA-MD";
+const DEFAULT_BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽Ｄ 🍁";
 const DEFAULT_SEARCH_IMAGE =
@@ -159,7 +161,7 @@ async function sendErrorMsg(sock, from, mek, text) {
   );
 }
 
-/* ================= 1. CINESUBZ ƝINI (SEARCH) ================= */
+/* ================= 1. CINESUBZ SEARCH ================= */
 async function customSearchCineSubz(query) {
   const formattedQuery = encodeURIComponent(query.trim()).replace(/%20/g, "+");
   const searchUrl = `https://cinesubz.co/?s=${formattedQuery}`;
@@ -217,7 +219,7 @@ async function customSearchCineSubz(query) {
   }
 }
 
-/* ================= 2. FILIMU KA ƝƆGƆNYA SƆRƆ NI CSPLAYER LA ================= */
+/* ================= 2. MOVIE SCRAPING ================= */
 async function scrapeMoviePage(movieUrl, fallbackTitle = "Movie", fallbackImage = DEFAULT_SEARCH_IMAGE) {
   try {
     const res = await axios.get(movieUrl, {
@@ -289,7 +291,7 @@ async function scrapeMoviePage(movieUrl, fallbackTitle = "Movie", fallbackImage 
   }
 }
 
-/* ================= 3. LABAN DƆWUNLODI JƆRƆNW LAJA ================= */
+/* ================= 3. DIRECT DOWNLOAD RESOLVER ================= */
 async function getCineSubzLinks(originalUrl) {
   let targetLink = originalUrl.replace(/^https:\/\/[^\/]+/, "https://drive.csplayer2.space");
   targetLink = targetLink.replace(/(server\d+\/)\d+:\//, "$1");
@@ -440,7 +442,7 @@ async function getCineSubzLinks(originalUrl) {
   return { error: "File not found on any server." };
 }
 
-/* ================= CI KƆNƆ KAN (COMMAND) ================= */
+/* ================= COMMAND: .cinesubz ================= */
 cmd(
   {
     pattern: "cinesubz",
@@ -480,6 +482,10 @@ cmd(
       const k = keyFor(sender, from);
       clearUserSession(k);
 
+      const settings = await readSettings(sessionId);
+      const btnsOn = !!settings.btns_enabled;
+      const botDisplayName = settings?.bot_name?.trim() || DEFAULT_BOT_NAME;
+
       let searchImg = DEFAULT_SEARCH_IMAGE;
       if (sessionId) {
         try {
@@ -488,10 +494,7 @@ cmd(
         } catch (e) {}
       }
 
-      const bodyText = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n© 2026 MALIYA-MD BOT SYSTEM`;
-
-      const settings = await readSettings(sessionId);
-      const btnsOn = !!settings.btns_enabled;
+      const bodyText = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${botDisplayName.toUpperCase()} MOVIES*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n© 2026 ${BRAND_BASE} SYSTEM`;
 
       if (btnsOn) {
         try {
@@ -505,7 +508,7 @@ cmd(
 
           const btn = new ButtonV2(sock)
             .setBody(bodyText)
-            .setFooter("WaBot by MALIYA-MD Team ツ")
+            .setFooter(`WaBot by ${botDisplayName}`)
             .setThumbnail(searchImg);
 
           btn.addRawButton({
@@ -532,6 +535,7 @@ cmd(
               timestamp: Date.now(),
               isProcessing: false,
               expectedMsgId: sentMsg.key.id,
+              botDisplayName,
             };
             await sock.sendMessage(from, {
               react: { text: "✅", key: mek.key },
@@ -544,7 +548,7 @@ cmd(
       }
 
       // Numbered Fallback
-      let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n`;
+      let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${botDisplayName.toUpperCase()} MOVIES*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n`;
       topResults.forEach((item, index) => {
         text += `*[ ${String(index + 1).padStart(2, "0")} ]* ➔ *${item.title}*\n`;
       });
@@ -567,6 +571,7 @@ cmd(
         timestamp: Date.now(),
         isProcessing: false,
         expectedMsgId: sentMsg.key.id,
+        botDisplayName,
       };
 
       await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
@@ -582,7 +587,7 @@ cmd(
   },
 );
 
-/* ================= JAABILI LAMAGA (REPLY HANDLER) ================= */
+/* ================= REPLY HANDLER ================= */
 const csReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
@@ -642,7 +647,9 @@ const csReplyHandler = {
       return;
     lastProcessedMsg[k] = { text: String(choice), time: now };
 
-    // YƆRƆ 1: Filimu sugandi
+    const botDisplayName = pending.botDisplayName || DEFAULT_BOT_NAME;
+
+    // STEP 1: Movie Pick -> Qualities
     if (pending.step === 1) {
       if (choice > pending.results.length) return;
       pending.isProcessing = true;
@@ -700,7 +707,7 @@ const csReplyHandler = {
           qualityBody += `⭐ *IMDb :* ${movieInfo.imdb_rate || selected.imdb}\n`;
         if (movieInfo.duration)
           qualityBody += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
-        qualityBody += `Available formats below 2GB are listed. Choose one to start download.\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+        qualityBody += `Available formats below 2GB are listed. Choose one to start download.\n\n© 2026 ${BRAND_BASE} SYSTEM`;
 
         const settings = await readSettings(sessionId);
         const btnsOn = !!settings.btns_enabled;
@@ -717,7 +724,7 @@ const csReplyHandler = {
 
             const btn = new ButtonV2(sock)
               .setBody(qualityBody)
-              .setFooter("WaBot by MALIYA-MD Team ツ")
+              .setFooter(`WaBot by ${botDisplayName}`)
               .setThumbnail(imgToSend);
 
             btn.addRawButton({
@@ -795,11 +802,11 @@ const csReplyHandler = {
         );
       }
     }
-    // YƆRƆ 2: Filimu dɔwunlodi
+    // STEP 2: Download Link Processing
     else if (pending.step === 2) {
       if (choice > pending.movie.downloadLinks.length) return;
       pending.isProcessing = true;
-      await sock.sendMessage(from, { react: { text: "⬆️️", key: mek.key } });
+      await sock.sendMessage(from, { react: { text: "⬆", key: mek.key } });
 
       const { movie } = pending;
       const selectedLink = movie.downloadLinks[choice - 1];
@@ -870,7 +877,6 @@ const csReplyHandler = {
         let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
         if (directDownloadUrl) {
-          // Baileys ka URL streaming fɛɛrɛ (Zero-RAM buffer direct upload)
           const docPayload = {
             document: { url: directDownloadUrl },
             mimetype: "video/mp4",
