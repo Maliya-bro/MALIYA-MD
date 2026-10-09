@@ -1,8 +1,7 @@
 const { downloadMediaMessage, jidNormalizedUser } = require("@whiskeysockets/baileys");
-const { cmd } = require("../command");
 const P = require("pino");
 
-console.log("✅ [SILENT AUTO] Direct Chat Mode + .testinbox Diagnostic Loaded!");
+console.log("✅ [SILENT AUTO] Direct Real-time Interceptor Active!");
 
 const editCache = new Map();
 
@@ -13,45 +12,53 @@ setInterval(() => {
   }
 }, 60 * 1000);
 
-function unwrap(msg) {
-  if (!msg) return null;
-  let m = msg;
-  if (m.ephemeralMessage?.message) m = m.ephemeralMessage.message;
-  if (m.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
-  if (m.viewOnceMessage?.message) m = m.viewOnceMessage.message;
-  if (m.viewOnceMessageV2Extension?.message) m = m.viewOnceMessageV2Extension.message;
-  if (m.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
-  return m;
+// සියලුම View Once wrappers ගැළවීම
+function extractMediaNode(rawMsg) {
+  if (!rawMsg) return null;
+  let target = rawMsg;
+
+  if (target.ephemeralMessage?.message) target = target.ephemeralMessage.message;
+  if (target.viewOnceMessageV2?.message) target = target.viewOnceMessageV2.message;
+  if (target.viewOnceMessage?.message) target = target.viewOnceMessage.message;
+  if (target.viewOnceMessageV2Extension?.message) target = target.viewOnceMessageV2Extension.message;
+  if (target.documentWithCaptionMessage?.message) target = target.documentWithCaptionMessage.message;
+
+  if (target.imageMessage) return { type: "image", node: target.imageMessage, clean: target };
+  if (target.videoMessage) return { type: "video", node: target.videoMessage, clean: target };
+  if (target.audioMessage) return { type: "audio", node: target.audioMessage, clean: target };
+  return null;
 }
 
-function isViewOnce(rawMsg) {
+function checkIsViewOnce(rawMsg) {
   if (!rawMsg) return false;
   const str = JSON.stringify(rawMsg);
-  if (str.includes("viewOnceMessage") || str.includes('"viewOnce":true')) return true;
-  return false;
+  return str.includes("viewOnceMessage") || str.includes('"viewOnce":true');
 }
 
-function getText(rawMsg) {
-  const clean = unwrap(rawMsg);
-  if (!clean) return "";
+function getMessageText(rawMsg) {
+  if (!rawMsg) return "";
+  const media = extractMediaNode(rawMsg);
+  if (media?.node?.caption) return media.node.caption.trim();
+
+  let target = rawMsg;
+  if (target.ephemeralMessage?.message) target = target.ephemeralMessage.message;
   return (
-    clean.conversation ||
-    clean.extendedTextMessage?.text ||
-    clean.imageMessage?.caption ||
-    clean.videoMessage?.caption ||
+    target.conversation ||
+    target.extendedTextMessage?.text ||
     ""
   ).trim();
 }
 
 async function handleSilentAutomation(sock, mek, m, sessionCtx) {
   try {
-    if (!mek?.message || mek.key.fromMe) return;
+    if (!mek?.message) return;
 
-    const from = mek.key.remoteJid || "";
+    const from = mek.key?.remoteJid || "";
     if (from.endsWith("@newsletter") || from === "status@broadcast") return;
 
-    // 🎯 කෙළින්ම මැසේජ් එක වැටුණු Chat එකටම යැවීම
-    const targetChat = from;
+    // 🎯 .testinbox එකෙන් තහවුරු වූ ඔබගේ normalized JID එක
+    const targetInbox = sock?.user?.id ? jidNormalizedUser(sock.user.id) : null;
+    if (!targetInbox) return;
 
     const isGroup = from.endsWith("@g.us");
     const rawSender = mek.key.participant || from;
@@ -63,7 +70,7 @@ async function handleSilentAutomation(sock, mek, m, sessionCtx) {
     if (proto && proto.type === 14) {
       const targetId = proto.key?.id;
       const cached = editCache.get(targetId);
-      const newText = getText(proto.editedMessage);
+      const newText = getMessageText(proto.editedMessage);
       const oldText = cached ? cached.text : "*(Not cached)*";
 
       if (cached && cached.text === newText) return;
@@ -74,43 +81,39 @@ async function handleSilentAutomation(sock, mek, m, sessionCtx) {
         `❌ *Original:*\n${oldText}\n\n` +
         `✏️ *Edited:*\n${newText || "*(Empty/Cleared)*"}`;
 
-      await sock.sendMessage(targetChat, {
+      await sock.sendMessage(targetInbox, {
         text: editMsg,
         mentions: [rawSender]
-      }, { quoted: mek });
+      });
       return;
     }
 
-    // Cache message for edit sniffer
-    const currentText = getText(mek.message);
+    // සාමාන්‍ය මැසේජ් cache කිරීම
+    const currentText = getMessageText(mek.message);
     if (mek.key?.id && currentText) {
       editCache.set(mek.key.id, { text: currentText, time: Date.now() });
       if (editCache.size > 1500) editCache.delete(editCache.keys().next().value);
     }
 
     // ── 2. VIEW ONCE INTERCEPTOR ──
-    if (isViewOnce(mek.message)) {
-      const clean = unwrap(mek.message);
-      if (!clean) return;
-
-      let type = clean.imageMessage ? "image" : clean.videoMessage ? "video" : clean.audioMessage ? "audio" : null;
-      let mediaNode = clean[type + "Message"];
-      if (!type || !mediaNode) return;
+    if (checkIsViewOnce(mek.message)) {
+      const media = extractMediaNode(mek.message);
+      if (!media || !media.node) return;
 
       let buffer = null;
 
-      // Primary: m.download() wrapper
+      // 1. msg.js එකේ m.download() මඟින් බාගත කිරීම
       try {
         if (m && typeof m.download === "function") {
           buffer = await m.download();
         }
       } catch (_) {}
 
-      // Fallback: Baileys downloadMediaMessage with updateMediaMessage
+      // 2. Fallback: .vv diagnostic එකේ සාර්ථක වූ downloadMediaMessage ක්‍රමය
       if (!buffer || !buffer.length) {
         try {
           buffer = await downloadMediaMessage(
-            { key: mek.key, message: clean },
+            { key: mek.key, message: media.clean },
             "buffer",
             {},
             {
@@ -123,7 +126,7 @@ async function handleSilentAutomation(sock, mek, m, sessionCtx) {
 
       if (!buffer || !buffer.length) return;
 
-      const captionText = mediaNode.caption || "";
+      const captionText = media.node.caption || "";
       const finalCaption = `🤫 *[ SILENT AUTO : VIEW ONCE ]*\n\n` +
         `📍 *Source:* ${chatType}\n` +
         `👤 *Sender:* @${sender}\n` +
@@ -131,76 +134,33 @@ async function handleSilentAutomation(sock, mek, m, sessionCtx) {
 
       const mentions = [rawSender];
 
-      if (type === "image") {
-        await sock.sendMessage(targetChat, {
+      if (media.type === "image") {
+        await sock.sendMessage(targetInbox, {
           image: buffer,
           caption: finalCaption,
           mentions
-        }, { quoted: mek });
-      } else if (type === "video") {
-        await sock.sendMessage(targetChat, {
+        });
+      } else if (media.type === "video") {
+        await sock.sendMessage(targetInbox, {
           video: buffer,
           caption: finalCaption,
           mentions
-        }, { quoted: mek });
-      } else if (type === "audio") {
-        await sock.sendMessage(targetChat, {
+        });
+      } else if (media.type === "audio") {
+        await sock.sendMessage(targetInbox, {
           audio: buffer,
-          mimetype: mediaNode.ptt ? "audio/ogg; codecs=opus" : "audio/mpeg",
-          ptt: mediaNode.ptt === true
-        }, { quoted: mek });
-        await sock.sendMessage(targetChat, {
+          mimetype: media.node.ptt ? "audio/ogg; codecs=opus" : "audio/mpeg",
+          ptt: media.node.ptt === true
+        });
+        await sock.sendMessage(targetInbox, {
           text: finalCaption,
           mentions
-        }, { quoted: mek });
+        });
       }
     }
   } catch (err) {
     // Silent fail
   }
 }
-
-// ── 3. TEST INBOX DIAGNOSTIC COMMAND ──
-cmd(
-  {
-    pattern: "testinbox",
-    desc: "Test inbox resolution and direct message delivery",
-    category: "owner",
-    react: "📬",
-    filename: __filename,
-  },
-  async (conn, mek, m, { from, sender, isGroup, reply, sessionId }) => {
-    try {
-      const sockUser = conn?.user?.id || "N/A";
-      const normalizedSockUser = conn?.user?.id ? jidNormalizedUser(conn.user.id) : "N/A";
-      const rawChat = from;
-      const rawSender = sender;
-
-      const infoText = `📊 *[ INBOX & SESSION DIAGNOSTIC ]* 📊\n\n` +
-        `🔹 *Current Chat JID:* \`${rawChat}\`\n` +
-        `🔹 *Sender JID:* \`${rawSender}\`\n` +
-        `🔹 *Socket User JID:* \`${sockUser}\`\n` +
-        `🔹 *Normalized User JID:* \`${normalizedSockUser}\`\n` +
-        `🔹 *Session ID:* \`${sessionId || "N/A"}\`\n` +
-        `🔹 *Is Group:* ${isGroup ? "Yes" : "No"}\n\n` +
-        `⏳ *Testing Self-Delivery in 2 seconds...*`;
-
-      await reply(infoText);
-
-      // Direct test message to Normalized User JID
-      if (normalizedSockUser !== "N/A") {
-        try {
-          await conn.sendMessage(normalizedSockUser, {
-            text: `✅ *[ DIRECT SELF-INBOX TEST SUCCESSFUL ]*\n\nමෙම පණිවිඩය සාර්ථකව ඔබේ Normalized JID (\`${normalizedSockUser}\`) වෙත ලැබුණි.`
-          });
-        } catch (selfErr) {
-          await reply(`❌ *Self-Inbox Delivery Failed:* ${selfErr?.message || selfErr}`);
-        }
-      }
-    } catch (e) {
-      reply(`❌ *Diagnostic Error:* ${e?.message || e}`);
-    }
-  }
-);
 
 module.exports = { handleSilentAutomation };
