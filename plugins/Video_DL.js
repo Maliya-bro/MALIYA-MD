@@ -41,7 +41,7 @@ function cookiesStatus() {
   }
 }
 
-const VIDEO_LIMIT_MB = 45;
+const VIDEO_LIMIT_MB = 60;
 const pendingVideoQuality = Object.create(null);
 
 function makeTempFile(ext = ".mp4") {
@@ -227,7 +227,6 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-// Native ButtonV2 Builder with 1080p
 async function sendQualityInteractiveMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
 
@@ -276,25 +275,34 @@ async function sendErrorMsg(reply, text) {
   await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰•──────•°•❀•°•─────•┈➤`);
 }
 
-// 🚀 Primary Omegatech API Downloader (First Priority)
+// 🎯 Smart FFprobe Audio Checker
+function checkHasAudio(filePath) {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err || !metadata || !metadata.streams) return resolve(false);
+      const hasAudio = metadata.streams.some((s) => s.codec_type === "audio");
+      resolve(hasAudio);
+    });
+  });
+}
+
+// 🎯 Omegatech API Downloader (Fix for Video-Only Streams)
 async function downloadViaOmegatech(videoUrl, quality, outPath) {
   try {
     const apiUrl = `https://api.omegatech.app/api/download/yt-dl?action=download&url=${encodeURIComponent(videoUrl)}&quality=${quality}p`;
     const res = await axios.get(apiUrl, { timeout: 25000 });
 
     if (!res.data || !res.data.success || !res.data.data) {
-      throw new Error("Invalid API response");
+      throw new Error("Invalid API response format");
     }
 
     const data = res.data.data;
     let targetDownloadUrl = null;
 
-    // Direct selected quality matching
     if (data.downloadUrl && data.selectedQuality && data.selectedQuality.includes(quality)) {
       targetDownloadUrl = data.downloadUrl;
     }
 
-    // Search in allMedias if quality doesn't match directly
     if (!targetDownloadUrl && Array.isArray(data.allMedias) && data.allMedias.length > 0) {
       const found = data.allMedias.find(
         (m) => m.quality && m.quality.toLowerCase().includes(`${quality}p`)
@@ -312,20 +320,31 @@ async function downloadViaOmegatech(videoUrl, quality, outPath) {
       method: "GET",
       responseType: "stream",
       timeout: 180000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+      },
     });
 
     fileRes.data.pipe(writer);
-    return new Promise((resolve, reject) => {
+    await new Promise((resolve, reject) => {
       writer.on("finish", () => resolve(true));
       writer.on("error", reject);
     });
+
+    // Check if the stream actually has audio (Omegatech >360p gives googlevideo DASH with no audio)
+    const hasAudio = await checkHasAudio(outPath);
+    if (!hasAudio && quality !== "360") {
+      throw new Error("Omegatech provided video-only stream (no audio track)");
+    }
+
+    return true;
   } catch (err) {
-    console.log("Omegatech API Failed:", err.message);
+    console.log("Omegatech API Issue:", err.message);
     throw err;
   }
 }
 
-// Fallback APIs
+// 🎯 Secondary Fallback APIs
 async function fallbackAPIs(url, quality, outPath) {
   try {
     const startRes = await axios.get(
@@ -335,7 +354,7 @@ async function fallbackAPIs(url, quality, outPath) {
       const jobId = startRes.data.id;
       let dlUrl = null;
       for (let i = 0; i < 20; i++) {
-        await new Promise((r) => setTimeout(r, 3000));
+        await new Promise((r) => setTimeout(r, 2500));
         const prog = await axios.get(`https://p.savenow.to/ajax/progress.php?id=${jobId}`);
         if (prog.data && prog.data.success === 1 && prog.data.download_url) {
           dlUrl = prog.data.download_url;
@@ -385,11 +404,18 @@ async function fallbackAPIs(url, quality, outPath) {
   throw new Error("All Backup APIs Failed");
 }
 
+// 🎯 Safe WhatsApp Re-encode (Doesn't crash if Audio is missing)
 async function reencodeForWhatsApp(inputPath, outputPath) {
+  const hasAudio = await checkHasAudio(inputPath);
+
   return new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
-      .videoCodec("libx264")
-      .audioCodec("aac")
+    let proc = ffmpeg(inputPath).videoCodec("libx264");
+
+    if (hasAudio) {
+      proc.audioCodec("aac");
+    }
+
+    proc
       .outputOptions([
         "-movflags +faststart",
         "-pix_fmt yuv420p",
@@ -401,7 +427,16 @@ async function reencodeForWhatsApp(inputPath, outputPath) {
       ])
       .format("mp4")
       .on("end", () => resolve(outputPath))
-      .on("error", reject)
+      .on("error", (err) => {
+        console.log("FFmpeg warning:", err.message);
+        // If re-encode fails, copy file directly
+        try {
+          fs.copyFileSync(inputPath, outputPath);
+          resolve(outputPath);
+        } catch (copyErr) {
+          reject(err);
+        }
+      })
       .save(outputPath);
   });
 }
@@ -423,21 +458,21 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
   try {
     await sock.sendMessage(from, { react: { text: "⬇️", key: mek.key } });
 
-    // 1️⃣ Option 1: Omegatech API (Primary)
+    // 1️⃣ Priority 1: Omegatech API
     try {
-      console.log(`Downloading via Omegatech API (${quality}p)...`);
+      console.log(`[1] Trying Omegatech API (${quality}p)...`);
       await downloadViaOmegatech(pending.video.url, quality, rawFile);
       downloadedSuccessfully = true;
     } catch (omegaErr) {
-      console.log("Omegatech failed, switching to yt-dlp...");
+      console.log("Omegatech bypassed ->", omegaErr.message);
       safeUnlink(rawFile);
       rawFile = makeTempFile(".mp4");
     }
 
-    // 2️⃣ Option 2: yt-dlp
+    // 2️⃣ Priority 2: yt-dlp (Muxes video+audio natively for 480p, 720p, 1080p)
     if (!downloadedSuccessfully) {
       try {
-        console.log(`Downloading via yt-dlp (${quality}p)...`);
+        console.log(`[2] Trying yt-dlp (${quality}p)...`);
         const formatStr = `bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}]/best`;
         const ytArgs = {
           format: formatStr,
@@ -454,15 +489,15 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
         await ytDlp(pending.video.url, ytArgs);
         downloadedSuccessfully = true;
       } catch (ytErr) {
-        console.log("YT-DLP ERROR:", ytErr.message.substring(0, 100));
+        console.log("yt-dlp error:", ytErr.message.substring(0, 100));
         safeUnlink(rawFile);
         rawFile = makeTempFile(".mp4");
       }
     }
 
-    // 3️⃣ Option 3: Fallback APIs
+    // 3️⃣ Priority 3: Backup APIs
     if (!downloadedSuccessfully) {
-      console.log("Switching to Backup APIs Fallback...");
+      console.log(`[3] Trying Fallback APIs (${quality}p)...`);
       await fallbackAPIs(pending.video.url, quality, rawFile);
       downloadedSuccessfully = true;
     }
