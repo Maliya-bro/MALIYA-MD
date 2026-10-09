@@ -1,7 +1,7 @@
 const { downloadMediaMessage, jidNormalizedUser } = require("@whiskeysockets/baileys");
 const P = require("pino");
 
-console.log("✅ [SILENT AUTO] Diagnostic-Verified Engine Active!");
+console.log("✅ [SILENT AUTO] Multi-Session Engine Loaded!");
 
 const editCache = new Map();
 
@@ -12,37 +12,26 @@ setInterval(() => {
   }
 }, 60 * 1000);
 
-function unwrapMessage(message) {
-  if (!message) return null;
-  if (message.ephemeralMessage) return unwrapMessage(message.ephemeralMessage.message);
-  if (message.viewOnceMessageV2) return unwrapMessage(message.viewOnceMessageV2.message);
-  if (message.viewOnceMessage) return unwrapMessage(message.viewOnceMessage.message);
-  if (message.viewOnceMessageV2Extension) return unwrapMessage(message.viewOnceMessageV2Extension.message);
-  if (message.documentWithCaptionMessage) return unwrapMessage(message.documentWithCaptionMessage.message);
-  return message;
+function unwrap(msg) {
+  if (!msg) return null;
+  let m = msg;
+  if (m.ephemeralMessage?.message) m = m.ephemeralMessage.message;
+  if (m.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
+  if (m.viewOnceMessage?.message) m = m.viewOnceMessage.message;
+  if (m.viewOnceMessageV2Extension?.message) m = m.viewOnceMessageV2Extension.message;
+  if (m.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
+  return m;
 }
 
-function detectMedia(m) {
-  if (!m) return null;
-  if (m.imageMessage) return { type: "image", node: m.imageMessage };
-  if (m.videoMessage) return { type: "video", node: m.videoMessage };
-  if (m.audioMessage) return { type: "audio", node: m.audioMessage, ptt: m.audioMessage.ptt === true };
-  return null;
-}
-
-function isViewOnceMessage(raw) {
-  if (!raw) return false;
-  const jsonStr = JSON.stringify(raw);
-  if (jsonStr.includes("viewOnceMessage") || jsonStr.includes('"viewOnce":true')) return true;
-
-  if (raw.viewOnceMessage || raw.viewOnceMessageV2 || raw.viewOnceMessageV2Extension) return true;
-  const clean = unwrapMessage(raw);
-  if (clean?.imageMessage?.viewOnce || clean?.videoMessage?.viewOnce || clean?.audioMessage?.viewOnce) return true;
+function isViewOnce(rawMsg) {
+  if (!rawMsg) return false;
+  const str = JSON.stringify(rawMsg);
+  if (str.includes("viewOnceMessage") || str.includes('"viewOnce":true')) return true;
   return false;
 }
 
-function getText(m) {
-  const clean = unwrapMessage(m);
+function getText(rawMsg) {
+  const clean = unwrap(rawMsg);
   if (!clean) return "";
   return (
     clean.conversation ||
@@ -53,31 +42,34 @@ function getText(m) {
   ).trim();
 }
 
-// 🎯 Multi-Session එකේදී Botගේම Inbox (You Chat) එකට නිවැරදිව JID එක Normalize කිරීම
-function resolveInboxJid(sock) {
+function resolveInbox(sock, sessionCtx) {
   if (sock?.user?.id) {
     return jidNormalizedUser(sock.user.id);
+  }
+  if (sessionCtx?.ownerNumber && sessionCtx.ownerNumber[0]) {
+    const num = String(sessionCtx.ownerNumber[0]).replace(/\D/g, "");
+    return `${num}@s.whatsapp.net`;
   }
   return null;
 }
 
-async function handleSilentAutomation(sock, mek, sessionCtx) {
+async function handleSilentAutomation(sock, mek, m, sessionCtx) {
   try {
     if (!mek?.message || mek.key.fromMe) return;
 
     const from = mek.key.remoteJid || "";
     if (from.endsWith("@newsletter") || from === "status@broadcast") return;
 
-    const targetInbox = resolveInboxJid(sock);
+    const targetInbox = resolveInbox(sock, sessionCtx);
     if (!targetInbox) return;
 
     const isGroup = from.endsWith("@g.us");
     const rawSender = mek.key.participant || from;
-    const senderClean = rawSender.split("@")[0].split(":")[0];
+    const sender = rawSender.split("@")[0].split(":")[0];
     const chatType = isGroup ? "👥 Group Chat" : "👤 Private Chat (DM)";
 
     // ── 1. EDITED MESSAGE TRACKER ──
-    const proto = mek.message.protocolMessage;
+    const proto = mek.message?.protocolMessage;
     if (proto && proto.type === 14) {
       const targetId = proto.key?.id;
       const cached = editCache.get(targetId);
@@ -88,7 +80,7 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
 
       const editMsg = `📝 *[ SILENT AUTO : MESSAGE EDITED ]*\n\n` +
         `📍 *Chat:* ${chatType}\n` +
-        `👤 *Sender:* @${senderClean}\n\n` +
+        `👤 *Sender:* @${sender}\n\n` +
         `❌ *Original:*\n${oldText}\n\n` +
         `✏️ *Edited:*\n${newText || "*(Empty/Cleared)*"}`;
 
@@ -100,58 +92,72 @@ async function handleSilentAutomation(sock, mek, sessionCtx) {
     }
 
     // Cache message for edit sniffer
-    const rawText = getText(mek.message);
-    if (mek.key?.id && rawText) {
-      editCache.set(mek.key.id, { text: rawText, time: Date.now() });
+    const currentText = getText(mek.message);
+    if (mek.key?.id && currentText) {
+      editCache.set(mek.key.id, { text: currentText, time: Date.now() });
       if (editCache.size > 1500) editCache.delete(editCache.keys().next().value);
     }
 
-    // ── 2. VIEW ONCE INTERCEPTOR (Diagnostic Logic) ──
-    if (isViewOnceMessage(mek.message)) {
-      const clean = unwrapMessage(mek.message);
+    // ── 2. VIEW ONCE INTERCEPTOR ──
+    if (isViewOnce(mek.message)) {
+      const clean = unwrap(mek.message);
       if (!clean) return;
 
-      const media = detectMedia(clean);
-      if (!media || !media.node?.mediaKey) return;
+      let type = clean.imageMessage ? "image" : clean.videoMessage ? "video" : clean.audioMessage ? "audio" : null;
+      let mediaNode = clean[type + "Message"];
+      if (!type || !mediaNode) return;
 
-      // 🛠️ Diagnostic Report එකේ 100% සාර්ථක වූ downloadMediaMessage call එක
-      const buffer = await downloadMediaMessage(
-        { key: mek.key, message: clean },
-        "buffer",
-        {},
-        {
-          logger: P({ level: "silent" }),
-          reuploadRequest: sock.updateMediaMessage,
+      let buffer = null;
+
+      // Primary download via msg.js wrapper m.download()[cite: 1]
+      try {
+        if (m && typeof m.download === "function") {
+          buffer = await m.download();
         }
-      );
+      } catch (_) {}
+
+      // Secondary fallback via verified Baileys downloadMediaMessage with updateMediaMessage
+      if (!buffer || !buffer.length) {
+        try {
+          buffer = await downloadMediaMessage(
+            { key: mek.key, message: clean },
+            "buffer",
+            {},
+            {
+              logger: P({ level: "silent" }),
+              reuploadRequest: sock.updateMediaMessage,
+            }
+          );
+        } catch (_) {}
+      }
 
       if (!buffer || !buffer.length) return;
 
-      const captionText = media.node.caption || "";
+      const captionText = mediaNode.caption || "";
       const finalCaption = `🤫 *[ SILENT AUTO : VIEW ONCE ]*\n\n` +
         `📍 *Source:* ${chatType}\n` +
-        `👤 *Sender:* @${senderClean}\n` +
+        `👤 *Sender:* @${sender}\n` +
         (captionText ? `💬 *Caption:* ${captionText}` : "");
 
       const mentions = [rawSender];
 
-      if (media.type === "image") {
+      if (type === "image") {
         await sock.sendMessage(targetInbox, {
           image: buffer,
           caption: finalCaption,
           mentions
         });
-      } else if (media.type === "video") {
+      } else if (type === "video") {
         await sock.sendMessage(targetInbox, {
           video: buffer,
           caption: finalCaption,
           mentions
         });
-      } else if (media.type === "audio") {
+      } else if (type === "audio") {
         await sock.sendMessage(targetInbox, {
           audio: buffer,
-          mimetype: media.ptt ? "audio/ogg; codecs=opus" : "audio/mpeg",
-          ptt: media.ptt === true
+          mimetype: mediaNode.ptt ? "audio/ogg; codecs=opus" : "audio/mpeg",
+          ptt: mediaNode.ptt === true
         });
         await sock.sendMessage(targetInbox, {
           text: finalCaption,
