@@ -1,105 +1,167 @@
-"use strict";
+const { downloadMediaMessage, jidNormalizedUser } = require("@whiskeysockets/baileys");
+const P = require("pino");
 
-const { downloadContentFromMessage } = require("@whiskeysockets/baileys");
-const { readSettings } = require("../lib/botSettings");
+console.log("✅ [SILENT AUTO] Diagnostic-Verified Engine Active!");
 
-// WhatsApp වලින් එන හැකි සෑම Wrapper එකක්ම ගලවා ඇතුළත Core Message එක ගන්නා Function එක
-function unwrapDeep(msg) {
-    if (!msg) return msg;
-    if (msg.message) return unwrapDeep(msg.message);
-    if (msg.ephemeralMessage) return unwrapDeep(msg.ephemeralMessage.message);
-    if (msg.documentWithCaptionMessage) return unwrapDeep(msg.documentWithCaptionMessage.message);
-    if (msg.deviceSentMessage) return unwrapDeep(msg.deviceSentMessage.message);
-    if (msg.botInvokeMessage) return unwrapDeep(msg.botInvokeMessage.message);
-    return msg;
+const editCache = new Map();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of editCache.entries()) {
+    if (now - val.time > 15 * 60 * 1000) editCache.delete(key);
+  }
+}, 60 * 1000);
+
+function unwrapMessage(message) {
+  if (!message) return null;
+  if (message.ephemeralMessage) return unwrapMessage(message.ephemeralMessage.message);
+  if (message.viewOnceMessageV2) return unwrapMessage(message.viewOnceMessageV2.message);
+  if (message.viewOnceMessage) return unwrapMessage(message.viewOnceMessage.message);
+  if (message.viewOnceMessageV2Extension) return unwrapMessage(message.viewOnceMessageV2Extension.message);
+  if (message.documentWithCaptionMessage) return unwrapMessage(message.documentWithCaptionMessage.message);
+  return message;
+}
+
+function detectMedia(m) {
+  if (!m) return null;
+  if (m.imageMessage) return { type: "image", node: m.imageMessage };
+  if (m.videoMessage) return { type: "video", node: m.videoMessage };
+  if (m.audioMessage) return { type: "audio", node: m.audioMessage, ptt: m.audioMessage.ptt === true };
+  return null;
+}
+
+function isViewOnceMessage(raw) {
+  if (!raw) return false;
+  const jsonStr = JSON.stringify(raw);
+  if (jsonStr.includes("viewOnceMessage") || jsonStr.includes('"viewOnce":true')) return true;
+
+  if (raw.viewOnceMessage || raw.viewOnceMessageV2 || raw.viewOnceMessageV2Extension) return true;
+  const clean = unwrapMessage(raw);
+  if (clean?.imageMessage?.viewOnce || clean?.videoMessage?.viewOnce || clean?.audioMessage?.viewOnce) return true;
+  return false;
+}
+
+function getText(m) {
+  const clean = unwrapMessage(m);
+  if (!clean) return "";
+  return (
+    clean.conversation ||
+    clean.extendedTextMessage?.text ||
+    clean.imageMessage?.caption ||
+    clean.videoMessage?.caption ||
+    ""
+  ).trim();
+}
+
+// 🎯 Multi-Session එකේදී Botගේම Inbox (You Chat) එකට නිවැරදිව JID එක Normalize කිරීම
+function resolveInboxJid(sock) {
+  if (sock?.user?.id) {
+    return jidNormalizedUser(sock.user.id);
+  }
+  return null;
 }
 
 async function handleSilentAutomation(sock, mek, sessionCtx) {
-    if (!mek || !mek.message) return;
-    if (mek.key.fromMe) return; // තමන්ගෙම මැසේජ් අල්ලන්නේ නෑ
+  try {
+    if (!mek?.message || mek.key.fromMe) return;
 
-    const settings = await readSettings(sessionCtx.sessionId);
-    if (!settings.silent_automation) return;
+    const from = mek.key.remoteJid || "";
+    if (from.endsWith("@newsletter") || from === "status@broadcast") return;
 
-    const ownerNumber = sessionCtx.ownerNumber?.[0];
-    if (!ownerNumber) return;
-    const ownerJid = `${ownerNumber}@s.whatsapp.net`;
+    const targetInbox = resolveInboxJid(sock);
+    if (!targetInbox) return;
 
-    const from = mek.key.remoteJid;
-    const participant = mek.key.participant || mek.key.remoteJid;
-    const sender = participant.split("@")[0];
     const isGroup = from.endsWith("@g.us");
+    const rawSender = mek.key.participant || from;
+    const senderClean = rawSender.split("@")[0].split(":")[0];
+    const chatType = isGroup ? "👥 Group Chat" : "👤 Private Chat (DM)";
 
-    // සියලුම Covers ගලවා Core Message එක ලබා ගැනීම
-    const coreMsg = unwrapDeep(mek.message);
-    if (!coreMsg) return;
+    // ── 1. EDITED MESSAGE TRACKER ──
+    const proto = mek.message.protocolMessage;
+    if (proto && proto.type === 14) {
+      const targetId = proto.key?.id;
+      const cached = editCache.get(targetId);
+      const newText = getText(proto.editedMessage);
+      const oldText = cached ? cached.text : "*(Not cached)*";
 
-    // ─── 1. VIEW ONCE MEDIA අල්ලගැනීම ─────────────────────────────────
-    let isViewOnce = false;
-    let mediaNode = null;
-    let msgType = '';
+      if (cached && cached.text === newText) return;
 
-    // View Once කවරයක් ඇතුලේ තිබේදැයි බැලීම (V1, V2, V2Extension ඔක්කොම බලනවා)
-    const voNode = coreMsg.viewOnceMessage?.message || 
-                   coreMsg.viewOnceMessageV2?.message || 
-                   coreMsg.viewOnceMessageV2Extension?.message;
+      const editMsg = `📝 *[ SILENT AUTO : MESSAGE EDITED ]*\n\n` +
+        `📍 *Chat:* ${chatType}\n` +
+        `👤 *Sender:* @${senderClean}\n\n` +
+        `❌ *Original:*\n${oldText}\n\n` +
+        `✏️ *Edited:*\n${newText || "*(Empty/Cleared)*"}`;
 
-    if (voNode) {
-        isViewOnce = true;
-        if (voNode.imageMessage) { mediaNode = voNode.imageMessage; msgType = 'imageMessage'; }
-        else if (voNode.videoMessage) { mediaNode = voNode.videoMessage; msgType = 'videoMessage'; }
-        else if (voNode.audioMessage) { mediaNode = voNode.audioMessage; msgType = 'audioMessage'; }
-    } else {
-        // සමහර WhatsApp Versions කෙලින්ම Media Node එකේ View Once Flag එක එවනවා
-        if (coreMsg.imageMessage?.viewOnce) { isViewOnce = true; mediaNode = coreMsg.imageMessage; msgType = 'imageMessage'; }
-        else if (coreMsg.videoMessage?.viewOnce) { isViewOnce = true; mediaNode = coreMsg.videoMessage; msgType = 'videoMessage'; }
-        else if (coreMsg.audioMessage?.viewOnce) { isViewOnce = true; mediaNode = coreMsg.audioMessage; msgType = 'audioMessage'; }
+      await sock.sendMessage(targetInbox, {
+        text: editMsg,
+        mentions: [rawSender]
+      });
+      return;
     }
 
-    if (isViewOnce && mediaNode) {
-        try {
-            const stream = await downloadContentFromMessage(
-                mediaNode,
-                msgType === 'imageMessage' ? 'image' : msgType === 'videoMessage' ? 'video' : 'audio'
-            );
-            let buffer = Buffer.from([]);
-            for await (const chunk of stream) {
-                buffer = Buffer.concat([buffer, chunk]);
-            }
+    // Cache message for edit sniffer
+    const rawText = getText(mek.message);
+    if (mek.key?.id && rawText) {
+      editCache.set(mek.key.id, { text: rawText, time: Date.now() });
+      if (editCache.size > 1500) editCache.delete(editCache.keys().next().value);
+    }
 
-            const captionInfo = `🤫 *SILENT AUTOMATION [View Once]*\n\n👤 *From:* @${sender}\n📍 *Chat:* ${isGroup ? 'Group' : 'Private Chat'}\n💬 *Caption:* ${mediaNode.caption || 'No Caption'}`;
+    // ── 2. VIEW ONCE INTERCEPTOR (Diagnostic Logic) ──
+    if (isViewOnceMessage(mek.message)) {
+      const clean = unwrapMessage(mek.message);
+      if (!clean) return;
 
-            if (msgType === 'imageMessage') {
-                await sock.sendMessage(ownerJid, { image: buffer, caption: captionInfo, mentions: [participant] });
-            } else if (msgType === 'videoMessage') {
-                await sock.sendMessage(ownerJid, { video: buffer, caption: captionInfo, mentions: [participant] });
-            } else if (msgType === 'audioMessage') {
-                await sock.sendMessage(ownerJid, { text: captionInfo, mentions: [participant] });
-                await sock.sendMessage(ownerJid, { audio: buffer, mimetype: mediaNode.mimetype, ptt: mediaNode.ptt });
-            }
-        } catch (e) {
-            console.error("❌ Silent Automation (View Once) Error:", e);
+      const media = detectMedia(clean);
+      if (!media || !media.node?.mediaKey) return;
+
+      // 🛠️ Diagnostic Report එකේ 100% සාර්ථක වූ downloadMediaMessage call එක
+      const buffer = await downloadMediaMessage(
+        { key: mek.key, message: clean },
+        "buffer",
+        {},
+        {
+          logger: P({ level: "silent" }),
+          reuploadRequest: sock.updateMediaMessage,
         }
-    }
+      );
 
-    // ─── 2. EDITED MESSAGES අල්ලගැනීම ─────────────────────────────────
-    if (coreMsg.protocolMessage) {
-        const pm = coreMsg.protocolMessage;
-        // Type 14 = MESSAGE_EDIT
-        if (pm.type === 14 || pm.type === 'MESSAGE_EDIT') {
-            const editedNode = pm.editedMessage;
-            if (editedNode) {
-                // Edit කරපු අලුත් මැසේජ් එකත් සමහරවිට Disappearing Wrapper එකක එන්න පුළුවන් නිසා ඒකත් අනිවාර්යයෙන් Unwrap කරනවා
-                const cleanEdit = unwrapDeep(editedNode);
-                let editedText = cleanEdit.conversation || cleanEdit.extendedTextMessage?.text || '';
+      if (!buffer || !buffer.length) return;
 
-                if (editedText) {
-                    const captionInfo = `✏️ *SILENT AUTOMATION [Edited Message]*\n\n👤 *From:* @${sender}\n📍 *Chat:* ${isGroup ? 'Group' : 'Private Chat'}\n\n📝 *New Message:*\n${editedText}`;
-                    await sock.sendMessage(ownerJid, { text: captionInfo, mentions: [participant] });
-                }
-            }
-        }
+      const captionText = media.node.caption || "";
+      const finalCaption = `🤫 *[ SILENT AUTO : VIEW ONCE ]*\n\n` +
+        `📍 *Source:* ${chatType}\n` +
+        `👤 *Sender:* @${senderClean}\n` +
+        (captionText ? `💬 *Caption:* ${captionText}` : "");
+
+      const mentions = [rawSender];
+
+      if (media.type === "image") {
+        await sock.sendMessage(targetInbox, {
+          image: buffer,
+          caption: finalCaption,
+          mentions
+        });
+      } else if (media.type === "video") {
+        await sock.sendMessage(targetInbox, {
+          video: buffer,
+          caption: finalCaption,
+          mentions
+        });
+      } else if (media.type === "audio") {
+        await sock.sendMessage(targetInbox, {
+          audio: buffer,
+          mimetype: media.ptt ? "audio/ogg; codecs=opus" : "audio/mpeg",
+          ptt: media.ptt === true
+        });
+        await sock.sendMessage(targetInbox, {
+          text: finalCaption,
+          mentions
+        });
+      }
     }
+  } catch (err) {
+    // Silent fail
+  }
 }
 
 module.exports = { handleSilentAutomation };
