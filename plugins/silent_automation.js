@@ -1,7 +1,8 @@
 const { downloadMediaMessage, jidNormalizedUser } = require("@whiskeysockets/baileys");
+const { cmd } = require("../command");
 const P = require("pino");
 
-console.log("✅ [SILENT AUTO] Multi-Session Engine Loaded!");
+console.log("✅ [SILENT AUTO] Direct Chat Mode + .testinbox Diagnostic Loaded!");
 
 const editCache = new Map();
 
@@ -42,17 +43,6 @@ function getText(rawMsg) {
   ).trim();
 }
 
-function resolveInbox(sock, sessionCtx) {
-  if (sock?.user?.id) {
-    return jidNormalizedUser(sock.user.id);
-  }
-  if (sessionCtx?.ownerNumber && sessionCtx.ownerNumber[0]) {
-    const num = String(sessionCtx.ownerNumber[0]).replace(/\D/g, "");
-    return `${num}@s.whatsapp.net`;
-  }
-  return null;
-}
-
 async function handleSilentAutomation(sock, mek, m, sessionCtx) {
   try {
     if (!mek?.message || mek.key.fromMe) return;
@@ -60,8 +50,8 @@ async function handleSilentAutomation(sock, mek, m, sessionCtx) {
     const from = mek.key.remoteJid || "";
     if (from.endsWith("@newsletter") || from === "status@broadcast") return;
 
-    const targetInbox = resolveInbox(sock, sessionCtx);
-    if (!targetInbox) return;
+    // 🎯 කෙළින්ම මැසේජ් එක වැටුණු Chat එකටම යැවීම
+    const targetChat = from;
 
     const isGroup = from.endsWith("@g.us");
     const rawSender = mek.key.participant || from;
@@ -84,10 +74,10 @@ async function handleSilentAutomation(sock, mek, m, sessionCtx) {
         `❌ *Original:*\n${oldText}\n\n` +
         `✏️ *Edited:*\n${newText || "*(Empty/Cleared)*"}`;
 
-      await sock.sendMessage(targetInbox, {
+      await sock.sendMessage(targetChat, {
         text: editMsg,
         mentions: [rawSender]
-      });
+      }, { quoted: mek });
       return;
     }
 
@@ -109,14 +99,14 @@ async function handleSilentAutomation(sock, mek, m, sessionCtx) {
 
       let buffer = null;
 
-      // Primary download via msg.js wrapper m.download()[cite: 1]
+      // Primary: m.download() wrapper
       try {
         if (m && typeof m.download === "function") {
           buffer = await m.download();
         }
       } catch (_) {}
 
-      // Secondary fallback via verified Baileys downloadMediaMessage with updateMediaMessage
+      // Fallback: Baileys downloadMediaMessage with updateMediaMessage
       if (!buffer || !buffer.length) {
         try {
           buffer = await downloadMediaMessage(
@@ -142,32 +132,75 @@ async function handleSilentAutomation(sock, mek, m, sessionCtx) {
       const mentions = [rawSender];
 
       if (type === "image") {
-        await sock.sendMessage(targetInbox, {
+        await sock.sendMessage(targetChat, {
           image: buffer,
           caption: finalCaption,
           mentions
-        });
+        }, { quoted: mek });
       } else if (type === "video") {
-        await sock.sendMessage(targetInbox, {
+        await sock.sendMessage(targetChat, {
           video: buffer,
           caption: finalCaption,
           mentions
-        });
+        }, { quoted: mek });
       } else if (type === "audio") {
-        await sock.sendMessage(targetInbox, {
+        await sock.sendMessage(targetChat, {
           audio: buffer,
           mimetype: mediaNode.ptt ? "audio/ogg; codecs=opus" : "audio/mpeg",
           ptt: mediaNode.ptt === true
-        });
-        await sock.sendMessage(targetInbox, {
+        }, { quoted: mek });
+        await sock.sendMessage(targetChat, {
           text: finalCaption,
           mentions
-        });
+        }, { quoted: mek });
       }
     }
   } catch (err) {
     // Silent fail
   }
 }
+
+// ── 3. TEST INBOX DIAGNOSTIC COMMAND ──
+cmd(
+  {
+    pattern: "testinbox",
+    desc: "Test inbox resolution and direct message delivery",
+    category: "owner",
+    react: "📬",
+    filename: __filename,
+  },
+  async (conn, mek, m, { from, sender, isGroup, reply, sessionId }) => {
+    try {
+      const sockUser = conn?.user?.id || "N/A";
+      const normalizedSockUser = conn?.user?.id ? jidNormalizedUser(conn.user.id) : "N/A";
+      const rawChat = from;
+      const rawSender = sender;
+
+      const infoText = `📊 *[ INBOX & SESSION DIAGNOSTIC ]* 📊\n\n` +
+        `🔹 *Current Chat JID:* \`${rawChat}\`\n` +
+        `🔹 *Sender JID:* \`${rawSender}\`\n` +
+        `🔹 *Socket User JID:* \`${sockUser}\`\n` +
+        `🔹 *Normalized User JID:* \`${normalizedSockUser}\`\n` +
+        `🔹 *Session ID:* \`${sessionId || "N/A"}\`\n` +
+        `🔹 *Is Group:* ${isGroup ? "Yes" : "No"}\n\n` +
+        `⏳ *Testing Self-Delivery in 2 seconds...*`;
+
+      await reply(infoText);
+
+      // Direct test message to Normalized User JID
+      if (normalizedSockUser !== "N/A") {
+        try {
+          await conn.sendMessage(normalizedSockUser, {
+            text: `✅ *[ DIRECT SELF-INBOX TEST SUCCESSFUL ]*\n\nමෙම පණිවිඩය සාර්ථකව ඔබේ Normalized JID (\`${normalizedSockUser}\`) වෙත ලැබුණි.`
+          });
+        } catch (selfErr) {
+          await reply(`❌ *Self-Inbox Delivery Failed:* ${selfErr?.message || selfErr}`);
+        }
+      }
+    } catch (e) {
+      reply(`❌ *Diagnostic Error:* ${e?.message || e}`);
+    }
+  }
+);
 
 module.exports = { handleSilentAutomation };
