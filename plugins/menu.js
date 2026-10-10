@@ -8,7 +8,7 @@ const pendingMenu = Object.create(null);
 const lastProcessedMsg = {};
 const LOOP_COOLDOWN = 2500;
 
-/* ============ PERMANENT BRANDING ============ */
+/* ============ PERMANENT BRANDING (DO NOT CHANGE) ============ */
 const BRAND_BASE = "MALIYA-MD";
 const DEFAULT_BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
 const PREFIX = ".";
@@ -46,18 +46,27 @@ let cachedMenu = null;
 let cacheTime = 0;
 const MENU_CACHE_MS = 60 * 1000;
 
-/* ================= HELPERS (SAME AS CINESUBZ) ================= */
+/* ================= HELPERS ================= */
+
+// Menu state is stored per chat (so button/number replies always find it)
 function keyFor(sender, from) {
   return `${from || ""}`;
 }
 
-function clearUserSession(k) {
-  delete pendingMenu[k];
+// Shared dedupe: command + reply handler both fire on a button click,
+// this makes sure only one of them actually sends the message.
+function shouldSkip(k, sig) {
+  const now = Date.now();
+  const last = lastProcessedMsg[k];
+  if (last && last.text === sig && now - last.time < LOOP_COOLDOWN) return true;
+  lastProcessedMsg[k] = { text: sig, time: now };
+  return false;
 }
 
 function getQuotedId(m, mek) {
   return (
     m?.quoted?.id ||
+    m?.quoted?.key?.id ||
     mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
     m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
     m?.message?.imageMessage?.contextInfo?.stanzaId ||
@@ -66,6 +75,23 @@ function getQuotedId(m, mek) {
     mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
     null
   );
+}
+
+// Remember every menu message we sent (so replying to an older menu still works)
+function registerSent(state, sent) {
+  const id = sent?.key?.id;
+  if (!id) return;
+  if (!state.ids) state.ids = new Set();
+  state.ids.add(id);
+  state.expectedMsgId = id;
+  state.timestamp = Date.now();
+}
+
+function isQuotedMenu(state, m, mek) {
+  const quotedId = getQuotedId(m, mek);
+  if (!quotedId) return false;
+  if (state.ids && state.ids.has(quotedId)) return true;
+  return !!(state.expectedMsgId && quotedId === state.expectedMsgId);
 }
 
 function cleanPhone(num = "") {
@@ -78,7 +104,8 @@ function sameNumber(a = "", b = "") {
 
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const small = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+  const small =
+    "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
   return String(str)
     .split("")
     .map((char) => {
@@ -181,7 +208,6 @@ function buildCommandMapCached() {
   return cachedMenu;
 }
 
-// Exactly like original code for Button thumbnail buffer
 async function getFittedImageBuffer(url) {
   try {
     const res = await axios.get(url, { responseType: "arraybuffer", timeout: 10000 });
@@ -196,6 +222,28 @@ async function getFittedImageBuffer(url) {
   } catch (e) {
     return url;
   }
+}
+
+async function getHeaderImage(sessionId) {
+  let headerImg = DEFAULT_HEADER_IMAGE;
+  if (sessionId) {
+    try {
+      const custom = await getCustomImage(sessionId, "menu_header");
+      if (custom && custom.data) headerImg = custom.data;
+    } catch (e) {}
+  }
+  return headerImg;
+}
+
+async function getBotName(sessionId) {
+  let name = DEFAULT_BOT_NAME;
+  if (sessionId) {
+    try {
+      const settings = await readSettings(sessionId);
+      if (settings?.bot_name) name = String(settings.bot_name).trim();
+    } catch (e) {}
+  }
+  return name;
 }
 
 function menuHeader(userName = "User", latency = "0ms", botDisplayName = DEFAULT_BOT_NAME) {
@@ -220,7 +268,8 @@ function menuHeader(userName = "User", latency = "0ms", botDisplayName = DEFAULT
 👇 *Select a command category below to view commands:*
 
 🌐 *Web:* https://maliya-md.vercel.app
-🌸 *Video:* https://youtube.com/shorts/sxWbUypZG64?si=ZNPWj8kLWEjRM1tf`;
+
+🌸 *Video* https://youtube.com/shorts/sxWbUypZG64?si=ZNPWj8kLWEjRM1tf`;
 }
 
 function buildStyledMainMenu(state, userName, latency = "0ms", botDisplayName = DEFAULT_BOT_NAME) {
@@ -243,7 +292,7 @@ function buildStyledMainMenu(state, userName, latency = "0ms", botDisplayName = 
     const emo = getCategoryEmoji(cat);
     const numStr = String(idx + 1).padStart(2, "0");
     const styledCat = toSmallCaps(cat);
-    msg += `*[ ${numStr} ]*${emo}  *${styledCat}*  _(${state.map[cat].length})_\n`;
+    msg += `*[ ${numStr} ]*  ${emo}  *${styledCat}*  _(${state.map[cat].length})_\n`;
   });
   msg += `\n━─ ⋆ ⋅ 𖤐 ⋅ ⋆ ─━┈➤\n> 💬 *Swipe & Reply this message with a number...*\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
   return msg;
@@ -264,11 +313,10 @@ function commandListCaption(cat, list, userName = "User", botDisplayName = DEFAU
     txt += `  ╰ 📌 *\`ᴅᴇsᴄ\` :* _${c.desc || "No description"}_\n\n`;
   });
 
-  txt += `────━──✦❘•❘✦──━───\n> 👑 ${botDisplayName} \vert{} ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
+  txt += `────━──✦❘•❘✦──━───\n> 👑 ${botDisplayName} | ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
   return txt;
 }
 
-// Exactly like cinesubz text extractor
 function extractTexts(body, mek, m) {
   const texts = [];
   const direct = [
@@ -286,6 +334,7 @@ function extractTexts(body, mek, m) {
     mek?.message?.extendedTextMessage?.text,
     mek?.message?.buttonsResponseMessage?.selectedButtonId,
     mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    mek?.message?.interactiveResponseMessage?.body?.text,
   ];
   for (const item of direct) {
     if (item) texts.push(String(item).trim());
@@ -307,26 +356,40 @@ function extractTexts(body, mek, m) {
   return [...new Set(texts.filter(Boolean))];
 }
 
+// Works for: ".menuview CAT", ".menu_view CAT", list titles, "menu_view:CAT", ".menuall", ".menu_all"
 function resolveMenuAction(texts, state) {
-  const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
-  for (const text of normalized) {
-    if (text === "≡ LIST MENU" || text === ".MENU_ALL" || text === "MENU_VIEW:ALL") {
+  const cats = state.categories || [];
+
+  for (const raw of texts) {
+    const text = normalizeText(raw);
+    if (!text) continue;
+
+    if (
+      text === "≡ LIST MENU" ||
+      text === ".MENUALL" ||
+      text === ".MENU_ALL" ||
+      text === "MENU_VIEW:ALL"
+    ) {
       return { type: "all" };
     }
-    if (text.startsWith("MENU_VIEW:")) {
-      return { type: "view", cat: text.replace("MENU_VIEW:", "").trim() };
+
+    // id style: ".menuview CAT" / ".menu_view CAT" / "MENU_VIEW:CAT"
+    const idMatch = text.match(/^\.?MENU_?VIEW[:\s]+(.+)$/);
+    if (idMatch) {
+      const wanted = idMatch[1].trim();
+      const found = cats.find((c) => normalizeText(c) === wanted);
+      if (found) return { type: "view", cat: found };
     }
-    if (text.startsWith(".MENU_VIEW")) {
-      return { type: "view", cat: text.replace(".MENU_VIEW", "").trim() };
-    }
-    for (const cat of state.categories || []) {
-      const catText = normalizeText(cat);
+
+    // list title style: "<emoji> <SMALLCAPS CAT> MENU"
+    for (const cat of cats) {
+      const plain = normalizeText(cat);
+      const small = normalizeText(toSmallCaps(cat));
       if (
-        text === `${catText} MENU` ||
-        text.includes(`${catText} MENU`) ||
-        text === `${catText} COMMANDS` ||
-        text.includes(`${catText} COMMANDS`) ||
-        text === catText
+        text.includes(`${plain} MENU`) ||
+        text.includes(`${small} MENU`) ||
+        text.includes(`${plain} COMMANDS`) ||
+        text.includes(`${small} COMMANDS`)
       ) {
         return { type: "view", cat };
       }
@@ -335,7 +398,16 @@ function resolveMenuAction(texts, state) {
   return null;
 }
 
-// Exactly the original safeSendImageOrText
+// Finds a plain number (1..N) from the incoming texts
+function resolveNumber(texts, state) {
+  for (const t of texts) {
+    if (!/^\d{1,3}$/.test(String(t).trim())) continue;
+    const num = parseInt(t, 10);
+    if (num > 0 && num <= (state.categories || []).length) return num;
+  }
+  return null;
+}
+
 async function safeSendImageOrText(sock, from, imgUrl, caption, mek) {
   try {
     return await sock.sendMessage(
@@ -360,13 +432,7 @@ async function safeSendImageOrText(sock, from, imgUrl, caption, mek) {
 }
 
 async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId, botDisplayName) {
-  let headerImg = DEFAULT_HEADER_IMAGE;
-  if (sessionId) {
-    try {
-      const custom = await getCustomImage(sessionId, "menu_header");
-      if (custom && custom.data) headerImg = custom.data;
-    } catch (e) {}
-  }
+  const headerImg = await getHeaderImage(sessionId);
   return await safeSendImageOrText(
     sock,
     from,
@@ -391,15 +457,13 @@ cmd(
       const startTimestamp = Date.now();
       await sock.sendMessage(from, { react: { text: "📜", key: mek.key } });
 
-      const latencyMs = Date.now() - startTimestamp;
-      const latencyStr = `${latencyMs}ms`;
+      const latencyStr = `${Date.now() - startTimestamp}ms`;
 
       const { map, categories } = buildCommandMapCached();
       if (!categories.length) return reply("❌ No commands found!");
 
       const userName = getUserName(pushname, m, mek, sender);
       const k = keyFor(sender, from);
-      clearUserSession(k);
 
       let botDisplayName = DEFAULT_BOT_NAME;
       let btnsOn = true;
@@ -415,31 +479,28 @@ cmd(
 
       const state = {
         expectedMsgId: null,
+        ids: new Set(),
         map,
         categories,
         userName,
         sessionId,
         botDisplayName,
         timestamp: Date.now(),
-        isProcessing: false,
       };
 
-      let headerImg = DEFAULT_HEADER_IMAGE;
-      if (sessionId) {
-        try {
-          const custom = await getCustomImage(sessionId, "menu_header");
-          if (custom && custom.data) headerImg = custom.data;
-        } catch (e) {}
-      }
+      // Register the state BEFORE sending, so a very fast click never misses it
+      pendingMenu[k] = state;
+
+      const headerImg = await getHeaderImage(sessionId);
 
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
 
           const listRows = categories.map((cat) => ({
-            title: `${getCategoryEmoji(cat)}${toSmallCaps(cat)} MENU`,
+            title: `${getCategoryEmoji(cat)} ${toSmallCaps(cat)} MENU`,
             description: `${state.map[cat].length} commands available`,
-            id: `.menu_view ${cat}`,
+            id: `.menuview ${cat}`,
           }));
 
           const fittedThumb = await getFittedImageBuffer(headerImg);
@@ -450,7 +511,7 @@ cmd(
             .setThumbnail(fittedThumb);
 
           btn.addRawButton({
-            buttonId: ".menu_all",
+            buttonId: ".menuall",
             buttonText: { displayText: "≡ List Menu" },
             type: 1,
             nativeFlowInfo: {
@@ -472,9 +533,7 @@ cmd(
           const sentMsg = await btn.send(from, { quoted: mek });
 
           if (sentMsg?.key?.id) {
-            state.expectedMsgId = sentMsg.key.id;
-            pendingMenu[k] = state;
-            await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+            registerSent(state, sentMsg);
             return;
           }
         } catch (err) {
@@ -482,7 +541,7 @@ cmd(
         }
       }
 
-      // Exact fallback message (Buttons OFF)
+      // Number-reply mode (or button fallback)
       const sentMsg = await safeSendImageOrText(
         sock,
         from,
@@ -490,12 +549,7 @@ cmd(
         buildStyledMainMenu(state, userName, latencyStr, botDisplayName),
         mek
       );
-
-      if (sentMsg?.key?.id) {
-        state.expectedMsgId = sentMsg.key.id;
-        pendingMenu[k] = state;
-      }
-      await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+      registerSent(state, sentMsg);
     } catch (e) {
       console.log("MENU ERROR:", e?.message || e);
       reply("❌ Cannot send menu: " + (e?.message || e));
@@ -503,88 +557,154 @@ cmd(
   }
 );
 
-/* ================= EXACT CINESUBZ STYLE REPLY HANDLER ================= */
-const menuReplyHandler = {
-  filter: (text, { sender, from, m, mek }) => {
-    const k = keyFor(sender, from);
-    const pending = pendingMenu[k];
-    if (!pending) return false;
-
-    // Button interactions: check extracted texts
-    const texts = extractTexts(text, mek, m);
-    if (resolveMenuAction(texts, pending)) return true;
-
-    // Number matching (exactly as in cinesubz)
-    const num = parseInt(String(text || "").trim(), 10);
-    const max = pending.categories ? pending.categories.length : 0;
-    const isNum = !isNaN(num) && num > 0 && num <= max;
-
-    const quotedId = getQuotedId(m, mek);
-    const isQuoted = quotedId && quotedId === pending.expectedMsgId;
-
-    return isQuoted || isNum;
+/* ================= COMMAND: .menuall (button: List Menu) ================= */
+cmd(
+  {
+    pattern: "menuall",
+    alias: ["menu_all"],
+    dontAddCommandList: true,
+    filename: __filename,
   },
-  function: async (sock, mek, m, { from, body, sender, pushname, reply, sessionId }) => {
+  async (sock, mek, m, { from, sender, pushname, sessionId }) => {
     try {
       const k = keyFor(sender, from);
-      const pending = pendingMenu[k];
-      if (!pending || pending.isProcessing) return;
+      if (shouldSkip(k, "all:")) return;
 
-      const texts = extractTexts(body, mek, m);
-      let action = resolveMenuAction(texts, pending);
+      const { map, categories } = buildCommandMapCached();
+      const userName = getUserName(pushname, m, mek, sender);
+      const headerImg = await getHeaderImage(sessionId);
+      const botDisplayName = await getBotName(sessionId);
 
-      if (!action) {
-        let choice = null;
-        const num = parseInt(String(body || "").trim(), 10);
-        if (!isNaN(num)) choice = num;
+      const state =
+        pendingMenu[k] || {
+          expectedMsgId: null,
+          ids: new Set(),
+          map,
+          categories,
+          userName,
+          sessionId,
+          botDisplayName,
+          timestamp: Date.now(),
+        };
+      pendingMenu[k] = state;
 
-        if (choice && choice > 0 && choice <= pending.categories.length) {
-          action = { type: "view", cat: pending.categories[choice - 1] };
-        }
-      }
+      const sentMsg = await safeSendImageOrText(
+        sock,
+        from,
+        headerImg,
+        buildStyledMainMenu(state, userName, "0ms", botDisplayName),
+        mek
+      );
+      registerSent(state, sentMsg);
+    } catch (e) {
+      console.log("MENU ALL ERROR:", e);
+    }
+  }
+);
 
-      if (!action) return;
+/* ================= COMMAND: .menuview <CATEGORY> (button: list row) ================= */
+cmd(
+  {
+    pattern: "menuview",
+    alias: ["menu_view"],
+    dontAddCommandList: true,
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, q, sender, pushname, reply, sessionId }) => {
+    try {
+      const cat = String(q || "").trim().toUpperCase();
+      const k = keyFor(sender, from);
+      if (shouldSkip(k, `view:${cat}`)) return;
 
-      const now = Date.now();
-      const sig = `${action.type}_${action.cat || ""}`;
-      const lastMsg = lastProcessedMsg[k];
-      if (lastMsg && lastMsg.text === sig && now - lastMsg.time < LOOP_COOLDOWN) return;
-      lastProcessedMsg[k] = { text: sig, time: now };
-
-      const userName = pending.userName || getUserName(pushname, m, mek, sender);
-      const botDisplayName = pending.botDisplayName || DEFAULT_BOT_NAME;
-      const sid = sessionId || pending.sessionId;
-
-      if (action.type === "all") {
-        let headerImg = DEFAULT_HEADER_IMAGE;
-        if (sid) {
-          try {
-            const custom = await getCustomImage(sid, "menu_header");
-            if (custom && custom.data) headerImg = custom.data;
-          } catch (e) {}
-        }
-        const sent = await safeSendImageOrText(
-          sock,
-          from,
-          headerImg,
-          buildStyledMainMenu(pending, userName, "0ms", botDisplayName),
-          mek
-        );
-        if (sent?.key?.id) pending.expectedMsgId = sent.key.id;
-        return;
-      }
-
-      const cat = action.cat;
-      const list = pending.map[cat] || [];
+      const { map } = buildCommandMapCached();
+      const list = map[cat] || [];
       if (!list.length) return reply("❌ No commands found in this category.");
 
-      pending.timestamp = Date.now();
+      const userName = getUserName(pushname, m, mek, sender);
+      const botDisplayName = await getBotName(sessionId);
 
       await sock.sendMessage(from, {
         react: { text: getCategoryEmoji(cat), key: mek.key },
       });
 
-      return await sendCommandsList(sock, from, mek, cat, list, userName, sid, botDisplayName);
+      await sendCommandsList(sock, from, mek, cat, list, userName, sessionId, botDisplayName);
+    } catch (e) {
+      console.log("MENU VIEW ERROR:", e);
+    }
+  }
+);
+
+/* ================= REPLY HANDLER (button clicks + number replies) ================= */
+const menuReplyHandler = {
+  filter: (text, { sender, from, m, mek }) => {
+    const state = pendingMenu[keyFor(sender, from)];
+    if (!state) return false;
+
+    const texts = extractTexts(text, mek, m);
+
+    // Button / list click
+    if (resolveMenuAction(texts, state)) return true;
+
+    // Number reply (must be a reply to one of the menu messages)
+    return !!(resolveNumber(texts, state) && isQuotedMenu(state, m, mek));
+  },
+
+  function: async (sock, mek, m, { from, body, sender, pushname, reply }) => {
+    try {
+      const k = keyFor(sender, from);
+      const state = pendingMenu[k];
+      if (!state) return;
+
+      const texts = extractTexts(body, mek, m);
+      let action = resolveMenuAction(texts, state);
+
+      if (!action) {
+        if (!isQuotedMenu(state, m, mek)) return;
+        const num = resolveNumber(texts, state);
+        if (num) action = { type: "view", cat: state.categories[num - 1] };
+      }
+      if (!action) return;
+
+      if (shouldSkip(k, `${action.type}:${action.cat || ""}`)) return;
+
+      const userName = state.userName || getUserName(pushname, m, mek, sender);
+      const botDisplayName = state.botDisplayName || DEFAULT_BOT_NAME;
+
+      if (action.type === "all") {
+        const headerImg = await getHeaderImage(state.sessionId);
+        const sent = await safeSendImageOrText(
+          sock,
+          from,
+          headerImg,
+          buildStyledMainMenu(state, userName, "0ms", botDisplayName),
+          mek
+        );
+        registerSent(state, sent);
+        return;
+      }
+
+      const cat = action.cat;
+      const list = state.map[cat] || [];
+      if (!list.length) {
+        return reply("❌ No commands found in this category.");
+      }
+
+      state.timestamp = Date.now();
+
+      await sock.sendMessage(from, {
+        react: { text: getCategoryEmoji(cat), key: mek.key },
+      });
+
+      return await sendCommandsList(
+        sock,
+        from,
+        mek,
+        cat,
+        list,
+        userName,
+        state.sessionId,
+        botDisplayName
+      );
     } catch (e) {
       console.log("MENU ACTION ERROR:", e?.message || e);
     }
@@ -598,8 +718,9 @@ if (Array.isArray(replyHandlers)) {
 /* ================= AUTO CLEANUP ================= */
 setInterval(() => {
   const now = Date.now();
-  for (const k in pendingMenu) {
-    if (now - pendingMenu[k].timestamp > 3 * 60 * 1000) {
+  const timeout = 3 * 60 * 1000;
+  for (const k of Object.keys(pendingMenu)) {
+    if (now - pendingMenu[k].timestamp > timeout) {
       delete pendingMenu[k];
     }
   }
@@ -609,5 +730,3 @@ setInterval(() => {
     }
   }
 }, 30 * 1000);
-
-module.exports = { pendingMenu };
