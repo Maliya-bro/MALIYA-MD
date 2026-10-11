@@ -1,5 +1,4 @@
 const { cmd, commands } = require("../command");
-const config = require("../config");
 const axios = require("axios");
 const sharp = require("sharp");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
@@ -17,6 +16,30 @@ function toSmallCaps(str = "") {
   }).join("");
 }
 
+function getCategoryEmoji(cat) {
+  const c = String(cat || "").toUpperCase();
+  if (c.includes("DOWNLOAD")) return "📥";
+  if (c.includes("AI")) return "🤖";
+  if (c.includes("ANIME")) return "🍥";
+  if (c.includes("ADMIN")) return "🛡️";
+  if (c.includes("GROUP")) return "👥";
+  if (c.includes("OWNER")) return "👑";
+  if (c.includes("TOOLS")) return "🛠️";
+  if (c.includes("FUN")) return "🎉";
+  if (c.includes("GAME")) return "🎮";
+  if (c.includes("SEARCH")) return "🔎";
+  if (c.includes("NEWS")) return "📰";
+  if (c.includes("MEDIA")) return "🎬";
+  if (c.includes("CONFIG")) return "🛠️";
+  if (c.includes("MAIN")) return "📜";
+  if (c.includes("EDUCATION")) return "📚";
+  if (c.includes("MOVIE")) return "🎬";
+  if (c.includes("STICKER")) return "🖼️";
+  if (c.includes("CONVERT")) return "♻️";
+  if (c.includes("UTILITY")) return "🧰";
+  return "✨";
+}
+
 async function getFittedImageBuffer(url) {
   try {
     const res = await axios.get(url, { responseType: "arraybuffer", timeout: 10000 });
@@ -26,13 +49,13 @@ async function getFittedImageBuffer(url) {
   }
 }
 
-/* ================= 1. .menu COMMAND WITH INSPECTOR ================= */
+/* ================= 1. .menu COMMAND ================= */
 cmd(
   {
     pattern: "menu",
     alias: ["list", "botmenu", "help"],
     react: "📜",
-    desc: "Show command categories with full debugger",
+    desc: "Show command categories",
     category: "main",
     filename: __filename,
   },
@@ -55,7 +78,8 @@ cmd(
       try {
         const settings = await readSettings(sessionId);
         if (settings?.bot_name) botDisplayName = String(settings.bot_name).trim();
-        if (settings && typeof settings.btns_enabled !== "undefined") btnsOn = Boolean(settings.btns_enabled);
+        // Settings වල buttons off කරලා තිබුණත් default එක true කරමු
+        btnsOn = settings?.btns_enabled !== false;
       } catch (e) {}
 
       let headerImg = DEFAULT_HEADER_IMAGE;
@@ -66,43 +90,33 @@ cmd(
         } catch (e) {}
       }
 
-      let menuText = `╭───〔 🛠️ MENU FULL INSPECTOR 〕───┈➤\n`;
-      menuText += `┃ 🆔 Chat From       : ${from}\n`;
-      menuText += `┃ 👤 Sender          : ${sender}\n`;
-      menuText += `┃ 🔖 Message ID      : ${mek?.key?.id}\n`;
-      menuText += `┃ 🔘 Buttons State   : ${btnsOn ? "ON" : "OFF"}\n`;
-      menuText += `╰────────────────────────────────────┈➤\n\n`;
+      let menuText = `┏━━━━━━◥◣◆◢◤━━━━━━┓\n★彡 *${botDisplayName}* 彡★\n┗━━━━━━◢◤◆◥◣━━━━━━┛\n\n`;
+      menuText += `✨ 👋 *ʜɪ, ${toSmallCaps(pushname || "User")}!*\n\n`;
+      menuText += `╔═════. .★.══════════╗\n🤖 *\`ʙᴏᴛ\` :* ${botDisplayName}\n🎯 *\`ᴘʀᴇғɪx\` :* [ ${PREFIX} ]\n╚══════════. .★.═════╝\n\n`;
+      menuText += `👇 *Select a command category below:*\n\n`;
 
-      menuText += `*MAIN MENU*\n───────────────────────\n`;
       categories.forEach((cat, i) => {
         const numStr = String(i + 1).padStart(2, "0");
-        menuText += `┃ [ ${numStr} ] *${cat}* (${commandMap[cat].length})\n`;
+        menuText += `*[ ${numStr} ]* ➔ ${getCategoryEmoji(cat)} *${toSmallCaps(cat)}* _(${commandMap[cat].length})_\n`;
       });
-      menuText += `───────────────────────\n`;
-      menuText += `> 💬 Reply with an option number (e.g. 1, 2)`;
+      menuText += `\n⊱━━━━━━━━━━━━━━━⊰\n> 💬 *Swipe & Reply this message with a number...*`;
 
-      console.log("\n================ [MENU TRIGGERED] ================");
-      console.log("From JID   :", from);
-      console.log("Sender JID :", sender);
-      console.log("Msg ID     :", mek?.key?.id);
-      console.log("==================================================\n");
-
-      let sentMsg = null;
-
+      // 🔘 BUTTONS MODE
+      let sentSuccess = false;
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
           const listRows = categories.map((cat, i) => ({
-            title: `${toSmallCaps(cat)} MENU`,
+            title: `${getCategoryEmoji(cat)} ${toSmallCaps(cat)} MENU`,
             description: `${commandMap[cat].length} commands available`,
-            id: String(i + 1),
+            id: `.menu_pick ${i + 1}`, // Command එකක් විදිහටම Button ID එක යවන්න
           }));
 
           const fittedThumb = await getFittedImageBuffer(headerImg);
 
           const btn = new ButtonV2(sock)
             .setBody(menuText)
-            .setFooter("MALIYA-MD SYSTEM")
+            .setFooter("© 2026 MALIYA-MD")
             .setThumbnail(fittedThumb);
 
           btn.addRawButton({
@@ -119,21 +133,22 @@ cmd(
           });
 
           btn.addButton("📊 Ping", ".ping");
-          sentMsg = await btn.send(from, { quoted: mek });
+          await btn.send(from, { quoted: mek });
+          sentSuccess = true;
         } catch (err) {
-          sentMsg = await sock.sendMessage(from, { image: { url: headerImg }, caption: menuText }, { quoted: mek });
+          console.log("BUTTON ERROR:", err);
         }
-      } else {
-        sentMsg = await sock.sendMessage(from, { image: { url: headerImg }, caption: menuText }, { quoted: mek });
       }
 
+      if (!sentSuccess) {
+        await sock.sendMessage(from, { image: { url: headerImg }, caption: menuText }, { quoted: mek });
+      }
+
+      // Memory Store (Exact Sudda format)
       const stateData = {
         step: "category",
         commandMap,
         categories,
-        savedSender: sender,
-        savedFrom: from,
-        savedMsgId: sentMsg?.key?.id || mek?.key?.id,
         botDisplayName,
         sessionId,
         userName: pushname || "User",
@@ -149,61 +164,115 @@ cmd(
   }
 );
 
-/* ================= 2. SUDDA STYLE REPLY HANDLER ================= */
+/* ================= 2. BUTTON CLICK COMMAND HANDLER (.menu_pick) ================= */
+// Button එකක් click කරපු ගමන් Command එකක් විදිහට අල්ලන නිසා කවදාවත් bypass වෙන්නේ නෑ!
 cmd(
   {
-    filter: (text, { sender, from, m, mek }) => {
+    pattern: "menu_pick",
+    dontAddCommandList: true,
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, q, sender, pushname, reply, sessionId }) => {
+    const index = parseInt(String(q || "").trim(), 10) - 1;
+    const commandMap = {};
+    for (const command of commands) {
+      if (command.dontAddCommandList) continue;
+      const category = (command.category || "MISC").toUpperCase();
+      if (!commandMap[category]) commandMap[category] = [];
+      commandMap[category].push(command);
+    }
+    const categories = Object.keys(commandMap).sort();
+
+    if (isNaN(index) || index < 0 || index >= categories.length) return;
+
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+
+    const selectedCategory = categories[index];
+    const cmdsInCategory = commandMap[selectedCategory] || [];
+
+    const emo = getCategoryEmoji(selectedCategory);
+    const styledCat = toSmallCaps(selectedCategory);
+    let cmdText = `╭─── ⋆ ⋅ 𖤐 ⋅ ⋆ ━─┈➤\n${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n╰──━ ⋆ ⋅ 𖤐 ⋅ ⋆ ──┈➤\n\n👤 *\`ᴜsᴇʀ\` :* ${toSmallCaps(pushname || "User")}\n📦 *\`ᴛᴏᴛᴀʟ\` :* ${cmdsInCategory.length} Commands\n🎯 *\`ᴘʀᴇғɪx\` :* [ ${PREFIX} ]\n\n`;
+
+    cmdsInCategory.forEach((c) => {
+      const primary = c.pattern ? `${PREFIX}${toSmallCaps(c.pattern)}` : "No Pattern";
+      const aliases = (c.alias || []).filter(Boolean).map((a) => `${PREFIX}${toSmallCaps(a)}`);
+      cmdText += `🔹 *${primary}*\n`;
+      if (aliases.length) cmdText += `  ├ 💬 *\`ᴀʟɪᴀs\` :* \`${aliases.join(", ")}\`\n`;
+      cmdText += `  ╰ 📌 *\`ᴅᴇsᴄ\` :* _${c.desc || "No description"}_\n\n`;
+    });
+
+    cmdText += `────━──✦❘•❘✦──━───\n> 👑 MALIYA-MD | ᴘᴏᴡᴇʀᴇᴅ ʙʏ MALIYA-MD`;
+
+    let headerImg = DEFAULT_HEADER_IMAGE;
+    if (sessionId) {
+      try {
+        const custom = await getCustomImage(sessionId, "menu_header");
+        if (custom && custom.data) headerImg = custom.data;
+      } catch (e) {}
+    }
+
+    try {
+      await sock.sendMessage(from, { image: { url: headerImg }, caption: cmdText }, { quoted: mek });
+    } catch (err) {
+      await sock.sendMessage(from, { text: cmdText }, { quoted: mek });
+    }
+  }
+);
+
+/* ================= 3. NUMBER REPLY HANDLER (EXACT SUDDA LOGIC) ================= */
+cmd(
+  {
+    filter: (text, { sender, from }) => {
       const rawText = String(text || "").trim();
       const isNum = /^[1-9][0-9]*$/.test(rawText);
-
       const hasSenderState = Boolean(pendingMenu[sender] && pendingMenu[sender].step === "category");
       const hasFromState = Boolean(pendingMenu[from] && pendingMenu[from].step === "category");
-
-      console.log("\n---------------- [MENU FILTER CHECK] ----------------");
-      console.log("Incoming Text     :", `"${rawText}"`);
-      console.log("Pure Number Check :", isNum);
-      console.log("Sender Key State  :", hasSenderState, `(${sender})`);
-      console.log("From Key State    :", hasFromState, `(${from})`);
-      console.log("Filter Result     :", (hasSenderState || hasFromState) && isNum ? "PASS ✅" : "REJECT ❌");
-      console.log("-----------------------------------------------------\n");
 
       return (hasSenderState || hasFromState) && isNum;
     },
   },
   async (sock, mek, m, { from, body, sender, reply }) => {
+    const activeState = pendingMenu[sender] || pendingMenu[from];
+    if (!activeState) return;
+
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
-    const activeState = pendingMenu[sender] || pendingMenu[from];
-    if (!activeState) {
-      return reply("❌ Debug: State memory එකෙන් හමු නොවීය.");
-    }
-
-    const { commandMap, categories, savedSender, savedFrom, savedMsgId, botDisplayName } = activeState;
+    const { commandMap, categories, botDisplayName, sessionId, userName } = activeState;
     const index = parseInt(String(body).trim(), 10) - 1;
 
-    if (index < 0 || index >= categories.length) {
-      return reply(`❌ Invalid selection. 1 ත් ${categories.length} ත් අතර අංකයක් තෝරන්න.`);
-    }
+    if (index < 0 || index >= categories.length) return reply("❌ Invalid selection.");
 
     const selectedCategory = categories[index];
     const cmdsInCategory = commandMap[selectedCategory] || [];
 
-    let cmdText = `╭───〔 🛠️ MENU EXECUTION DETAILS 〕───┈➤\n`;
-    cmdText += `┃ 📥 Selected Input : ${String(body).trim()}\n`;
-    cmdText += `┃ 🗂️ Category       : ${selectedCategory}\n`;
-    cmdText += `┃ 👤 Sender Found   : ${sender}\n`;
-    cmdText += `┃ 🆔 Chat From      : ${from}\n`;
-    cmdText += `┃ 💾 Original MsgId : ${savedMsgId}\n`;
-    cmdText += `╰──────────────────────────────────────┈➤\n\n`;
+    const emo = getCategoryEmoji(selectedCategory);
+    const styledCat = toSmallCaps(selectedCategory);
+    let cmdText = `╭─── ⋆ ⋅ 𖤐 ⋅ ⋆ ━─┈➤\n${emo} *${styledCat} ᴄᴏᴍᴍᴀɴᴅs*\n╰──━ ⋆ ⋅ 𖤐 ⋅ ⋆ ──┈➤\n\n👤 *\`ᴜsᴇʀ\` :* ${toSmallCaps(userName)}\n📦 *\`ᴛᴏᴛᴀʟ\` :* ${cmdsInCategory.length} Commands\n🎯 *\`ᴘʀᴇғɪx\` :* [ ${PREFIX} ]\n\n`;
 
-    cmdText += `*${selectedCategory} COMMANDS*\n───────────────────────\n`;
     cmdsInCategory.forEach((c) => {
-      const patterns = [c.pattern, ...(c.alias || [])].filter(Boolean).map((p) => `.${p}`);
-      cmdText += `${patterns.join(", ")} - ${c.desc || "No description"}\n`;
+      const primary = c.pattern ? `${PREFIX}${toSmallCaps(c.pattern)}` : "No Pattern";
+      const aliases = (c.alias || []).filter(Boolean).map((a) => `${PREFIX}${toSmallCaps(a)}`);
+      cmdText += `🔹 *${primary}*\n`;
+      if (aliases.length) cmdText += `  ├ 💬 *\`ᴀʟɪᴀs\` :* \`${aliases.join(", ")}\`\n`;
+      cmdText += `  ╰ 📌 *\`ᴅᴇsᴄ\` :* _${c.desc || "No description"}_\n\n`;
     });
-    cmdText += `───────────────────────\nTotal Commands: ${cmdsInCategory.length}\n`;
 
-    await sock.sendMessage(from, { text: cmdText }, { quoted: mek });
+    cmdText += `────━──✦❘•❘✦──━───\n> 👑 ${botDisplayName} | ᴘᴏᴡᴇʀᴇᴅ ʙʏ MALIYA-MD`;
+
+    let headerImg = DEFAULT_HEADER_IMAGE;
+    if (sessionId) {
+      try {
+        const custom = await getCustomImage(sessionId, "menu_header");
+        if (custom && custom.data) headerImg = custom.data;
+      } catch (e) {}
+    }
+
+    try {
+      await sock.sendMessage(from, { image: { url: headerImg }, caption: cmdText }, { quoted: mek });
+    } catch (err) {
+      await sock.sendMessage(from, { text: cmdText }, { quoted: mek });
+    }
 
     delete pendingMenu[sender];
     delete pendingMenu[from];
