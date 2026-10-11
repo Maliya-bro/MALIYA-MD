@@ -4,7 +4,7 @@ const axios = require("axios");
 const sharp = require("sharp");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
-const pendingMenu = {}; // Exact sudda memory store
+const pendingMenu = {};
 const DEFAULT_HEADER_IMAGE = "https://github.com/Maliya-bro/web-pair/blob/main/ChatGPT%20Image%20Sep%2027,%202026,%2007_25_52%20PM.png?raw=true";
 const PREFIX = ".";
 
@@ -66,7 +66,6 @@ cmd(
         } catch (e) {}
       }
 
-      // 🛠️ SUDDA STYLE INSPECTOR HEADER
       let menuText = `╭───〔 🛠️ MENU FULL INSPECTOR 〕───┈➤\n`;
       menuText += `┃ 🆔 Chat From       : ${from}\n`;
       menuText += `┃ 👤 Sender          : ${sender}\n`;
@@ -96,7 +95,7 @@ cmd(
           const listRows = categories.map((cat, i) => ({
             title: `${toSmallCaps(cat)} MENU`,
             description: `${commandMap[cat].length} commands available`,
-            id: String(i + 1)
+            id: String(i + 1),
           }));
 
           const fittedThumb = await getFittedImageBuffer(headerImg);
@@ -128,7 +127,6 @@ cmd(
         sentMsg = await sock.sendMessage(from, { image: { url: headerImg }, caption: menuText }, { quoted: mek });
       }
 
-      // Memory Store (Exact Sudda pattern)
       const stateData = {
         step: "category",
         commandMap,
@@ -138,7 +136,7 @@ cmd(
         savedMsgId: sentMsg?.key?.id || mek?.key?.id,
         botDisplayName,
         sessionId,
-        userName: pushname || "User"
+        userName: pushname || "User",
       };
 
       pendingMenu[sender] = stateData;
@@ -151,7 +149,7 @@ cmd(
   }
 );
 
-/* ================= 2. SUDDA STYLE REPLY HANDLER WITH LOGGER ================= */
+/* ================= 2. SUDDA STYLE REPLY HANDLER ================= */
 cmd(
   {
     filter: (text, { sender, from, m, mek }) => {
@@ -170,7 +168,7 @@ cmd(
       console.log("-----------------------------------------------------\n");
 
       return (hasSenderState || hasFromState) && isNum;
-    }
+    },
   },
   async (sock, mek, m, { from, body, sender, reply }) => {
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
@@ -183,4 +181,33 @@ cmd(
     const { commandMap, categories, savedSender, savedFrom, savedMsgId, botDisplayName } = activeState;
     const index = parseInt(String(body).trim(), 10) - 1;
 
-    if (index < 0 || index >= categories.length
+    if (index < 0 || index >= categories.length) {
+      return reply(`❌ Invalid selection. 1 ත් ${categories.length} ත් අතර අංකයක් තෝරන්න.`);
+    }
+
+    const selectedCategory = categories[index];
+    const cmdsInCategory = commandMap[selectedCategory] || [];
+
+    let cmdText = `╭───〔 🛠️ MENU EXECUTION DETAILS 〕───┈➤\n`;
+    cmdText += `┃ 📥 Selected Input : ${String(body).trim()}\n`;
+    cmdText += `┃ 🗂️ Category       : ${selectedCategory}\n`;
+    cmdText += `┃ 👤 Sender Found   : ${sender}\n`;
+    cmdText += `┃ 🆔 Chat From      : ${from}\n`;
+    cmdText += `┃ 💾 Original MsgId : ${savedMsgId}\n`;
+    cmdText += `╰──────────────────────────────────────┈➤\n\n`;
+
+    cmdText += `*${selectedCategory} COMMANDS*\n───────────────────────\n`;
+    cmdsInCategory.forEach((c) => {
+      const patterns = [c.pattern, ...(c.alias || [])].filter(Boolean).map((p) => `.${p}`);
+      cmdText += `${patterns.join(", ")} - ${c.desc || "No description"}\n`;
+    });
+    cmdText += `───────────────────────\nTotal Commands: ${cmdsInCategory.length}\n`;
+
+    await sock.sendMessage(from, { text: cmdText }, { quoted: mek });
+
+    delete pendingMenu[sender];
+    delete pendingMenu[from];
+  }
+);
+
+module.exports = {};
