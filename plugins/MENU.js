@@ -554,11 +554,11 @@ function buildStyledMainMenu(state, userName, latency = "0ms", botDisplayName = 
 
   const { time, date } = nowLK();
 
-  let msg = `┏━━━━━━◥◣◆◢◤━━━━━━┓\n★彡 *${botDisplayName}* 彡★\n┗━━━━━━◢◤◆◥◣━━━━━━┛\n\n`;
+  let msg = `┏━━━━◥◣◆◢◤━━━━┓\n★彡 *${botDisplayName}* 彡★\n┗━━━━◢◤◆◥◣━━━━┛\n\n`;
 
   msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
 
-  msg += `╔═════. .★.══════════╗\n`;
+  msg += `╔═════. .★.════════╗\n`;
 
   msg += `🤖 *\`ʙᴏᴛ\` :* ${botDisplayName}\n`;
 
@@ -574,7 +574,7 @@ function buildStyledMainMenu(state, userName, latency = "0ms", botDisplayName = 
 
   msg += `⚡ *\`ʟᴀᴛᴇɴᴄʏ\` :* ${latency}\n`;
 
-  msg += `╚══════════. .★.═════╝\n\n`;
+  msg += `╚════════. .★.═════╝\n\n`;
 
 
 
