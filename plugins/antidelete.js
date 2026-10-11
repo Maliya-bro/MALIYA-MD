@@ -1,10 +1,9 @@
 const { readSettings } = require("../lib/botSettings");
 const { downloadContentFromMessage } = require("@whiskeysockets/baileys");
 
-// Message cache
 const store = new Map();
 
-// Helper: Extract clean text from message object
+// Helper: Text extract කර ගැනීම
 function extractText(message) {
   if (!message) return "";
   return (
@@ -17,10 +16,10 @@ function extractText(message) {
   );
 }
 
-// Helper: Format message alert layout using clean markdown
-function formatAlert({ title, isGroup, chatName, senderTag, content, isMedia = false }) {
+// Helper: Formatting alert
+function formatAlert({ title, isGroup, senderTag, content, isMedia = false }) {
   const time = new Date().toLocaleTimeString();
-  const scope = isGroup ? `👥 *Chat:* ${chatName || "Group"}` : "👤 *Chat:* Private DM";
+  const scope = isGroup ? "👥 *Chat:* Group" : "👤 *Chat:* Private DM";
 
   const lines = [
     `*${title}*`,
@@ -40,7 +39,75 @@ function formatAlert({ title, isGroup, chatName, senderTag, content, isMedia = f
   return lines.join("\n");
 }
 
+// Reusable function to handle Edit detection
+async function handleEditMessage(conn, updateObj) {
+  try {
+    const key = updateObj?.key;
+    const message = updateObj?.message || updateObj?.update?.message;
+    if (!key || !message) return;
+
+    // Check protocolMessage for edit type 14 OR editedMessage container
+    const protoMsg = message?.protocolMessage;
+    const isEdit = protoMsg?.type === 14 || Boolean(protoMsg?.editedMessage) || Boolean(message?.editedMessage);
+    if (!isEdit) return;
+
+    const targetKey = protoMsg?.key || key;
+    const targetId = targetKey.id;
+    if (!targetId) return;
+
+    const oldMsgData = store.get(targetId);
+    if (!oldMsgData) return;
+
+    let settings = { anti_edit: true };
+    try {
+      settings = await readSettings();
+    } catch {}
+    if (settings.anti_edit === false) return;
+
+    const remoteJid = key.remoteJid || targetKey.remoteJid;
+    if (!remoteJid || remoteJid === "status@broadcast") return;
+
+    const isGroup = remoteJid.endsWith("@g.us");
+    const sender = key.participant || targetKey.participant || (isGroup ? null : remoteJid) || "";
+    const senderTag = sender ? `@${sender.split("@")[0]}` : "Unknown";
+
+    const oldText = extractText(oldMsgData.message);
+    const newMsgObj = protoMsg?.editedMessage || message?.editedMessage?.message || message?.editedMessage;
+    const newText = extractText(newMsgObj);
+
+    // Only alert if text actually changed
+    if (oldText && newText && oldText === newText) return;
+
+    const contentText = [
+      `📝 *Original Message:*\n> _${oldText || "(Empty / Media)"}_`,
+      ``,
+      `✏️ *Edited Message:*\n> _${newText || "(Empty)"}_`
+    ].join("\n");
+
+    const alertText = formatAlert({
+      title: "✏️ *EDITED MESSAGE DETECTED*",
+      isGroup,
+      senderTag,
+      content: contentText
+    });
+
+    await conn.sendMessage(remoteJid, {
+      text: alertText,
+      mentions: sender ? [sender] : []
+    });
+
+    // Update store with new text
+    store.set(targetId, {
+      ...oldMsgData,
+      message: newMsgObj
+    });
+  } catch (e) {
+    console.log("Anti-Edit Error:", e?.message || e);
+  }
+}
+
 module.exports = {
+  // 1. messages.upsert හරහා එන messages
   onMessage: async (conn, msg) => {
     try {
       if (!msg?.message || msg.key.fromMe) return;
@@ -48,56 +115,14 @@ module.exports = {
       const remoteJid = msg.key.remoteJid;
       if (!remoteJid || remoteJid === "status@broadcast") return;
 
-      // ── 1. CHECK FOR EDITED MESSAGES ────────────────────────
+      // Check if message itself is an edit payload
       const protoMsg = msg.message?.protocolMessage;
-      const isEdit = protoMsg?.type === 14 || Boolean(msg.message?.editedMessage);
-
-      if (isEdit) {
-        let settings = { anti_delete: true, anti_edit: true };
-        try {
-          settings = await readSettings();
-        } catch {}
-
-        if (settings.anti_edit !== false) {
-          const targetKey = protoMsg?.key || msg.key;
-          const targetId = targetKey.id;
-          const oldMsgData = store.get(targetId);
-
-          if (oldMsgData) {
-            const isGroup = remoteJid.endsWith("@g.us");
-            const sender = msg.key.participant || targetKey.participant || remoteJid;
-            const senderTag = `@${sender.split("@")[0]}`;
-
-            const oldText = extractText(oldMsgData.message);
-            const newMsgContent = protoMsg?.editedMessage || msg.message.editedMessage?.message;
-            const newText = extractText(newMsgContent);
-
-            const contentText = [
-              `📝 *Original Message:*\n> _${oldText || "(No Text / Media)"}_`,
-              ``,
-              `✏️ *Edited Message:*\n> _${newText || "(Empty)"}_`
-            ].join("\n");
-
-            const alertText = formatAlert({
-              title: "✏️ *EDITED MESSAGE DETECTED*",
-              isGroup,
-              senderTag,
-              content: contentText
-            });
-
-            await conn.sendMessage(
-              remoteJid,
-              {
-                text: alertText,
-                mentions: [sender]
-              },
-              { quoted: msg }
-            );
-          }
-        }
+      if (protoMsg?.type === 14 || Boolean(msg.message?.editedMessage)) {
+        await handleEditMessage(conn, msg);
+        return;
       }
 
-      // ── 2. SAVE INCOMING MESSAGE TO STORE ───────────────────
+      // Store normal incoming message
       const id = msg.key.id;
       if (!id) return;
 
@@ -109,7 +134,6 @@ module.exports = {
         remoteJid: remoteJid
       });
 
-      // Memory cleanup: limit to 2000 messages
       if (store.size > 2000) {
         const oldestKey = store.keys().next().value;
         if (oldestKey) store.delete(oldestKey);
@@ -119,6 +143,18 @@ module.exports = {
     }
   },
 
+  // 2. messages.update event එක හරහා edit messages අල්ලා ගැනීම
+  onUpdate: async (conn, updates) => {
+    try {
+      for (const update of updates) {
+        await handleEditMessage(conn, update);
+      }
+    } catch (e) {
+      console.log("Anti-Edit onUpdate Error:", e?.message || e);
+    }
+  },
+
+  // 3. Delete messages recover කිරීම
   onDelete: async (conn, updates) => {
     try {
       for (const item of updates) {
@@ -146,7 +182,6 @@ module.exports = {
         try {
           settings = await readSettings();
         } catch (e) {
-          console.log("⚠️ Anti-delete settings read error:", e?.message);
           continue;
         }
 
@@ -161,7 +196,7 @@ module.exports = {
 
         const senderTag = sender ? `@${sender.split("@")[0]}` : "Unknown";
 
-        // ── RESTORE TEXT ─────────────────────────────────────
+        // Text
         if (saved.message.conversation || saved.message.extendedTextMessage) {
           const text = extractText(saved.message);
           const alertText = formatAlert({
@@ -177,7 +212,7 @@ module.exports = {
           });
         }
 
-        // ── RESTORE MEDIA FILES ──────────────────────────────
+        // Media
         const mediaTypes = [
           { type: "image", obj: saved.message.imageMessage, label: "IMAGE" },
           { type: "video", obj: saved.message.videoMessage, label: "VIDEO" },
@@ -204,35 +239,15 @@ module.exports = {
           });
 
           if (media.type === "image") {
-            await conn.sendMessage(remoteJid, {
-              image: buffer,
-              caption: captionText,
-              mentions: sender ? [sender] : []
-            });
+            await conn.sendMessage(remoteJid, { image: buffer, caption: captionText, mentions: sender ? [sender] : [] });
           } else if (media.type === "video") {
-            await conn.sendMessage(remoteJid, {
-              video: buffer,
-              caption: captionText,
-              mentions: sender ? [sender] : []
-            });
+            await conn.sendMessage(remoteJid, { video: buffer, caption: captionText, mentions: sender ? [sender] : [] });
           } else if (media.type === "audio") {
-            await conn.sendMessage(remoteJid, {
-              text: captionText,
-              mentions: sender ? [sender] : []
-            });
-            await conn.sendMessage(remoteJid, {
-              audio: buffer,
-              mimetype: "audio/mp4",
-              ptt: true
-            });
+            await conn.sendMessage(remoteJid, { text: captionText, mentions: sender ? [sender] : [] });
+            await conn.sendMessage(remoteJid, { audio: buffer, mimetype: "audio/mp4", ptt: true });
           } else if (media.type === "sticker") {
-            await conn.sendMessage(remoteJid, {
-              text: captionText,
-              mentions: sender ? [sender] : []
-            });
-            await conn.sendMessage(remoteJid, {
-              sticker: buffer
-            });
+            await conn.sendMessage(remoteJid, { text: captionText, mentions: sender ? [sender] : [] });
+            await conn.sendMessage(remoteJid, { sticker: buffer });
           } else if (media.type === "document") {
             await conn.sendMessage(remoteJid, {
               document: buffer,
