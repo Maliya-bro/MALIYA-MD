@@ -5,8 +5,6 @@ const sharp = require("sharp");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const pendingMenu = Object.create(null);
-const lastProcessedMsg = {};
-const LOOP_COOLDOWN = 2500;
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 
 /* ============ PERMANENT BRANDING ============ */
@@ -47,13 +45,16 @@ let cachedMenu = null;
 let cacheTime = 0;
 const MENU_CACHE_MS = 60 * 1000;
 
-/* ================= HELPERS (FROM SETTINGS.JS) ================= */
+/* ================= HELPERS ================= */
 function keyFor(sender, from) {
   return `${sender || "unknown"}_${from || "unknown"}`;
 }
 
-function clearUserSession(k) {
-  delete pendingMenu[k];
+function getSafeMsgId(sentMsg) {
+  if (!sentMsg) return null;
+  if (typeof sentMsg === "string") return sentMsg;
+  if (sentMsg.key && sentMsg.key.id) return sentMsg.key.id;
+  return null;
 }
 
 function getQuotedId(m, mek) {
@@ -66,15 +67,6 @@ function getQuotedId(m, mek) {
   }
   if (m?.message?.imageMessage?.contextInfo?.stanzaId) {
     return m.message.imageMessage.contextInfo.stanzaId;
-  }
-  if (m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId) {
-    return m.message.interactiveResponseMessage.contextInfo.stanzaId;
-  }
-  if (mek?.message?.imageMessage?.contextInfo?.stanzaId) {
-    return mek.message.imageMessage.contextInfo.stanzaId;
-  }
-  if (mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId) {
-    return mek.message.interactiveResponseMessage.contextInfo.stanzaId;
   }
   return null;
 }
@@ -102,15 +94,8 @@ function sameNumber(a = "", b = "") {
 
 function getUserName(pushname, m, mek, sender = "") {
   const candidates = [
-    pushname,
-    m?.pushName,
-    mek?.pushName,
-    m?.name,
-    mek?.name,
-    m?.notifyName,
-    mek?.notifyName,
-    m?.chatName,
-    mek?.chatName,
+    pushname, m?.pushName, mek?.pushName, m?.name, mek?.name,
+    m?.notifyName, mek?.notifyName, m?.chatName, mek?.chatName,
   ];
   for (const item of candidates) {
     if (item && String(item).trim()) {
@@ -127,17 +112,10 @@ function getUserName(pushname, m, mek, sender = "") {
 function nowLK() {
   const d = new Date();
   const time = new Intl.DateTimeFormat("en-GB", {
-    timeZone: TZ,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
+    timeZone: TZ, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true,
   }).format(d);
   const date = new Intl.DateTimeFormat("en-GB", {
-    timeZone: TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
+    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
   }).format(d);
   return { time, date };
 }
@@ -279,76 +257,23 @@ function commandListCaption(cat, list, userName = "User", botDisplayName = DEFAU
   return txt;
 }
 
-// Exactly like settings.js extractTexts
-function extractTexts(body, mek, m) {
-  const texts = [];
-  const direct = [
-    body, m?.body, m?.text, m?.message?.conversation,
-    m?.message?.extendedTextMessage?.text, m?.message?.buttonsResponseMessage?.selectedButtonId,
-    m?.message?.buttonsResponseMessage?.selectedDisplayText,
-    m?.message?.listResponseMessage?.title, m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
-    m?.message?.interactiveResponseMessage?.body?.text,
-    mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
-    mek?.message?.buttonsResponseMessage?.selectedButtonId,
-    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
-  ];
-  direct.forEach((item) => {
-    if (item) texts.push(String(item).trim());
-  });
-
-  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  [p1, p2].forEach((raw) => {
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed.id) texts.push(String(parsed.id).trim());
-        if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
-        if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
-        if (parsed.title) texts.push(String(parsed.title).trim());
-        if (parsed.name) texts.push(String(parsed.name).trim());
-      } catch (e) {}
-    }
-  });
-
-  return [...new Set(texts.filter(Boolean))];
-}
-
-function resolveMenuActionFromText(text) {
-  let t = "";
-  if (text) t = String(text).trim();
-  if (!t) return null;
-
-  if (t.startsWith(".menuview ")) {
-    return t.replace(".menuview ", "").trim();
-  }
-  return null;
-}
-
 async function safeSendImageOrText(sock, from, imgUrl, caption, mek) {
   try {
     return await sock.sendMessage(
       from,
-      {
-        image: { url: imgUrl },
-        caption: caption,
-        contextInfo: channelContextInfo(),
-      },
+      { image: { url: imgUrl }, caption: caption, contextInfo: channelContextInfo() },
       { quoted: mek }
     );
   } catch (err) {
     return await sock.sendMessage(
       from,
-      {
-        text: caption,
-        contextInfo: channelContextInfo(),
-      },
+      { text: caption, contextInfo: channelContextInfo() },
       { quoted: mek }
     );
   }
 }
 
-/* ================= COMMAND: .menu ================= */
+/* ================= 1. COMMAND: MAIN MENU ================= */
 cmd(
   {
     pattern: "menu",
@@ -382,11 +307,8 @@ cmd(
 
       const headerImg = await getHeaderImage(sessionId);
 
-      // Map categories to flat options (Same style as settings.js)
-      const flatOpts = categories.map((cat) => ({
-        cat: cat,
-        cmd: `.menuview ${cat}`,
-      }));
+      // Create flat options for NUMBER reply fallback map
+      const flatOpts = categories.map((cat) => ({ cat: cat }));
 
       const state = {
         createdAt: Date.now(),
@@ -399,15 +321,14 @@ cmd(
         botDisplayName: botDisplayName,
       };
 
-      // 1. BUTTONS MODE (Both original buttons in the same row layout)
+      // BUTTONS MODE
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
-
           const listRows = categories.map((cat) => ({
             title: `${getCategoryEmoji(cat)} ${toSmallCaps(cat)} MENU`,
             description: `${map[cat].length} commands available`,
-            id: `.menuview ${cat}`,
+            id: `.menuview ${cat}`, // 🔥 Button sends command format
           }));
 
           const fittedThumb = await getFittedImageBuffer(headerImg);
@@ -417,32 +338,26 @@ cmd(
             .setFooter(`© 2026 ${BRAND_BASE} SYSTEM`)
             .setThumbnail(fittedThumb);
 
-          // Original Button 1: Single select popup list
           btn.addRawButton({
-            buttonId: ".menuall",
+            buttonId: "menu_list_main",
             buttonText: { displayText: "≡ List Menu" },
             type: 1,
             nativeFlowInfo: {
               name: "single_select",
               paramsJson: JSON.stringify({
                 title: "Click Here ↯",
-                sections: [
-                  {
-                    title: "Command Categories",
-                    rows: listRows,
-                  },
-                ],
+                sections: [{ title: "Command Categories", rows: listRows }],
               }),
             },
           });
 
-          // Original Button 2: Ping button alongside
           btn.addButton("📊 Ping", ".ping");
 
           const sentMsg = await btn.send(from, { quoted: mek });
+          const msgId = getSafeMsgId(sentMsg);
 
-          if (sentMsg?.key?.id) {
-            state.menuMsgId = sentMsg.key.id;
+          if (msgId) {
+            state.menuMsgId = msgId;
             pendingMenu[k] = state;
             await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
             return;
@@ -452,25 +367,13 @@ cmd(
         }
       }
 
-      // 2. NUMBER REPLY MODE FALLBACK
-      const captionText = buildStyledMainMenu(
-        categories,
-        map,
-        userName,
-        latencyStr,
-        botDisplayName
-      );
-
-      const sentMsg = await safeSendImageOrText(
-        sock,
-        from,
-        headerImg,
-        captionText,
-        mek
-      );
-
-      if (sentMsg?.key?.id) {
-        state.menuMsgId = sentMsg.key.id;
+      // NUMBER REPLY FALLBACK
+      const captionText = buildStyledMainMenu(categories, map, userName, latencyStr, botDisplayName);
+      const sentMsg = await safeSendImageOrText(sock, from, headerImg, captionText, mek);
+      
+      const msgId = getSafeMsgId(sentMsg);
+      if (msgId) {
+        state.menuMsgId = msgId;
         pendingMenu[k] = state;
       }
 
@@ -482,26 +385,55 @@ cmd(
   }
 );
 
-/* ================= EXACT SETTINGS.JS STYLE REPLY HANDLER ================= */
+/* ================= 2. COMMAND: BUTTON CLICK HANDLER (.menuview) ================= */
+// 🔥 බොත්තම් click කළාම .menuview MAIN විදිහට එන නිසා මෙය කෙලින්ම command එකකින් අල්ලයි.
+cmd(
+  {
+    pattern: "menuview",
+    dontAddCommandList: true,
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, q, sender, pushname, reply, sessionId }) => {
+    try {
+      const cat = String(q || "").trim().toUpperCase();
+      if (!cat) return;
+
+      const { map } = buildCommandMapCached();
+      const list = map[cat] || [];
+      if (!list.length) return reply("❌ No commands found in this category.");
+
+      const userName = getUserName(pushname, m, mek, sender);
+      let botDisplayName = DEFAULT_BOT_NAME;
+      try {
+        const settings = await readSettings(sessionId);
+        if (settings?.bot_name) botDisplayName = String(settings.bot_name).trim();
+      } catch (e) {}
+
+      const headerImg = await getHeaderImage(sessionId);
+      const caption = commandListCaption(cat, list, userName, botDisplayName);
+
+      await sock.sendMessage(from, { react: { text: getCategoryEmoji(cat), key: mek.key } });
+      await safeSendImageOrText(sock, from, headerImg, caption, mek);
+    } catch (e) {
+      console.log("MENU VIEW ERROR:", e?.message);
+    }
+  }
+);
+
+/* ================= 3. REPLY HANDLER: NUMBER REPLY HANDLER ================= */
+// 🔥 User Number 1, 2 වගේ type කළාම එය අල්ලගන්නේ මේ Handler එකෙනි.
 const menuReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
     const state = pendingMenu[k];
     if (!state) return false;
 
-    const texts = extractTexts(text, mek, m);
-    for (const t of texts) {
-      if (resolveMenuActionFromText(t)) {
-        return true;
-      }
-    }
-
     const num = parseInt(String(text || "").trim(), 10);
-    let isNum = !isNaN(num) && num > 0 && num <= state.options.length;
-
+    const isNum = !isNaN(num) && num > 0 && num <= state.options.length;
     const quotedId = getQuotedId(m, mek);
-    let isQuoted = quotedId && quotedId === state.menuMsgId;
+    const isQuoted = quotedId && quotedId === state.menuMsgId;
 
+    // 🔥 User Quote කරලා අංකය දැම්මත්, නිකන්ම අංකය දැම්මත් අල්ලගන්නවා
     return Boolean(isQuoted || isNum);
   },
 
@@ -510,37 +442,11 @@ const menuReplyHandler = {
     const state = pendingMenu[k];
     if (!state) return;
 
-    const texts = extractTexts(body, mek, m);
-    let selectedCategory = null;
+    const num = parseInt(String(body || "").trim(), 10);
+    if (isNaN(num) || num < 1 || num > state.options.length) return;
 
-    // Check button click text (.menuview <CAT>)
-    for (const t of texts) {
-      const cat = resolveMenuActionFromText(t);
-      if (cat) {
-        selectedCategory = cat.toUpperCase();
-        break;
-      }
-    }
-
-    // Check number reply from options (exact settings.js behavior)
-    if (!selectedCategory) {
-      const num = parseInt(String(body || "").trim(), 10);
-      if (!isNaN(num) && num > 0 && num <= state.options.length) {
-        selectedCategory = state.options[num - 1].cat;
-      }
-    }
-
-    if (!selectedCategory) return;
-
-    // Strict deduplication check
-    const now = Date.now();
-    const sig = `menu_${selectedCategory}`;
-    const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === sig && now - lastMsg.time < LOOP_COOLDOWN) {
-      return;
-    }
-    lastProcessedMsg[k] = { text: sig, time: now };
-
+    const selectedCategory = state.options[num - 1].cat;
+    
     try {
       const list = state.map[selectedCategory] || [];
       const userName = state.userName || getUserName(pushname, m, mek, sender);
@@ -551,18 +457,11 @@ const menuReplyHandler = {
       });
 
       const headerImg = await getHeaderImage(sessionId || state.sessionId);
-      const caption = commandListCaption(
-        selectedCategory,
-        list,
-        userName,
-        botDisplayName
-      );
+      const caption = commandListCaption(selectedCategory, list, userName, botDisplayName);
 
       await safeSendImageOrText(sock, from, headerImg, caption, mek);
     } catch (err) {
-      console.log("MENU EXECUTE ERROR:", err);
-    } finally {
-      clearUserSession(k);
+      console.log("MENU REPLY HANDLER ERROR:", err);
     }
   },
 };
@@ -571,17 +470,12 @@ if (Array.isArray(replyHandlers)) {
   replyHandlers.push(menuReplyHandler);
 }
 
-/* ================= CLEANUP (IDENTICAL TO SETTINGS.JS) ================= */
+/* ================= 4. CLEANUP ================= */
 setInterval(() => {
   const now = Date.now();
   for (const key of Object.keys(pendingMenu)) {
     if (now - pendingMenu[key].createdAt > SESSION_TIMEOUT) {
       delete pendingMenu[key];
-    }
-  }
-  for (const key of Object.keys(lastProcessedMsg)) {
-    if (now - lastProcessedMsg[key].time > LOOP_COOLDOWN) {
-      delete lastProcessedMsg[key];
     }
   }
 }, 30000);
