@@ -502,7 +502,7 @@ function menuHeader(userName = "User", latency = "0ms", botDisplayName = DEFAULT
 
   return `┏━━━━━━◥◣◆◢◤━━━━━━┓
 
-★彡 *${botDisplayName}* 彡★
+ㅤ★彡 *${botDisplayName}* 彡★
 
 ┗━━━━━━◢◤◆◥◣━━━━━━┛
 
