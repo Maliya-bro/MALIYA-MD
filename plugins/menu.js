@@ -367,7 +367,7 @@ cmd(
 
       const headerImg = await getHeaderImage(sessionId);
 
-      // Button setup (මුල් structure එක එලෙසම තබා ඇත)
+      // Buttons setup (Original row layout preserved)
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
@@ -385,7 +385,7 @@ cmd(
             .setFooter(`© 2026 ${BRAND_BASE} SYSTEM`)
             .setThumbnail(fittedThumb);
 
-          // 1. Popup list row button
+          // 1. Popup Single Select List Menu
           btn.addRawButton({
             buttonId: ".menuall",
             buttonText: { displayText: "≡ List Menu" },
@@ -404,7 +404,7 @@ cmd(
             },
           });
 
-          // 2. Action button in the same message
+          // 2. Ping Button in the same message
           btn.addButton("📊 Ping", ".ping");
 
           const sentMsg = await btn.send(from, { quoted: mek });
@@ -464,7 +464,7 @@ cmd(
   }
 );
 
-/* ================= REPLY HANDLER (Exact CineSubz Flow) ================= */
+/* ================= REPLY HANDLER (CineSubz Logic) ================= */
 const menuReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
@@ -494,7 +494,7 @@ const menuReplyHandler = {
     const texts = extractTexts(body, mek, m);
     let choice = null;
 
-    // Button ID extraction (.menuview 1)
+    // Button click extractor (.menuview 1)
     for (const t of texts) {
       if (t.startsWith(".menuview ")) {
         choice = parseInt(t.replace(".menuview ", "").trim(), 10);
@@ -502,7 +502,7 @@ const menuReplyHandler = {
       }
     }
 
-    // Direct number reply extraction
+    // Number input extractor
     if (choice === null) {
       const num = parseInt(String(body || "").trim(), 10);
       if (!isNaN(num)) choice = num;
@@ -533,4 +533,40 @@ const menuReplyHandler = {
         react: { text: getCategoryEmoji(selectedCategory), key: mek.key },
       });
 
-      const headerImg = await getHeaderImage(sessionId || pending.sessionId
+      const headerImg = await getHeaderImage(sessionId || pending.sessionId);
+      const caption = commandListCaption(
+        selectedCategory,
+        list,
+        userName,
+        botDisplayName
+      );
+
+      await safeSendImageOrText(sock, from, headerImg, caption, mek);
+    } catch (err) {
+      console.log("MENU REPLY HANDLER ERROR:", err?.message || err);
+    } finally {
+      clearUserSession(k);
+    }
+  },
+};
+
+if (Array.isArray(replyHandlers)) {
+  replyHandlers.push(menuReplyHandler);
+}
+
+/* ================= CLEANUP ================= */
+setInterval(() => {
+  const now = Date.now();
+  for (const k in pendingMenu) {
+    if (now - pendingMenu[k].timestamp > SESSION_TIMEOUT) {
+      delete pendingMenu[k];
+    }
+  }
+  for (const k in lastProcessedMsg) {
+    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) {
+      delete lastProcessedMsg[k];
+    }
+  }
+}, 2.5 * 60 * 1000);
+
+module.exports = {};
