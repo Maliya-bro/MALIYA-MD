@@ -4,7 +4,7 @@ const axios = require("axios");
 const sharp = require("sharp");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
-const pendingMenu = Object.create(null);
+const pendingMenu = {};
 const lastProcessedMsg = {};
 const LOOP_COOLDOWN = 2500;
 const SESSION_TIMEOUT = 5 * 60 * 1000;
@@ -47,15 +47,35 @@ let cachedMenu = null;
 let cacheTime = 0;
 const MENU_CACHE_MS = 60 * 1000;
 
-/* ================= HELPERS ================= */
+/* ================= HELPERS (FROM SETTINGS.JS) ================= */
 function keyFor(sender, from) {
   return `${sender || "unknown"}_${from || "unknown"}`;
 }
 
-function getSafeMsgId(sentMsg) {
-  if (!sentMsg) return null;
-  if (typeof sentMsg === "string") return sentMsg;
-  if (sentMsg.key && sentMsg.key.id) return sentMsg.key.id;
+function clearUserSession(k) {
+  delete pendingMenu[k];
+}
+
+function getQuotedId(m, mek) {
+  if (m?.quoted?.id) return m.quoted.id;
+  if (mek?.message?.extendedTextMessage?.contextInfo?.stanzaId) {
+    return mek.message.extendedTextMessage.contextInfo.stanzaId;
+  }
+  if (m?.message?.extendedTextMessage?.contextInfo?.stanzaId) {
+    return m.message.extendedTextMessage.contextInfo.stanzaId;
+  }
+  if (m?.message?.imageMessage?.contextInfo?.stanzaId) {
+    return m.message.imageMessage.contextInfo.stanzaId;
+  }
+  if (m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId) {
+    return m.message.interactiveResponseMessage.contextInfo.stanzaId;
+  }
+  if (mek?.message?.imageMessage?.contextInfo?.stanzaId) {
+    return mek.message.imageMessage.contextInfo.stanzaId;
+  }
+  if (mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId) {
+    return mek.message.interactiveResponseMessage.contextInfo.stanzaId;
+  }
   return null;
 }
 
@@ -294,7 +314,7 @@ async function safeSendImageOrText(sock, from, imgUrl, caption, mek) {
   }
 }
 
-/* ================= 1. COMMAND: MAIN MENU ================= */
+/* ================= 1. MAIN COMMAND: .menu ================= */
 cmd(
   {
     pattern: "menu",
@@ -315,6 +335,7 @@ cmd(
 
       const userName = getUserName(pushname, m, mek, sender);
       const k = keyFor(sender, from);
+      clearUserSession(k);
 
       let botDisplayName = DEFAULT_BOT_NAME;
       let btnsOn = true;
@@ -328,9 +349,9 @@ cmd(
 
       const headerImg = await getHeaderImage(sessionId);
 
-      // Create flat options mapped to numbers
+      // Create options mapping for both buttons & numbers
       const flatOpts = categories.map((cat) => ({ cat: cat }));
-
+      
       const state = {
         createdAt: Date.now(),
         sessionId: sessionId,
@@ -347,12 +368,11 @@ cmd(
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
           
-          // 🔥 MASTER TRICK: Button ID is just a Number! (e.g., "1", "2")
-          // This perfectly bypasses isCmd and triggers the Number Reply Handler seamlessly!
-          const listRows = categories.map((cat, index) => ({
+          // 🔥 KEY FIX: Set Row ID as `.menuview <CAT>` so index.js reads it as a standard Command!
+          const listRows = categories.map((cat) => ({
             title: `${getCategoryEmoji(cat)} ${toSmallCaps(cat)} MENU`,
             description: `${map[cat].length} commands available`,
-            id: String(index + 1), 
+            id: `.menuview ${cat}`,
           }));
 
           const fittedThumb = await getFittedImageBuffer(headerImg);
@@ -375,18 +395,19 @@ cmd(
             },
           });
 
-          // Original Ping button
           btn.addButton("📊 Ping", ".ping");
 
           const sentMsg = await btn.send(from, { quoted: mek });
-          const msgId = getSafeMsgId(sentMsg);
-
-          if (msgId) {
-            state.menuMsgId = msgId;
-            pendingMenu[k] = state;
-            await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-            return;
+          
+          if (sentMsg?.key?.id) {
+            state.menuMsgId = sentMsg.key.id;
           }
+          
+          // Unconditionally save state for Number Replies
+          pendingMenu[k] = state;
+          await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+          return;
+          
         } catch (err) {
           console.log("MENU BUTTONV2 ERROR:", err?.message || err);
         }
@@ -394,14 +415,13 @@ cmd(
 
       // NUMBER REPLY FALLBACK
       const captionText = buildStyledMainMenu(categories, map, userName, latencyStr, botDisplayName);
-      const sentMsg = await safeSendImageOrText(sock, from, headerImg, captionText, mek);
+      const sentMsgFallback = await safeSendImageOrText(sock, from, headerImg, captionText, mek);
       
-      const msgId = getSafeMsgId(sentMsg);
-      if (msgId) {
-        state.menuMsgId = msgId;
-        pendingMenu[k] = state;
+      if (sentMsgFallback?.key?.id) {
+        state.menuMsgId = sentMsgFallback.key.id;
       }
-
+      
+      pendingMenu[k] = state;
       await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
     } catch (e) {
       console.log("MENU ERROR:", e?.message || e);
@@ -410,57 +430,77 @@ cmd(
   }
 );
 
-/* ================= 2. UNIFIED REPLY HANDLER (Handles BOTH Buttons & Numbers) ================= */
+/* ================= 2. BUTTON COMMAND HANDLER (.menuview) ================= */
+// 🔥 බොත්තම එබූ විට ක්‍රියාත්මක වන්නේ මෙම අංශයයි!
+cmd(
+  {
+    pattern: "menuview",
+    alias: ["menu_view"],
+    dontAddCommandList: true,
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, q, sender, pushname, reply, sessionId }) => {
+    try {
+      const cat = String(q || "").trim().toUpperCase();
+      if (!cat) return;
+
+      const { map } = buildCommandMapCached();
+      const list = map[cat] || [];
+      if (!list.length) return reply("❌ No commands found in this category.");
+
+      const userName = getUserName(pushname, m, mek, sender);
+      let botDisplayName = DEFAULT_BOT_NAME;
+      try {
+        const settings = await readSettings(sessionId);
+        if (settings?.bot_name) botDisplayName = String(settings.bot_name).trim();
+      } catch (e) {}
+
+      const headerImg = await getHeaderImage(sessionId);
+      const caption = commandListCaption(cat, list, userName, botDisplayName);
+
+      await sock.sendMessage(from, { react: { text: getCategoryEmoji(cat), key: mek.key } });
+      await safeSendImageOrText(sock, from, headerImg, caption, mek);
+    } catch (e) {
+      console.log("MENU VIEW ERROR:", e?.message);
+    }
+  }
+);
+
+/* ================= 3. NUMBER REPLY HANDLER (1, 2, 3...) ================= */
+// 🔥 ඉලක්කම් Type කර යැවූ විට ක්‍රියාත්මක වන්නේ මෙම අංශයයි! (settings.js style)
 const menuReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
     const state = pendingMenu[k];
     if (!state) return false;
 
-    const texts = extractTexts(text, mek, m);
-    
-    // Check if any extracted text is a valid option number
-    for (const t of texts) {
-      const num = parseInt(String(t).trim(), 10);
-      if (!isNaN(num) && num > 0 && num <= state.options.length) {
-        return true; 
-      }
-    }
-    return false;
+    const num = parseInt(String(text || "").trim(), 10);
+    const isNum = !isNaN(num) && num > 0 && num <= state.options.length;
+
+    const quotedId = getQuotedId(m, mek);
+    const isQuoted = quotedId && quotedId === state.menuMsgId;
+
+    return Boolean(isQuoted || isNum);
   },
 
   function: async (sock, mek, m, { body, sender, from, pushname, sessionId }) => {
     const k = keyFor(sender, from);
     const state = pendingMenu[k];
-    if (!state || state.isProcessing) return;
+    if (!state) return;
 
-    const texts = extractTexts(body, mek, m);
-    let choice = null;
+    const num = parseInt(String(body || "").trim(), 10);
+    if (isNaN(num) || num < 1 || num > state.options.length) return;
 
-    // Get the choice (Will work whether typed "1", quoted "1", or clicked Button "1")
-    for (const t of texts) {
-      const num = parseInt(String(t).trim(), 10);
-      if (!isNaN(num) && num > 0 && num <= state.options.length) {
-        choice = num;
-        break;
-      }
-    }
-
-    if (!choice) return;
-
-    // Prevent duplicate processing
     const now = Date.now();
-    const sig = `menu_choice_${choice}`;
+    const sig = `menu_${num}`;
     const lastMsg = lastProcessedMsg[k];
     if (lastMsg && lastMsg.text === sig && now - lastMsg.time < LOOP_COOLDOWN) {
       return;
     }
     lastProcessedMsg[k] = { text: sig, time: now };
 
-    state.isProcessing = true;
-    
     try {
-      const selectedCategory = state.options[choice - 1].cat;
+      const selectedCategory = state.options[num - 1].cat;
       const list = state.map[selectedCategory] || [];
       const userName = state.userName || getUserName(pushname, m, mek, sender);
       const botDisplayName = state.botDisplayName || DEFAULT_BOT_NAME;
@@ -474,20 +514,18 @@ const menuReplyHandler = {
 
       await safeSendImageOrText(sock, from, headerImg, caption, mek);
     } catch (err) {
-      console.log("MENU REPLY HANDLER ERROR:", err);
+      console.log("MENU NUMBER REPLY ERROR:", err);
     } finally {
-      // Clear memory securely after responding
-      delete pendingMenu[k];
+      clearUserSession(k);
     }
   },
 };
 
-// Register via the module exports approach exactly as requested
 if (Array.isArray(replyHandlers)) {
   replyHandlers.push(menuReplyHandler);
 }
 
-/* ================= 3. CLEANUP MEMORY ================= */
+/* ================= 4. CLEANUP (MEMORY SAFE) ================= */
 setInterval(() => {
   const now = Date.now();
   for (const key of Object.keys(pendingMenu)) {
