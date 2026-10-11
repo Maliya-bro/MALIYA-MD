@@ -4,8 +4,14 @@ const sharp = require("sharp");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const pendingMenu = {};
-const DEFAULT_HEADER_IMAGE = "https://github.com/Maliya-bro/web-pair/blob/main/ChatGPT%20Image%20Sep%2027,%202026,%2007_25_52%20PM.png?raw=true";
+const BRAND_BASE = "MALIYA-MD";
+const DEFAULT_BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
 const PREFIX = ".";
+const DEFAULT_HEADER_IMAGE = "https://github.com/Maliya-bro/web-pair/blob/main/ChatGPT%20Image%20Sep%2027,%202026,%2007_25_52%20PM.png?raw=true";
+
+function cleanKey(jid) {
+  return String(jid || "").split("@")[0].split(":")[0];
+}
 
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -35,7 +41,6 @@ function getCategoryEmoji(cat) {
   if (c.includes("EDUCATION")) return "📚";
   if (c.includes("MOVIE")) return "🎬";
   if (c.includes("STICKER")) return "🖼️";
-  if (c.includes("CONVERT")) return "♻️";
   if (c.includes("UTILITY")) return "🧰";
   return "✨";
 }
@@ -55,7 +60,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu", "help"],
     react: "📜",
-    desc: "Show command categories",
+    desc: "Main menu",
     category: "main",
     filename: __filename,
   },
@@ -71,15 +76,14 @@ cmd(
         commandMap[category].push(command);
       }
       const categories = Object.keys(commandMap).sort();
-      if (!categories.length) return reply("❌ No commands found!");
+      if (!categories.length) return reply("❌ Commands හමු නොවීය!");
 
-      let botDisplayName = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
+      let botDisplayName = DEFAULT_BOT_NAME;
       let btnsOn = true;
       try {
         const settings = await readSettings(sessionId);
         if (settings?.bot_name) botDisplayName = String(settings.bot_name).trim();
-        // Settings වල buttons off කරලා තිබුණත් default එක true කරමු
-        btnsOn = settings?.btns_enabled !== false;
+        if (settings && typeof settings.btns_enabled !== "undefined") btnsOn = Boolean(settings.btns_enabled);
       } catch (e) {}
 
       let headerImg = DEFAULT_HEADER_IMAGE;
@@ -93,30 +97,28 @@ cmd(
       let menuText = `┏━━━━━━◥◣◆◢◤━━━━━━┓\n★彡 *${botDisplayName}* 彡★\n┗━━━━━━◢◤◆◥◣━━━━━━┛\n\n`;
       menuText += `✨ 👋 *ʜɪ, ${toSmallCaps(pushname || "User")}!*\n\n`;
       menuText += `╔═════. .★.══════════╗\n🤖 *\`ʙᴏᴛ\` :* ${botDisplayName}\n🎯 *\`ᴘʀᴇғɪx\` :* [ ${PREFIX} ]\n╚══════════. .★.═════╝\n\n`;
-      menuText += `👇 *Select a command category below:*\n\n`;
 
       categories.forEach((cat, i) => {
         const numStr = String(i + 1).padStart(2, "0");
         menuText += `*[ ${numStr} ]* ➔ ${getCategoryEmoji(cat)} *${toSmallCaps(cat)}* _(${commandMap[cat].length})_\n`;
       });
-      menuText += `\n⊱━━━━━━━━━━━━━━━⊰\n> 💬 *Swipe & Reply this message with a number...*`;
+      menuText += `\n⊱━━━━━━━━━━━━━━━⊰\n> 💬 *කැමති Category එකේ අංකය Reply කරන්න...*`;
 
-      // 🔘 BUTTONS MODE
-      let sentSuccess = false;
+      // 🔘 BUTTONS SETUP
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
           const listRows = categories.map((cat, i) => ({
             title: `${getCategoryEmoji(cat)} ${toSmallCaps(cat)} MENU`,
             description: `${commandMap[cat].length} commands available`,
-            id: `.menu_pick ${i + 1}`, // Command එකක් විදිහටම Button ID එක යවන්න
+            id: `.menu_pick ${i + 1}`, // Button එකෙන් command එකක් විදිහට යැවීම
           }));
 
           const fittedThumb = await getFittedImageBuffer(headerImg);
 
           const btn = new ButtonV2(sock)
             .setBody(menuText)
-            .setFooter("© 2026 MALIYA-MD")
+            .setFooter(`© 2026 ${BRAND_BASE}`)
             .setThumbnail(fittedThumb);
 
           btn.addRawButton({
@@ -127,24 +129,21 @@ cmd(
               name: "single_select",
               paramsJson: JSON.stringify({
                 title: "Select Category ↯",
-                sections: [{ title: "Categories", rows: listRows }],
+                sections: [{ title: "Command Categories", rows: listRows }],
               }),
             },
           });
 
           btn.addButton("📊 Ping", ".ping");
           await btn.send(from, { quoted: mek });
-          sentSuccess = true;
         } catch (err) {
-          console.log("BUTTON ERROR:", err);
+          await sock.sendMessage(from, { image: { url: headerImg }, caption: menuText }, { quoted: mek });
         }
-      }
-
-      if (!sentSuccess) {
+      } else {
         await sock.sendMessage(from, { image: { url: headerImg }, caption: menuText }, { quoted: mek });
       }
 
-      // Memory Store (Exact Sudda format)
+      // Memory Store: LID, sender, from යන සියල්ලෙන්ම Save කර තැබීම
       const stateData = {
         step: "category",
         commandMap,
@@ -154,25 +153,26 @@ cmd(
         userName: pushname || "User",
       };
 
-      pendingMenu[sender] = stateData;
       pendingMenu[from] = stateData;
+      pendingMenu[sender] = stateData;
+      pendingMenu[cleanKey(sender)] = stateData;
+      pendingMenu[cleanKey(from)] = stateData;
 
     } catch (e) {
       console.log("MENU ERROR:", e);
-      reply("❌ Error sending menu: " + e.message);
+      reply("❌ Menu එක යැවීමේදී දෝෂයක් සිදුවිය.");
     }
   }
 );
 
 /* ================= 2. BUTTON CLICK COMMAND HANDLER (.menu_pick) ================= */
-// Button එකක් click කරපු ගමන් Command එකක් විදිහට අල්ලන නිසා කවදාවත් bypass වෙන්නේ නෑ!
 cmd(
   {
     pattern: "menu_pick",
     dontAddCommandList: true,
     filename: __filename,
   },
-  async (sock, mek, m, { from, q, sender, pushname, reply, sessionId }) => {
+  async (sock, mek, m, { from, q, sender, pushname, sessionId }) => {
     const index = parseInt(String(q || "").trim(), 10) - 1;
     const commandMap = {};
     for (const command of commands) {
@@ -202,7 +202,7 @@ cmd(
       cmdText += `  ╰ 📌 *\`ᴅᴇsᴄ\` :* _${c.desc || "No description"}_\n\n`;
     });
 
-    cmdText += `────━──✦❘•❘✦──━───\n> 👑 MALIYA-MD | ᴘᴏᴡᴇʀᴇᴅ ʙʏ MALIYA-MD`;
+    cmdText += `────━──✦❘•❘✦──━───\n> 👑 ${DEFAULT_BOT_NAME} | ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
 
     let headerImg = DEFAULT_HEADER_IMAGE;
     if (sessionId) {
@@ -220,28 +220,25 @@ cmd(
   }
 );
 
-/* ================= 3. NUMBER REPLY HANDLER (EXACT SUDDA LOGIC) ================= */
+/* ================= 3. NUMBER REPLY HANDLER (SUDDA STYLE) ================= */
 cmd(
   {
-    filter: (text, { sender, from }) => {
-      const rawText = String(text || "").trim();
-      const isNum = /^[1-9][0-9]*$/.test(rawText);
-      const hasSenderState = Boolean(pendingMenu[sender] && pendingMenu[sender].step === "category");
-      const hasFromState = Boolean(pendingMenu[from] && pendingMenu[from].step === "category");
-
-      return (hasSenderState || hasFromState) && isNum;
+    filter: (text, { from, sender }) => {
+      const targetState = pendingMenu[from] || pendingMenu[sender] || pendingMenu[cleanKey(sender)] || pendingMenu[cleanKey(from)];
+      return Boolean(targetState && targetState.step === "category" && /^[1-9][0-9]*$/.test(String(text || "").trim()));
     },
   },
   async (sock, mek, m, { from, body, sender, reply }) => {
-    const activeState = pendingMenu[sender] || pendingMenu[from];
-    if (!activeState) return;
+    const stateKey = pendingMenu[from] ? from : (pendingMenu[sender] ? sender : (pendingMenu[cleanKey(sender)] ? cleanKey(sender) : cleanKey(from)));
+    const state = pendingMenu[stateKey];
+    if (!state) return;
 
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
-    const { commandMap, categories, botDisplayName, sessionId, userName } = activeState;
-    const index = parseInt(String(body).trim(), 10) - 1;
+    const { commandMap, categories, botDisplayName, sessionId, userName } = state;
+    const index = parseInt(String(body || "").trim(), 10) - 1;
 
-    if (index < 0 || index >= categories.length) return reply("❌ Invalid selection.");
+    if (index < 0 || index >= categories.length) return reply("❌ වැරදි අංකයක්.");
 
     const selectedCategory = categories[index];
     const cmdsInCategory = commandMap[selectedCategory] || [];
@@ -258,7 +255,7 @@ cmd(
       cmdText += `  ╰ 📌 *\`ᴅᴇsᴄ\` :* _${c.desc || "No description"}_\n\n`;
     });
 
-    cmdText += `────━──✦❘•❘✦──━───\n> 👑 ${botDisplayName} | ᴘᴏᴡᴇʀᴇᴅ ʙʏ MALIYA-MD`;
+    cmdText += `────━──✦❘•❘✦──━───\n> 👑 ${botDisplayName} | ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
 
     let headerImg = DEFAULT_HEADER_IMAGE;
     if (sessionId) {
@@ -274,8 +271,10 @@ cmd(
       await sock.sendMessage(from, { text: cmdText }, { quoted: mek });
     }
 
-    delete pendingMenu[sender];
     delete pendingMenu[from];
+    delete pendingMenu[sender];
+    delete pendingMenu[cleanKey(sender)];
+    delete pendingMenu[cleanKey(from)];
   }
 );
 
