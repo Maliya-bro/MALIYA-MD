@@ -271,7 +271,6 @@ function commandListCaption(cat, list, userName = "User", botDisplayName = DEFAU
   return txt;
 }
 
-// Exactly like CineSubz extractor
 function extractTexts(body, mek, m) {
   const texts = [];
   const direct = [
@@ -337,7 +336,7 @@ async function safeSendImageOrText(sock, from, imgUrl, caption, mek) {
 cmd(
   {
     pattern: "menu",
-    alias: ["list", "botmenu", "help"],
+    alias: ["list", "botmenu"],
     react: "📜",
     desc: "Show styled command categories with popup list",
     category: "main",
@@ -368,16 +367,15 @@ cmd(
 
       const headerImg = await getHeaderImage(sessionId);
 
-      // 1. BUTTON MODE
+      // Button setup (මුල් structure එක එලෙසම තබා ඇත)
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
 
-          // Row ID matches CineSubz format (.menu_cat 1)
           const listRows = categories.map((cat, index) => ({
             title: `${getCategoryEmoji(cat)} ${toSmallCaps(cat)} MENU`,
             description: `${map[cat].length} commands available`,
-            id: `.menu_cat ${index + 1}`,
+            id: `.menuview ${index + 1}`,
           }));
 
           const fittedThumb = await getFittedImageBuffer(headerImg);
@@ -387,17 +385,18 @@ cmd(
             .setFooter(`© 2026 ${BRAND_BASE} SYSTEM`)
             .setThumbnail(fittedThumb);
 
+          // 1. Popup list row button
           btn.addRawButton({
-            buttonId: "main_menu_categories",
-            buttonText: { displayText: "📜 Select Category" },
+            buttonId: ".menuall",
+            buttonText: { displayText: "≡ List Menu" },
             type: 1,
             nativeFlowInfo: {
               name: "single_select",
               paramsJson: JSON.stringify({
-                title: "Command Categories ↯",
+                title: "Click Here ↯",
                 sections: [
                   {
-                    title: "Available Categories",
+                    title: "Command Categories",
                     rows: listRows,
                   },
                 ],
@@ -405,6 +404,7 @@ cmd(
             },
           });
 
+          // 2. Action button in the same message
           btn.addButton("📊 Ping", ".ping");
 
           const sentMsg = await btn.send(from, { quoted: mek });
@@ -428,7 +428,7 @@ cmd(
         }
       }
 
-      // 2. NUMBER REPLY FALLBACK
+      // Number Reply Fallback
       const captionText = buildStyledMainMenu(
         categories,
         map,
@@ -464,20 +464,18 @@ cmd(
   }
 );
 
-/* ================= REPLY HANDLER (CineSubz Architecture) ================= */
+/* ================= REPLY HANDLER (Exact CineSubz Flow) ================= */
 const menuReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
     const pending = pendingMenu[k];
     if (!pending) return false;
 
-    // Check button click text
     const texts = extractTexts(text, mek, m);
     for (const t of texts) {
-      if (t.startsWith(".menu_cat ")) return true;
+      if (t.startsWith(".menuview ")) return true;
     }
 
-    // CineSubz style permissive check (Number or Quoted Reply)
     const num = parseInt(String(text || "").trim(), 10);
     const max = pending.categories?.length || 0;
     const isNum = !isNaN(num) && num > 0 && num <= max;
@@ -488,7 +486,7 @@ const menuReplyHandler = {
     return isQuoted || isNum;
   },
 
-  function: async (sock, mek, m, { body, sender, from, pushname }) => {
+  function: async (sock, mek, m, { body, sender, from, pushname, sessionId }) => {
     const k = keyFor(sender, from);
     const pending = pendingMenu[k];
     if (!pending || pending.isProcessing) return;
@@ -496,15 +494,15 @@ const menuReplyHandler = {
     const texts = extractTexts(body, mek, m);
     let choice = null;
 
-    // Button ID extraction
+    // Button ID extraction (.menuview 1)
     for (const t of texts) {
-      if (t.startsWith(".menu_cat ")) {
-        choice = parseInt(t.replace(".menu_cat ", "").trim(), 10);
+      if (t.startsWith(".menuview ")) {
+        choice = parseInt(t.replace(".menuview ", "").trim(), 10);
         break;
       }
     }
 
-    // Number extraction
+    // Direct number reply extraction
     if (choice === null) {
       const num = parseInt(String(body || "").trim(), 10);
       if (!isNaN(num)) choice = num;
@@ -512,7 +510,6 @@ const menuReplyHandler = {
 
     if (!choice || choice < 1 || choice > pending.categories.length) return;
 
-    // Cooldown verification
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
     if (
@@ -536,40 +533,4 @@ const menuReplyHandler = {
         react: { text: getCategoryEmoji(selectedCategory), key: mek.key },
       });
 
-      const headerImg = await getHeaderImage(pending.sessionId);
-      const caption = commandListCaption(
-        selectedCategory,
-        list,
-        userName,
-        botDisplayName
-      );
-
-      await safeSendImageOrText(sock, from, headerImg, caption, mek);
-    } catch (err) {
-      console.log("MENU REPLY ERROR:", err?.message || err);
-    } finally {
-      clearUserSession(k);
-    }
-  },
-};
-
-if (Array.isArray(replyHandlers)) {
-  replyHandlers.push(menuReplyHandler);
-}
-
-/* ================= SESSION TIMEOUT CLEANUP ================= */
-setInterval(() => {
-  const now = Date.now();
-  for (const k in pendingMenu) {
-    if (now - pendingMenu[k].timestamp > SESSION_TIMEOUT) {
-      delete pendingMenu[k];
-    }
-  }
-  for (const k in lastProcessedMsg) {
-    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) {
-      delete lastProcessedMsg[k];
-    }
-  }
-}, 2.5 * 60 * 1000);
-
-module.exports = {};
+      const headerImg = await getHeaderImage(sessionId || pending.sessionId
