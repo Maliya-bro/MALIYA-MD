@@ -1,26 +1,103 @@
 const { readSettings } = require("../lib/botSettings");
-const {
-  downloadContentFromMessage
-} = require("@whiskeysockets/baileys");
+const { downloadContentFromMessage } = require("@whiskeysockets/baileys");
 
+// Message cache
 const store = new Map();
+
+// Helper: Extract clean text from message object
+function extractText(message) {
+  if (!message) return "";
+  return (
+    message.conversation ||
+    message.extendedTextMessage?.text ||
+    message.imageMessage?.caption ||
+    message.videoMessage?.caption ||
+    message.documentMessage?.caption ||
+    ""
+  );
+}
+
+// Helper: Format message alert layout using clean markdown
+function formatAlert({ title, isGroup, chatName, senderTag, content, isMedia = false }) {
+  const time = new Date().toLocaleTimeString();
+  const scope = isGroup ? `👥 *Chat:* ${chatName || "Group"}` : "👤 *Chat:* Private DM";
+
+  const lines = [
+    `*${title}*`,
+    `────────────────────`,
+    scope,
+    `👤 *Sender:* ${senderTag}`,
+    `🕒 *Time:* \`${time}\``,
+    `────────────────────`
+  ];
+
+  if (isMedia) {
+    if (content) lines.push(`💬 *Caption:* _${content}_`);
+  } else if (content) {
+    lines.push(content);
+  }
+
+  return lines.join("\n");
+}
 
 module.exports = {
   onMessage: async (conn, msg) => {
-    // ✅ FIX: await readSettings() with sessionId
-    // msg.key.remoteJid එකෙන් sessionId එක හොයාගන්න බැරි නිසා,
-    // අපිට මෙතනදි sessionId pass කරන්න අමාරුයි. 
-    // ඒ නිසා අපි anti_delete check එක onDelete වලදි කරමු.
-    // onMessage එකේදි message එක store කරන්න විතරයි.
-    
-    if (!msg?.message || msg.key.fromMe) return;
-
-    // ── PRIVATE CHATS ONLY ──────────────────────────────────
-    // Skip group messages entirely
-    if (msg.key.remoteJid?.endsWith("@g.us")) return;
-    // ────────────────────────────────────────────────────────
-
     try {
+      if (!msg?.message || msg.key.fromMe) return;
+
+      const remoteJid = msg.key.remoteJid;
+      if (!remoteJid || remoteJid === "status@broadcast") return;
+
+      // ── 1. CHECK FOR EDITED MESSAGES ────────────────────────
+      const protoMsg = msg.message?.protocolMessage;
+      const isEdit = protoMsg?.type === 14 || Boolean(msg.message?.editedMessage);
+
+      if (isEdit) {
+        let settings = { anti_delete: true, anti_edit: true };
+        try {
+          settings = await readSettings();
+        } catch {}
+
+        if (settings.anti_edit !== false) {
+          const targetKey = protoMsg?.key || msg.key;
+          const targetId = targetKey.id;
+          const oldMsgData = store.get(targetId);
+
+          if (oldMsgData) {
+            const isGroup = remoteJid.endsWith("@g.us");
+            const sender = msg.key.participant || targetKey.participant || remoteJid;
+            const senderTag = `@${sender.split("@")[0]}`;
+
+            const oldText = extractText(oldMsgData.message);
+            const newMsgContent = protoMsg?.editedMessage || msg.message.editedMessage?.message;
+            const newText = extractText(newMsgContent);
+
+            const contentText = [
+              `📝 *Original Message:*\n> _${oldText || "(No Text / Media)"}_`,
+              ``,
+              `✏️ *Edited Message:*\n> _${newText || "(Empty)"}_`
+            ].join("\n");
+
+            const alertText = formatAlert({
+              title: "✏️ *EDITED MESSAGE DETECTED*",
+              isGroup,
+              senderTag,
+              content: contentText
+            });
+
+            await conn.sendMessage(
+              remoteJid,
+              {
+                text: alertText,
+                mentions: [sender]
+              },
+              { quoted: msg }
+            );
+          }
+        }
+      }
+
+      // ── 2. SAVE INCOMING MESSAGE TO STORE ───────────────────
       const id = msg.key.id;
       if (!id) return;
 
@@ -29,15 +106,17 @@ module.exports = {
         message: msg.message,
         pushName: msg.pushName || "Unknown",
         timestamp: Date.now(),
-        remoteJid: msg.key.remoteJid, // ✅ store the chat ID
+        remoteJid: remoteJid
       });
 
-      // limit memory
-      if (store.size > 1000) {
-        const firstKey = store.keys().next().value;
-        if (firstKey) store.delete(firstKey);
+      // Memory cleanup: limit to 2000 messages
+      if (store.size > 2000) {
+        const oldestKey = store.keys().next().value;
+        if (oldestKey) store.delete(oldestKey);
       }
-    } catch {}
+    } catch (e) {
+      console.log("Anti-Delete onMessage Error:", e?.message);
+    }
   },
 
   onDelete: async (conn, updates) => {
@@ -45,22 +124,17 @@ module.exports = {
       for (const item of updates) {
         const key = item?.key;
         const update = item?.update;
-
         if (!key || !update) continue;
 
-        const jid = key.remoteJid;
+        const remoteJid = key.remoteJid;
+        if (!remoteJid || remoteJid === "status@broadcast") continue;
 
-        // ── PRIVATE CHATS ONLY ────────────────────────────
-        // Skip group delete events entirely
-        if (jid?.endsWith("@g.us")) continue;
-        // ──────────────────────────────────────────────────
-
-        const deleted =
+        const isDeleted =
           update.message === null ||
           update.messageStubType === 1 ||
           update.messageStubType === 2;
 
-        if (!deleted) continue;
+        if (!isDeleted) continue;
 
         const msgId = key.id;
         if (!msgId) continue;
@@ -68,212 +142,111 @@ module.exports = {
         const saved = store.get(msgId);
         if (!saved) continue;
 
-        // ✅ FIX: Get sessionId from the saved message or from context
-        // For anti-delete, we need to check if anti_delete is enabled
-        // Since we don't have sessionId directly, we'll use the remoteJid
-        // to determine which session this belongs to.
-        // Actually, the sessionId is not stored in the message.
-        // We need to pass sessionId from index.js to this plugin.
-        // But let's check if anti_delete is enabled globally for now.
-        
-        // ✅ FIX: Use sessionId from the saved message or default
-        // We'll try to get sessionId from the saved message
-        // In index.js, we need to pass sessionId to the plugin.
-        // For now, let's read settings without sessionId (uses "default")
-        // But we should pass sessionId from index.js
-        
-        // ✅ FIX: For now, read settings with the default session
-        // Later we can pass sessionId from index.js
-        let settings;
+        let settings = { anti_delete: true };
         try {
-          // Try to get settings from the session
-          // Since we don't have sessionId here, we'll use the saved remoteJid
-          // to determine which session it belongs to.
-          // Actually, the better approach is to store sessionId with the message
-          // But that requires changes in index.js
-          
-          // For now, let's read settings without sessionId (uses "default")
           settings = await readSettings();
         } catch (e) {
           console.log("⚠️ Anti-delete settings read error:", e?.message);
           continue;
         }
 
-        // ✅ FIX: Check anti_delete setting
         if (!settings.anti_delete) continue;
 
+        const isGroup = remoteJid.endsWith("@g.us");
         const sender =
           key.participant ||
-          key.remoteJid ||
           saved.key?.participant ||
-          saved.key?.remoteJid ||
+          (isGroup ? null : remoteJid) ||
           "";
 
-        const senderTag = sender
-          ? `@${String(sender).split("@")[0]}`
-          : "Unknown";
+        const senderTag = sender ? `@${sender.split("@")[0]}` : "Unknown";
 
-        const infoText = `🚨 *ANTI DELETE*\n\n👤 Sender: ${senderTag}\n🕒 Message restored successfully.`;
-
-        // 📝 TEXT
+        // ── RESTORE TEXT ─────────────────────────────────────
         if (saved.message.conversation || saved.message.extendedTextMessage) {
-          const text =
-            saved.message.conversation ||
-            saved.message.extendedTextMessage?.text ||
-            "";
+          const text = extractText(saved.message);
+          const alertText = formatAlert({
+            title: "🚨 *DELETED MESSAGE RESTORED*",
+            isGroup,
+            senderTag,
+            content: `💬 *Deleted Message:*\n> _${text}_`
+          });
 
-          await conn.sendMessage(jid, {
-            text: `${infoText}\n\n💬 Message:\n${text}`,
-            mentions: sender ? [sender] : [],
+          await conn.sendMessage(remoteJid, {
+            text: alertText,
+            mentions: sender ? [sender] : []
           });
         }
 
-        // 🖼️ IMAGE
-        else if (saved.message.imageMessage) {
-          await conn.sendMessage(jid, { text: infoText });
+        // ── RESTORE MEDIA FILES ──────────────────────────────
+        const mediaTypes = [
+          { type: "image", obj: saved.message.imageMessage, label: "IMAGE" },
+          { type: "video", obj: saved.message.videoMessage, label: "VIDEO" },
+          { type: "audio", obj: saved.message.audioMessage, label: "AUDIO" },
+          { type: "sticker", obj: saved.message.stickerMessage, label: "STICKER" },
+          { type: "document", obj: saved.message.documentMessage, label: "DOCUMENT" }
+        ];
 
-          try {
-            const stream = await downloadContentFromMessage(
-              saved.message.imageMessage,
-              "image"
-            );
+        for (const media of mediaTypes) {
+          if (!media.obj) continue;
 
-            let buffer = Buffer.from([]);
-            for await (const chunk of stream) {
-              buffer = Buffer.concat([buffer, chunk]);
-            }
+          const stream = await downloadContentFromMessage(media.obj, media.type);
+          let buffer = Buffer.from([]);
+          for await (const chunk of stream) {
+            buffer = Buffer.concat([buffer, chunk]);
+          }
 
-            await conn.sendMessage(jid, {
+          const captionText = formatAlert({
+            title: `🚨 *RESTORED ${media.label}*`,
+            isGroup,
+            senderTag,
+            content: media.obj.caption || "",
+            isMedia: true
+          });
+
+          if (media.type === "image") {
+            await conn.sendMessage(remoteJid, {
               image: buffer,
-              caption:
-                saved.message.imageMessage.caption || "Restored image",
+              caption: captionText,
+              mentions: sender ? [sender] : []
             });
-          } catch {
-            await conn.sendMessage(jid, {
-              text: "🖼️ Cannot restore image",
-            });
-          }
-        }
-
-        // 🎥 VIDEO
-        else if (saved.message.videoMessage) {
-          await conn.sendMessage(jid, { text: infoText });
-
-          try {
-            const stream = await downloadContentFromMessage(
-              saved.message.videoMessage,
-              "video"
-            );
-
-            let buffer = Buffer.from([]);
-            for await (const chunk of stream) {
-              buffer = Buffer.concat([buffer, chunk]);
-            }
-
-            await conn.sendMessage(jid, {
+          } else if (media.type === "video") {
+            await conn.sendMessage(remoteJid, {
               video: buffer,
-              caption:
-                saved.message.videoMessage.caption || "Restored video",
+              caption: captionText,
+              mentions: sender ? [sender] : []
             });
-          } catch {
-            await conn.sendMessage(jid, {
-              text: "🎥 Cannot restore video",
+          } else if (media.type === "audio") {
+            await conn.sendMessage(remoteJid, {
+              text: captionText,
+              mentions: sender ? [sender] : []
             });
-          }
-        }
-
-        // 🔊 AUDIO / VOICE
-        else if (saved.message.audioMessage) {
-          await conn.sendMessage(jid, { text: infoText });
-
-          try {
-            const stream = await downloadContentFromMessage(
-              saved.message.audioMessage,
-              "audio"
-            );
-
-            let buffer = Buffer.from([]);
-            for await (const chunk of stream) {
-              buffer = Buffer.concat([buffer, chunk]);
-            }
-
-            await conn.sendMessage(jid, {
+            await conn.sendMessage(remoteJid, {
               audio: buffer,
               mimetype: "audio/mp4",
-              ptt: true,
+              ptt: true
             });
-          } catch {
-            await conn.sendMessage(jid, {
-              text: "🎵 Cannot restore audio",
+          } else if (media.type === "sticker") {
+            await conn.sendMessage(remoteJid, {
+              text: captionText,
+              mentions: sender ? [sender] : []
             });
-          }
-        }
-
-        // 🧩 STICKER
-        else if (saved.message.stickerMessage) {
-          await conn.sendMessage(jid, { text: infoText });
-
-          try {
-            const stream = await downloadContentFromMessage(
-              saved.message.stickerMessage,
-              "sticker"
-            );
-
-            let buffer = Buffer.from([]);
-            for await (const chunk of stream) {
-              buffer = Buffer.concat([buffer, chunk]);
-            }
-
-            await conn.sendMessage(jid, {
-              sticker: buffer,
+            await conn.sendMessage(remoteJid, {
+              sticker: buffer
             });
-          } catch {
-            await conn.sendMessage(jid, {
-              text: "🧩 Cannot restore sticker",
-            });
-          }
-        }
-
-        // 📄 DOCUMENT
-        else if (saved.message.documentMessage) {
-          await conn.sendMessage(jid, { text: infoText });
-
-          try {
-            const stream = await downloadContentFromMessage(
-              saved.message.documentMessage,
-              "document"
-            );
-
-            let buffer = Buffer.from([]);
-            for await (const chunk of stream) {
-              buffer = Buffer.concat([buffer, chunk]);
-            }
-
-            await conn.sendMessage(jid, {
+          } else if (media.type === "document") {
+            await conn.sendMessage(remoteJid, {
               document: buffer,
-              mimetype:
-                saved.message.documentMessage.mimetype ||
-                "application/octet-stream",
-              fileName:
-                saved.message.documentMessage.fileName ||
-                "restored-file",
-            });
-          } catch {
-            await conn.sendMessage(jid, {
-              text: "📄 Cannot restore document",
+              mimetype: media.obj.mimetype || "application/octet-stream",
+              fileName: media.obj.fileName || "restored-file",
+              caption: captionText,
+              mentions: sender ? [sender] : []
             });
           }
-        }
-
-        // ⚠️ OTHER
-        else {
-          await conn.sendMessage(jid, {
-            text: `${infoText}\n\n⚠️ Unknown message type.`,
-          });
+          break;
         }
       }
     } catch (e) {
-      console.log("antidelete error:", e?.message || e);
+      console.log("Anti-Delete onDelete Error:", e?.message || e);
     }
-  },
+  }
 };
