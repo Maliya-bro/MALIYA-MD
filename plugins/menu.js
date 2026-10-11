@@ -7,9 +7,11 @@ const { readSettings, getCustomImage } = require("../lib/botSettings");
 const pendingMenu = Object.create(null);
 const lastProcessedMsg = {};
 const LOOP_COOLDOWN = 2500;
+const SESSION_TIMEOUT = 5 * 60 * 1000;
 
-/* ============ CONFIG ============ */
-const BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
+/* ============ PERMANENT BRANDING ============ */
+const BRAND_BASE = "MALIYA-MD";
+const DEFAULT_BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
@@ -35,32 +37,59 @@ const OWNER_NUMBER = OWNER_NUMBER_RAW.startsWith("+")
   ? `+${OWNER_NUMBER_RAW}`
   : "Not Set";
 
-const OWNER_NAME =
-  String(config.OWNER_NAME || config.BOT_NAME || "Owner").trim() || "Owner";
+const OWNER_NAME = "MALINDU NADITH";
 
-const DEFAULT_HEADER_IMAGE = "https://github.com/Maliya-bro/web-pair/blob/main/ChatGPT%20Image%20Sep%2027,%202026,%2007_25_52%20PM.png?raw=true";
+const DEFAULT_HEADER_IMAGE =
+  "https://github.com/Maliya-bro/web-pair/blob/main/ChatGPT%20Image%20Sep%2027,%202026,%2007_25_52%20PM.png?raw=true";
 
 /* ============ CACHE ============ */
 let cachedMenu = null;
 let cacheTime = 0;
 const MENU_CACHE_MS = 60 * 1000;
 
-/* ================= HELPERS ================= */
+/* ================= HELPERS (FROM SETTINGS.JS) ================= */
 function keyFor(sender, from) {
-  return `${from || ""}`;
+  return `${sender || "unknown"}_${from || "unknown"}`;
+}
+
+function clearUserSession(k) {
+  delete pendingMenu[k];
 }
 
 function getQuotedId(m, mek) {
-  return (
-    m?.quoted?.id ||
-    mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
-    m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
-    m?.message?.imageMessage?.contextInfo?.stanzaId ||
-    mek?.message?.imageMessage?.contextInfo?.stanzaId ||
-    m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
-    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
-    null
-  );
+  if (m?.quoted?.id) return m.quoted.id;
+  if (mek?.message?.extendedTextMessage?.contextInfo?.stanzaId) {
+    return mek.message.extendedTextMessage.contextInfo.stanzaId;
+  }
+  if (m?.message?.extendedTextMessage?.contextInfo?.stanzaId) {
+    return m.message.extendedTextMessage.contextInfo.stanzaId;
+  }
+  if (m?.message?.imageMessage?.contextInfo?.stanzaId) {
+    return m.message.imageMessage.contextInfo.stanzaId;
+  }
+  if (m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId) {
+    return m.message.interactiveResponseMessage.contextInfo.stanzaId;
+  }
+  if (mek?.message?.imageMessage?.contextInfo?.stanzaId) {
+    return mek.message.imageMessage.contextInfo.stanzaId;
+  }
+  if (mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId) {
+    return mek.message.interactiveResponseMessage.contextInfo.stanzaId;
+  }
+  return null;
+}
+
+function toSmallCaps(str = "") {
+  const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const small =
+    "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+  return String(str)
+    .split("")
+    .map((char) => {
+      const idx = normal.indexOf(char);
+      return idx !== -1 ? small[idx] : char;
+    })
+    .join("");
 }
 
 function cleanPhone(num = "") {
@@ -69,18 +98,6 @@ function cleanPhone(num = "") {
 
 function sameNumber(a = "", b = "") {
   return cleanPhone(a) === cleanPhone(b);
-}
-
-function toSmallCaps(str = "") {
-  const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
-  return String(str)
-    .split("")
-    .map((char) => {
-      const idx = normal.indexOf(char);
-      return idx !== -1 ? small[idx] : char;
-    })
-    .join("");
 }
 
 function getUserName(pushname, m, mek, sender = "") {
@@ -123,15 +140,6 @@ function nowLK() {
     day: "2-digit",
   }).format(d);
   return { time, date };
-}
-
-function normalizeText(s = "") {
-  return String(s)
-    .replace(/\r/g, "")
-    .replace(/\n+/g, "\n")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toUpperCase();
 }
 
 function getCategoryEmoji(cat) {
@@ -179,11 +187,10 @@ function buildCommandMapCached() {
 async function getFittedImageBuffer(url) {
   try {
     const res = await axios.get(url, { responseType: "arraybuffer", timeout: 10000 });
-    const inputBuf = Buffer.from(res.data);
-    return await sharp(inputBuf)
+    return await sharp(Buffer.from(res.data))
       .resize(800, 800, {
         fit: "contain",
-        background: { r: 18, g: 18, b: 24, alpha: 1 }
+        background: { r: 18, g: 18, b: 24, alpha: 1 },
       })
       .jpeg({ quality: 80 })
       .toBuffer();
@@ -192,19 +199,30 @@ async function getFittedImageBuffer(url) {
   }
 }
 
-function menuHeader(userName = "User", latency = "0ms") {
+async function getHeaderImage(sessionId) {
+  let headerImg = DEFAULT_HEADER_IMAGE;
+  if (sessionId) {
+    try {
+      const custom = await getCustomImage(sessionId, "menu_header");
+      if (custom && custom.data) headerImg = custom.data;
+    } catch (e) {}
+  }
+  return headerImg;
+}
+
+function menuHeader(userName = "User", latency = "0ms", botDisplayName = DEFAULT_BOT_NAME) {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
   return `┏━━━━━━◥◣◆◢◤━━━━━━┓
-★彡 *${BOT_NAME}* 彡★
+★彡 *${botDisplayName}* 彡★
 ┗━━━━━━◢◤◆◥◣━━━━━━┛
 
 ✨ 👋 *ʜɪ, ${styledUser}!*
 
 ╔═════. .★.══════════╗
-🤖 *\`ʙᴏᴛ\` :* ${BOT_NAME}
+🤖 *\`ʙᴏᴛ\` :* ${botDisplayName}
 👤 *\`ᴜsᴇʀ\` :* ${styledUser}
-👑 *\`ᴏᴡɴᴇʀ\` :* MALINDU NADITH
+👑 *\`ᴏᴡɴᴇʀ\` :* ${OWNER_NAME}
 🕒 *\`ᴛɪᴍᴇ\` :* ${time}
 📅 *\`ᴅᴀᴛᴇ\` :* ${date}
 🎯 *\`ᴘʀᴇғɪx\` :* [ ${PREFIX} ]
@@ -214,19 +232,18 @@ function menuHeader(userName = "User", latency = "0ms") {
 👇 *Select a command category below to view commands:*
 
 🌐 *Web:* https://maliya-md.vercel.app
-🌸 *Video* https://youtube.com/shorts/sxWbUypZG64?si=ZNPWj8kLWEjRM1tf`;
+🌸 *Video:* https://youtube.com/shorts/sxWbUypZG64?si=ZNPWj8kLWEjRM1tf`;
 }
 
-function buildStyledMainMenu(state, userName, latency = "0ms") {
-  const { categories } = state;
+function buildStyledMainMenu(categories, map, userName, latency = "0ms", botDisplayName = DEFAULT_BOT_NAME) {
   const styledUser = toSmallCaps(userName);
   const { time, date } = nowLK();
-  let msg = `┏━━━━━━◥◣◆◢◤━━━━━━┓\n★彡 *${BOT_NAME}* 彡★\n┗━━━━━━◢◤◆◥◣━━━━━━┛\n\n`;
+  let msg = `┏━━━━━━◥◣◆◢◤━━━━━━┓\n★彡 *${botDisplayName}* 彡★\n┗━━━━━━◢◤◆◥◣━━━━━━┛\n\n`;
   msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
   msg += `╔═════. .★.══════════╗\n`;
-  msg += `🤖 *\`ʙᴏᴛ\` :* ${BOT_NAME}\n`;
+  msg += `🤖 *\`ʙᴏᴛ\` :* ${botDisplayName}\n`;
   msg += `👤 *\`ᴜsᴇʀ\` :* ${styledUser}\n`;
-  msg += `👑 *\`ᴏᴡɴᴇʀ\` :* MALINDU NADITH\n`;
+  msg += `👑 *\`ᴏᴡɴᴇʀ\` :* ${OWNER_NAME}\n`;
   msg += `🕒 *\`ᴛɪᴍᴇ\` :* ${time}\n`;
   msg += `📅 *\`ᴅᴀᴛᴇ\` :* ${date}\n`;
   msg += `🎯 *\`ᴘʀᴇғɪx\` :* [ ${PREFIX} ]\n`;
@@ -237,13 +254,13 @@ function buildStyledMainMenu(state, userName, latency = "0ms") {
     const emo = getCategoryEmoji(cat);
     const numStr = String(idx + 1).padStart(2, "0");
     const styledCat = toSmallCaps(cat);
-    msg += `*[ ${numStr} ]*  ${emo}  *${styledCat}*  _(${state.map[cat].length})_\n`;
+    msg += `*[ ${numStr} ]*  ${emo}  *${styledCat}*  _(${map[cat]?.length || 0})_\n`;
   });
-  msg += `\n━─ ⋆ ⋅ 𖤐 ⋅ ⋆ ─━┈➤\n> 💬 *Swipe & Reply this message with a number...*`;
+  msg += `\n━─ ⋆ ⋅ 𖤐 ⋅ ⋆ ─━┈➤\n> 💬 *Swipe & Reply this message with a number...*\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
   return msg;
 }
 
-function commandListCaption(cat, list, userName = "User") {
+function commandListCaption(cat, list, userName = "User", botDisplayName = DEFAULT_BOT_NAME) {
   const emo = getCategoryEmoji(cat);
   const styledCat = toSmallCaps(cat);
   const styledUser = toSmallCaps(userName);
@@ -258,84 +275,54 @@ function commandListCaption(cat, list, userName = "User") {
     txt += `  ╰ 📌 *\`ᴅᴇsᴄ\` :* _${c.desc || "No description"}_\n\n`;
   });
 
-  txt += `────━──✦❘•❘✦──━───\n> 👑 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BOT_NAME}`;
+  txt += `────━──✦❘•❘✦──━───\n> 👑 ${botDisplayName} | ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
   return txt;
 }
 
+// Exactly like settings.js extractTexts
 function extractTexts(body, mek, m) {
   const texts = [];
   const direct = [
-    body,
-    m?.body,
-    m?.text,
-    m?.message?.conversation,
-    m?.message?.extendedTextMessage?.text,
-    m?.message?.buttonsResponseMessage?.selectedButtonId,
+    body, m?.body, m?.text, m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text, m?.message?.buttonsResponseMessage?.selectedButtonId,
     m?.message?.buttonsResponseMessage?.selectedDisplayText,
-    m?.message?.listResponseMessage?.title,
-    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.listResponseMessage?.title, m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
     m?.message?.interactiveResponseMessage?.body?.text,
-    mek?.message?.conversation,
-    mek?.message?.extendedTextMessage?.text,
+    mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
     mek?.message?.buttonsResponseMessage?.selectedButtonId,
     mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
   ];
-  for (const item of direct) {
+  direct.forEach((item) => {
     if (item) texts.push(String(item).trim());
-  }
+  });
 
   const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  for (const raw of [p1, p2]) {
-    if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed.id) texts.push(String(parsed.id).trim());
-      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
-      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
-      if (parsed.title) texts.push(String(parsed.title).trim());
-      if (parsed.name) texts.push(String(parsed.name).trim());
-    } catch {}
-  }
+  [p1, p2].forEach((raw) => {
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.id) texts.push(String(parsed.id).trim());
+        if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+        if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+        if (parsed.title) texts.push(String(parsed.title).trim());
+        if (parsed.name) texts.push(String(parsed.name).trim());
+      } catch (e) {}
+    }
+  });
+
   return [...new Set(texts.filter(Boolean))];
 }
 
-function resolveMenuAction(texts, state) {
-  const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
-  for (const text of normalized) {
-    if (text === "≡ LIST MENU" || text === ".MENU_ALL" || text === "MENU_VIEW:ALL") {
-      return { type: "all" };
-    }
-    if (text.startsWith("MENU_VIEW:")) {
-      return { type: "view", cat: text.replace("MENU_VIEW:", "").trim() };
-    }
-    if (text.startsWith(".MENU_VIEW")) {
-      return { type: "view", cat: text.replace(".MENU_VIEW", "").trim() };
-    }
-    for (const cat of state.categories || []) {
-      const catText = normalizeText(cat);
-      if (
-        text === `${catText} MENU` ||
-        text.includes(`${catText} MENU`) ||
-        text === `${catText} COMMANDS` ||
-        text.includes(`${catText} COMMANDS`)
-      ) {
-        return { type: "view", cat };
-      }
-    }
+function resolveMenuActionFromText(text) {
+  let t = "";
+  if (text) t = String(text).trim();
+  if (!t) return null;
+
+  if (t.startsWith(".menuview ")) {
+    return t.replace(".menuview ", "").trim();
   }
   return null;
-}
-
-function isDuplicateAction(state, action) {
-  const now = Date.now();
-  const sig = `${action.type}:${action.cat || ""}`;
-  if (state.lastActionSig === sig && now - (state.lastActionAt || 0) < 2500) {
-    return true;
-  }
-  state.lastActionSig = sig;
-  state.lastActionAt = now;
-  return false;
 }
 
 async function safeSendImageOrText(sock, from, imgUrl, caption, mek) {
@@ -361,23 +348,6 @@ async function safeSendImageOrText(sock, from, imgUrl, caption, mek) {
   }
 }
 
-async function sendCommandsList(sock, from, mek, cat, list, userName, sessionId) {
-  let headerImg = DEFAULT_HEADER_IMAGE;
-  if (sessionId) {
-    try {
-      const custom = await getCustomImage(sessionId, "menu_header");
-      if (custom && custom.data) headerImg = custom.data;
-    } catch (e) {}
-  }
-  return await safeSendImageOrText(
-    sock,
-    from,
-    headerImg,
-    commandListCaption(cat, list, userName),
-    mek
-  );
-}
-
 /* ================= COMMAND: .menu ================= */
 cmd(
   {
@@ -393,61 +363,63 @@ cmd(
       const startTimestamp = Date.now();
       await sock.sendMessage(from, { react: { text: "📜", key: mek.key } });
 
-      const latencyMs = Date.now() - startTimestamp;
-      const latencyStr = `${latencyMs}ms`;
-
+      const latencyStr = `${Date.now() - startTimestamp}ms`;
       const { map, categories } = buildCommandMapCached();
       if (!categories.length) return reply("❌ No commands found!");
 
       const userName = getUserName(pushname, m, mek, sender);
       const k = keyFor(sender, from);
 
-      const state = {
-        expectedMsgId: null,
-        map,
-        categories,
-        userName,
-        sessionId,
-        timestamp: Date.now(),
-        lastActionSig: "",
-        lastActionAt: 0,
-      };
-
+      let botDisplayName = DEFAULT_BOT_NAME;
       let btnsOn = true;
       try {
         const settings = await readSettings(sessionId);
+        if (settings?.bot_name) botDisplayName = String(settings.bot_name).trim();
         if (settings && typeof settings.btns_enabled !== "undefined") {
-          btnsOn = !!settings.btns_enabled;
+          btnsOn = Boolean(settings.btns_enabled);
         }
       } catch (e) {}
 
-      let headerImg = DEFAULT_HEADER_IMAGE;
-      if (sessionId) {
-        try {
-          const custom = await getCustomImage(sessionId, "menu_header");
-          if (custom && custom.data) headerImg = custom.data;
-        } catch (e) {}
-      }
+      const headerImg = await getHeaderImage(sessionId);
 
+      // Map categories to flat options (Same style as settings.js)
+      const flatOpts = categories.map((cat) => ({
+        cat: cat,
+        cmd: `.menuview ${cat}`,
+      }));
+
+      const state = {
+        createdAt: Date.now(),
+        sessionId: sessionId,
+        menuMsgId: null,
+        categories: categories,
+        options: flatOpts,
+        map: map,
+        userName: userName,
+        botDisplayName: botDisplayName,
+      };
+
+      // 1. BUTTONS MODE (Both original buttons in the same row layout)
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
 
           const listRows = categories.map((cat) => ({
             title: `${getCategoryEmoji(cat)} ${toSmallCaps(cat)} MENU`,
-            description: `${state.map[cat].length} commands available`,
-            id: `.menu_view ${cat}`,
+            description: `${map[cat].length} commands available`,
+            id: `.menuview ${cat}`,
           }));
 
           const fittedThumb = await getFittedImageBuffer(headerImg);
 
           const btn = new ButtonV2(sock)
-            .setBody(menuHeader(userName, latencyStr))
-            .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
+            .setBody(menuHeader(userName, latencyStr, botDisplayName))
+            .setFooter(`© 2026 ${BRAND_BASE} SYSTEM`)
             .setThumbnail(fittedThumb);
 
+          // Original Button 1: Single select popup list
           btn.addRawButton({
-            buttonId: ".menu_all",
+            buttonId: ".menuall",
             buttonText: { displayText: "≡ List Menu" },
             type: 1,
             nativeFlowInfo: {
@@ -464,32 +436,45 @@ cmd(
             },
           });
 
+          // Original Button 2: Ping button alongside
           btn.addButton("📊 Ping", ".ping");
 
           const sentMsg = await btn.send(from, { quoted: mek });
 
           if (sentMsg?.key?.id) {
-            state.expectedMsgId = sentMsg.key.id;
+            state.menuMsgId = sentMsg.key.id;
             pendingMenu[k] = state;
+            await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
             return;
           }
         } catch (err) {
-          console.log("BUTTONV2 SEND ERROR:", err?.message || err);
+          console.log("MENU BUTTONV2 ERROR:", err?.message || err);
         }
       }
+
+      // 2. NUMBER REPLY MODE FALLBACK
+      const captionText = buildStyledMainMenu(
+        categories,
+        map,
+        userName,
+        latencyStr,
+        botDisplayName
+      );
 
       const sentMsg = await safeSendImageOrText(
         sock,
         from,
         headerImg,
-        buildStyledMainMenu(state, userName, latencyStr),
+        captionText,
         mek
       );
 
       if (sentMsg?.key?.id) {
-        state.expectedMsgId = sentMsg.key.id;
+        state.menuMsgId = sentMsg.key.id;
         pendingMenu[k] = state;
       }
+
+      await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
     } catch (e) {
       console.log("MENU ERROR:", e?.message || e);
       reply("❌ Cannot send menu: " + (e?.message || e));
@@ -497,172 +482,87 @@ cmd(
   }
 );
 
-/* ================= COMMAND: .menu_all ================= */
-cmd(
-  {
-    pattern: "menu_all",
-    dontAddCommandList: true,
-    filename: __filename,
-  },
-  async (sock, mek, m, { from, sender, pushname, sessionId }) => {
-    try {
-      const startTimestamp = Date.now();
-      const latencyStr = `${Date.now() - startTimestamp}ms`;
-
-      const { map, categories } = buildCommandMapCached();
-      const userName = getUserName(pushname, m, mek, sender);
-      const k = keyFor(sender, from);
-
-      let headerImg = DEFAULT_HEADER_IMAGE;
-      if (sessionId) {
-        try {
-          const custom = await getCustomImage(sessionId, "menu_header");
-          if (custom && custom.data) headerImg = custom.data;
-        } catch (e) {}
-      }
-
-      const state = pendingMenu[k] || {
-        expectedMsgId: null,
-        map,
-        categories,
-        userName,
-        sessionId,
-        timestamp: Date.now(),
-      };
-
-      const sentMsg = await safeSendImageOrText(
-        sock,
-        from,
-        headerImg,
-        buildStyledMainMenu(state, userName, latencyStr),
-        mek
-      );
-
-      if (sentMsg?.key?.id) {
-        state.expectedMsgId = sentMsg.key.id;
-        pendingMenu[k] = state;
-      }
-    } catch (e) {
-      console.log("MENU ALL ERROR:", e);
-    }
-  }
-);
-
-/* ================= COMMAND: .menu_view ================= */
-cmd(
-  {
-    pattern: "menu_view",
-    dontAddCommandList: true,
-    filename: __filename,
-  },
-  async (sock, mek, m, { from, q, sender, pushname, reply, sessionId }) => {
-    try {
-      const cat = String(q || "").trim().toUpperCase();
-      const { map } = buildCommandMapCached();
-      const list = map[cat] || [];
-      if (!list.length) return reply("❌ No commands found in this category.");
-
-      const userName = getUserName(pushname, m, mek, sender);
-      await sock.sendMessage(from, {
-        react: { text: getCategoryEmoji(cat), key: mek.key },
-      });
-
-      await sendCommandsList(sock, from, mek, cat, list, userName, sessionId);
-    } catch (e) {
-      console.log("MENU VIEW ERROR:", e);
-    }
-  }
-);
-
-/* ================= REPLY HANDLER ================= */
+/* ================= EXACT SETTINGS.JS STYLE REPLY HANDLER ================= */
 const menuReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
     const state = pendingMenu[k];
     if (!state) return false;
 
-    // Quoted message එකේ ID එක සහ checks
-    const quotedId = getQuotedId(m, mek);
-    const isQuoted = !!(quotedId && state.expectedMsgId && quotedId === state.expectedMsgId);
-
-    // Interactive button / list clicks සඳහා
     const texts = extractTexts(text, mek, m);
-    const action = resolveMenuAction(texts, state);
-    if (action) return true;
+    for (const t of texts) {
+      if (resolveMenuActionFromText(t)) {
+        return true;
+      }
+    }
 
-    // Number එකක් ගහනවා නම් අනිවාර්යයෙන්ම quote කරලා තියෙන්නම ඕනෙ
     const num = parseInt(String(text || "").trim(), 10);
-    const isNum = !isNaN(num) && num > 0 && num <= state.categories.length;
+    let isNum = !isNaN(num) && num > 0 && num <= state.options.length;
 
-    return isQuoted && isNum;
+    const quotedId = getQuotedId(m, mek);
+    let isQuoted = quotedId && quotedId === state.menuMsgId;
+
+    return Boolean(isQuoted || isNum);
   },
-  function: async (sock, mek, m, { from, body, sender, pushname, reply }) => {
+
+  function: async (sock, mek, m, { body, sender, from, pushname, sessionId }) => {
+    const k = keyFor(sender, from);
+    const state = pendingMenu[k];
+    if (!state) return;
+
+    const texts = extractTexts(body, mek, m);
+    let selectedCategory = null;
+
+    // Check button click text (.menuview <CAT>)
+    for (const t of texts) {
+      const cat = resolveMenuActionFromText(t);
+      if (cat) {
+        selectedCategory = cat.toUpperCase();
+        break;
+      }
+    }
+
+    // Check number reply from options (exact settings.js behavior)
+    if (!selectedCategory) {
+      const num = parseInt(String(body || "").trim(), 10);
+      if (!isNaN(num) && num > 0 && num <= state.options.length) {
+        selectedCategory = state.options[num - 1].cat;
+      }
+    }
+
+    if (!selectedCategory) return;
+
+    // Strict deduplication check
+    const now = Date.now();
+    const sig = `menu_${selectedCategory}`;
+    const lastMsg = lastProcessedMsg[k];
+    if (lastMsg && lastMsg.text === sig && now - lastMsg.time < LOOP_COOLDOWN) {
+      return;
+    }
+    lastProcessedMsg[k] = { text: sig, time: now };
+
     try {
-      const k = keyFor(sender, from);
-      const state = pendingMenu[k];
-      if (!state) return;
-
-      const inputStr = String(body || "").trim();
-      const now = Date.now();
-      const lastMsg = lastProcessedMsg[k];
-      if (lastMsg && lastMsg.text === inputStr && (now - lastMsg.time) < LOOP_COOLDOWN) return;
-      lastProcessedMsg[k] = { text: inputStr, time: now };
-
-      const quotedId = getQuotedId(m, mek);
-      const isQuoted = !!(quotedId && state.expectedMsgId && quotedId === state.expectedMsgId);
-
-      const texts = extractTexts(body, mek, m);
-      let action = resolveMenuAction(texts, state);
-
-      // Action එකක් නැතිව number එකක් විදිහට එනවා නම් quote කරලා තියෙන එක අනිවාර්යයි
-      if (!action) {
-        if (!isQuoted) return; // Quote කරලා නැත්නම් run වෙන්නේ නෑ
-
-        const num = parseInt(inputStr, 10);
-        if (!isNaN(num) && num > 0 && num <= state.categories.length) {
-          action = { type: "view", cat: state.categories[num - 1] };
-        }
-      }
-      if (!action) return;
-
-      if (isDuplicateAction(state, action)) return;
-
+      const list = state.map[selectedCategory] || [];
       const userName = state.userName || getUserName(pushname, m, mek, sender);
-
-      if (action.type === "all") {
-        let headerImg = DEFAULT_HEADER_IMAGE;
-        if (state.sessionId) {
-          try {
-            const custom = await getCustomImage(state.sessionId, "menu_header");
-            if (custom && custom.data) headerImg = custom.data;
-          } catch (e) {}
-        }
-        const sent = await safeSendImageOrText(
-          sock,
-          from,
-          headerImg,
-          buildStyledMainMenu(state, userName, "0ms"),
-          mek
-        );
-        if (sent?.key?.id) state.expectedMsgId = sent.key.id;
-        return;
-      }
-
-      const cat = action.cat;
-      const list = state.map[cat] || [];
-      if (!list.length) {
-        return reply("❌ No commands found in this category.");
-      }
-
-      state.timestamp = Date.now();
+      const botDisplayName = state.botDisplayName || DEFAULT_BOT_NAME;
 
       await sock.sendMessage(from, {
-        react: { text: getCategoryEmoji(cat), key: mek.key },
+        react: { text: getCategoryEmoji(selectedCategory), key: mek.key },
       });
 
-      return await sendCommandsList(sock, from, mek, cat, list, userName, state.sessionId);
-    } catch (e) {
-      console.log("MENU ACTION ERROR:", e?.message || e);
+      const headerImg = await getHeaderImage(sessionId || state.sessionId);
+      const caption = commandListCaption(
+        selectedCategory,
+        list,
+        userName,
+        botDisplayName
+      );
+
+      await safeSendImageOrText(sock, from, headerImg, caption, mek);
+    } catch (err) {
+      console.log("MENU EXECUTE ERROR:", err);
+    } finally {
+      clearUserSession(k);
     }
   },
 };
@@ -671,20 +571,19 @@ if (Array.isArray(replyHandlers)) {
   replyHandlers.push(menuReplyHandler);
 }
 
-/* ================= AUTO CLEANUP ================= */
+/* ================= CLEANUP (IDENTICAL TO SETTINGS.JS) ================= */
 setInterval(() => {
   const now = Date.now();
-  const timeout = 3 * 60 * 1000;
-  for (const k of Object.keys(pendingMenu)) {
-    if (now - pendingMenu[k].timestamp > timeout) {
-      delete pendingMenu[k];
+  for (const key of Object.keys(pendingMenu)) {
+    if (now - pendingMenu[key].createdAt > SESSION_TIMEOUT) {
+      delete pendingMenu[key];
     }
   }
-  for (const k in lastProcessedMsg) {
-    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) {
-      delete lastProcessedMsg[k];
+  for (const key of Object.keys(lastProcessedMsg)) {
+    if (now - lastProcessedMsg[key].time > LOOP_COOLDOWN) {
+      delete lastProcessedMsg[key];
     }
   }
-}, 30 * 1000);
+}, 30000);
 
-module.exports = { pendingMenu };
+module.exports = {};
