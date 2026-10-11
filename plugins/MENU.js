@@ -24,12 +24,71 @@ function channelContextInfo() {
 
 const DEFAULT_HEADER_IMAGE = "https://github.com/Maliya-bro/web-pair/blob/main/ChatGPT%20Image%20Sep%2027,%202026,%2007_25_52%20PM.png?raw=true";
 
-// 🔥 video.js එකේ exact pending store එක
-const pendingMenuSelection = Object.create(null);
+// 🎯 EXACT VIDEO.JS STORE & KEY SYSTEM
+const pendingMenuCategory = Object.create(null);
 
-// 🔥 video.js එකේ exact key හදන function එක (Multi-device safe)
 function makePendingKey(sender, from) {
   return `${from || ""}::${(sender || "").split(":")[0]}`;
+}
+
+// 🎯 EXACT VIDEO.JS EXTRACT TEXTS HELPER
+function extractTexts(body, mek, m) {
+  const texts = [];
+  const direct = [
+    body,
+    m?.body,
+    m?.text,
+    m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text,
+    m?.message?.buttonsResponseMessage?.selectedButtonId,
+    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.interactiveResponseMessage?.body?.text,
+    mek?.message?.conversation,
+    mek?.message?.extendedTextMessage?.text,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    mek?.message?.interactiveResponseMessage?.body?.text,
+  ];
+  for (const item of direct) if (item) texts.push(String(item).trim());
+
+  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  for (const raw of [p1, p2]) {
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.id) texts.push(String(parsed.id).trim());
+      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+    } catch {}
+  }
+
+  return [...new Set(texts.filter(Boolean))];
+}
+
+// 🎯 EXACT VIDEO.JS STYLE NORMALIZER & EXTRACTOR
+function normalizeText(s = "") {
+  return String(s)
+    .replace(/\r/g, "")
+    .replace(/\n+/g, "\n")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+function extractCategoryChoice(texts, totalCategories) {
+  const normalized = texts.map((t) => normalizeText(t));
+  for (const text of normalized) {
+    if (text.startsWith("MENUCAT:")) {
+      const val = parseInt(text.replace("MENUCAT:", "").trim(), 10);
+      if (!isNaN(val) && val > 0 && val <= totalCategories) return val;
+    }
+    const num = parseInt(text, 10);
+    if (!isNaN(num) && num > 0 && num <= totalCategories && /^\d+$/.test(text)) {
+      return num;
+    }
+  }
+  return null;
 }
 
 function toSmallCaps(str = "") {
@@ -67,12 +126,11 @@ function getCategoryEmoji(cat) {
   if (c.includes("EDUCATION")) return "📚";
   if (c.includes("MOVIE")) return "🎬";
   if (c.includes("STICKER")) return "🖼️";
-  if (c.includes("CONVERT")) return "♻️";
   if (c.includes("UTILITY")) return "🧰";
   return "✨";
 }
 
-function buildCommandMapCached() {
+function buildCommandMap() {
   const map = Object.create(null);
   for (const c of commands) {
     if (c.dontAddCommandList) continue;
@@ -106,57 +164,6 @@ async function getHeaderImage(sessionId) {
   return headerImg;
 }
 
-// 🔥 video.js එකේ exact extractTexts function එක
-function extractTexts(body, mek, m) {
-  const texts = [];
-  const direct = [
-    body,
-    m?.body,
-    m?.text,
-    m?.message?.conversation,
-    m?.message?.extendedTextMessage?.text,
-    m?.message?.buttonsResponseMessage?.selectedButtonId,
-    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
-    m?.message?.interactiveResponseMessage?.body?.text,
-    mek?.message?.conversation,
-    mek?.message?.extendedTextMessage?.text,
-    mek?.message?.buttonsResponseMessage?.selectedButtonId,
-    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
-    mek?.message?.interactiveResponseMessage?.body?.text,
-  ];
-  for (const item of direct) if (item) texts.push(String(item).trim());
-
-  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  for (const raw of [p1, p2]) {
-    if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed.id) texts.push(String(parsed.id).trim());
-      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
-      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
-    } catch (e) {}
-  }
-
-  return [...new Set(texts.filter(Boolean))];
-}
-
-// 🔥 Choice එක අංකයක්ද නැත්නම් Button එකෙන් ආපු action එකක්ද කියලා අල්ලන helper එක
-function extractChoiceFromTexts(texts, maxLen) {
-  for (const t of texts) {
-    const str = String(t).trim();
-    if (str.startsWith("menucat:")) {
-      const n = parseInt(str.replace("menucat:", "").trim(), 10);
-      if (!isNaN(n) && n > 0 && n <= maxLen) return n;
-    }
-    const pureNum = parseInt(str, 10);
-    if (!isNaN(pureNum) && pureNum > 0 && pureNum <= maxLen && /^\d+$/.test(str)) {
-      return pureNum;
-    }
-  }
-  return null;
-}
-
 function commandListCaption(cat, list, userName, botDisplayName) {
   const emo = getCategoryEmoji(cat);
   const styledCat = toSmallCaps(cat);
@@ -180,7 +187,7 @@ cmd(
     pattern: "menu",
     alias: ["list", "botmenu", "help"],
     react: "📜",
-    desc: "Main menu",
+    desc: "Show command categories",
     category: "main",
     filename: __filename,
   },
@@ -188,18 +195,15 @@ cmd(
     try {
       await sock.sendMessage(from, { react: { text: "📜", key: mek.key } });
 
-      const { map, categories } = buildCommandMapCached();
+      const { map, categories } = buildCommandMap();
       if (!categories.length) return reply("❌ No commands found!");
 
-      const key = makePendingKey(sender, from);
       let botDisplayName = DEFAULT_BOT_NAME;
       let btnsOn = true;
       try {
         const settings = await readSettings(sessionId);
         if (settings?.bot_name) botDisplayName = String(settings.bot_name).trim();
-        if (settings && typeof settings.btns_enabled !== "undefined") {
-          btnsOn = Boolean(settings.btns_enabled);
-        }
+        if (settings && typeof settings.btns_enabled !== "undefined") btnsOn = Boolean(settings.btns_enabled);
       } catch (e) {}
 
       const headerImg = await getHeaderImage(sessionId);
@@ -217,25 +221,27 @@ cmd(
       });
       menuText += `\n⊱━━━━━━━━━━━━━━━⊰\n> 💬 *Reply with a number (e.g. 1, 2)...*`;
 
-      // 🔥 video.js විදිහටම Memory Save කිරීම (Quoted checks කිසිවක් නැත)
-      pendingMenuSelection[key] = {
-        from,
+      // 🎯 EXACT VIDEO.JS PENDING SESSION SAVE
+      const key = makePendingKey(sender, from);
+      pendingMenuCategory[key] = {
         categories,
         map,
+        userName,
         botDisplayName,
         sessionId,
-        userName,
+        from,
         createdAt: Date.now(),
         isProcessing: false,
       };
 
+      // 🔘 BUTTONS MODE (quality:360 වගේම menucat:X ලෙස යැවීම)
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
           const listRows = categories.map((cat, i) => ({
             title: `${getCategoryEmoji(cat)} ${toSmallCaps(cat)} MENU`,
             description: `${map[cat].length} commands available`,
-            id: `menucat:${i + 1}`, // video.js quality:360 වගේම clean ID එකක්
+            id: `menucat:${i + 1}`,
           }));
 
           const fittedThumb = await getFittedImageBuffer(headerImg);
@@ -262,11 +268,10 @@ cmd(
           await btn.send(from, { quoted: mek });
           return;
         } catch (err) {
-          console.log("MENU BUTTON ERROR:", err?.message);
+          console.log("BUTTON ERROR:", err);
         }
       }
 
-      // Button නැත්නම් Image + Caption යවන්න
       await sock.sendMessage(from, { image: { url: headerImg }, caption: menuText, contextInfo: channelContextInfo() }, { quoted: mek });
 
     } catch (e) {
@@ -276,20 +281,19 @@ cmd(
   }
 );
 
-/* ================= 2. EXACT VIDEO.JS STYLE REPLY HANDLER ================= */
-// 🔥 කිසිම Quoted Message Check එකක් නැහැ! Key එක තිබේ නම් කෙලින්ම Execute වේ.
+/* ================= 2. EXACT VIDEO.JS REPLY HANDLER ================= */
 replyHandlers.push({
-  filter: (_body, { sender, from }) => !!pendingMenuSelection[makePendingKey(sender, from)],
+  filter: (_body, { sender, from }) => !!pendingMenuCategory[makePendingKey(sender, from)],
   function: async (sock, mek, m, { from, body, sender }) => {
     const key = makePendingKey(sender, from);
-    const pending = pendingMenuSelection[key];
+    const pending = pendingMenuCategory[key];
     if (!pending || pending.isProcessing) return;
 
-    // Button payload එකෙන් හෝ කෙලින්ම text එකෙන් number එක ගැනීම
-    let choice = extractChoiceFromTexts(extractTexts(body, mek, m), pending.categories.length);
+    // Button Click හෝ Number Reply එක ගැනීම
+    let choice = extractCategoryChoice(extractTexts(body, mek, m), pending.categories.length);
     if (!choice && /^[1-9][0-9]*$/.test(String(body || "").trim())) {
-      const n = parseInt(String(body || "").trim(), 10);
-      if (n > 0 && n <= pending.categories.length) choice = n;
+      const val = parseInt(String(body || "").trim(), 10);
+      if (val > 0 && val <= pending.categories.length) choice = val;
     }
 
     if (!choice) return;
@@ -314,17 +318,17 @@ replyHandlers.push({
     } catch (err) {
       console.log("MENU EXECUTION ERROR:", err?.message);
     } finally {
-      delete pendingMenuSelection[key];
+      delete pendingMenuCategory[key];
     }
   },
 });
 
-/* ================= 3. AUTO CLEANUP ================= */
+/* ================= 3. CLEANUP ================= */
 setInterval(() => {
   const now = Date.now();
-  for (const key of Object.keys(pendingMenuSelection)) {
-    if (now - pendingMenuSelection[key].createdAt > 3 * 60 * 1000) {
-      delete pendingMenuSelection[key];
+  for (const key of Object.keys(pendingMenuCategory)) {
+    if (now - pendingMenuCategory[key].createdAt > 2 * 60 * 1000) {
+      delete pendingMenuCategory[key];
     }
   }
 }, 30000);
