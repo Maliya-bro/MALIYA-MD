@@ -5,47 +5,60 @@ const { cmd } = require("../command");
 const { readSettings } = require("../lib/botSettings");
 
 const spamStore = new Map(); 
-// key: "chatJid::senderJid" => { timestamps, state, until, lastWarned, warned }
+// key: senderJid => { timestamps, state, until, lastWarned, strikes }
 
-function getKey(chatJid, senderJid) {
-  return `${chatJid}::${senderJid}`;
+function getKey(senderJid) {
+  return senderJid;
 }
 
 // 🔥 VIRTEX / BUG PAYLOAD DETECTOR 🔥
 function isVirtexPayload(mek) {
-    if (!mek || !mek.message) return false;
-    
-    try {
-        let text = mek.message.conversation || mek.message.extendedTextMessage?.text || "";
-        if (text.length > 10000) return true; // අකුරු 10,000 ට වැඩි නම්
+  if (!mek || !mek.message) return false;
 
-        const weirdChars = text.match(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\u0300-\u036F]/g);
-        if (weirdChars && weirdChars.length > 500) return true; // නොපෙනෙන අකුරු 500 ට වැඩි නම්
+  try {
+    const text =
+      mek.message.conversation ||
+      mek.message.extendedTextMessage?.text ||
+      "";
 
-        const rawJson = JSON.stringify(mek.message);
-        if (rawJson.length > 25000) return true; // ලොකු Contact/Location Bug එකක් නම්
+    if (text.length > 10000) return true;
 
-        return false;
-    } catch (e) {
-        return false;
-    }
+    const weirdChars = text.match(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\u0300-\u036F]/g);
+    if (weirdChars && weirdChars.length > 500) return true;
+
+    const rawJson = JSON.stringify(mek.message);
+    if (rawJson.length > 25000) return true;
+
+    return false;
+  } catch (e) {
+    return false;
+  }
 }
 
 // ── Main logic ──────────────────────────────────
 async function handleAntiSpam(sock, mek, m, { from, sender, senderNumber, isOwner, reply, sessionId }) {
-  const settings = await readSettings(sessionId);
-  if (!settings.anti_spam) return true; 
+  let settings = { anti_spam: true };
+  try {
+    settings = await readSettings(sessionId);
+  } catch {}
 
-  if (isOwner) return true; // Owner ට මේ නීති අදාල නෑ! 😎
+  if (!settings.anti_spam) return true;
+  if (isOwner) return true; // Owner exempt
 
   const chatJid = from;
   const senderJid = sender;
-  const key = getKey(chatJid, senderJid);
+  const key = getKey(senderJid);
   const now = Date.now();
 
   let record = spamStore.get(key);
   if (!record) {
-    record = { timestamps: [], state: 'normal', until: 0, lastWarned: 0, warned: false };
+    record = {
+      timestamps: [],
+      state: "normal",
+      until: 0,
+      lastWarned: 0,
+      strikes: 0 // Track strike level: 0 = none, 1 = warned, 2 = muted, 3 = blocked
+    };
     spamStore.set(key, record);
   }
 
@@ -53,97 +66,129 @@ async function handleAntiSpam(sock, mek, m, { from, sender, senderNumber, isOwne
   // 🐛 1. VIRTEX / CRASH BUG ACTION
   // ==========================================
   if (isVirtexPayload(mek)) {
-      // Bug එකක් ආපු ගමන්, ඒ මැසේජ් එක Auto Delete කරනවා! 🗑️
-      try {
-          await sock.sendMessage(chatJid, { delete: mek.key });
-      } catch(e) {}
+    try {
+      await sock.sendMessage(chatJid, { delete: mek.key });
+    } catch (e) {}
 
-      // යූසර්ව කෙලින්ම විනාඩි 2කට Block කරනවා
-      record.state = 'blocked';
-      record.until = now + (2 * 60 * 1000); 
-      record.lastWarned = now;
-      spamStore.set(key, record);
+    record.state = "blocked";
+    record.until = now + 5 * 60 * 1000; // 5 Minutes
+    record.lastWarned = now;
+    record.strikes = 3;
+    spamStore.set(key, record);
 
-      await reply(`⛔ *VIRTEX / CRASH BUG DETECTED!*\n\n⚠️ මෙම පණිවිඩය WhatsApp Crash කිරීමට එවන ලද්දක් බැවින් එය *Auto Delete* කරන ලදී.\n🚫 *ඔයාව විනාඩි 2කට BLOCK කරනු ලැබුවා!*`);
-      return false; // මැසේජ් එක නවත්තනවා
+    await reply(
+      `⛔ *VIRTEX / CRASH BUG DETECTED!*\n\n` +
+      `⚠️ _මෙම පණිවිඩය WhatsApp Crash කිරීමට එවන ලද්දක් බැවින් එය Auto-Delete කරන ලදී._\n` +
+      `🚫 *ඔයාව විනාඩි 5කට BLOCK කරනු ලැබුවා!*`
+    );
+    return false;
   }
 
   // ==========================================
-  // 💬 2. NORMAL MESSAGE SPAM ACTION
+  // 🚫 2. CURRENTLY BLOCKED / MUTED CHECK
   // ==========================================
-  
-  // 🚫 දැනටමත් Block වෙලා නම්...
-  if (record.state === 'blocked' && record.until > now) {
-      if (now - record.lastWarned > 10000) { // තත්පර 10කට සැරයක් විතරක් මතක් කරනවා
-          const remaining = Math.ceil((record.until - now) / 1000);
-          const minutes = Math.floor(remaining / 60);
-          const seconds = remaining % 60;
-          await reply(`🚫 *ඔයා දැනට බ්ලොක් කරලයි තියෙන්නේ!*\n⏳ ඉතුරු කාලය: ${minutes}m ${seconds}s\n_(කාලය ඉවර වුණාම Auto Unblock වෙනවා)_`);
-          record.lastWarned = now;
+  if (record.until > now) {
+    if (record.state === "blocked") {
+      if (now - record.lastWarned > 10000) {
+        const remaining = Math.ceil((record.until - now) / 1000);
+        const mins = Math.floor(remaining / 60);
+        const secs = remaining % 60;
+
+        await reply(
+          `🚫 *ඔයා දැනට BLOCK කරලයි තියෙන්නේ!*\n` +
+          `⏳ *ඉතිරි කාලය:* \`${mins}m${secs}s\`\n` +
+          `_කාලය අවසන් වූ පසු ස්වයංක්‍රීයව Unblock වේ._`
+        );
+        record.lastWarned = now;
+        spamStore.set(key, record);
       }
-      return false; 
-  }
+      return false;
+    }
 
-  // 🔇 දැනටමත් Mute වෙලා නම්...
-  if (record.state === 'muted' && record.until > now) {
-      if (now - record.lastWarned > 3000) { // තත්පර 3කට සැරයක් මතක් කරනවා
-          const remaining = Math.ceil((record.until - now) / 1000);
-          await reply(`🔇 *ඔයා දැනට MUTE කරලයි තියෙන්නේ!*\n⏳ තව තත්පර ${remaining} ක් ඉන්න.`);
-          record.lastWarned = now;
+    if (record.state === "muted") {
+      if (now - record.lastWarned > 3000) {
+        const remaining = Math.ceil((record.until - now) / 1000);
+        await reply(`🔇 *ඔයා දැනට MUTE කරලයි තියෙන්නේ!*\n⏳ තව තත්පර \`${remaining}s\` ක් රැඳී සිටින්න.`);
+        record.lastWarned = now;
+        spamStore.set(key, record);
       }
-      return false; 
+      return false;
+    }
   }
 
-  // කාලය ඉවර නම්, එයාව නිදහස් කරනවා (Auto Unblock / Unmute)
-  if ((record.state === 'blocked' || record.state === 'muted') && record.until <= now) {
-      record.state = 'normal';
-      record.until = 0;
-      record.warned = false;
+  // කාලය අවසන් වූ විට State Reset කිරීම (Strike count එක පහත හෙලීම)
+  if (record.until > 0 && record.until <= now) {
+    record.state = "normal";
+    record.until = 0;
+    // Cool down strikes gradually
+    if (record.strikes > 0) record.strikes -= 1;
   }
 
-  // තත්පර 10ක් ඇතුලත දාපු මැසේජ් විතරක් මතක තියාගන්නවා
-  record.timestamps = record.timestamps.filter(t => now - t < 10000);
+  // ==========================================
+  // 💬 3. SPAM RATE CALCULATION
+  // ==========================================
+  // තත්පර 5ක් ඇතුලත timestamps පමණක් තබා ගැනීම
+  record.timestamps = record.timestamps.filter((t) => now - t < 5000);
   record.timestamps.push(now);
-  
-  // ⏱️ තත්පර 3ක් ඇතුලත දාපු මැසේජ් ගාන ගන්නවා
-  const count3s = record.timestamps.filter(t => now - t < 3000).length;
 
-  if (count3s >= 5) {
-      // 🚫 Strike 3: මැසේජ් 5ක් තත්පර 3ක් ඇතුලත - විනාඩි 2ක් Block!
-      record.state = 'blocked';
-      record.until = now + (2 * 60 * 1000); // 2 Minutes
-      record.lastWarned = now;
-      await reply(`⛔ *SPAM DETECTED!*\n\n🚫 *ඔයා දිගටම ස්පෑම් කරපු නිසා විනාඩි 2කට BLOCK කරනු ලැබුවා!*\n_(විනාඩි 2කට පසුව Auto Unblock වනු ඇත)_`);
-      spamStore.set(key, record);
-      return false;
+  const msgCountIn5s = record.timestamps.length;
 
-  } else if (count3s === 4) {
-      // 🔇 Strike 2: මැසේජ් 4ක් තත්පර 3ක් ඇතුලත - තත්පර 5ක් Mute!
-      record.state = 'muted';
-      record.until = now + 5000; // 5 Seconds
-      record.lastWarned = now;
-      await reply(`🔇 *Warning!* ඔයා වේගෙන් මැසේජ් දානවා වැඩියි. ඔයාව තත්පර 5කට MUTE කරා!`);
-      spamStore.set(key, record);
-      return false;
+  // Strike Escalation Logic:
+  // - 3 මැසේජ් තත්පර 5ක් ඇතුලත -> Warning (Strike 1)
+  // - 5 මැසේජ් තත්පර 5ක් ඇතුලත -> Mute (Strike 2, 10 seconds)
+  // - 7+ මැසේජ් තත්පර 5ක් ඇතුලත -> Block (Strike 3, 2 minutes)
 
-  } else if (count3s === 3 && !record.warned) {
-      // ⚠️ Strike 1: මැසේජ් 3ක් තත්පර 3ක් ඇතුලත - Warning!
-      record.warned = true;
-      await reply(`⚠️ *Warning!* කරුණාකර ටිකක් හිමින් මැසේජ් දාන්න. නැත්නම් ඔයාව Block වෙයි.`);
-      spamStore.set(key, record);
+  if (msgCountIn5s >= 7) {
+    // 🚫 Tier 3: Block
+    record.state = "blocked";
+    record.until = now + 2 * 60 * 1000; // 2 Minutes
+    record.lastWarned = now;
+    record.strikes = 3;
+    spamStore.set(key, record);
+
+    await reply(
+      `⛔ *SPAM DETECTED!*\n\n` +
+      `🚫 *ඔයා දිගටම spam කළ නිසා විනාඩි 2කට BLOCK කරනු ලැබුවා!*\n` +
+      `_කාලය අවසන් වූ පසු Auto Unblock වනු ඇත._`
+    );
+    return false;
+  } else if (msgCountIn5s >= 5) {
+    // 🔇 Tier 2: Mute
+    record.state = "muted";
+    record.until = now + 10 * 1000; // 10 Seconds
+    record.lastWarned = now;
+    record.strikes = 2;
+    spamStore.set(key, record);
+
+    await reply(
+      `🔇 *MUTE WARNING!*\n\n` +
+      `⚠️ ඔයා ඉතා වේගයෙන් පණිවිඩ එවයි. ඔයාව තත්පර 10කට *MUTE* කරන ලදී.`
+    );
+    return false;
+  } else if (msgCountIn5s >= 3 && record.strikes < 1) {
+    // ⚠️ Tier 1: Warning
+    record.strikes = 1;
+    record.lastWarned = now;
+    spamStore.set(key, record);
+
+    await reply(
+      `⚠️ *SLOW DOWN!*\n\n` +
+      `_කරුණාකර පණිවිඩ එවන වේගය අඩු කරන්න. දිගටම එවුවහොත් Mute හෝ Block විය හැක._`
+    );
+    return true;
   }
 
   spamStore.set(key, record);
-  return true; // සාමාන්‍ය මැසේජ් එකක් නම් යන්න දෙනවා
+  return true;
 }
 
 // ── Command: .unblock (Owner Only) ────────────────────────
 cmd(
   {
     pattern: "unblock",
-    alias: ["ub"],
+    alias: ["ub", "unmute"],
     react: "🔓",
-    desc: "Unblock a user from anti-spam in this chat (owner only)",
+    desc: "Unblock/Unmute a user from anti-spam (Owner only)",
     category: "owner",
     filename: __filename,
   },
@@ -152,7 +197,6 @@ cmd(
       return reply("❌ *This command is owner only.*");
     }
 
-    const chatJid = from;
     const mentioned = m?.message?.extendedTextMessage?.contextInfo?.mentionedJid;
     let targetJid = sender;
     if (mentioned && mentioned.length > 0) {
@@ -161,20 +205,21 @@ cmd(
       targetJid = mek.message.extendedTextMessage.contextInfo.participant;
     }
 
-    const key = getKey(chatJid, targetJid);
+    const key = getKey(targetJid);
     const record = spamStore.get(key);
-    if (!record || (record.state !== 'blocked' && record.state !== 'muted')) {
-      return reply(`✅ *User is not currently blocked or muted.*`);
+
+    if (!record || (record.state !== "blocked" && record.state !== "muted")) {
+      return reply("✅ *User is not currently blocked or muted.*");
     }
 
-    record.state = 'normal';
+    record.state = "normal";
     record.until = 0;
-    record.warned = false;
+    record.strikes = 0;
     record.timestamps = [];
     spamStore.set(key, record);
 
-    const targetName = targetJid.split('@')[0];
-    await reply(`🔓 *Unblocked @${targetName} successfully!*\n✅ දැන් ආයෙමත් මැසේජ් දාන්න පුළුවන්.`);
+    const targetName = targetJid.split("@")[0];
+    await reply(`🔓 *@${targetName} unblocked successfully!*\n_දැන් සාමාන්‍ය පරිදි පණිවිඩ එවිය හැක._`);
   }
 );
 
@@ -182,14 +227,14 @@ cmd(
 setInterval(() => {
   const now = Date.now();
   for (const [key, record] of spamStore.entries()) {
-    if (record.state === 'normal' && record.timestamps.length > 0) {
+    if (record.state === "normal" && record.timestamps.length > 0) {
       const last = record.timestamps[record.timestamps.length - 1];
       if (now - last > 120000) {
         spamStore.delete(key);
         continue;
       }
     }
-    if (record.state !== 'normal' && record.until > 0 && now > record.until + 60000) {
+    if (record.state !== "normal" && record.until > 0 && now > record.until + 60000) {
       spamStore.delete(key);
     }
   }
