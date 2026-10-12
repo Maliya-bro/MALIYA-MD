@@ -1,18 +1,235 @@
 // plugins/blockManager.js
-// WhatsApp Block List & Unblock Commands
+// WhatsApp Block, Unblock & Block List Management
 
 const { cmd } = require("../command");
 const config = require("../config");
 const { getCustomImage } = require("../lib/botSettings");
 
-// ── Default images ────────────────────────────────────────────
 const DEFAULT_IMG =
   "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_j34rhwj34rhwj34r.png?raw=true";
 
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁";
 
-// ── Command 1: .listblock ─────────────────────────────────────
+// Helper: Target JID එක සොයා ගැනීම
+function getTargetJid(q, m, mek) {
+  let targetJid = null;
+
+  // 1. Text Query (Phone Number)
+  if (q && q.trim()) {
+    const cleanPhone = q.replace(/[^0-9]/g, "");
+    if (cleanPhone.length >= 7) {
+      targetJid = `${cleanPhone}@s.whatsapp.net`;
+    }
+  }
+
+  // 2. Mentioned User
+  const mentioned = m?.message?.extendedTextMessage?.contextInfo?.mentionedJid;
+  if (!targetJid && mentioned && mentioned.length > 0) {
+    targetJid = mentioned[0];
+  }
+
+  // 3. Quoted Message Participant
+  const quotedParticipant = mek.message?.extendedTextMessage?.contextInfo?.participant;
+  if (!targetJid && quotedParticipant) {
+    targetJid = quotedParticipant;
+  }
+
+  return targetJid;
+}
+
+// ── Command 1: .block ─────────────────────────────────────────
+cmd(
+  {
+    pattern: "block",
+    alias: ["b"],
+    react: "🚫",
+    desc: "Block a user or number on WhatsApp",
+    category: "owner",
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, q, reply, isOwner, sessionId, pushname }) => {
+    try {
+      if (!isOwner) {
+        return reply("❌ *This command is owner only.*");
+      }
+
+      const targetJid = getTargetJid(q, m, mek);
+
+      if (!targetJid) {
+        return reply(
+          "⚠️ *කරුණාකර Block කිරීමට අවශ්‍ය අංකය හෝ User ව සඳහන් කරන්න!*\n\n" +
+          "📌 *භාවිතය:*\n" +
+          "• `.block 947xxxxxxxx`\n" +
+          "• `.block @user`\n" +
+          "• පණිවිඩයකට reply කර `.block`"
+        );
+      }
+
+      // WhatsApp Socket Block Execution
+      await sock.updateBlockStatus(targetJid, "block");
+
+      const targetNumber = targetJid.split("@")[0];
+
+      let blockImg = DEFAULT_IMG;
+      if (sessionId) {
+        try {
+          const custom = await getCustomImage(sessionId, "block");
+          if (custom?.data) blockImg = custom.data;
+        } catch (e) {}
+      }
+
+      const userName = pushname || m?.pushName || "Owner";
+
+      const blockCaption = `
+╭━〔 USER BLOCKED 〕━╮
+┃
+┃ 👤 *Target User:* @${targetNumber}
+┃ 🛠️ *Action:* WhatsApp Block
+┃ ⚡ *Status:* Blocked Successfully
+┃ 👑 *By:* ${userName}
+┃
+╰━━━━━━━━━━╯
+
+🔒 _මෙම අංකය WhatsApp Block List එකට ඇතුළත් කරන ලදී._`;
+
+      await sock.sendMessage(
+        from,
+        {
+          image: { url: blockImg },
+          caption: blockCaption,
+          mentions: [targetJid],
+          buttons: [
+            { buttonId: `.unblock ${targetNumber}`, buttonText: { displayText: "🔓 Unblock" }, type: 1 },
+            { buttonId: ".listblock", buttonText: { displayText: "📑 Block List" }, type: 1 },
+          ],
+          headerType: 4,
+          contextInfo: {
+            forwardingScore: 999,
+            isForwarded: true,
+            forwardedNewsletterMessageInfo: {
+              newsletterJid: CHANNEL_JID,
+              newsletterName: CHANNEL_NAME,
+              serverMessageId: -1,
+            },
+          },
+        },
+        { quoted: mek }
+      );
+    } catch (err) {
+      console.log("BLOCK ERROR:", err);
+      reply(`❌ Block Error: ${err.message}`);
+    }
+  }
+);
+
+// ── Command 2: .unblock ───────────────────────────────────────
+cmd(
+  {
+    pattern: "unblock",
+    alias: ["ub"],
+    react: "🔓",
+    desc: "Unblock a user or number from WhatsApp",
+    category: "owner",
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, q, reply, isOwner, sessionId, pushname }) => {
+    try {
+      if (!isOwner) {
+        return reply("❌ *This command is owner only.*");
+      }
+
+      let targetJid = null;
+
+      let currentBlocklist = [];
+      try {
+        currentBlocklist = await sock.fetchBlocklist();
+      } catch (e) {}
+
+      // List එකේ number එකෙන් (1, 2, 3...) unblock කිරීමට
+      if (q && q.trim()) {
+        const cleanInput = q.trim();
+        const indexNumber = parseInt(cleanInput, 10);
+
+        if (!isNaN(indexNumber) && indexNumber >= 1 && indexNumber <= currentBlocklist.length && cleanInput.length <= 3) {
+          targetJid = currentBlocklist[indexNumber - 1];
+        }
+      }
+
+      // සාමාන්‍ය query, mention, reply check
+      if (!targetJid) {
+        targetJid = getTargetJid(q, m, mek);
+      }
+
+      if (!targetJid) {
+        return reply(
+          "⚠️ *කරුණාකර අංකයක්, List අංකයක් හෝ User ව mention කරන්න!*\n\n" +
+          "📌 *භාවිතය:*\n" +
+          "• `.unblock 1` (List එකේ Index අංකයෙන්)\n" +
+          "• `.unblock 947xxxxxxxx`\n" +
+          "• `.unblock @user`\n" +
+          "• පණිවිඩයකට reply කර `.unblock`"
+        );
+      }
+
+      const targetNumber = targetJid.split("@")[0];
+
+      // WhatsApp Socket Unblock Execution
+      await sock.updateBlockStatus(targetJid, "unblock");
+
+      let unblockImg = DEFAULT_IMG;
+      if (sessionId) {
+        try {
+          const custom = await getCustomImage(sessionId, "unblock");
+          if (custom?.data) unblockImg = custom.data;
+        } catch (e) {}
+      }
+
+      const userName = pushname || m?.pushName || "Owner";
+
+      const unblockCaption = `
+╭━〔 USER UNBLOCKED 〕━╮
+┃
+┃ 👤 *User:* @${targetNumber}
+┃ 🛠️ *Action:* WhatsApp Unblock
+┃ ⚡ *Status:* Unblocked Successfully
+┃ 👑 *By:* ${userName}
+┃
+╰━━━━━━━━━━━╯
+
+✅ _අදාළ අංකය WhatsApp Block List එකෙන් ඉවත් කරන ලදී._`;
+
+      await sock.sendMessage(
+        from,
+        {
+          image: { url: unblockImg },
+          caption: unblockCaption,
+          mentions: [targetJid],
+          buttons: [
+            { buttonId: ".listblock", buttonText: { displayText: "📑 Block List" }, type: 1 },
+            { buttonId: ".menu", buttonText: { displayText: "📜 Menu" }, type: 1 },
+          ],
+          headerType: 4,
+          contextInfo: {
+            forwardingScore: 999,
+            isForwarded: true,
+            forwardedNewsletterMessageInfo: {
+              newsletterJid: CHANNEL_JID,
+              newsletterName: CHANNEL_NAME,
+              serverMessageId: -1,
+            },
+          },
+        },
+        { quoted: mek }
+      );
+    } catch (err) {
+      console.log("UNBLOCK ERROR:", err);
+      reply(`❌ Unblock Error: ${err.message}`);
+    }
+  }
+);
+
+// ── Command 3: .listblock ─────────────────────────────────────
 cmd(
   {
     pattern: "listblock",
@@ -28,7 +245,6 @@ cmd(
         return reply("❌ *This command is owner only.*");
       }
 
-      // ── 1. Fetch blocked contacts from Baileys ─────────────
       let blocklist = [];
       try {
         blocklist = await sock.fetchBlocklist();
@@ -41,7 +257,6 @@ cmd(
         return reply("✅ *දැනට WhatsApp එකේ කිසිදු අංකයක් Block කර නොමැත.*");
       }
 
-      // ── 2. Format list ──────────────────────────────────────
       const mentions = [];
       let listText = "";
 
@@ -52,15 +267,12 @@ cmd(
         listText += `┃ ${count}. @${number}\n`;
       });
 
-      // ── 3. Load Custom Image ────────────────────────────────
       let bannerImg = DEFAULT_IMG;
       if (sessionId) {
         try {
           const custom = await getCustomImage(sessionId, "blocklist");
           if (custom?.data) bannerImg = custom.data;
-        } catch (e) {
-          console.log("⚠️ Failed to load custom image:", e.message);
-        }
+        } catch (e) {}
       }
 
       const userName = pushname || m?.pushName || "Owner";
@@ -75,9 +287,10 @@ ${listText.trimEnd()}
 ┃
 ╰━━━━━━━━━━━╯
 
-💡 *Tip:* අංකයක් unblock කිරීමට \`.unblock <number>\` භාවිතා කරන්න.`;
+💡 *Tip:* අංකයක් unblock කිරීමට:
+• \`.unblock <index_number>\` (උදා: \`.unblock 1\`)
+• \`.unblock <phone_number>\` (උදා: \`.unblock 947xxxxxxxx\`)`;
 
-      // ── 4. Send Message ─────────────────────────────────────
       await sock.sendMessage(
         from,
         {
@@ -104,129 +317,6 @@ ${listText.trimEnd()}
     } catch (err) {
       console.log("LISTBLOCK ERROR:", err);
       reply(`❌ Listblock Error: ${err.message}`);
-    }
-  }
-);
-
-// ── Command 2: .unblock ───────────────────────────────────────
-cmd(
-  {
-    pattern: "unblock",
-    alias: ["ub", "unmute"],
-    react: "🔓",
-    desc: "Unblock a user or number from WhatsApp & Bot",
-    category: "owner",
-    filename: __filename,
-  },
-  async (sock, mek, m, { from, q, reply, isOwner, sessionId, pushname }) => {
-    try {
-      if (!isOwner) {
-        return reply("❌ *This command is owner only.*");
-      }
-
-      let targetJid = null;
-
-      // 1. Parameter එකක් ලෙස number එක දුන් විට (.unblock 947xxxxxxxx)
-      if (q && q.trim()) {
-        const cleanNumber = q.replace(/[^0-9]/g, "");
-        if (cleanNumber.length >= 7) {
-          targetJid = `${cleanNumber}@s.whatsapp.net`;
-        }
-      }
-
-      // 2. Mention කර ඇත්නම් (@user)
-      const mentioned = m?.message?.extendedTextMessage?.contextInfo?.mentionedJid;
-      if (!targetJid && mentioned && mentioned.length > 0) {
-        targetJid = mentioned[0];
-      }
-
-      // 3. Message එකකට reply කර ඇත්නම්
-      const quotedParticipant =
-        mek.message?.extendedTextMessage?.contextInfo?.participant;
-      if (!targetJid && quotedParticipant) {
-        targetJid = quotedParticipant;
-      }
-
-      if (!targetJid) {
-        return reply(
-          "⚠️ *කරුණාකර අංකයක් ඇතුළත් කරන්න හෝ User ව mention කරන්න!*\n\n" +
-          "📌 *භාවිතය:*\n" +
-          "• `.unblock 94712345678`\n" +
-          "• `.unblock @user`\n" +
-          "• මැසේජ් එකකට reply කර `.unblock`"
-        );
-      }
-
-      const targetNumber = targetJid.split("@")[0];
-
-      // ── 1. WhatsApp Level Unblock ───────────────────────────
-      try {
-        await sock.updateBlockStatus(targetJid, "unblock");
-      } catch (err) {
-        console.log("⚠️ WhatsApp updateBlockStatus error:", err.message);
-      }
-
-      // ── 2. Anti-Spam Memory Reset (Plugin එක load කර ඇත්නම්) ─
-      try {
-        const antiSpam = require("./anti-spam");
-        if (antiSpam && typeof antiSpam.resetSpamUser === "function") {
-          antiSpam.resetSpamUser(targetJid);
-        }
-      } catch {}
-
-      // ── 3. Load Custom Image ────────────────────────────────
-      let unblockImg = DEFAULT_IMG;
-      if (sessionId) {
-        try {
-          const custom = await getCustomImage(sessionId, "unblock");
-          if (custom?.data) unblockImg = custom.data;
-        } catch (e) {
-          console.log("⚠️ Failed to load custom image:", e.message);
-        }
-      }
-
-      const userName = pushname || m?.pushName || "Owner";
-
-      const unblockCaption = `
-╭━〔 🔓 USER UNBLOCKED 🔓 〕━╮
-┃
-┃ 👤 *Target User:* @${targetNumber}
-┃ 🛠️ *Action:* WhatsApp & Spam Unblock
-┃ ⚡ *Status:* Active / Whitelisted
-┃ 👑 *Executed By:* ${userName}
-┃ 🧩 *Bot:* ${config.BOT_NAME || "🌀 MALIYA-MD 🌀"}
-┃
-╰━━━━━━━━━━━━╯
-
-✅ _දැන් මෙම අංකයට සාමාන්‍ය පරිදි බොට් භාවිතා කිරීමට හැකියාව ඇත._`;
-
-      // ── 4. Send Message ─────────────────────────────────────
-      await sock.sendMessage(
-        from,
-        {
-          image: { url: unblockImg },
-          caption: unblockCaption,
-          mentions: [targetJid],
-          buttons: [
-            { buttonId: ".listblock", buttonText: { displayText: "🚫 Block List" }, type: 1 },
-            { buttonId: ".menu", buttonText: { displayText: "📜 Menu" }, type: 1 },
-          ],
-          headerType: 4,
-          contextInfo: {
-            forwardingScore: 999,
-            isForwarded: true,
-            forwardedNewsletterMessageInfo: {
-              newsletterJid: CHANNEL_JID,
-              newsletterName: CHANNEL_NAME,
-              serverMessageId: -1,
-            },
-          },
-        },
-        { quoted: mek }
-      );
-    } catch (err) {
-      console.log("UNBLOCK ERROR:", err);
-      reply(`❌ Unblock Error: ${err.message}`);
     }
   }
 );
