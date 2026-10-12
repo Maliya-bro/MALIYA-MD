@@ -185,8 +185,8 @@ async function handleAntiSpam(sock, mek, m, { from, sender, senderNumber, isOwne
 // ── Command: .unblock (Owner Only) ────────────────────────
 cmd(
   {
-    pattern: "unblock",
-    alias: ["ub", "unmute"],
+    pattern: "unlock",
+    alias: ["ul", "unmute"],
     react: "🔓",
     desc: "Unblock/Unmute a user from anti-spam (Owner only)",
     category: "owner",
