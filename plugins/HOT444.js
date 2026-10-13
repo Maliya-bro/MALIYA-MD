@@ -106,6 +106,7 @@ function extractIncomingPayload(body, mek, m) {
   return String(text).trim();
 }
 
+// ===== FIX KALA SEARCH FUNCTION EKA =====
 async function xhamSearch(query, limit = 100) {
   let allResults = [];
   let page = 1;
@@ -117,29 +118,60 @@ async function xhamSearch(query, limit = 100) {
 
     try {
       const { data } = await axios.get(url, {
-        headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' },
-        timeout: 12000
+        headers: { 
+          'User-Agent': UA, 
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://xhamster.com/'
+        },
+        timeout: 15000
       });
+
       const $ = cheerio.load(data);
-      $('.video-thumb').each((_, el) => {
+      const thumbElements = $('[class*="video-thumb"], [data-role="video-item"], div.thumb-list__item');
+
+      thumbElements.each((_, el) => {
         if (allResults.length >= limit) return false;
-        const anchor = $(el).find('a.video-thumb__image-container').first();
-        const img = $(el).find('img.thumb-image-container__image').first();
-        const href = anchor.attr('href') || '';
-        const title = $(el).find('.video-thumb-info__name').first().text().trim() || anchor.attr('title') || '';
-        const duration = $(el).find('.video-thumb-views-box__item--duration, [data-role="video-duration"]').first().text().trim();
+
+        const anchor = $(el).find('a[href*="/videos/"]').first();
+        if (!anchor.length) return;
+
+        let href = anchor.attr('href') || '';
+        if (!href) return;
+
+        const img = $(el).find('img').first();
+        
+        let title = anchor.attr('aria-label') || 
+                    anchor.attr('title') || 
+                    $(el).find('[class*="name"]').first().text().trim() || 
+                    img.attr('alt') || 
+                    '';
+
+        let duration = $(el).find('time').first().attr('datetime') \vert{}\vert{}$(el).find('[data-role="video-duration"], [class*="duration"]').first().text().trim() || 
+                       '';
+
+        let thumb = img.attr('data-src') || 
+                    img.attr('src') || 
+                    img.attr('srcset')?.split(' ')[0] || 
+                    '';
 
         if (title && href) {
-          allResults.push({
-            title,
-            url: href.startsWith('http') ? href : `https://xhamster.com${href}`,
-            thumb: img.attr('src') || '',
-            duration
-          });
+          const fullUrl = href.startsWith('http') ? href : `https://xhamster.com${href}`;
+          
+          if (!allResults.some(r => r.url === fullUrl)) {
+            allResults.push({
+              title: title.trim(),
+              url: fullUrl,
+              thumb,
+              duration
+            });
+          }
         }
       });
+
       page++;
     } catch (err) {
+      console.error(`xHam Search Page ${page} Error:`, err.message);
       break;
     }
   }
