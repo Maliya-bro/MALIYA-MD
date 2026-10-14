@@ -256,13 +256,101 @@ function extractIncomingPayload(body, mek, m) {
   return String(text).trim();
 }
 
-// 1. SEARCH FUNCTION (IF-ELSE ONLY)
+// 1. JSON API & HTML DUAL-ENGINE SEARCH
 async function xhamSearch(query, limit = 100) {
   let allResults = [];
-  let page = 1;
 
+  // ක්‍රමය A: Frontend Search API එක මඟින් සෙවීම (100% ප්‍රතිඵල ලැබේ)
+  try {
+    const apiRes = await axios.get("https://xhamster.com/api/front/search/video", {
+      params: {
+        q: query,
+        page: 1,
+        limit: limit
+      },
+      headers: {
+        'User-Agent': UA,
+        'Referer': 'https://xhamster.com/',
+        'Accept': 'application/json, text/plain, */*'
+      },
+      timeout: 12000
+    });
+
+    if (apiRes.data) {
+      let videoList = null;
+      if (apiRes.data.videos) {
+        videoList = apiRes.data.videos;
+      } else if (apiRes.data.items) {
+        videoList = apiRes.data.items;
+      } else if (Array.isArray(apiRes.data)) {
+        videoList = apiRes.data;
+      }
+
+      if (videoList) {
+        if (Array.isArray(videoList)) {
+          for (let i = 0; i < videoList.length; i++) {
+            if (allResults.length >= limit) {
+              break;
+            }
+            const item = videoList[i];
+            let vTitle = item.title;
+            let vUrl = item.pageURL;
+            if (!vUrl) {
+              vUrl = item.url;
+            }
+            if (!vUrl) {
+              if (item.id) {
+                vUrl = "https://xhamster.com/videos/" + item.id;
+              }
+            }
+
+            let vThumb = item.thumbURL;
+            if (!vThumb) {
+              vThumb = item.thumb;
+            }
+            if (!vThumb) {
+              vThumb = item.image;
+            }
+
+            let vDuration = item.durationFormatted;
+            if (!vDuration) {
+              if (item.duration) {
+                vDuration = item.duration + "s";
+              } else {
+                vDuration = "N/A";
+              }
+            }
+
+            if (vTitle) {
+              if (vUrl) {
+                if (!vUrl.startsWith('http')) {
+                  vUrl = "https://xhamster.com" + vUrl;
+                }
+                allResults.push({
+                  title: String(vTitle).trim(),
+                  url: vUrl,
+                  thumb: vThumb,
+                  duration: vDuration
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // API fail වුවහොත් fallback එකට යයි
+  }
+
+  // ප්‍රතිඵල ලැබුණි නම් මෙතැනින්ම return කරයි
+  if (allResults.length > 0) {
+    return allResults;
+  }
+
+  // ක්‍රමය B: Cheerio Fallback
+  let page = 1;
   while (allResults.length < limit) {
-    if (page > 5) {
+    if (page > 3) {
       break;
     }
 
@@ -276,105 +364,93 @@ async function xhamSearch(query, limit = 100) {
     try {
       const { data } = await axios.get(url, {
         headers: { 
-          'User-Agent': UA, 
+          'User-Agent': UA,
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
           'Referer': 'https://xhamster.com/'
         },
         timeout: 15000
       });
 
-      const $ = cheerio.load(data);
-      const thumbElements = $('[class*="video-thumb"], [data-role="video-item"], div.thumb-list__item');
-
-      thumbElements.each((_, el) => {
-        if (allResults.length >= limit) {
-          return false;
-        }
-
-        const anchor = $(el).find('a[href*="/videos/"]').first();
-        if (!anchor.length) {
-          return;
-        }
-
-        let href = anchor.attr('href');
-        if (!href) {
-          return;
-        }
-
-        const img = $(el).find('img').first();
-        
-        // Title parsing
-        let title = anchor.attr('aria-label');
-        if (!title) {
-          title = anchor.attr('title');
-        }
-        if (!title) {
-          title = $(el).find('[class*="name"]').first().text().trim();
-        }
-        if (!title) {
-          title = img.attr('alt');
-        }
-        if (!title) {
-          title = '';
-        }
-
-        // Duration parsing
-        let duration = $(el).find('time').first().attr('datetime');
-        if (!duration) {
-          duration = $(el).find('[data-role="video-duration"], [class*="duration"]').first().text().trim();
-        }
-        if (!duration) {
-          duration = 'N/A';
-        }
-
-        // Thumb parsing
-        let thumb = img.attr('data-src');
-        if (!thumb) {
-          thumb = img.attr('src');
-        }
-        if (!thumb) {
-          const srcset = img.attr('srcset');
-          if (srcset) {
-            thumb = srcset.split(' ')[0];
-          } else {
-            thumb = '';
+      // HTML එක තුළ ඇති window.initials JSON පරීක්ෂාව
+      const match = data.match(/window\.initials\s*=\s*(\{.+?\});/);
+      if (match) {
+        if (match[1]) {
+          const parsed = safeJsonParse(match[1]);
+          if (parsed) {
+            let jsonVideos = null;
+            if (parsed.searchModel) {
+              if (parsed.searchModel.videos) {
+                jsonVideos = parsed.searchModel.videos;
+              }
+            }
+            if (jsonVideos) {
+              if (Array.isArray(jsonVideos)) {
+                for (let j = 0; j < jsonVideos.length; j++) {
+                  if (allResults.length >= limit) {
+                    break;
+                  }
+                  const vid = jsonVideos[j];
+                  if (vid.title) {
+                    if (vid.pageURL) {
+                      allResults.push({
+                        title: vid.title,
+                        url: vid.pageURL.startsWith('http') ? vid.pageURL : 'https://xhamster.com' + vid.pageURL,
+                        thumb: vid.thumbURL,
+                        duration: vid.durationFormatted ? vid.durationFormatted : 'N/A'
+                      });
+                    }
+                  }
+                }
+              }
+            }
           }
         }
+      }
 
-        if (title) {
+      if (allResults.length === 0) {
+        const $ = cheerio.load(data);
+        $('a[href*="/videos/"]').each((_, el) => {
+          if (allResults.length >= limit) {
+            return false;
+          }
+          const anchor = $(el);
+          const href = anchor.attr('href');
+          const title = anchor.attr('aria-label') ? anchor.attr('aria-label') : anchor.attr('title');
+
           if (href) {
-            let fullUrl = href;
-            if (!href.startsWith('http')) {
-              fullUrl = 'https://xhamster.com' + href;
-            }
-            
-            const alreadyExists = allResults.some(r => r.url === fullUrl);
-            if (!alreadyExists) {
-              allResults.push({
-                title: title.trim(),
-                url: fullUrl,
-                thumb: thumb,
-                duration: duration
-              });
+            if (title) {
+              if (!href.includes('/categories/')) {
+                if (!href.includes('/creators/')) {
+                  const fullUrl = href.startsWith('http') ? href : 'https://xhamster.com' + href;
+                  const alreadyIn = allResults.some(r => r.url === fullUrl);
+                  if (!alreadyIn) {
+                    allResults.push({
+                      title: title.trim(),
+                      url: fullUrl,
+                      thumb: '',
+                      duration: 'N/A'
+                    });
+                  }
+                }
+              }
             }
           }
-        }
-      });
+        });
+      }
 
       page++;
-    } catch (err) {
-      console.error("xHam Search Page " + page + " Error:", err.message);
+    } catch (e) {
       break;
     }
   }
+
   return allResults;
 }
 
-// 2. VIDEO DETAILS EXTRACTION (IF-ELSE ONLY)
+// 2. VIDEO DETAILS EXTRACTION
 async function fetchXhamVideoDetails(url) {
   const { data } = await axios.get(url, {
-    headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' },
+    headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9', 'Referer': 'https://xhamster.com/' },
     timeout: 12000
   });
 
@@ -477,7 +553,7 @@ async function fetchXhamVideoDetails(url) {
   return { title, duration, hlsUrl, qualities };
 }
 
-// 3. FFMPEG DOWNLOAD BUFFER
+// 3. FFMPEG BUFFER DOWNLOAD
 async function xhamDownloadBuffer(streamUrl) {
   const tmpDir = await mkdtemp(join(tmpdir(), 'xhamdl-'));
   const outPath = join(tmpDir, 'video.mp4');
