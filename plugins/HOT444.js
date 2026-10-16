@@ -345,17 +345,10 @@ async function getPhDirectStream(url) {
     try {
       const flashvars = JSON.parse(flashvarsMatch[1]);
       if (flashvars.mediaDefinitions && Array.isArray(flashvars.mediaDefinitions)) {
-        const hlsDef = flashvars.mediaDefinitions.find(m => {
-          if (m.format === 'hls' && m.videoUrl) {
-            return true;
-          } else if (m.videoUrl && m.videoUrl.includes('.m3u8')) {
-            return true;
-          } else {
-            return false;
-          }
-        });
-        if (hlsDef) {
-          masterM3u8Url = hlsDef.videoUrl;
+        // High quality HLS stream pick
+        const sortedDefs = flashvars.mediaDefinitions.filter(m => (m.format === 'hls' || (m.videoUrl && m.videoUrl.includes('.m3u8'))) && m.videoUrl);
+        if (sortedDefs.length > 0) {
+          masterM3u8Url = sortedDefs[0].videoUrl;
         }
       }
     } catch {}
@@ -382,29 +375,37 @@ async function getPhDirectStream(url) {
 
   const duration = $('span.duration').first().text().trim();
 
-  // CDN direct sub-stream playlist resolution
+  // Master m3u8 එක parse කර direct sub-playlist (.m3u8) link එකක් ලබාගැනීම
   let finalStreamUrl = masterM3u8Url;
   try {
     const m3u8Res = await axios.get(masterM3u8Url, {
       headers: {
         'User-Agent': UA,
         'Referer': 'https://www.pornhub.com/',
-        'Origin': 'https://www.pornhub.com'
+        'Origin': 'https://www.pornhub.com',
+        'Cookie': 'hasVisited=1; age_verified=1'
       },
       timeout: 10000
     });
 
-    const lines = m3u8Res.data.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line && !line.startsWith('#')) {
-        if (line.startsWith('http')) {
-          finalStreamUrl = line;
-        } else {
-          const baseUrl = masterM3u8Url.substring(0, masterM3u8Url.lastIndexOf('/') + 1);
-          finalStreamUrl = baseUrl + line;
+    const m3u8Content = m3u8Res.data;
+    if (typeof m3u8Content === 'string') {
+      const lines = m3u8Content.split('\n');
+      const validSubLinks = [];
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line && !line.startsWith('#')) {
+          if (line.startsWith('http')) {
+            validSubLinks.push(line);
+          } else {
+            const baseUrl = masterM3u8Url.substring(0, masterM3u8Url.lastIndexOf('/') + 1);
+            validSubLinks.push(baseUrl + line);
+          }
         }
-        break;
+      }
+      if (validSubLinks.length > 0) {
+        // පළමු sub-playlist (හොඳම quality) URL එක තෝරා ගනී
+        finalStreamUrl = validSubLinks[0];
       }
     }
   } catch (e) {
@@ -419,22 +420,21 @@ async function phDownloadBuffer(streamUrl) {
   const tmpDir = await mkdtemp(join(tmpdir(), 'phdl-'));
   const outPath = join(tmpDir, 'video.mp4');
 
-  const headersStr = "Referer: https://www.pornhub.com/\r\nOrigin: https://www.pornhub.com\r\nAccept: */*\r\n";
+  // Multi-line header string වෙනුවට single sanitized string
+  const customHeaders = "Referer: https://www.pornhub.com/\r\nOrigin: https://www.pornhub.com\r\nCookie: hasVisited=1; age_verified=1\r\nAccept: */*\r\n";
 
   const ffmpegArgs = [
     '-v', 'error',
     '-y',
     '-user_agent', UA,
-    '-headers', headersStr,
+    '-headers', customHeaders,
     '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
     '-reconnect', '1',
     '-reconnect_streamed', '1',
     '-reconnect_delay_max', '5',
     '-i', streamUrl,
-    '-c:v', 'libx264',
-    '-preset', 'fast',
-    '-c:a', 'aac',
-    '-pix_fmt', 'yuv420p',
+    '-c', 'copy', // Re-encoding (libx264) වෙනුවට direct copy එකෙන් වේගවත් කර memory limit බේරා ගනී
+    '-bsf:a', 'aac_adtstoasc',
     '-movflags', '+faststart',
     outPath
   ];
@@ -545,7 +545,7 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, bo
 // ===== 1. MAIN COMMAND =====
 cmd({
   pattern: "ph",
-  alias: ["pornhub", "phub", "sex"],
+  alias: ["pornhub", "phub"],
   desc: "Search and download videos from Pornhub",
   category: "download",
   react: "🔞",
