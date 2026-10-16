@@ -127,7 +127,7 @@ async function phSearch(query, limit = 100) {
     return allResults;
 }
 
-// 2. Direct Video Stream Extractor
+// 2. Direct Video Stream Extractor & Sub-Playlist Resolver
 async function getPhDirectStream(url) {
     const { data } = await axios.get(url, {
         headers: { 
@@ -187,20 +187,52 @@ async function getPhDirectStream(url) {
 
     const duration = $('span.duration').first().text().trim();
 
-    return { title: title, duration: duration, streamUrl: masterM3u8Url };
+    // Resolve direct playlist inside Master M3U8 to avoid CDN 4XX issues
+    let finalStreamUrl = masterM3u8Url;
+    try {
+        const m3u8Res = await axios.get(masterM3u8Url, {
+            headers: {
+                'User-Agent': UA,
+                'Referer': 'https://www.pornhub.com/',
+                'Origin': 'https://www.pornhub.com'
+            },
+            timeout: 10000
+        });
+
+        const lines = m3u8Res.data.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line && !line.startsWith('#')) {
+                if (line.startsWith('http')) {
+                    finalStreamUrl = line;
+                } else {
+                    const baseUrl = masterM3u8Url.substring(0, masterM3u8Url.lastIndexOf('/') + 1);
+                    finalStreamUrl = baseUrl + line;
+                }
+                break;
+            }
+        }
+    } catch (e) {
+        // Fallback to master if sub-playlist resolution fails
+        finalStreamUrl = masterM3u8Url;
+    }
+
+    return { title: title, duration: duration, streamUrl: finalStreamUrl };
 }
 
-// 3. FFMPEG Downloader
+// 3. FFMPEG Downloader (Fixed headers & options)
 async function phDownloadBuffer(streamUrl) {
     const tmpDir = await mkdtemp(join(tmpdir(), 'phdl-'));
     const outPath = join(tmpDir, 'video.mp4');
 
-    const headersStr = "User-Agent: " + UA + "\r\nReferer: https://www.pornhub.com/\r\nOrigin: https://www.pornhub.com\r\n";
+    const headersStr = "Referer: https://www.pornhub.com/\r\nOrigin: https://www.pornhub.com\r\nAccept: */*\r\n";
 
     const ffmpegArgs = [
         '-v', 'error',
         '-y',
+        '-user_agent', UA,
         '-headers', headersStr,
+        '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
         '-i', streamUrl,
         '-c', 'copy',
         '-bsf:a', 'aac_adtstoasc',
@@ -304,8 +336,8 @@ async function processDownload(bot, mek, m, reply, from, streamUrl, title, durat
 
 // ===== COMMAND REGISTRATION =====
 cmd({
-    pattern: "sex",
-    alias: ["pornhub", "phub", "ph"],
+    pattern: "ph",
+    alias: ["pornhub", "phub"],
     desc: "Search and download videos from Pornhub",
     category: "download",
     react: "🔞",
