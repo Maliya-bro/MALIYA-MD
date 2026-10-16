@@ -10,19 +10,21 @@ const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const execFileAsync = promisify(execFile);
 
-const pendingXhamSearch = {};
-const pendingXhamQuality = {}; 
-const lastProcessedMsg = {};   
+// State Management
+const pendingPhSearch = {};
+const lastProcessedMsg = {};
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 3000;
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
 const BRAND_BASE = "MALIYA-MD";
 const DEFAULT_BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 const DEFAULT_SEARCH_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
+
+// ===== HELPER FUNCTIONS =====
 
 function channelContextInfo() {
   return {
@@ -39,22 +41,23 @@ function channelContextInfo() {
 function keyFor(sender, from) {
   let fromPart = "";
   if (from) {
-    fromPart = from;
+    fromPart = String(from);
   }
   let senderPart = "";
   if (sender) {
-    senderPart = sender.split(":")[0];
+    senderPart = String(sender).split(":")[0];
   }
   return fromPart + "::" + senderPart;
 }
 
 function toSmallCaps(str) {
-  if (!str) {
-    str = "";
+  let text = "";
+  if (str) {
+    text = String(str);
   }
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
-  return String(str)
+  return text
     .split("")
     .map((char) => {
       const idx = normal.indexOf(char);
@@ -68,8 +71,7 @@ function toSmallCaps(str) {
 }
 
 function clearUserSession(k) {
-  delete pendingXhamSearch[k];
-  delete pendingXhamQuality[k];
+  delete pendingPhSearch[k];
 }
 
 function safeJsonParse(str) {
@@ -101,13 +103,6 @@ function getQuotedStanzaId(mek) {
         if (mek.message.videoMessage.contextInfo) {
           if (mek.message.videoMessage.contextInfo.stanzaId) {
             return mek.message.videoMessage.contextInfo.stanzaId;
-          }
-        }
-      }
-      if (mek.message.documentMessage) {
-        if (mek.message.documentMessage.contextInfo) {
-          if (mek.message.documentMessage.contextInfo.stanzaId) {
-            return mek.message.documentMessage.contextInfo.stanzaId;
           }
         }
       }
@@ -256,313 +251,182 @@ function extractIncomingPayload(body, mek, m) {
   return String(text).trim();
 }
 
-// 1. JSON API & HTML DUAL-ENGINE SEARCH
-async function xhamSearch(query, limit = 100) {
+// 1. SEARCH LOGIC
+async function phSearch(query, limit = 100) {
   let allResults = [];
-
-  // ක්‍රමය A: Frontend Search API එක මඟින් සෙවීම (100% ප්‍රතිඵල ලැබේ)
-  try {
-    const apiRes = await axios.get("https://xhamster.com/api/front/search/video", {
-      params: {
-        q: query,
-        page: 1,
-        limit: limit
-      },
-      headers: {
-        'User-Agent': UA,
-        'Referer': 'https://xhamster.com/',
-        'Accept': 'application/json, text/plain, */*'
-      },
-      timeout: 12000
-    });
-
-    if (apiRes.data) {
-      let videoList = null;
-      if (apiRes.data.videos) {
-        videoList = apiRes.data.videos;
-      } else if (apiRes.data.items) {
-        videoList = apiRes.data.items;
-      } else if (Array.isArray(apiRes.data)) {
-        videoList = apiRes.data;
-      }
-
-      if (videoList) {
-        if (Array.isArray(videoList)) {
-          for (let i = 0; i < videoList.length; i++) {
-            if (allResults.length >= limit) {
-              break;
-            }
-            const item = videoList[i];
-            let vTitle = item.title;
-            let vUrl = item.pageURL;
-            if (!vUrl) {
-              vUrl = item.url;
-            }
-            if (!vUrl) {
-              if (item.id) {
-                vUrl = "https://xhamster.com/videos/" + item.id;
-              }
-            }
-
-            let vThumb = item.thumbURL;
-            if (!vThumb) {
-              vThumb = item.thumb;
-            }
-            if (!vThumb) {
-              vThumb = item.image;
-            }
-
-            let vDuration = item.durationFormatted;
-            if (!vDuration) {
-              if (item.duration) {
-                vDuration = item.duration + "s";
-              } else {
-                vDuration = "N/A";
-              }
-            }
-
-            if (vTitle) {
-              if (vUrl) {
-                if (!vUrl.startsWith('http')) {
-                  vUrl = "https://xhamster.com" + vUrl;
-                }
-                allResults.push({
-                  title: String(vTitle).trim(),
-                  url: vUrl,
-                  thumb: vThumb,
-                  duration: vDuration
-                });
-              }
-            }
-          }
-        }
-      }
-    }
-  } catch (err) {
-    // API fail වුවහොත් fallback එකට යයි
-  }
-
-  // ප්‍රතිඵල ලැබුණි නම් මෙතැනින්ම return කරයි
-  if (allResults.length > 0) {
-    return allResults;
-  }
-
-  // ක්‍රමය B: Cheerio Fallback
   let page = 1;
-  while (allResults.length < limit) {
-    if (page > 3) {
-      break;
-    }
 
-    let url = "";
-    if (page === 1) {
-      url = "https://xhamster.com/search/" + encodeURIComponent(query);
-    } else {
-      url = "https://xhamster.com/search/" + encodeURIComponent(query) + "?page=" + page;
-    }
+  while (allResults.length < limit && page <= 5) {
+    const url = "https://www.pornhub.com/video/search?search=" + encodeURIComponent(query) + "&page=" + page;
 
     try {
       const { data } = await axios.get(url, {
         headers: { 
-          'User-Agent': UA,
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Referer': 'https://xhamster.com/'
+          'User-Agent': UA, 
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Cookie': 'hasVisited=1; age_verified=1'
         },
-        timeout: 15000
+        timeout: 12000
       });
-
-      // HTML එක තුළ ඇති window.initials JSON පරීක්ෂාව
-      const match = data.match(/window\.initials\s*=\s*(\{.+?\});/);
-      if (match) {
-        if (match[1]) {
-          const parsed = safeJsonParse(match[1]);
-          if (parsed) {
-            let jsonVideos = null;
-            if (parsed.searchModel) {
-              if (parsed.searchModel.videos) {
-                jsonVideos = parsed.searchModel.videos;
-              }
-            }
-            if (jsonVideos) {
-              if (Array.isArray(jsonVideos)) {
-                for (let j = 0; j < jsonVideos.length; j++) {
-                  if (allResults.length >= limit) {
-                    break;
-                  }
-                  const vid = jsonVideos[j];
-                  if (vid.title) {
-                    if (vid.pageURL) {
-                      allResults.push({
-                        title: vid.title,
-                        url: vid.pageURL.startsWith('http') ? vid.pageURL : 'https://xhamster.com' + vid.pageURL,
-                        thumb: vid.thumbURL,
-                        duration: vid.durationFormatted ? vid.durationFormatted : 'N/A'
-                      });
-                    }
-                  }
-                }
-              }
-            }
-          }
+      const $ = cheerio.load(data);
+      
+      $('li.pcVideoListItem, li.videoBox').each((_, el) => {
+        if (allResults.length >= limit) return false;
+        const anchor = $(el).find('a').first();
+        const img = $(el).find('img').first();
+        
+        let title = $(el).find('.title a, span.title').first().text().trim();
+        if (!title) {
+          title = anchor.attr('title');
         }
-      }
+        if (!title) {
+          title = '';
+        }
 
-      if (allResults.length === 0) {
-        const $ = cheerio.load(data);
-        $('a[href*="/videos/"]').each((_, el) => {
-          if (allResults.length >= limit) {
-            return false;
+        let href = anchor.attr('href');
+        if (!href) {
+          href = '';
+        }
+
+        const duration = $(el).find('var.duration, .duration').first().text().trim();
+
+        if (title && href && href.includes('viewkey=')) {
+          let fullUrl = '';
+          if (href.startsWith('http')) {
+            fullUrl = href;
+          } else {
+            fullUrl = "https://www.pornhub.com" + href;
           }
-          const anchor = $(el);
-          const href = anchor.attr('href');
-          const title = anchor.attr('aria-label') ? anchor.attr('aria-label') : anchor.attr('title');
 
-          if (href) {
-            if (title) {
-              if (!href.includes('/categories/')) {
-                if (!href.includes('/creators/')) {
-                  const fullUrl = href.startsWith('http') ? href : 'https://xhamster.com' + href;
-                  const alreadyIn = allResults.some(r => r.url === fullUrl);
-                  if (!alreadyIn) {
-                    allResults.push({
-                      title: title.trim(),
-                      url: fullUrl,
-                      thumb: '',
-                      duration: 'N/A'
-                    });
-                  }
-                }
-              }
-            }
+          let thumb = img.attr('data-mediumhint');
+          if (!thumb) {
+            thumb = img.attr('src');
           }
-        });
-      }
+          if (!thumb) {
+            thumb = '';
+          }
 
+          allResults.push({
+            title: title,
+            url: fullUrl,
+            thumb: thumb,
+            duration: duration || 'N/A'
+          });
+        }
+      });
       page++;
-    } catch (e) {
+    } catch (err) {
       break;
     }
   }
-
   return allResults;
 }
 
-// 2. VIDEO DETAILS EXTRACTION
-async function fetchXhamVideoDetails(url) {
+// 2. DIRECT STREAM & SUB-PLAYLIST RESOLVER
+async function getPhDirectStream(url) {
   const { data } = await axios.get(url, {
-    headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9', 'Referer': 'https://xhamster.com/' },
-    timeout: 12000
+    headers: { 
+      'User-Agent': UA, 
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Cookie': 'hasVisited=1; age_verified=1'
+    },
+    timeout: 15000
   });
-
+  
   const $ = cheerio.load(data);
-  let hlsUrl = null;
+  let masterM3u8Url = null;
 
-  const windowStateMatch = data.match(/window\.initials\s*=\s*({.*?});/s);
-  if (windowStateMatch) {
-    if (windowStateMatch[1]) {
-      try {
-        const initialState = JSON.parse(windowStateMatch[1]);
-        let videoModel = null;
-        if (initialState.videoModel) {
-          videoModel = initialState.videoModel;
-        } else if (initialState.video) {
-          videoModel = initialState.video;
-        }
+  let flashvarsMatch = data.match(/flashvars_\d+\s*=\s*({.+?});/s);
+  if (!flashvarsMatch) {
+    flashvarsMatch = data.match(/var\s+media_0\s*=\s*({.+?});/s);
+  }
 
-        if (videoModel) {
-          if (videoModel.sources) {
-            if (videoModel.sources.hls) {
-              hlsUrl = videoModel.sources.hls;
-            } else if (videoModel.sources.mp4) {
-              if (videoModel.sources.mp4.h264) {
-                if (videoModel.sources.mp4.h264[0]) {
-                  hlsUrl = videoModel.sources.mp4.h264[0].url;
-                }
-              }
-            } else if (videoModel.sources.standard) {
-              if (videoModel.sources.standard.h264) {
-                if (videoModel.sources.standard.h264[0]) {
-                  hlsUrl = videoModel.sources.standard.h264[0].url;
-                }
-              }
-            }
+  if (flashvarsMatch) {
+    try {
+      const flashvars = JSON.parse(flashvarsMatch[1]);
+      if (flashvars.mediaDefinitions && Array.isArray(flashvars.mediaDefinitions)) {
+        const hlsDef = flashvars.mediaDefinitions.find(m => {
+          if (m.format === 'hls' && m.videoUrl) {
+            return true;
+          } else if (m.videoUrl && m.videoUrl.includes('.m3u8')) {
+            return true;
+          } else {
+            return false;
           }
+        });
+        if (hlsDef) {
+          masterM3u8Url = hlsDef.videoUrl;
         }
-      } catch (e) {
-        // Parse error ignored
       }
+    } catch {}
+  }
+
+  if (!masterM3u8Url) {
+    const directM3u8 = data.match(/https?:\/\/[^"'\s\\]+?\.m3u8[^"'\s\\]*/i);
+    if (directM3u8) {
+      masterM3u8Url = directM3u8[0].replace(/\\/g, '');
     }
   }
 
-  if (!hlsUrl) {
-    const m3u8Match = data.match(/(https?:\\?\/\\?\/[^"]+\.m3u8[^"]*)/i);
-    if (m3u8Match) {
-      if (m3u8Match[1]) {
-        hlsUrl = m3u8Match[1].replace(/\\/g, '');
-      }
-    }
+  if (!masterM3u8Url) {
+    throw new Error('Video stream URL could not be extracted.');
   }
 
-  if (!hlsUrl) {
-    throw new Error('No video stream URL found for this video.');
-  }
-
-  let title = $('h1').first().text().trim();
+  let title = $('h1.inlineFree').first().text().trim();
   if (!title) {
-    title = 'xHamster Video';
+    title = $('title').text().replace('- Pornhub.com', '').trim();
+  }
+  if (!title) {
+    title = 'Pornhub Video';
   }
 
-  let duration = $('[data-role="video-duration"]').first().text().trim();
-  if (!duration) {
-    duration = 'N/A';
-  }
+  const duration = $('span.duration').first().text().trim();
 
-  let qualities = [];
+  // CDN direct sub-stream playlist resolution
+  let finalStreamUrl = masterM3u8Url;
   try {
-    const m3u8Res = await axios.get(hlsUrl, {
-      headers: { 'User-Agent': UA, 'Referer': 'https://xhamster.com/' },
+    const m3u8Res = await axios.get(masterM3u8Url, {
+      headers: {
+        'User-Agent': UA,
+        'Referer': 'https://www.pornhub.com/',
+        'Origin': 'https://www.pornhub.com'
+      },
       timeout: 10000
     });
+
     const lines = m3u8Res.data.split('\n');
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes('RESOLUTION=')) {
-        const resMatch = lines[i].match(/RESOLUTION=\d+x(\d+)/);
-        if (resMatch) {
-          if (lines[i + 1]) {
-            const qualityName = resMatch[1] + 'p';
-            let streamUrl = lines[i + 1].trim();
-            if (!streamUrl.startsWith('http')) {
-              streamUrl = new URL(streamUrl, hlsUrl).href;
-            }
-            const exists = qualities.some(q => q.quality === qualityName);
-            if (!exists) {
-              qualities.push({ quality: qualityName, url: streamUrl });
-            }
-          }
+      const line = lines[i].trim();
+      if (line && !line.startsWith('#')) {
+        if (line.startsWith('http')) {
+          finalStreamUrl = line;
+        } else {
+          const baseUrl = masterM3u8Url.substring(0, masterM3u8Url.lastIndexOf('/') + 1);
+          finalStreamUrl = baseUrl + line;
         }
+        break;
       }
     }
   } catch (e) {
-    console.error("Master playlist parse error:", e.message);
+    finalStreamUrl = masterM3u8Url;
   }
 
-  if (qualities.length === 0) {
-    qualities.push({ quality: 'Auto / 720p', url: hlsUrl });
-  }
-
-  return { title, duration, hlsUrl, qualities };
+  return { title: title, duration: duration, streamUrl: finalStreamUrl };
 }
 
-// 3. FFMPEG BUFFER DOWNLOAD
-async function xhamDownloadBuffer(streamUrl) {
-  const tmpDir = await mkdtemp(join(tmpdir(), 'xhamdl-'));
+// 3. FFMPEG DOWNLOAD BUFFER
+async function phDownloadBuffer(streamUrl) {
+  const tmpDir = await mkdtemp(join(tmpdir(), 'phdl-'));
   const outPath = join(tmpDir, 'video.mp4');
+
+  const headersStr = "Referer: https://www.pornhub.com/\r\nOrigin: https://www.pornhub.com\r\nAccept: */*\r\n";
 
   const ffmpegArgs = [
     '-v', 'error',
     '-y',
     '-user_agent', UA,
-    '-headers', 'Referer: https://xhamster.com/\r\n',
+    '-headers', headersStr,
+    '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
     '-reconnect', '1',
     '-reconnect_streamed', '1',
     '-reconnect_delay_max', '5',
@@ -585,7 +449,7 @@ async function xhamDownloadBuffer(streamUrl) {
 
     return buffer;
   } finally {
-    await rm(tmpDir, { recursive: true, force: true });
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -615,20 +479,19 @@ function generateResultText(results, startIndex = 0, botDisplayName = DEFAULT_BO
   return text;
 }
 
-async function processDownload(bot, mek, m, reply, from, selected, streamUrl, qualityName, botDisplayName = DEFAULT_BOT_NAME) {
+// 4. SEND DOWNLOADED VIDEO
+async function processDownload(bot, mek, m, reply, from, selected, streamUrl, botDisplayName = DEFAULT_BOT_NAME) {
   await bot.sendMessage(from, { react: { text: "⬇️", key: m.key } });
 
   try {
-    const buffer = await xhamDownloadBuffer(streamUrl);
+    const buffer = await phDownloadBuffer(streamUrl);
 
-    if (!buffer) {
-      return reply("╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Could not process video stream!_\n╰───────────────⮞");
-    } else if (buffer.length < 5000) {
+    if (!buffer || buffer.length < 5000) {
       return reply("╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Could not process video stream!_\n╰───────────────⮞");
     }
 
     const sizeMB = buffer.length / (1024 * 1024);
-    let title = "xHamster Video";
+    let title = "Pornhub Video";
     if (selected.title) {
       title = selected.title;
     }
@@ -641,7 +504,6 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, qu
 
     let captionText = "╭─[ 🔞 *" + botDisplayName.toUpperCase() + " 𝟭𝟴+* ]\n│\n";
     captionText += "├ 🎬 *𝗧𝗶𝘁𝗹𝗲:* " + toSmallCaps(cleanTitle) + "\n";
-    captionText += "├ 📊 *𝗤𝘂𝗮𝗹𝗶𝘁𝘆:* " + qualityName + "\n";
     captionText += "├ ⏱️ *𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻:* " + finalDuration + "\n";
     captionText += "├ 💾 *𝗦𝗶𝘇𝗲:* " + sizeMB.toFixed(2) + " MB\n";
     captionText += "│\n╰───────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
@@ -669,7 +531,7 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, qu
     await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
 
   } catch (e) {
-    console.error("xHamster Download Error:", e);
+    console.error("Pornhub Download Error:", e);
     await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
     
     let errMsg = "Unknown Download Error";
@@ -680,31 +542,25 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, qu
   }
 }
 
-// ===== 1. MAIN SEARCH COMMAND =====
+// ===== 1. MAIN COMMAND =====
 cmd({
-  pattern: "xham",
-  alias: ["xh", "xhamster"],
-  desc: "Search and download videos from xHamster",
+  pattern: "ph",
+  alias: ["pornhub", "phub", "sex"],
+  desc: "Search and download videos from Pornhub",
   category: "download",
-  react: "🔍",
+  react: "🔞",
   filename: __filename
 }, async (bot, mek, m, { from, q, sender, reply, sessionId }) => {
   if (!q) {
-    return reply("╭─[ ⚠️ *𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗨𝗦𝗔𝗚𝗘* ]\n│\n├ 📌 *Usage:* .xham [search_term]\n├ 💡 *Example:* .xham hot\n╰───────────────⮞");
+    return reply("╭─[ ⚠️ *𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗨𝗦𝗔𝗚𝗘* ]\n│\n├ 📌 *Usage:* .ph [search_term]\n├ 💡 *Example:* .ph hot\n╰───────────────⮞");
   }
 
   await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
 
   try {
-    const results = await xhamSearch(q.trim(), 100);
+    const results = await phSearch(q.trim(), 100);
 
-    if (!results) {
-      await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-      return reply("╭─[ 😞 *𝗡𝗢 𝗥𝗘𝗦𝗨𝗟𝗧𝗦* ]\n│\n├ 🎬 *Query:* _" + q + "_\n╰───────────────⮞");
-    } else if (!Array.isArray(results)) {
-      await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-      return reply("╭─[ 😞 *𝗡𝗢 𝗥𝗘𝗦𝗨𝗟𝗧𝗦* ]\n│\n├ 🎬 *Query:* _" + q + "_\n╰───────────────⮞");
-    } else if (results.length === 0) {
+    if (!results || !Array.isArray(results) || results.length === 0) {
       await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
       return reply("╭─[ 😞 *𝗡𝗢 𝗥𝗘𝗦𝗨𝗟𝗧𝗦* ]\n│\n├ 🎬 *Query:* _" + q + "_\n╰───────────────⮞");
     }
@@ -714,29 +570,21 @@ cmd({
 
     const settings = await readSettings(sessionId);
     let btnsOn = false;
-    if (settings) {
-      if (settings.btns_enabled) {
-        btnsOn = true;
-      }
+    if (settings && settings.btns_enabled) {
+      btnsOn = true;
     }
 
     let botDisplayName = DEFAULT_BOT_NAME;
-    if (settings) {
-      if (settings.bot_name) {
-        if (settings.bot_name.trim()) {
-          botDisplayName = settings.bot_name.trim();
-        }
-      }
+    if (settings && settings.bot_name && settings.bot_name.trim()) {
+      botDisplayName = settings.bot_name.trim();
     }
 
     let searchImg = DEFAULT_SEARCH_IMAGE;
     if (sessionId) {
       try {
-        const custom = await getCustomImage(sessionId, "xham_header");
-        if (custom) {
-          if (custom.data) {
-            searchImg = custom.data;
-          }
+        const custom = await getCustomImage(sessionId, "ph_header");
+        if (custom && custom.data) {
+          searchImg = custom.data;
         }
       } catch (e) {}
     }
@@ -754,7 +602,7 @@ cmd({
           return {
             title: String(index + 1).padStart(2, "0") + ". " + v.title.substring(0, 45),
             description: "Duration: " + dur,
-            id: ".xh_select " + (index + 1)
+            id: ".ph_select " + (index + 1)
           };
         });
 
@@ -766,7 +614,7 @@ cmd({
           .setThumbnail(searchImg);
 
         btn.addRawButton({
-          buttonId: "xham_search_list",
+          buttonId: "ph_search_list",
           buttonText: { displayText: "🎬 Select Video" },
           type: 1,
           nativeFlowInfo: {
@@ -782,32 +630,22 @@ cmd({
 
         const sentMsg = await btn.send(from, { quoted: mek });
 
-        if (sentMsg) {
-          if (sentMsg.key) {
-            if (sentMsg.key.id) {
-              pendingXhamSearch[k] = { 
-                results: results, 
-                timestamp: Date.now(), 
-                expectedMsgId: sentMsg.key.id,
-                botDisplayName: botDisplayName
-              };
-              await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-              return;
-            }
-          }
+        if (sentMsg && sentMsg.key && sentMsg.key.id) {
+          pendingPhSearch[k] = { 
+            results: results, 
+            timestamp: Date.now(), 
+            expectedMsgId: sentMsg.key.id,
+            botDisplayName: botDisplayName
+          };
+          await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+          return;
         }
       } catch (err) {
-        let errMsg = err;
-        if (err) {
-          if (err.message) {
-            errMsg = err.message;
-          }
-        }
-        console.log("XHAM BUTTON ERROR:", errMsg);
+        console.log("PH BUTTON ERROR:", err.message || err);
       }
     }
 
-    // Numbered Fallback
+    // Numbered List Fallback
     const sentMsg = await bot.sendMessage(from, { 
       image: { url: searchImg },
       caption: generateResultText(results, 0, botDisplayName),
@@ -815,13 +653,11 @@ cmd({
     }, { quoted: mek });
 
     let sentId = null;
-    if (sentMsg) {
-      if (sentMsg.key) {
-        sentId = sentMsg.key.id;
-      }
+    if (sentMsg && sentMsg.key) {
+      sentId = sentMsg.key.id;
     }
 
-    pendingXhamSearch[k] = { 
+    pendingPhSearch[k] = { 
       results: results, 
       timestamp: Date.now(), 
       expectedMsgId: sentId,
@@ -831,70 +667,47 @@ cmd({
     await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
 
   } catch (error) {
-    console.error("xHamster Search Error:", error);
+    console.error("Pornhub Search Error:", error);
     await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-    reply("╭─[ ❌ *𝗦𝗬𝗦𝗧𝗘𝗠 𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Error occurred while searching xHamster!_\n╰───────────────⮞");
+    reply("╭─[ ❌ *𝗦𝗬𝗦𝗧𝗘𝗠 𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Error occurred while searching Pornhub!_\n╰───────────────⮞");
   }
 });
 
-// ===== 2. NUMBER & SELECTION REPLY HANDLER =====
-const xhamReplyHandler = {
+// ===== 2. SELECTION REPLY HANDLER =====
+const phReplyHandler = {
   filter: (text, { sender, from }) => {
     const k = keyFor(sender, from);
-    if (pendingXhamSearch[k]) {
-      return true;
-    }
-    if (pendingXhamQuality[k]) {
-      return true;
-    }
-    return false;
+    return Boolean(pendingPhSearch[k]);
   },
-  function: async (bot, mek, m, { body, sender, reply, from, sessionId }) => {
+  function: async (bot, mek, m, { body, sender, reply, from }) => {
     const payload = extractIncomingPayload(body, mek, m);
-    if (!payload) {
-      return;
-    }
+    if (!payload) return;
 
     const k = keyFor(sender, from);
 
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
-    if (lastMsg) {
-      if (lastMsg.text === payload) {
-        if ((now - lastMsg.time) < LOOP_COOLDOWN) {
-          return;
-        }
-      }
+    if (lastMsg && lastMsg.text === payload && (now - lastMsg.time) < LOOP_COOLDOWN) {
+      return;
     }
     lastProcessedMsg[k] = { text: payload, time: now };
 
     const quotedId = getQuotedStanzaId(mek);
 
-    // STEP 1
-    if (pendingXhamSearch[k]) {
-      const session = pendingXhamSearch[k];
-      if (quotedId) {
-        if (session.expectedMsgId) {
-          if (quotedId !== session.expectedMsgId) {
-            return;
-          }
-        }
+    if (pendingPhSearch[k]) {
+      const session = pendingPhSearch[k];
+      if (quotedId && session.expectedMsgId && quotedId !== session.expectedMsgId) {
+        return;
       }
 
       let num = null;
-      if (payload.startsWith(".xh_select ")) {
-        num = parseInt(payload.replace(".xh_select ", "").trim(), 10);
+      if (payload.startsWith(".ph_select ")) {
+        num = parseInt(payload.replace(".ph_select ", "").trim(), 10);
       } else if (/^\d+$/.test(payload)) {
         num = parseInt(payload, 10);
       }
 
-      if (num === null) {
-        return;
-      } else if (isNaN(num)) {
-        return;
-      } else if (num <= 0) {
-        return;
-      } else if (num > session.results.length) {
+      if (num === null || isNaN(num) || num <= 0 || num > session.results.length) {
         return;
       }
 
@@ -909,201 +722,36 @@ const xhamReplyHandler = {
       }
 
       const selected = session.results[num - 1];
-      delete pendingXhamSearch[k];
+      delete pendingPhSearch[k];
 
       await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
       try {
-        const videoDetails = await fetchXhamVideoDetails(selected.url);
+        const streamData = await getPhDirectStream(selected.url);
+        
+        let finalTitle = streamData.title || selected.title;
+        let finalDuration = streamData.duration || selected.duration;
 
-        const settings = await readSettings(sessionId);
-        let btnsOn = false;
-        if (settings) {
-          if (settings.btns_enabled) {
-            btnsOn = true;
-          }
-        }
-
-        let thumbImg = DEFAULT_SEARCH_IMAGE;
-        if (selected.thumb) {
-          thumbImg = selected.thumb;
-        }
-
-        let finalTitle = selected.title;
-        if (videoDetails.title) {
-          finalTitle = videoDetails.title;
-        }
-
-        let finalDuration = selected.duration;
-        if (videoDetails.duration) {
-          finalDuration = videoDetails.duration;
-        }
-
-        if (btnsOn) {
-          try {
-            const { ButtonV2 } = await import("@vanzxy/baileys");
-
-            const qualityRows = videoDetails.qualities.map((q, idx) => ({
-              title: String(idx + 1).padStart(2, "0") + ". " + q.quality,
-              description: "Download video in " + q.quality,
-              id: ".xh_dl " + (idx + 1)
-            }));
-
-            let displayDuration = 'N/A';
-            if (selected.duration) {
-              displayDuration = selected.duration;
-            }
-
-            const bodyText = "╭─[ 📊 *𝗦𝗘𝗟𝗘𝗖𝗧 𝗤𝗨𝗔𝗟𝗜𝗧𝗬* ]\n│\n├ 🎬 *𝗧𝗶𝘁𝗹𝗲:* " + toSmallCaps(selected.title.slice(0, 36)) + "\n├ ⏱️ *Duration:* " + displayDuration + "\n│\n╰───────────────⮞\n\n© 2026 " + BRAND_BASE + " SYSTEM";
-
-            const btn = new ButtonV2(bot)
-              .setBody(bodyText)
-              .setFooter("WaBot by " + botDisplayName)
-              .setThumbnail(thumbImg);
-
-            btn.addRawButton({
-              buttonId: "xham_quality_list",
-              buttonText: { displayText: "📥 Select Quality" },
-              type: 1,
-              nativeFlowInfo: {
-                name: "single_select",
-                paramsJson: JSON.stringify({
-                  title: "Available Qualities ↯",
-                  sections: [{ title: "Choose Quality", rows: qualityRows }]
-                }),
-              },
-            });
-
-            btn.addButton("📜 Bot Menu", ".menu");
-
-            const sentQualityMsg = await btn.send(from, { quoted: mek });
-
-            if (sentQualityMsg) {
-              if (sentQualityMsg.key) {
-                if (sentQualityMsg.key.id) {
-                  pendingXhamQuality[k] = {
-                    selected: { ...selected, title: finalTitle, duration: finalDuration },
-                    qualities: videoDetails.qualities,
-                    timestamp: Date.now(),
-                    expectedMsgId: sentQualityMsg.key.id,
-                    botDisplayName: botDisplayName
-                  };
-                  await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-                  return;
-                }
-              }
-            }
-          } catch (e) {
-            let errMsg = e;
-            if (e) {
-              if (e.message) {
-                errMsg = e.message;
-              }
-            }
-            console.log("XHAM QUALITY BUTTON ERROR:", errMsg);
-          }
-        }
-
-        // Numbered Menu
-        let qMsg = "╭─[ 📊 *𝗦𝗘𝗟𝗘𝗖𝗧 𝗤𝗨𝗔𝗟𝗜𝗧𝗬* ]\n│\n";
-        qMsg += "├ 🎬 *𝗧𝗶𝘁𝗹𝗲:* " + toSmallCaps(selected.title.slice(0, 36)) + "\n│\n";
-        qMsg += "├ 👇 *Reply with Quality Number:*\n│\n";
-
-        videoDetails.qualities.forEach((q, idx) => {
-          const numStr = String(idx + 1).padStart(2, "0");
-          qMsg += "├ 📱 *[ " + numStr + " ]* 🎬 " + q.quality + "\n";
-        });
-
-        qMsg += "│\n╰───────────────⮞";
-
-        const sentQualityMsg = await bot.sendMessage(from, {
-          image: { url: thumbImg },
-          caption: qMsg,
-          contextInfo: channelContextInfo()
-        }, { quoted: mek });
-
-        let sentQualityId = null;
-        if (sentQualityMsg) {
-          if (sentQualityMsg.key) {
-            sentQualityId = sentQualityMsg.key.id;
-          }
-        }
-
-        pendingXhamQuality[k] = {
-          selected: { ...selected, title: finalTitle, duration: finalDuration },
-          qualities: videoDetails.qualities,
-          timestamp: Date.now(),
-          expectedMsgId: sentQualityId,
-          botDisplayName: botDisplayName
-        };
-
-        await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-
+        return processDownload(bot, mek, m, reply, from, { ...selected, title: finalTitle, duration: finalDuration }, streamData.streamUrl, botDisplayName);
       } catch (err) {
-        console.error("Quality Extract Error:", err);
+        console.error("Direct Download Fetch Error:", err);
         await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-        return reply("╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Failed to extract stream qualities!_\n╰───────────────⮞");
+        return reply("╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Failed to extract video stream!_\n╰───────────────⮞");
       }
-      return;
-    }
-
-    // STEP 2
-    if (pendingXhamQuality[k]) {
-      const session = pendingXhamQuality[k];
-      if (quotedId) {
-        if (session.expectedMsgId) {
-          if (quotedId !== session.expectedMsgId) {
-            return;
-          }
-        }
-      }
-
-      let choiceNum = null;
-      if (payload.startsWith(".xh_dl ")) {
-        choiceNum = parseInt(payload.replace(".xh_dl ", "").trim(), 10) - 1;
-      } else if (/^\d+$/.test(payload)) {
-        choiceNum = parseInt(payload, 10) - 1;
-      }
-
-      const selected = session.selected;
-      const qualities = session.qualities;
-      let botDisplayName = DEFAULT_BOT_NAME;
-      if (session.botDisplayName) {
-        botDisplayName = session.botDisplayName;
-      }
-
-      if (choiceNum === null) {
-        return reply("╭─[ ⚠️ *𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗢𝗣𝗧𝗜𝗢𝗡* ]\n│\n├ 🎯 *Range:* 1 - " + qualities.length + "\n╰───────────────⮞");
-      } else if (isNaN(choiceNum)) {
-        return reply("╭─[ ⚠️ *𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗢𝗣𝗧𝗜𝗢𝗡* ]\n│\n├ 🎯 *Range:* 1 - " + qualities.length + "\n╰───────────────⮞");
-      } else if (choiceNum < 0) {
-        return reply("╭─[ ⚠️ *𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗢𝗣𝗧𝗜𝗢𝗡* ]\n│\n├ 🎯 *Range:* 1 - " + qualities.length + "\n╰───────────────⮞");
-      } else if (choiceNum >= qualities.length) {
-        return reply("╭─[ ⚠️ *𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗢𝗣𝗧𝗜𝗢𝗡* ]\n│\n├ 🎯 *Range:* 1 - " + qualities.length + "\n╰───────────────⮞");
-      }
-
-      const chosenQuality = qualities[choiceNum];
-      delete pendingXhamQuality[k];
-
-      return processDownload(bot, mek, m, reply, from, selected, chosenQuality.url, chosenQuality.quality, botDisplayName);
     }
   }
 };
 
 if (Array.isArray(replyHandlers)) {
-  replyHandlers.push(xhamReplyHandler);
+  replyHandlers.push(phReplyHandler);
 }
 
+// Cleanup expired sessions
 setInterval(() => {
   const now = Date.now();
-  for (const s in pendingXhamSearch) {
-    if ((now - pendingXhamSearch[s].timestamp) > SESSION_TIMEOUT) {
-      delete pendingXhamSearch[s];
-    }
-  }
-  for (const s in pendingXhamQuality) {
-    if ((now - pendingXhamQuality[s].timestamp) > SESSION_TIMEOUT) {
-      delete pendingXhamQuality[s];
+  for (const s in pendingPhSearch) {
+    if ((now - pendingPhSearch[s].timestamp) > SESSION_TIMEOUT) {
+      delete pendingPhSearch[s];
     }
   }
   for (const s in lastProcessedMsg) {
@@ -1113,4 +761,4 @@ setInterval(() => {
   }
 }, 2.5 * 60 * 1000);
 
-module.exports = { pendingXhamSearch };
+module.exports = { pendingPhSearch };
