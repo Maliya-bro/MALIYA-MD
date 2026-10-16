@@ -20,17 +20,36 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 // ===== HELPER FUNCTIONS =====
 
 function keyFor(sender, from) {
-    return `${from \vert{}\vert{} ""}::${(sender || "").split(":")[0]}`;
+    let fromVal = "";
+    if (from) {
+        fromVal = String(from);
+    }
+
+    let senderVal = "";
+    if (sender) {
+        senderVal = String(sender).split(":")[0];
+    }
+
+    return fromVal + "::" + senderVal;
 }
 
-function toSmallCaps(str = "") {
+function toSmallCaps(str) {
+    let text = "";
+    if (str) {
+        text = String(str);
+    }
+
     const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
-    return String(str)
+    return text
         .split("")
         .map((char) => {
             const idx = normal.indexOf(char);
-            return idx !== -1 ? small[idx] : char;
+            if (idx !== -1) {
+                return small[idx];
+            } else {
+                return char;
+            }
         })
         .join("");
 }
@@ -45,7 +64,7 @@ async function phSearch(query, limit = 100) {
     let page = 1;
 
     while (allResults.length < limit && page <= 5) {
-        const url = `https://www.pornhub.com/video/search?search=${encodeURIComponent(query)}&page=${page}`;
+        const url = "https://www.pornhub.com/video/search?search=" + encodeURIComponent(query) + "&page=" + page;
 
         try {
             const { data } = await axios.get(url, {
@@ -56,22 +75,47 @@ async function phSearch(query, limit = 100) {
                 },
                 timeout: 12000
             });
-            const $ = cheerio.load(data);
-            
-            $('li.pcVideoListItem, li.videoBox').each((_, el) => {
+            const $= cheerio.load(data);$('li.pcVideoListItem, li.videoBox').each((_, el) => {
                 if (allResults.length >= limit) return false;
                 const anchor = $(el).find('a').first();
                 const img = $(el).find('img').first();
-                const title = $(el).find('.title a, span.title').first().text().trim() || anchor.attr('title') || '';
-                const href = anchor.attr('href') || '';
+                
+                let title = $(el).find('.title a, span.title').first().text().trim();
+                if (!title) {
+                    title = anchor.attr('title');
+                }
+                if (!title) {
+                    title = '';
+                }
+
+                let href = anchor.attr('href');
+                if (!href) {
+                    href = '';
+                }
+
                 const duration = $(el).find('var.duration, .duration').first().text().trim();
 
                 if (title && href && href.includes('viewkey=')) {
+                    let fullUrl = '';
+                    if (href.startsWith('http')) {
+                        fullUrl = href;
+                    } else {
+                        fullUrl = "https://www.pornhub.com" + href;
+                    }
+
+                    let thumb = img.attr('data-mediumhint');
+                    if (!thumb) {
+                        thumb = img.attr('src');
+                    }
+                    if (!thumb) {
+                        thumb = '';
+                    }
+
                     allResults.push({
-                        title,
-                        url: href.startsWith('http') ? href : `https://www.pornhub.com${href}`,
-                        thumb: img.attr('data-mediumhint') || img.attr('src') || '',
-                        duration
+                        title: title,
+                        url: fullUrl,
+                        thumb: thumb,
+                        duration: duration
                     });
                 }
             });
@@ -97,19 +141,31 @@ async function getPhDirectStream(url) {
     const $ = cheerio.load(data);
     let masterM3u8Url = null;
 
-    // Pattern A: flashvars or media_0
-    const flashvarsMatch = data.match(/flashvars_\d+\s*=\s*({.+?});/s) || data.match(/var\s+media_0\s*=\s*({.+?});/s);
+    let flashvarsMatch = data.match(/flashvars_\d+\s*=\s*({.+?});/s);
+    if (!flashvarsMatch) {
+        flashvarsMatch = data.match(/var\s+media_0\s*=\s*({.+?});/s);
+    }
+
     if (flashvarsMatch) {
         try {
             const flashvars = JSON.parse(flashvarsMatch[1]);
             if (flashvars.mediaDefinitions && Array.isArray(flashvars.mediaDefinitions)) {
-                const hlsDef = flashvars.mediaDefinitions.find(m => (m.format === 'hls' || (m.videoUrl && m.videoUrl.includes('.m3u8'))) && m.videoUrl);
-                if (hlsDef) masterM3u8Url = hlsDef.videoUrl;
+                const hlsDef = flashvars.mediaDefinitions.find(m => {
+                    if (m.format === 'hls' && m.videoUrl) {
+                        return true;
+                    } else if (m.videoUrl && m.videoUrl.includes('.m3u8')) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                });
+                if (hlsDef) {
+                    masterM3u8Url = hlsDef.videoUrl;
+                }
             }
         } catch {}
     }
 
-    // Pattern B: Raw m3u8 string match in script tags
     if (!masterM3u8Url) {
         const directM3u8 = data.match(/https?:\/\/[^"'\s\\]+?\.m3u8[^"'\s\\]*/i);
         if (directM3u8) {
@@ -121,10 +177,17 @@ async function getPhDirectStream(url) {
         throw new Error('Video stream URL could not be extracted (Protected or Deleted).');
     }
 
-    let title = $('h1.inlineFree').first().text().trim() || $('title').text().replace('- Pornhub.com', '').trim() || 'Pornhub Video';
+    let title = $('h1.inlineFree').first().text().trim();
+    if (!title) {
+        title = $('title').text().replace('- Pornhub.com', '').trim();
+    }
+    if (!title) {
+        title = 'Pornhub Video';
+    }
+
     const duration = $('span.duration').first().text().trim();
 
-    return { title, duration, streamUrl: masterM3u8Url };
+    return { title: title, duration: duration, streamUrl: masterM3u8Url };
 }
 
 // 3. FFMPEG Downloader
@@ -132,10 +195,12 @@ async function phDownloadBuffer(streamUrl) {
     const tmpDir = await mkdtemp(join(tmpdir(), 'phdl-'));
     const outPath = join(tmpDir, 'video.mp4');
 
+    const headersStr = "User-Agent: " + UA + "\r\nReferer: https://www.pornhub.com/\r\nOrigin: https://www.pornhub.com\r\n";
+
     const ffmpegArgs = [
         '-v', 'error',
         '-y',
-        '-headers', `User-Agent: ${UA}\r\nReferer: https://www.pornhub.com/\r\nOrigin: https://www.pornhub.com\r\n`,
+        '-headers', headersStr,
         '-i', streamUrl,
         '-c', 'copy',
         '-bsf:a', 'aac_adtstoasc',
@@ -144,7 +209,7 @@ async function phDownloadBuffer(streamUrl) {
     ];
 
     try {
-        await execFileAsync('ffmpeg', ffmpegArgs, { timeout: 300000 }); // 5 min timeout
+        await execFileAsync('ffmpeg', ffmpegArgs, { timeout: 300000 });
         const buffer = await readFile(outPath);
         
         if (buffer.length < 5000) {
@@ -159,46 +224,60 @@ async function phDownloadBuffer(streamUrl) {
 
 function generateResultText(results, startIndex = 0) {
     const endIndex = Math.min(startIndex + 10, results.length);
-    let text = `╭〔 🔞 *ᴘᴏʀɴʜᴜʙ sᴇᴀʀᴄʜ* 〕━\n┃\n`;
-    text += `┃ 📊 *ʀᴇsᴜʟᴛs:* ${startIndex + 1} - ${endIndex} of${results.length}\n┃\n`;
-    text += `╰━━━───────━► ❥\n\n`;
+    let text = "╭〔 🔞 *ᴘᴏʀɴʜᴜʙ sᴇᴀʀᴄʜ* 〕━\n┃\n";
+    text += "┃ 📊 *ʀᴇsᴜʟᴛs:* " + (startIndex + 1) + " - " + endIndex + " of " + results.length + "\n┃\n";
+    text += "╰━━━───────━► ❥\n\n";
 
     for (let i = startIndex; i < endIndex; i++) {
         const v = results[i];
         const numStr = String(i + 1).padStart(2, "0");
-        text += `*[ ${numStr} ]* 🎬 *${toSmallCaps(v.title.slice(0, 42))}*${v.duration ? `_(${v.duration})_` : ''}\n`;
+        let durText = '';
+        if (v.duration) {
+            durText = " _(" + v.duration + ")_";
+        }
+        text += "*[ " + numStr + " ]* 🎬 *" + toSmallCaps(v.title.slice(0, 42)) + "*" + durText + "\n";
     }
 
-    text += `\n──────────────\n`;
-    text += `📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴠɪᴅᴇᴏ ɴᴜᴍʙᴇʀ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ*\n`;
+    text += "\n──────────────\n";
+    text += "📌 *ʀᴇᴘʟʏ ᴡɪᴛʜ ᴠɪᴅᴇᴏ ɴᴜᴍʙᴇʀ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ*\n";
     if (endIndex < results.length && endIndex <= 90) {
-        text += `➡️ *ʀᴇᴘʟʏ ᴡɪᴛʜ "${endIndex + 1}" ᴛᴏ sᴇᴇ ɴᴇxᴛ 10 ʀᴇsᴜʟᴛs*`;
+        text += "➡️ *ʀᴇᴘʟʏ ᴡɪᴛʜ \"" + (endIndex + 1) + "\" ᴛᴏ sᴇᴇ ɴᴇxᴛ 10 ʀᴇsᴜʟᴛs*";
     }
     return text;
 }
 
 // 4. Send Downloaded Video
 async function processDownload(bot, mek, m, reply, from, streamUrl, title, duration) {
-    await reply(`⚙️ *ᴘʀᴏᴄᴇssɪɴɢ & ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴠɪᴅᴇᴏ...*\n⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ, ᴛʜɪs ᴍᴀʏ ᴛᴀᴋᴇ ᴀ ᴍᴏᴍᴇɴᴛ...*`);
+    await reply("⚙️ *ᴘʀᴏᴄᴇssɪɴɢ & ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴠɪᴅᴇᴏ...*\n⏳ *ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ, ᴛʜɪs ᴍᴀʏ ᴛᴀᴋᴇ ᴀ ᴍᴏᴍᴇɴᴛ...*");
 
     try {
         const buffer = await phDownloadBuffer(streamUrl);
 
         const sizeMB = buffer.length / (1024 * 1024);
-        const cleanTitle = (title || "Pornhub Video").replace(/[^\w\s.-]/gi, '_').substring(0, 50);
+        
+        let validTitle = title;
+        if (!validTitle) {
+            validTitle = "Pornhub Video";
+        }
+        const cleanTitle = validTitle.replace(/[^\w\s.-]/gi, '_').substring(0, 50);
 
-        let captionText = `🎬 *${toSmallCaps(title)}*\n⏱️ *ᴅᴜʀᴀᴛɪᴏɴ:* ${duration \vert{}\vert{} 'N/A'}\n💾 *sɪᴢᴇ:* ${sizeMB.toFixed(2)} MB\n\n🍿 *ᴇɴᴊᴏʏ ʏᴏᴜʀ ᴠɪᴅᴇᴏ!*`;
+        let validDuration = duration;
+        if (!validDuration) {
+            validDuration = 'N/A';
+        }
+
+        let captionText = "🎬 *" + toSmallCaps(validTitle) + "*\n⏱️ *ᴅᴜʀᴀᴛɪᴏɴ:* " + validDuration + "\n💾 *sɪᴢᴇ:* " + sizeMB.toFixed(2) + " MB\n\n🍿 *ᴇɴᴊᴏʏ ʏᴏᴜʀ ᴠɪᴅᴇᴏ!*";
 
         await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
 
-        const fileName = `${cleanTitle}.mp4`;
+        const fileName = cleanTitle + ".mp4";
 
         if (sizeMB > 45) {
             await bot.sendMessage(from, {
                 document: buffer,
                 mimetype: "video/mp4",
                 fileName: fileName,
-                caption: captionText + `\n\n_📄 Sent as document due to size limit._`
+                caption: captionText + "\n\n_📄 Sent as document due to size limit._"
             }, { quoted: mek });
         } else {
             await bot.sendMessage(from, {
@@ -214,21 +293,26 @@ async function processDownload(bot, mek, m, reply, from, streamUrl, title, durat
     } catch (e) {
         console.error("Pornhub Download Error:", e);
         await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-        reply(`❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ:* ${e.message || "Unknown error occurred"}`);
+        
+        let errorMsg = e.message;
+        if (!errorMsg) {
+            errorMsg = "Unknown error occurred";
+        }
+        reply("❌ *ᴅᴏᴡɴʟᴏᴀᴅ ғᴀɪʟᴇᴅ:* " + errorMsg);
     }
 }
 
 // ===== COMMAND REGISTRATION =====
 cmd({
-    pattern: "ph",
-    alias: ["pornhub", "phub"],
+    pattern: "sex",
+    alias: ["pornhub", "phub", "ph"],
     desc: "Search and download videos from Pornhub",
     category: "download",
     react: "🔞",
     filename: __filename
 }, async (bot, mek, m, { from, q, sender, reply }) => {
     if (!q) {
-        return reply(`🔞 *ᴘᴏʀɴʜᴜʙ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ*\n\n📌 *ᴜsᴀɢᴇ:* \`.ph [search_term]\`\n💡 *ᴇxᴀᴍᴘʟᴇ:* \`.ph hot\``);
+        return reply("🔞 *ᴘᴏʀɴʜᴜʙ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ*\n\n📌 *ᴜsᴀɢᴇ:* `.ph [search_term]`\n💡 *ᴇxᴀᴍᴘʟᴇ:* `.ph hot`");
     }
 
     await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
@@ -237,16 +321,25 @@ cmd({
     try {
         const results = await phSearch(q.trim(), 100);
 
-        if (!results || !Array.isArray(results) || results.length === 0) {
+        let hasNoResults = false;
+        if (!results) {
+            hasNoResults = true;
+        } else if (!Array.isArray(results)) {
+            hasNoResults = true;
+        } else if (results.length === 0) {
+            hasNoResults = true;
+        }
+
+        if (hasNoResults) {
             await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-            return reply(`❌ *ɴᴏ ʀᴇsᴜʟᴛs ғᴏᴜɴᴅ ᴏɴ ᴘᴏʀɴʜᴜʙ ғᴏʀ:* _${q}_`);
+            return reply("❌ *ɴᴏ ʀᴇsᴜʟᴛs ғᴏᴜɴᴅ ᴏɴ ᴘᴏʀɴʜᴜʙ ғᴏʀ:* _" + q + "_");
         }
 
         const k = keyFor(sender, from);
         clearUserSession(k);
 
         pendingPhSearch[k] = { 
-            results, 
+            results: results, 
             timestamp: Date.now() 
         };
 
@@ -255,7 +348,7 @@ cmd({
     } catch (error) {
         console.error("Pornhub Search Error:", error);
         await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-        reply(`❌ *ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ ᴡʜɪʟᴇ sᴇᴀʀᴄʜɪɴɢ ᴘᴏʀɴʜᴜʙ!*`);
+        reply("❌ *ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ ᴡʜɪʟᴇ sᴇᴀʀᴄʜɪɴɢ ᴘᴏʀɴʜᴜʙ!*");
     }
 });
 
@@ -264,19 +357,26 @@ const phReplyHandler = {
     filter: (text, { sender, from }) => {
         if (!text) return false;
         const k = keyFor(sender, from);
-        return /^\d+$/.test(text.trim()) && Boolean(pendingPhSearch[k]);
+        if (/^\d+$/.test(text.trim()) && Boolean(pendingPhSearch[k])) {
+            return true;
+        }
+        return false;
     },
     function: async (bot, mek, m, { body, sender, reply, from }) => {
-        const input = body ? body.trim() : "";
+        let input = "";
+        if (body) {
+            input = body.trim();
+        }
         if (!input) return;
 
         const k = keyFor(sender, from);
 
-        // Anti-loop protection
         const now = Date.now();
         const lastMsg = lastProcessedMsg[k];
-        if (lastMsg && lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
-            return;
+        if (lastMsg) {
+            if (lastMsg.text === input && (now - lastMsg.time) < LOOP_COOLDOWN) {
+                return;
+            }
         }
         lastProcessedMsg[k] = { text: input, time: now };
 
@@ -284,9 +384,14 @@ const phReplyHandler = {
         if (isNaN(num)) return;
 
         const session = pendingPhSearch[k];
-        if (!session || num <= 0 || num > session.results.length) return;
+        if (!session) {
+            return;
+        } else if (num <= 0) {
+            return;
+        } else if (num > session.results.length) {
+            return;
+        }
 
-        // Next page results logic
         if ([11, 21, 31, 41, 51, 61, 71, 81, 91].includes(num)) {
             session.timestamp = Date.now();
             return reply(generateResultText(session.results, num - 1));
@@ -296,12 +401,23 @@ const phReplyHandler = {
         clearUserSession(k);
 
         try {
-            await reply(`🔎 *ғᴇᴛᴄʜɪɴɢ ᴠɪᴅᴇᴏ sᴛʀᴇᴀᴍ...*`);
+            await reply("🔎 *ғᴇᴛᴄʜɪɴɢ ᴠɪᴅᴇᴏ sᴛʀᴇᴀᴍ...*");
             const { title, duration, streamUrl } = await getPhDirectStream(selected.url);
-            await processDownload(bot, mek, m, reply, from, streamUrl, title || selected.title, duration || selected.duration);
+            
+            let finalTitle = title;
+            if (!finalTitle) {
+                finalTitle = selected.title;
+            }
+
+            let finalDuration = duration;
+            if (!finalDuration) {
+                finalDuration = selected.duration;
+            }
+
+            await processDownload(bot, mek, m, reply, from, streamUrl, finalTitle, finalDuration);
         } catch (err) {
             console.error("Direct Download Fetch Error:", err);
-            reply(`❌ *ғᴀɪʟᴇᴅ ᴛᴏ ɪɴɪᴛɪᴀʟɪᴢᴇ ᴅᴏᴡɴʟᴏᴀᴅ:* ${err.message}`);
+            reply("❌ *ғᴀɪʟᴇᴅ ᴛᴏ ɪɴɪᴛɪᴀʟɪᴢᴇ ᴅᴏᴡɴʟᴏᴀᴅ:* " + err.message);
         }
     }
 };
@@ -314,10 +430,14 @@ if (Array.isArray(replyHandlers)) {
 setInterval(() => {
     const now = Date.now();
     for (const s in pendingPhSearch) {
-        if (now - pendingPhSearch[s].timestamp > SESSION_TIMEOUT) delete pendingPhSearch[s];
+        if (now - pendingPhSearch[s].timestamp > SESSION_TIMEOUT) {
+            delete pendingPhSearch[s];
+        }
     }
     for (const s in lastProcessedMsg) {
-        if (now - lastProcessedMsg[s].time > LOOP_COOLDOWN) delete lastProcessedMsg[s];
+        if (now - lastProcessedMsg[s].time > LOOP_COOLDOWN) {
+            delete lastProcessedMsg[s];
+        }
     }
 }, 2.5 * 60 * 1000);
 
