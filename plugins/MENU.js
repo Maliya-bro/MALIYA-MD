@@ -17,6 +17,7 @@ const TZ = "Asia/Colombo";
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
 
+// Option 2 Only: Quoted Troll payload (Extract කරන අයට පේන බොරු payload එක)
 function channelContextInfo() {
   return {
     forwardingScore: 999,
@@ -25,6 +26,10 @@ function channelContextInfo() {
       newsletterJid: CHANNEL_JID,
       newsletterName: CHANNEL_NAME,
       serverMessageId: -1,
+    },
+    stanzaId: "ANTI_EXTRACT_PROTECTION_V2",
+    quotedMessage: {
+      conversation: "🚨 UNAUTHORIZED CODE STEAL BLOCKED!\nProtected by Maliya-MD Engine.\nBro, write your own code! 😂🖕",
     },
   };
 }
@@ -48,13 +53,10 @@ const MENU_CACHE_MS = 60 * 1000;
 
 /* ================= HELPERS ================= */
 
-// Menu state is stored per chat (so button/number replies always find it)
 function keyFor(sender, from) {
   return `${from || ""}`;
 }
 
-// Shared dedupe: command + reply handler both fire on a button click,
-// this makes sure only one of them actually sends the message.
 function shouldSkip(k, sig) {
   const now = Date.now();
   const last = lastProcessedMsg[k];
@@ -77,7 +79,6 @@ function getQuotedId(m, mek) {
   );
 }
 
-// Remember every menu message we sent (so replying to an older menu still works)
 function registerSent(state, sent) {
   const id = sent?.key?.id;
   if (!id) return;
@@ -246,9 +247,11 @@ async function getBotName(sessionId) {
   return name;
 }
 
+// Clean menuHeader (කිසිම invisible junk එකක් නැත)
 function menuHeader(userName = "User", latency = "0ms", botDisplayName = DEFAULT_BOT_NAME) {
   const { time, date } = nowLK();
   const styledUser = toSmallCaps(userName);
+
   return `┏━━━━━━◥◣◆◢◤━━━━━━┓
   ㅤ★彡 *${botDisplayName}* 彡★
 ┗━━━━━━◢◤◆◥◣━━━━━━┛
@@ -356,7 +359,6 @@ function extractTexts(body, mek, m) {
   return [...new Set(texts.filter(Boolean))];
 }
 
-// Works for: ".menuview CAT", ".menu_view CAT", list titles, "menu_view:CAT", ".menuall", ".menu_all"
 function resolveMenuAction(texts, state) {
   const cats = state.categories || [];
 
@@ -373,7 +375,6 @@ function resolveMenuAction(texts, state) {
       return { type: "all" };
     }
 
-    // id style: ".menuview CAT" / ".menu_view CAT" / "MENU_VIEW:CAT"
     const idMatch = text.match(/^\.?MENU_?VIEW[:\s]+(.+)$/);
     if (idMatch) {
       const wanted = idMatch[1].trim();
@@ -381,7 +382,6 @@ function resolveMenuAction(texts, state) {
       if (found) return { type: "view", cat: found };
     }
 
-    // list title style: "<emoji> <SMALLCAPS CAT> MENU"
     for (const cat of cats) {
       const plain = normalizeText(cat);
       const small = normalizeText(toSmallCaps(cat));
@@ -398,7 +398,6 @@ function resolveMenuAction(texts, state) {
   return null;
 }
 
-// Finds a plain number (1..N) from the incoming texts
 function resolveNumber(texts, state) {
   for (const t of texts) {
     if (!/^\d{1,3}$/.test(String(t).trim())) continue;
@@ -488,7 +487,6 @@ cmd(
         timestamp: Date.now(),
       };
 
-      // Register the state BEFORE sending, so a very fast click never misses it
       pendingMenu[k] = state;
 
       const headerImg = await getHeaderImage(sessionId);
@@ -530,7 +528,11 @@ cmd(
 
           btn.addButton("📊 Ping", ".ping");
 
-          const sentMsg = await btn.send(from, { quoted: mek });
+          // Option 2 inject to protect button payload
+          const sentMsg = await btn.send(from, { 
+            quoted: mek,
+            ...channelContextInfo() 
+          });
 
           if (sentMsg?.key?.id) {
             registerSent(state, sentMsg);
