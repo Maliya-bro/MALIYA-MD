@@ -175,28 +175,68 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
+/* ================= INTERACTIVE MENU (BUTTONS IN SAME ROW) ================= */
 async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
   const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
   if (btnsOn) {
+    // 1. WhatsApp Native Flow (Quick Reply - buttons inline in single row)
     try {
-      const { ButtonV2 } = await import("@vanzxy/baileys");
+      const interactiveMessage = {
+        body: { text: buildAudioDetails(video) + `\n\n👇 *Tap a button below to download:*` },
+        footer: { text: "© 2026 MALIYA-MD BOT SYSTEM" },
+        header: {
+          title: "🎵 MALIYA-MD AUDIO",
+          hasMediaAttachment: true,
+          imageMessage: (await sock.sendMessage(from, { image: { url: video.thumbnail } })).message.imageMessage
+        },
+        nativeFlowMessage: {
+          buttons: [
+            {
+              name: "quick_reply",
+              buttonParamsJson: JSON.stringify({
+                display_text: "🎵 Audio",
+                id: "audio"
+              })
+            },
+            {
+              name: "quick_reply",
+              buttonParamsJson: JSON.stringify({
+                display_text: "📄 Document",
+                id: "doc"
+              })
+            }
+          ]
+        },
+        contextInfo: channelContextInfo()
+      };
 
-      const btn = new ButtonV2(sock)
-        .setBody(buildAudioDetails(video) + `\n\n👇 *Tap a button below to download:.*`)
-        .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
-        .setThumbnail(video.thumbnail)
-        .addButton("🎵 Audio", "audio")
-        .addButton("📄 Document", "doc");
+      const sentMsg = await sock.sendMessage(from, {
+        viewOnceMessage: { message: { interactiveMessage } }
+      }, { quoted: mek });
 
-      const sentMsg = await btn.send(from, { quoted: mek });
       if (sentMsg?.key?.id) return sentMsg;
     } catch (e) {
-      console.log("AUDIO BUTTONV2 ERROR:", e?.message || e);
+      // 2. ButtonV2 Fallback
+      try {
+        const { ButtonV2 } = await import("@vanzxy/baileys");
+        const btn = new ButtonV2(sock)
+          .setBody(buildAudioDetails(video) + `\n\n👇 *Tap a button below to download:*`)
+          .setFooter("© 2026 MALIYA-MD BOT SYSTEM")
+          .setThumbnail(video.thumbnail)
+          .addButton("🎵 Audio", "audio")
+          .addButton("📄 Document", "doc");
+
+        const sentMsg = await btn.send(from, { quoted: mek });
+        if (sentMsg?.key?.id) return sentMsg;
+      } catch (err) {
+        console.log("AUDIO BUTTON ERROR:", err?.message || err);
+      }
     }
   }
 
+  // Text menu fallback
   return sock.sendMessage(
     from,
     {
@@ -221,7 +261,35 @@ async function sendErrorMsg(reply, text) {
   await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`); 
 }
 
-/* ================= YTMP3.GE v2.0 API ================= */
+/* ================= 1. OMEGATECH API (NEW PRIORITY) ================= */
+async function downloadFromOmegatechAPI(url, outPath) {
+  const apiUrl = `https://api.omegatech.app/api/download/savefrom?action=download&url=${encodeURIComponent(url)}`;
+  const res = await axios.get(apiUrl, { timeout: 30000 });
+
+  if (res.data && res.data.success && res.data.data?.audioUrl) {
+    const audioDownloadUrl = res.data.data.audioUrl;
+    const writer = fs.createWriteStream(outPath);
+    const fileRes = await axios({
+      url: audioDownloadUrl,
+      method: "GET",
+      responseType: "stream",
+      timeout: 120000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+      }
+    });
+
+    fileRes.data.pipe(writer);
+    return new Promise((resolve, reject) => {
+      writer.on("finish", () => resolve(true));
+      writer.on("error", reject);
+    });
+  } else {
+    throw new Error(res.data?.message || "Omegatech API failed to provide audioUrl");
+  }
+}
+
+/* ================= 2. YTMP3.GE v2.0 API ================= */
 async function downloadFromYTmp3GeAPI(url, outPath) {
   const requestData = new URLSearchParams({
     youtube_url: url,
@@ -251,7 +319,7 @@ async function downloadFromYTmp3GeAPI(url, outPath) {
   }
 }
 
-/* ================= OTHER APIs ================= */
+/* ================= 3. LAGU API ================= */
 async function downloadFromLaguAPI(videoId, outPath) {
   const apiUrl = `https://api.download-lagu-mp3.com/@api/json/mp3/${videoId}`;
   const response = await axios.get(apiUrl, { timeout: 20000 });
@@ -268,6 +336,7 @@ async function downloadFromLaguAPI(videoId, outPath) {
   throw new Error("Lagu API returned invalid JSON structure.");
 }
 
+/* ================= 4. BACKUP APIS ================= */
 async function fallbackAudioAPIs(url, outPath) {
   const apis = [`https://api.deliriussapi.site/download/ytmp3?url=${encodeURIComponent(url)}`, `https://bk9.fun/download/ytmp3?url=${encodeURIComponent(url)}`];
   for (let api of apis) {
@@ -291,11 +360,10 @@ async function convertAudio(inputPath, outputPath) {
     if (!isValidMediaFile(inputPath)) return reject(new Error("Input file is corrupted or empty before conversion."));
     
     ffmpeg(inputPath)
-      .noVideo() // Ensures no video streams interfere
+      .noVideo()
       .toFormat('mp3') 
       .audioCodec("libmp3lame")
       .audioBitrate("192k")
-      // REMOVED: .audioChannels(2) සහ .audioFrequency(44100) -> මේවා තමයි Filter Graph crash එකට හේතුව!
       .on("end", () => resolve(outputPath))
       .on("error", (err) => reject(new Error(`FFmpeg Error (MP3): ${err.message}`)))
       .save(outputPath);
@@ -320,35 +388,50 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
 
   try {
     await sock.sendMessage(from, { react: { text: "⬇", key: mek.key } });
-    
-    // Method 1: youtube-dl-exec (Native)
+
+    // Method 1 (NEW PRIORITY): Omegatech API
     try {
-      const ytArgs = { 
-        format: "bestaudio[ext=m4a]/bestaudio/best", 
-        output: rawFile, 
-        ffmpegLocation: ffmpegPath, 
-        noWarnings: true, 
-        noCheckCertificates: true, 
-        noPlaylist: true, 
-        extractorArgs: "youtube:player_client=android,web", 
-        addHeader: ["referer:youtube.com"] 
-      };
-      
-      const cookies = cookiesStatus();
-      if (cookies.exists && cookies.sizeBytes > 0) ytArgs.cookies = COOKIES_PATH;
-      
-      await ytDlp(pending.video.url, ytArgs, {
-        timeout: 180000,
-        killSignal: 'SIGKILL'
-      });
-      
+      safeUnlink(rawFile);
+      rawFile = makeTempFile(".mp3");
+      await downloadFromOmegatechAPI(pending.video.url, rawFile);
       if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
-      else throw new Error("YT-DLP file is invalid or empty");
-    } catch (ytErr) { 
-      console.log("YT-DLP AUDIO ERROR:", ytErr.message?.substring(0, 100)); 
+      else throw new Error("Omegatech downloaded file is empty/invalid");
+    } catch (omegaErr) {
+      console.log("OMEGATECH API ERROR (Falling back):", omegaErr.message);
     }
 
-    // Method 2: YTMP3.GE v2.0 API (Priority Fallback)
+    // Method 2: youtube-dl-exec (Native)
+    if (!downloadedSuccessfully) {
+      try {
+        safeUnlink(rawFile);
+        rawFile = makeTempFile(".m4a");
+        const ytArgs = { 
+          format: "bestaudio[ext=m4a]/bestaudio/best", 
+          output: rawFile, 
+          ffmpegLocation: ffmpegPath, 
+          noWarnings: true, 
+          noCheckCertificates: true, 
+          noPlaylist: true, 
+          extractorArgs: "youtube:player_client=android,web", 
+          addHeader: ["referer:youtube.com"] 
+        };
+        
+        const cookies = cookiesStatus();
+        if (cookies.exists && cookies.sizeBytes > 0) ytArgs.cookies = COOKIES_PATH;
+        
+        await ytDlp(pending.video.url, ytArgs, {
+          timeout: 180000,
+          killSignal: 'SIGKILL'
+        });
+        
+        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
+        else throw new Error("YT-DLP file is invalid or empty");
+      } catch (ytErr) { 
+        console.log("YT-DLP AUDIO ERROR:", ytErr.message?.substring(0, 100)); 
+      }
+    }
+
+    // Method 3: YTMP3.GE v2.0 API
     if (!downloadedSuccessfully) {
       try { 
         safeUnlink(rawFile); 
@@ -359,7 +442,7 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
       } catch (ytgeErr) { console.log("YTMP3.GE API ERROR:", ytgeErr.message); }
     }
 
-    // Method 3: Lagu API
+    // Method 4: Lagu API
     if (!downloadedSuccessfully && videoId) {
       try { 
         safeUnlink(rawFile); 
@@ -370,7 +453,7 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
       } catch (laguErr) { console.log("LAGU MP3 API ERROR:", laguErr.message); }
     }
 
-    // Method 4: Other Fallback APIs
+    // Method 5: Other Fallback APIs
     if (!downloadedSuccessfully) {
       try { 
         safeUnlink(rawFile); 
