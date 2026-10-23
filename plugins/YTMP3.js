@@ -249,7 +249,7 @@ async function sendSongSearchResultsMenu(sock, from, mek, videos, query, session
         }
       });
 
-      btn.addButton("⚡ First DL", ".songselect 1");
+      btn.addButton("⚡First DL", ".songselect 1");
 
       const sentMsg = await btn.send(from, { 
         quoted: mek,
@@ -295,8 +295,8 @@ async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
 
       if (fittedThumb) btn.setThumbnail(fittedThumb);
 
-      btn.addButton("🎵 Audio", "audio")
-         .addButton("📄 Document", "doc");
+      btn.addButton("🎵 Audio Format", "audio")
+         .addButton("🗃️ Document Format", "doc");
 
       const sentMsg = await btn.send(from, { 
         quoted: mek,
