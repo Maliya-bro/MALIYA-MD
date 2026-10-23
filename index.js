@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
-//  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
-//  FIX: Session reconnect loop with max attempts (403 fix) + Anti-Spam + Settings API + WA Web Button Fix
+//   MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
+//   FIX: Session reconnect loop with max attempts (403 fix) + Anti-Spam + Settings API + WA Web Button Fix
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -463,6 +463,7 @@ async function startSessionBot(sessionId) {
           message.listMessage ||
           message.interactiveMessage
         );
+
         if (requiresPatch && !message.viewOnceMessage && !message.viewOnceMessageV2) {
           message = {
             viewOnceMessage: {
@@ -493,9 +494,16 @@ async function startSessionBot(sessionId) {
     sock.relayMessage = async (jid, message, options = {}) => {
       try {
         if (message && typeof message === "object") {
+          const botJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : "";
+          const targetJid = jidNormalizedUser(jid);
+
           const metaContext = {
             deviceListMetadata: {},
             deviceListMetadataVersion: 2,
+            botInfo: {
+              editType: 1,
+              targetId: botJid,
+            },
           };
 
           if (!message.messageContextInfo) {
@@ -516,10 +524,34 @@ async function startSessionBot(sessionId) {
           }
 
           if (inner && inner.interactiveMessage) {
-            if (!inner.interactiveMessage.contextInfo) {
-              inner.interactiveMessage.contextInfo = {};
+            const im = inner.interactiveMessage;
+
+            if (!im.contextInfo) {
+              im.contextInfo = {};
             }
-            Object.assign(inner.interactiveMessage.contextInfo, metaContext);
+
+            im.contextInfo.deviceListMetadata = {};
+            im.contextInfo.deviceListMetadataVersion = 2;
+            im.contextInfo.isForwarded = false;
+            im.contextInfo.forwardingScore = 0;
+
+            if (!im.contextInfo.businessOwnerJid && botJid) {
+              im.contextInfo.businessOwnerJid = botJid;
+            }
+
+            if (im.nativeFlowMessage) {
+              im.nativeFlowMessage.messageParamsJson =
+                im.nativeFlowMessage.messageParamsJson || "{}";
+            }
+
+            if (im.carouselMessage && Array.isArray(im.carouselMessage.cards)) {
+              im.carouselMessage.cards.forEach((card) => {
+                if (!card.contextInfo) card.contextInfo = {};
+                card.contextInfo.deviceListMetadata = {};
+                card.contextInfo.deviceListMetadataVersion = 2;
+                if (botJid) card.contextInfo.businessOwnerJid = botJid;
+              });
+            }
           }
 
           if (!options.additionalNodes) {
@@ -546,15 +578,39 @@ async function startSessionBot(sessionId) {
                       tag: "native_flow",
                       attrs: { name: "quick_reply" },
                     },
+                    {
+                      tag: "native_flow",
+                      attrs: { name: "cta_url" },
+                    },
+                    {
+                      tag: "native_flow",
+                      attrs: { name: "cta_call" },
+                    },
+                    {
+                      tag: "native_flow",
+                      attrs: { name: "cta_copy" },
+                    },
                   ],
                 },
               ],
+            });
+          }
+
+          const hasBotNode = options.additionalNodes.some(
+            (node) => node && node.tag === "bot"
+          );
+
+          if (!hasBotNode) {
+            options.additionalNodes.push({
+              tag: "bot",
+              attrs: { edit: "1" },
             });
           }
         }
       } catch (err) {
         console.log("Relay patch error:", err?.message || err);
       }
+
       return await origRelayMessage(jid, message, options);
     };
 
@@ -989,7 +1045,7 @@ function attachSessionHandlers(sock, sessionCtx) {
         if (!isCmd) {
           try {
             const handled = await handleAutoMsg({
-              conn:               sock,
+              conn:                sock,
               mek,
               m,
               sender,
@@ -1070,7 +1126,7 @@ function attachSessionHandlers(sock, sessionCtx) {
                   senderNumber, 
                   isGroup, 
                   isOwner, 
-                  reply,
+                  reply, 
                   sessionId: sessionCtx.sessionId,
                   pushname: pushName,
                   m: m,
