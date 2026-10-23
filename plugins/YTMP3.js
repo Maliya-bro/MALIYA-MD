@@ -1,25 +1,17 @@
 const { cmd, replyHandlers } = require("../command");
-const ytDlp = require("youtube-dl-exec");
 const yts = require("yt-search");
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const crypto = require("crypto");
 const sharp = require("sharp");
-const ffmpeg = require("fluent-ffmpeg");
-const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
-const ffprobePath = require("@ffprobe-installer/ffprobe").path;
 const { readSettings } = require("../lib/botSettings");
 
-ffmpeg.setFfmpegPath(ffmpegPath);
-ffmpeg.setFfprobePath(ffprobePath);
-
-const TEMP_DIR = path.join(__dirname, "../temp");
-if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
-
-const COOKIES_PATH = path.join(__dirname, "../cookies.txt");
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+
+// SaveTube AES-128-CBC Key
+const SAVETUBE_KEY = Buffer.from("C5D58EF67A7584E4A29F6C35BBC4EB12", "hex");
 
 function channelContextInfo() {
   return {
@@ -33,27 +25,8 @@ function channelContextInfo() {
   };
 }
 
-function cookiesStatus() {
-  if (!fs.existsSync(COOKIES_PATH)) return { exists: false, sizeBytes: 0 };
-  try { return { exists: true, sizeBytes: fs.statSync(COOKIES_PATH).size }; } 
-  catch { return { exists: false, sizeBytes: 0 }; }
-}
-
 const pendingSongSearch = Object.create(null);
 const pendingAudioType = Object.create(null);
-
-function makeTempFile(ext = ".mp3") { 
-  return path.join(TEMP_DIR, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${ext}`); 
-}
-
-function safeUnlink(file) { 
-  try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {} 
-}
-
-function isValidMediaFile(filePath) {
-  try { if (!fs.existsSync(filePath)) return false; return fs.statSync(filePath).size > 10240; } 
-  catch { return false; }
-}
 
 function formatViews(num) { return !num ? "Unknown" : Number(num).toLocaleString(); }
 
@@ -68,7 +41,6 @@ function formatSeconds(seconds) {
 }
 
 function generateProgressBar(duration = "0:00") { return `▰▰▰▰▰▰▰ *${duration}*`; }
-function getFileSizeMB(filePath) { return fs.statSync(filePath).size / (1024 * 1024); }
 function sanitizeFileName(name = "youtube_audio") { return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_audio"; }
 
 function toSmallCaps(str = "") {
@@ -177,31 +149,39 @@ function buildAudioDetails(video) {
   const views = formatViews(video.views);
   const uploaded = video.ago || "Unknown";
   const url = video.url || "Unavailable";
-  return `╭─[ 🎵 *${toSmallCaps("AUDIO DETAILS")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${title}\n├ 👤 *${toSmallCaps("Channel:")}* ${channel}\n├ ⏱️ *${toSmallCaps("Duration:")}* ${duration}\n├ 👀 *${toSmallCaps("Views:")}* ${views}\n├ 📅 *${toSmallCaps("Uploaded:")}* ${uploaded}\n├ 🔗 *${toSmallCaps("Link:")}* ${url}\n│\n╰─[ ${generateProgressBar(duration)} ]`;
+  return `╭─[ 🎵 *${toSmallCaps("AUDIO DETAILS")}* ]\n│\n├ 🎬 *\`Title:\`* ${title}\n├ 👤 *\`Channel:\`* ${channel}\n├ ⏱️ *\`Duration:\`* ${duration}\n├ 👀 *\`Views:\`* ${views}\n├ 📅 *\`Uploaded:\`* ${uploaded}\n├ 🔗 *\`Link:\`* ${url}\n│\n╰─[ ${generateProgressBar(duration)} ]`;
 }
 
-function buildFinalCaption(video, typeLabel, sizeMB) {
-  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎬 *${toSmallCaps("Title:")}* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎵 *${toSmallCaps("Format:")}* ${toSmallCaps(typeLabel)}\n├ 📦 *${toSmallCaps("Size:")}* ${sizeMB.toFixed(2)} MB\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+function buildFinalCaption(video, typeLabel) {
+  return `╭─[ ✅ *${toSmallCaps("DOWNLOADED")}* ]\n│\n├ 🎬 *\`Title:\`* ${toSmallCaps(video.title || "Unknown Title")}\n├ 🎵 *\`Format:\`* ${toSmallCaps(typeLabel)}\n│\n╰──────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 }
 
+/* ================= STYLED SEARCH RESULTS TEXT ================= */
 function buildSearchMenuText(videos, query) {
-  let txt = `┏━━━━━━◥◣◆◢◤━━━━━━┓\n   ★彡 *${toSmallCaps("YOUTUBE SEARCH")}* 彡★\n┗━━━━━━◢◤◆◥◣━━━━━━┛\n\n`;
-  txt += `🔍 *${toSmallCaps("Query:")}* _${query}_\n📦 *${toSmallCaps("Results:")}* ${videos.length} Songs\n\n`;
-  
+  let txt = `┏━━━━━◥◣◆◢◤━━━━━┓\n  ★彡 *${toSmallCaps("YOUTUBE SEARCH")}* 彡★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n`;
+  txt += `🔍 *\`Query:\`* _${query}_\n`;
+  txt += `📦 *\`Total Results:\`* ${videos.length} Tracks\n\n`;
+  txt += `╔═════. .★.════════╗\n`;
+
   videos.forEach((vid, idx) => {
     const num = String(idx + 1).padStart(2, "0");
     const dur = vid.timestamp || formatSeconds(vid.seconds) || "0:00";
-    txt += `*[ ${num} ]* 🎵 *${toSmallCaps(vid.title.substring(0, 45))}*\n`;
-    txt += `     ⏱️ _${dur}_  •  👤 _${toSmallCaps(vid.author?.name || "Unknown")}_\n\n`;
+    const author = vid.author?.name || "Unknown Channel";
+    const title = vid.title.length > 38 ? `${vid.title.substring(0, 35)}...` : vid.title;
+
+    txt += `*[ ${num} ]* 🎵 *${title}*\n`;
+    txt += `     ├ ⏱️ *\`Duration:\`* _${dur}_\n`;
+    txt += `     ╰ 👤 *\`Channel:\`* _${author}_\n\n`;
   });
 
+  txt += `╚════════. .★.═════╝\n\n`;
   txt += `━─ ⋆ ⋅ 𖤐 ⋅ ⋆ ─━┈➤\n`;
-  txt += `> 💬 *Swipe & Reply this message with a number (1-10)...*\n`;
+  txt += `> 💬 *Swipe & Reply this message with a number (01-10)...*\n`;
   txt += `> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
   return txt;
 }
 
-/* ================= 1. SEARCH RESULTS MENU (BUTTONV2) ================= */
+/* ================= 1. SEARCH RESULTS MENU ================= */
 async function sendSongSearchResultsMenu(sock, from, mek, videos, query, sessionId) {
   let btnsOn = true;
   try {
@@ -212,7 +192,7 @@ async function sendSongSearchResultsMenu(sock, from, mek, videos, query, session
   } catch (e) {}
 
   const topThumb = videos[0]?.thumbnail || "";
-  const headerText = `┏━━━━━━◥◣◆◢◤━━━━━━┓\n   ★彡 *${toSmallCaps("YOUTUBE SEARCH")}* 彡★\n┗━━━━━━◢◤◆◥◣━━━━━━┛\n\n🔍 *Search:* _${query}_\n🎵 *Found:* ${videos.length} tracks\n\n👇 *Select a song from the list or click First DL:*`;
+  const headerText = `┏━━━━━◥◣◆◢◤━━━━━┓\n  ★彡 *${toSmallCaps("YOUTUBE SEARCH")}* 彡★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n🔍 *\`Query:\`* _${query}_\n🎵 *\`Found:\`* ${videos.length} tracks\n\n👇 *Select a song from the list or tap 1st:*`;
 
   if (btnsOn) {
     try {
@@ -220,7 +200,7 @@ async function sendSongSearchResultsMenu(sock, from, mek, videos, query, session
       const fittedThumb = topThumb ? await getFittedImageBuffer(topThumb) : null;
 
       const listRows = videos.map((vid, idx) => ({
-        title: `${idx + 1}. ${vid.title.substring(0, 35)}`,
+        title: `${idx + 1}. ${vid.title.substring(0, 30)}`,
         description: `⏱️ ${vid.timestamp || formatSeconds(vid.seconds)} | 👤 ${vid.author?.name || "Unknown"}`,
         id: `.songselect ${idx + 1}`
       }));
@@ -233,15 +213,15 @@ async function sendSongSearchResultsMenu(sock, from, mek, videos, query, session
 
       btn.addRawButton({
         buttonId: ".songselect 1",
-        buttonText: { displayText: "Select Song ↯" },
+        buttonText: { displayText: "List ↯" },
         type: 1,
         nativeFlowInfo: {
           name: "single_select",
           paramsJson: JSON.stringify({
-            title: "Select Song ↯",
+            title: "Select Song",
             sections: [
               {
-                title: "YouTube Audio Results",
+                title: "YouTube Tracks",
                 rows: listRows
               }
             ]
@@ -249,7 +229,7 @@ async function sendSongSearchResultsMenu(sock, from, mek, videos, query, session
         }
       });
 
-      btn.addButton("⚡First DL", ".songselect 1");
+      btn.addButton("⚡GET", ".songselect 1");
 
       const sentMsg = await btn.send(from, { 
         quoted: mek,
@@ -262,7 +242,6 @@ async function sendSongSearchResultsMenu(sock, from, mek, videos, query, session
     }
   }
 
-  // Fallback text menu
   return await sock.sendMessage(
     from,
     {
@@ -274,7 +253,7 @@ async function sendSongSearchResultsMenu(sock, from, mek, videos, query, session
   );
 }
 
-/* ================= 2. AUDIO / DOC FORMAT MENU (BUTTONV2) ================= */
+/* ================= 2. AUDIO / DOC FORMAT MENU ================= */
 async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
   let btnsOn = true;
   try {
@@ -295,8 +274,8 @@ async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
 
       if (fittedThumb) btn.setThumbnail(fittedThumb);
 
-      btn.addButton("🎵 Audio Format", "audio")
-         .addButton("🗃️ Document Format", "doc");
+      btn.addButton("🎵 Audio", "audio")
+         .addButton("📄 Doc", "doc");
 
       const sentMsg = await btn.send(from, { 
         quoted: mek,
@@ -309,12 +288,11 @@ async function sendAudioInteractiveMenu(sock, from, mek, video, sessionId) {
     }
   }
 
-  // Fallback text menu
   return sock.sendMessage(
     from,
     {
       image: { url: video.thumbnail },
-      caption: buildAudioDetails(video) + `\n\n╭─[ 🎵 *${toSmallCaps("SELECT FORMAT")}* ]\n│\n├ 📱 *[ 01 ]* ➔ 🎵 Audio Format (MP3)\n├ 📱 *[ 02 ]* ➔ 📄 Send Document (MP3)\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`,
+      caption: buildAudioDetails(video) + `\n\n╭─[ 🎵 *${toSmallCaps("SELECT FORMAT")}* ]\n│\n├ 📱 *\`[ 01 ]\`* ➔ 🎵 Audio Format (MP3)\n├ 📱 *\`[ 02 ]\`* ➔ 📄 Send Document (MP3)\n│\n╰─[ 👇 *${toSmallCaps("Reply with a Number")}* ]`,
       contextInfo: channelContextInfo()
     },
     { quoted: mek }
@@ -334,116 +312,59 @@ async function sendErrorMsg(reply, text) {
   await reply(`╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`); 
 }
 
-/* ================= 1. OMEGATECH API ================= */
-async function downloadFromOmegatechAPI(url, outPath) {
-  const apiUrl = `https://api.omegatech.app/api/download/savefrom?action=download&url=${encodeURIComponent(url)}`;
-  const res = await axios.get(apiUrl, { timeout: 30000 });
+/* ================= SAVETUBE VIP ENGINE (AES-128-CBC) ================= */
+function decryptPayload(encryptedData) {
+  try {
+    const rawBuffer = Buffer.from(encryptedData.replace(/\s/g, ""), "base64");
+    const iv = rawBuffer.subarray(0, 16);
+    const data = rawBuffer.subarray(16);
 
-  if (res.data && res.data.success && res.data.data?.audioUrl) {
-    const audioDownloadUrl = res.data.data.audioUrl;
-    const writer = fs.createWriteStream(outPath);
-    const fileRes = await axios({
-      url: audioDownloadUrl,
-      method: "GET",
-      responseType: "stream",
-      timeout: 120000,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-      }
-    });
+    const decipher = crypto.createDecipheriv("aes-128-cbc", SAVETUBE_KEY, iv);
+    const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
 
-    fileRes.data.pipe(writer);
-    return new Promise((resolve, reject) => {
-      writer.on("finish", () => resolve(true));
-      writer.on("error", reject);
-    });
-  } else {
-    throw new Error(res.data?.message || "Omegatech API failed to provide audioUrl");
+    return JSON.parse(decrypted.toString("utf-8"));
+  } catch (err) {
+    throw new Error("Payload decryption failed: " + err.message);
   }
 }
 
-/* ================= 2. YTMP3.GE v2.0 API ================= */
-async function downloadFromYTmp3GeAPI(url, outPath) {
-  const requestData = new URLSearchParams({
-    youtube_url: url,
-    quality: '320'
-  }).toString();
+async function fetchSaveTubeAudioUrl(videoUrl) {
+  const headers = {
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+    "Origin": "https://ytshortdown.com",
+    "Referer": "https://ytshortdown.com/"
+  };
 
-  const response = await axios.post("https://ytmp3.ge/api/convert", requestData, { 
-    headers: { "Content-Type": "application/x-www-form-urlencoded" }, 
-    timeout: 300000 
-  });
+  const cdnRes = await axios.get("https://media.savetube.vip/api/random-cdn", { headers, timeout: 15000 });
+  const cdnHost = cdnRes.data?.cdn;
+  if (!cdnHost) throw new Error("Could not obtain an active CDN host");
 
-  if (response.data && response.data.success && response.data.downloadUrl) {
-    const writer = fs.createWriteStream(outPath);
-    const fileRes = await axios({ 
-      url: response.data.downloadUrl, 
-      method: "GET", 
-      responseType: "stream", 
-      timeout: 120000 
-    });
-    fileRes.data.pipe(writer);
-    return new Promise((resolve, reject) => { 
-      writer.on("finish", () => resolve(true)); 
-      writer.on("error", reject); 
-    });
-  } else {
-    throw new Error(response.data?.error || "YTMP3.GE API returned an invalid response.");
+  const infoRes = await axios.post(`https://${cdnHost}/v2/info`, { url: videoUrl }, { headers, timeout: 20000 });
+  if (!infoRes.data?.status || !infoRes.data?.data) throw new Error("Failed to retrieve encrypted video information");
+
+  const decrypted = decryptPayload(infoRes.data.data);
+  const videoId = decrypted.id;
+  const downloadKey = decrypted.key;
+
+  const dlRes = await axios.post(
+    `https://${cdnHost}/download`,
+    {
+      id: videoId,
+      key: downloadKey,
+      downloadType: "audio",
+      quality: "128"
+    },
+    { headers, timeout: 20000 }
+  );
+
+  if (dlRes.data?.status && dlRes.data?.data?.downloadUrl) {
+    return dlRes.data.data.downloadUrl;
   }
+  throw new Error("SaveTube failed to generate direct audio stream URL");
 }
 
-/* ================= 3. LAGU API ================= */
-async function downloadFromLaguAPI(videoId, outPath) {
-  const apiUrl = `https://api.download-lagu-mp3.com/@api/json/mp3/${videoId}`;
-  const response = await axios.get(apiUrl, { timeout: 20000 });
-  if (response.data && response.data.vidInfo) {
-    const bestFormat = response.data.vidInfo["0"] || Object.values(response.data.vidInfo)[0];
-    if (bestFormat && bestFormat.dloadUrl) {
-      let downloadUrl = bestFormat.dloadUrl.startsWith("//") ? "https:" + bestFormat.dloadUrl : bestFormat.dloadUrl;
-      const writer = fs.createWriteStream(outPath);
-      const fileRes = await axios({ url: downloadUrl, method: "GET", responseType: "stream", timeout: 120000 });
-      fileRes.data.pipe(writer);
-      return new Promise((resolve, reject) => { writer.on("finish", () => resolve(true)); writer.on("error", reject); });
-    }
-  }
-  throw new Error("Lagu API returned invalid JSON structure.");
-}
-
-/* ================= 4. BACKUP APIS ================= */
-async function fallbackAudioAPIs(url, outPath) {
-  const apis = [`https://api.deliriussapi.site/download/ytmp3?url=${encodeURIComponent(url)}`, `https://bk9.fun/download/ytmp3?url=${encodeURIComponent(url)}`];
-  for (let api of apis) {
-    try {
-      const res = await axios.get(api, { timeout: 15000 });
-      const dlUrl = res.data?.result?.download?.url || res.data?.result?.dl_link || res.data?.dl || res.data?.data?.dl || res.data?.BK9;
-      if (dlUrl) {
-        const writer = fs.createWriteStream(outPath);
-        const fileRes = await axios({ url: dlUrl, method: 'GET', responseType: 'stream', timeout: 120000 });
-        fileRes.data.pipe(writer);
-        return new Promise((resolve, reject) => { writer.on('finish', () => resolve(true)); writer.on('error', reject); });
-      }
-    } catch (e) { continue; }
-  }
-  throw new Error("All Backup APIs Failed");
-}
-
-/* ================= FFMPEG CONVERT ================= */
-async function convertAudio(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    if (!isValidMediaFile(inputPath)) return reject(new Error("Input file is corrupted or empty before conversion."));
-    
-    ffmpeg(inputPath)
-      .noVideo()
-      .toFormat('mp3') 
-      .audioCodec("libmp3lame")
-      .audioBitrate("192k")
-      .on("end", () => resolve(outputPath))
-      .on("error", (err) => reject(new Error(`FFmpeg Error (MP3): ${err.message}`)))
-      .save(outputPath);
-  });
-}
-
-/* ================= MAIN DOWNLOAD PROCESSOR ================= */
+/* ================= MAIN DOWNLOAD PROCESSOR (STREAMING TO WHATSAPP) ================= */
 async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
   const key = keyFor(sender, from);
   const pending = pendingAudioType[key];
@@ -454,118 +375,52 @@ async function handleAudioDownload(sock, mek, from, sender, reply, choiceRaw) {
   if (!type || isDuplicateTypeAction(pending, type)) return;
 
   pending.isProcessing = true;
-  let rawFile = makeTempFile(".m4a");
-  let finalFile = makeTempFile(".mp3");
-  let downloadedSuccessfully = false;
-  let videoId = pending.video.videoId;
 
   try {
     await sock.sendMessage(from, { react: { text: "⬇", key: mek.key } });
 
-    // 1. Omegatech
-    try {
-      safeUnlink(rawFile);
-      rawFile = makeTempFile(".mp3");
-      await downloadFromOmegatechAPI(pending.video.url, rawFile);
-      if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
-      else throw new Error("Omegatech downloaded file is empty/invalid");
-    } catch (omegaErr) {
-      console.log("OMEGATECH API ERROR (Falling back):", omegaErr.message);
-    }
-
-    // 2. youtube-dl-exec
-    if (!downloadedSuccessfully) {
-      try {
-        safeUnlink(rawFile);
-        rawFile = makeTempFile(".m4a");
-        const ytArgs = { 
-          format: "bestaudio[ext=m4a]/bestaudio/best", 
-          output: rawFile, 
-          ffmpegLocation: ffmpegPath, 
-          noWarnings: true, 
-          noCheckCertificates: true, 
-          noPlaylist: true, 
-          extractorArgs: "youtube:player_client=android,web", 
-          addHeader: ["referer:youtube.com"] 
-        };
-        
-        const cookies = cookiesStatus();
-        if (cookies.exists && cookies.sizeBytes > 0) ytArgs.cookies = COOKIES_PATH;
-        
-        await ytDlp(pending.video.url, ytArgs, {
-          timeout: 180000,
-          killSignal: 'SIGKILL'
-        });
-        
-        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true;
-        else throw new Error("YT-DLP file is invalid or empty");
-      } catch (ytErr) { 
-        console.log("YT-DLP AUDIO ERROR:", ytErr.message?.substring(0, 100)); 
-      }
-    }
-
-    // 3. YTMP3.GE
-    if (!downloadedSuccessfully) {
-      try { 
-        safeUnlink(rawFile); 
-        rawFile = makeTempFile(".mp3"); 
-        await downloadFromYTmp3GeAPI(pending.video.url, rawFile); 
-        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; 
-        else throw new Error("YTMP3.GE file is invalid"); 
-      } catch (ytgeErr) { console.log("YTMP3.GE API ERROR:", ytgeErr.message); }
-    }
-
-    // 4. Lagu
-    if (!downloadedSuccessfully && videoId) {
-      try { 
-        safeUnlink(rawFile); 
-        rawFile = makeTempFile(".mp3"); 
-        await downloadFromLaguAPI(videoId, rawFile); 
-        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; 
-        else throw new Error("Lagu MP3 file is invalid"); 
-      } catch (laguErr) { console.log("LAGU MP3 API ERROR:", laguErr.message); }
-    }
-
-    // 5. Fallback
-    if (!downloadedSuccessfully) {
-      try { 
-        safeUnlink(rawFile); 
-        rawFile = makeTempFile(".mp3"); 
-        await fallbackAudioAPIs(pending.video.url, rawFile); 
-        if (isValidMediaFile(rawFile)) downloadedSuccessfully = true; 
-        else throw new Error("Fallback file is invalid"); 
-      } catch (fbErr) { console.log("OLD FALLBACK API ERROR:", fbErr.message); }
-    }
-
-    if (!downloadedSuccessfully) throw new Error("All download methods failed to provide a valid audio file.");
-
-    await sock.sendMessage(from, { react: { text: "🛠", key: mek.key } });
-    await convertAudio(rawFile, finalFile);
-
-    const sizeMB = getFileSizeMB(finalFile);
-    const cleanTitle = sanitizeFileName(pending.video.title);
+    // SaveTube VIP Direct CDN Link එක ලබාගැනීම
+    const directAudioUrl = await fetchSaveTubeAudioUrl(pending.video.url);
 
     await sock.sendMessage(from, { react: { text: "⬆", key: mek.key } });
 
-    const caption = buildFinalCaption(pending.video, typeLabel, sizeMB);
-    const buffer = fs.readFileSync(finalFile);
+    const cleanTitle = sanitizeFileName(pending.video.title);
+    const caption = buildFinalCaption(pending.video, typeLabel);
 
+    // Direct Stream to WhatsApp (Server storage එකට save නොවේ)
     if (type === "doc") {
-      await sock.sendMessage(from, { document: buffer, mimetype: "audio/mpeg", fileName: `${cleanTitle}.mp3`, caption: caption, contextInfo: channelContextInfo() }, { quoted: mek });
+      await sock.sendMessage(
+        from,
+        {
+          document: { url: directAudioUrl },
+          mimetype: "audio/mpeg",
+          fileName: `${cleanTitle}.mp3`,
+          caption: caption,
+          contextInfo: channelContextInfo()
+        },
+        { quoted: mek }
+      );
     } else {
-      await sock.sendMessage(from, { audio: buffer, mimetype: "audio/mpeg", contextInfo: channelContextInfo() }, { quoted: mek });
+      await sock.sendMessage(
+        from,
+        {
+          audio: { url: directAudioUrl },
+          mimetype: "audio/mpeg",
+          fileName: `${cleanTitle}.mp3`,
+          contextInfo: channelContextInfo()
+        },
+        { quoted: mek }
+      );
     }
 
     await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
   } catch (e) {
     const errText = (e && (e.stderr || e.message)) || "Unknown Error";
-    console.log("ALL AUDIO DOWNLOAD METHODS FAILED:", errText);
+    console.log("SAVETUBE AUDIO DOWNLOAD FAILED:", errText);
     await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
     const cleanErr = String(errText).replace(/\n/g, " ").trim();
     await sendErrorMsg(reply, `Audio Download Failed: ${cleanErr.substring(0, 100)}`);
   } finally {
-    safeUnlink(rawFile); 
-    safeUnlink(finalFile);
     if (pendingAudioType[key]) pendingAudioType[key].isProcessing = false;
     delete pendingAudioType[key];
   }
@@ -705,7 +560,7 @@ replyHandlers.push({
     const audioState = pendingAudioType[k];
     const texts = extractTexts(body, mek, m);
 
-    // Search Result Chosen
+    // Step 1: Search Result Chosen
     if (searchState) {
       let chosenIndex = -1;
       for (const t of texts) {
@@ -728,7 +583,7 @@ replyHandlers.push({
       }
     }
 
-    // Format Chosen
+    // Step 2: Format Chosen
     if (audioState && !audioState.isProcessing) {
       let type = extractTypeFromTexts(texts);
       if (!type && /^[1-2]$/.test(String(body || "").trim())) {
