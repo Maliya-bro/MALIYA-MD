@@ -213,7 +213,7 @@ async function sendSongSearchResultsMenu(sock, from, mek, videos, query, session
 
       btn.addRawButton({
         buttonId: ".songselect 1",
-        buttonText: { displayText: "List ↯" },
+        buttonText: { displayText: "📂List Song" },
         type: 1,
         nativeFlowInfo: {
           name: "single_select",
@@ -229,7 +229,7 @@ async function sendSongSearchResultsMenu(sock, from, mek, videos, query, session
         }
       });
 
-      btn.addButton("⚡GET", ".songselect 1");
+      btn.addButton("⚡GET MP3", ".songselect 1");
 
       const sentMsg = await btn.send(from, { 
         quoted: mek,
