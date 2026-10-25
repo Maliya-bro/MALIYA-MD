@@ -9,8 +9,47 @@ const { readSettings } = require("../lib/botSettings");
 const { jidNormalizedUser } = require("@whiskeysockets/baileys");
 
 const BAD_WORDS = [
-  "paka", "ponnaya", "hutta", "kariyo", "hukanna", "ammatapuka",
-  "fuck", "bitch", "asshole", "dick", "cunt", "bastard"
+  // ── ENGLISH TOXIC & HARASSMENT ──
+  "fuck", "fucking", "fucker", "motherfucker", "mf", "bitch", "bitches", "asshole", 
+  "dick", "pussy", "bastard", "cunt", "slut", "whore", "dumbass", "jackass", 
+  "retard", "nigger", "nigga", "fag", "faggot", "idiot", "moron", "stfu", "bullshit", 
+  "shit", "cock", "suck", "dickhead", "scumbag", "dipshit", "prick", "twat", "wanker",
+  "douche", "douchebag", "creep", "pervert", "porn", "pornhub", "xvideos", "xxx",
+  "nude", "nudes", "hentai", "sex", "boobs", "horny", "rapist", "pedophile",
+
+  // ── SINGLISH INSULTS, ABUSES & VULGAR WORDS ──
+  "paka", "pakaya", "pakao", "pakata", "pakiya", "pakis", "pakwal",
+  "ponnaya", "ponz", "ponzla", "ponsiya", "ponna", "ponnayo",
+  "hutta", "hutti", "hutto", "hutte", "huththa", "huththi", "hukanna", "hukanawa", "hukala", "hukapan", "hukan",
+  "kariyo", "kariya", "kariyaa", "kari", "kariyek",
+  "ammatapuka", "ammatasiri", "ammapa", "ammapala", "ammatahukanna", "ammatasikana",
+  "balla", "balli", "ballek", "ballo", "balu", "walballa",
+  "wesige", "wesi", "wesiyo", "wesikama", "wesikeliya",
+  "paraya", "paratti", "parayo", "para",
+  "thoththa", "thotha", "gona", "meeharaka", "haraka", "modaya", "modi",
+  "kalakanniya", "kalakanni", "walatha", "walathaya", "walaththeya",
+  "bada", "lolz", "buruwa", "chithra", "jaraa", "jarawa", "chater", "chaater",
+  "keriya", "kehilla", "guu", "gukariya", "guuwa", "guukapan", "pukapan", "pukata", "puka",
+  "baduwa", "baduwak", "badu", "baduwada", "konda", "lollu", "lollek", "atheparak",
+  "athanahapan", "athanawata", "pukshana", "bijja", "biya", "chater",
+
+  // ── SINHALA UNICODE (සිංහල අකුරු) ──
+  "පක", "පකයා", "පකයො", "පකෝ", "පකා", "පකී",
+  "හුත්ත", "හුත්ති", "හුත්තෝ", "හුකන්නා", "හුකනවා", "හුකපන්", "හුකලා", "හුක්",
+  "පොන්නයා", "පොන්න", "පොන්නයෝ", "පොන්සි",
+  "කැරියා", "කැරියෝ", "කැරි", "කැරියෙක්",
+  "වේසි", "වේසියෙ", "වේසිකම", "වේසියෝ", "වේසිගෙ",
+  "අම්මටහුකන්නා", "අම්මටපුක", "අම්මටසිකෙන්න",
+  "බල්ලා", "බැල්ලි", "බල්ලෝ", "බල්ලෙක්", "බලුකම",
+  "පරයා", "පරට්ටි", "පරයෝ",
+  "මෝඩයා", "මෝඩි", "මෝඩයෝ", "මීහරකා", "හරකා", "බූරුවා",
+  "කාලකන්නියා", "කාලකන්නි",
+  "වල්", "වලත්තයා", "වලත්ත", "වල්පරයා",
+  "ගූ", "ගූකන්නා", "ගූකැරියා", "ගූගොඩ",
+  "පුක", "පුකට", "පුකේ", "පුකදෙන්න", "පුකදෙනවා",
+  "බඩුව", "බඩු", "බඩුවක්",
+  "බිජ්ජ", "බිජ්ජා",
+  "ලොල්ලා", "ලොල්ලෝ"
 ];
 
 const spamTracker = new Map();
@@ -59,7 +98,8 @@ async function handleGroupAutomation(sock, mek, m, sessionCtx) {
     // Group Management toggle එක OFF නම් automation ක්‍රියාත්මක නොවේ
     if (!settings.group_management) return false;
 
-    const sender = mek.key.participant || from;
+    const rawSender = mek.key.participant || from;
+    const sender = jidNormalizedUser(rawSender);
     const body = String(
       mek.message?.conversation ||
       mek.message?.extendedTextMessage?.text ||
@@ -89,32 +129,48 @@ async function handleGroupAutomation(sock, mek, m, sessionCtx) {
         await sock.sendMessage(from, { delete: mek.key });
       }
       await sock.sendMessage(from, {
-        text: `╭─「 *⚠️ SPAM WARNING* 」─◆\n│ 👤 *User:* @${sender.split("@")[0]}\n│ 🚫 *Reason:* Message flooding\n│ ⏳ *Action:* Messages suppressed\n╰──────◆──◆──◆──◆`,
+        text: `╭─「 *⚠️ SPAM WARNING* 」─◆\n│ 👤 *User:* @${sender.split("@")[0]}\n│ 🚫 *Reason:* Message flooding\n│ ⏳ *Action:* Messages suppressed\n╰─────◆──◆──◆──◆`,
         mentions: [sender]
       });
       return true;
     }
 
-    // ── 🔗 ANTI-LINK PROTECTION ──
+    // ── 🔗 ANTI-LINK PROTECTION (3/3 Kick Action) ──
     const linkRegex = /(https?:\/\/[^\s]+|chat\.whatsapp\.com\/[^\s]+|wa\.me\/[^\s]+|t\.me\/[^\s]+)/gi;
     if (linkRegex.test(body)) {
+      // 1. Link message එක delete කිරීම
       if (isBotAdmin) {
-        await sock.sendMessage(from, { delete: mek.key });
+        try {
+          await sock.sendMessage(from, { delete: mek.key });
+        } catch (_) {}
       }
 
+      // 2. Warning count එක ලබා ගැනීම සහ update කිරීම
       let currentWarn = (userWarnings.get(warnKey) || 0) + 1;
-      userWarnings.set(warnKey, currentWarn);
 
-      if (currentWarn >= 3 && isBotAdmin) {
+      if (currentWarn >= 3) {
+        // Warning count එක reset කිරීම
         userWarnings.delete(warnKey);
-        await sock.groupParticipantsUpdate(from, [sender], "remove");
-        await sock.sendMessage(from, {
-          text: `╭──「 *⛔ ANTI-LINK REMOVAL* 」──◆\n│ 👤 *User:* @${sender.split("@")[0]}\n│ ❌ *Reason:* Links forbidden (3/3)\n│ 🚪 *Status:* Removed from group\n╰───────◆──◆──◆──◆`,
-          mentions: [sender]
-        });
+
+        if (isBotAdmin) {
+          // සාමාජිකයාව remove (kick) කිරීම
+          await sock.groupParticipantsUpdate(from, [sender], "remove");
+          await sock.sendMessage(from, {
+            text: `╭─「 *⛔ ANTI-LINK REMOVAL* 」─◆\n│ 👤 *User:* @${sender.split("@")[0]}\n│ ❌ *Reason:* Links forbidden (3/3)\n│ 🚪 *Action:* Kicked from group\n╰──────◆──◆──◆──◆`,
+            mentions: [sender]
+          });
+        } else {
+          // Bot admin නැතිනම් ማስጠንසරයක් යැවීම
+          await sock.sendMessage(from, {
+            text: `╭─「 *⚠️ ANTI-LINK VIOLATION* 」─◆\n│ 👤 *User:* @${sender.split("@")[0]}\n│ ❌ *Attempts:* [ 3 / 3 ] Exceeded!\n│ ⚠️ *Note:* Bot is not admin to kick.\n╰──────◆──◆──◆──◆`,
+            mentions: [sender]
+          });
+        }
       } else {
+        // 1 හෝ 2 වන warning එක ලබා දීම
+        userWarnings.set(warnKey, currentWarn);
         await sock.sendMessage(from, {
-          text: `╭──「 *⚠️ ANTI-LINK GUARD* 」──◆\n│ 👤 *User:* @${sender.split("@")[0]}\n│ 🚫 *Reason:* Links are strictly prohibited\n│ ⚠️ *Warning:* [ ${currentWarn} / 3 ]\n╰───────◆──◆──◆──◆`,
+          text: `╭─「 *⚠️ ANTI-LINK GUARD* 」─◆\n│ 👤 *User:* @${sender.split("@")[0]}\n│ 🚫 *Reason:* Links are strictly prohibited\n│ ⚠️ *Warning:* [ ${currentWarn} / 3 ]\n│ 📢 *Notice:* 3/3 න් පසු ඔබව ඉවත් කරනු ලැබේ.\n╰───────◆──◆──◆──◆`,
           mentions: [sender]
         });
       }
@@ -132,7 +188,7 @@ async function handleGroupAutomation(sock, mek, m, sessionCtx) {
         await sock.sendMessage(from, { delete: mek.key });
       }
       await sock.sendMessage(from, {
-        text: `╭「 *🚫 TOXIC WORD GUARD* 」◆\n│ 👤 *User:* @${sender.split("@")[0]}\n│ ⚠️ *Warning:* Inappropriate words detected\n│ ⚖️ *Rule:* Maintain a respectful chat\n╰───────◆──◆──◆──◆`,
+        text: `╭「 *🚫 TOXIC WORD GUARD* 」◆\n│ 👤 *User:* @${sender.split("@")[0]}\n│ ⚠️ *Warning:* Inappropriate words detected\n│ ⚖️ *Rule:* Maintain a respectful chat\n╰──────◆──◆──◆──◆`,
         mentions: [sender]
       });
       return true;
@@ -165,22 +221,26 @@ async function handleGroupParticipantsUpdate(sock, update, sessionId) {
     const groupName = groupMeta.subject || "Our Community";
     const memberCount = groupMeta.participants.length;
 
-    for (const user of participants) {
-      const userNum = user.split("@")[0];
+    for (const participant of participants) {
+      const rawJid = typeof participant === "string" 
+        ? participant 
+        : (participant?.id || participant?.jid);
 
-      // Profile Picture retrieval with crash-proof fallback
+      if (!rawJid || typeof rawJid !== "string") continue;
+
+      const user = jidNormalizedUser(rawJid);
+      const userNum = user.split("@")[0] || "Member";
+
       let ppUrl = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/ChatGPT%20Image%20Jan%2018%2C%202026%2C%2012_27_25%20PM.png";
       try {
         const fetched = await sock.profilePictureUrl(user, "image");
         if (fetched) ppUrl = fetched;
-      } catch (_) {
-        // Fallback to default banner if privacy restricts PP
-      }
+      } catch (_) {}
 
       const welcomeCaption = `
-╔══════════════════════╗
+╔═════════════════════╗
   ✨ *WELCOME TO OUR FAMILY* ✨
-╚═════════════════════╝
+╚════════════════════╝
 
 👋 *හායි* @${userNum},
 අපගේ *${groupName}* සමූහයට ඔබව සාදරයෙන් පිළිගනිමු!
@@ -190,7 +250,7 @@ async function handleGroupParticipantsUpdate(sock, update, sessionId) {
 │ 🏛️ *Group:* ${groupName}
 │ 👥 *Total Members:* ${memberCount}
 │ 📅 *Date:* ${new Date().toLocaleDateString("en-GB")}
-╰───────◆──◆──◆──◆
+╰──────◆──◆──◆──◆
 
 > 💬 *සමූහයේ සාමකාමීව හා සතුටින් රැඳී සිටින්න!*
 > 🔥 *Protected by MALIYA-MD Core*
@@ -230,16 +290,17 @@ cmd(
     const participants = meta.participants || [];
     const message = args.join(" ") || "Attention Everyone!";
 
-    let text = `╔════════════════════╗\n   📢 *GROUP ANNOUNCEMENT* 📢\n╚═══════════════════╝\n\n💬 *Message:* ${message}\n\n`;
+    let text = `╔═════════════════╗\n   📢 *GROUP ANNOUNCEMENT* 📢\n╚═════════════════╝\n\n💬 *Message:* ${message}\n\n`;
     const mentions = [];
 
     participants.forEach((p, i) => {
       const num = String(i + 1).padStart(2, "0");
-      text += `│ *[ ${num} ]* @${p.id.split("@")[0]}\n`;
-      mentions.push(p.id);
+      const normalizedP = jidNormalizedUser(p.id);
+      text += `│ *[ ${num} ]* @${normalizedP.split("@")[0]}\n`;
+      mentions.push(normalizedP);
     });
 
-    text += `╰──────◆──◆──◆──◆\n> 🔥 *Broadcast via MALIYA-MD*`;
+    text += `╰────◆──◆──◆──◆\n> 🔥 *Broadcast via MALIYA-MD*`;
     return await conn.sendMessage(from, { text, mentions }, { quoted: mek });
   }
 );
@@ -258,7 +319,7 @@ cmd(
     if (!isAdmin) return reply("❌ *`[ THIS COMMAND IS ADMIN ONLY. ]`*");
 
     const meta = await conn.groupMetadata(from);
-    const mentions = meta.participants.map((p) => p.id);
+    const mentions = meta.participants.map((p) => jidNormalizedUser(p.id));
     const broadcastText = q || "Important Broadcast Notice";
 
     return await conn.sendMessage(from, { text: broadcastText, mentions });
@@ -319,11 +380,12 @@ cmd(
     if (!(await checkAdmin(conn, from, sender))) return reply("❌ *`[ ADMIN ONLY ]`*");
     if (!(await checkBotAdmin(conn, from))) return reply("❌ *`[ BOT IS NOT ADMIN ]`*");
 
-    let target = mek.message?.extendedTextMessage?.contextInfo?.participant ||
-                 mek.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+    let rawTarget = mek.message?.extendedTextMessage?.contextInfo?.participant ||
+                    mek.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
 
-    if (!target) return reply("⚠️ *කරුණාකර ඉවත් කිරීමට අවශ්‍ය සාමාජිකයාගේ message එකක් quote කරන්න හෝ @mention කරන්න.*");
+    if (!rawTarget) return reply("⚠️ *කරුණාකර ඉවත් කිරීමට අවශ්‍ය සාමාජිකයාගේ message එකක් quote කරන්න හෝ @mention කරන්න.*");
     
+    const target = jidNormalizedUser(rawTarget);
     await conn.groupParticipantsUpdate(from, [target], "remove");
     return reply(`✅ *@${target.split("@")[0]} has been removed.*`, { mentions: [target] });
   }
@@ -343,11 +405,12 @@ cmd(
     if (!(await checkAdmin(conn, from, sender))) return reply("❌ *`[ ADMIN ONLY ]`*");
     if (!(await checkBotAdmin(conn, from))) return reply("❌ *`[ BOT IS NOT ADMIN ]`*");
 
-    let target = mek.message?.extendedTextMessage?.contextInfo?.participant ||
-                 mek.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+    let rawTarget = mek.message?.extendedTextMessage?.contextInfo?.participant ||
+                    mek.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
 
-    if (!target) return reply("⚠️ *කරුණාකර Admin කිරීමට අවශ්‍ය කෙනාගේ message එකක් quote කරන්න හෝ @mention කරන්න.*");
+    if (!rawTarget) return reply("⚠️ *කරුණාකර Admin කිරීමට අවශ්‍ය කෙනාගේ message එකක් quote කරන්න හෝ @mention කරන්න.*");
 
+    const target = jidNormalizedUser(rawTarget);
     await conn.groupParticipantsUpdate(from, [target], "promote");
     return reply(`👑 *@${target.split("@")[0]} is now an Admin!*`, { mentions: [target] });
   }
@@ -366,11 +429,12 @@ cmd(
     if (!(await checkAdmin(conn, from, sender))) return reply("❌ *`[ ADMIN ONLY ]`*");
     if (!(await checkBotAdmin(conn, from))) return reply("❌ *`[ BOT IS NOT ADMIN ]`*");
 
-    let target = mek.message?.extendedTextMessage?.contextInfo?.participant ||
-                 mek.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+    let rawTarget = mek.message?.extendedTextMessage?.contextInfo?.participant ||
+                    mek.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
 
-    if (!target) return reply("⚠️ *කරුණාකර Dismiss කිරීමට අවශ්‍ය Admin ගේ message එකක් quote කරන්න හෝ @mention කරන්න.*");
+    if (!rawTarget) return reply("⚠️ *කරුණාකර Dismiss කිරීමට අවශ්‍ය Admin ගේ message එකක් quote කරන්න හෝ @mention කරන්න.*");
 
+    const target = jidNormalizedUser(rawTarget);
     await conn.groupParticipantsUpdate(from, [target], "demote");
     return reply(`📉 *@${target.split("@")[0]} is no longer an Admin.*`, { mentions: [target] });
   }
