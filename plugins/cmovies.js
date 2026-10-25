@@ -1,17 +1,28 @@
-const { cmd } = require("../command");
+const { cmd, replyHandlers } = require("../command");
 const axios = require("axios");
 const CryptoJS = require("crypto-js");
 const https = require("https");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
+const sharp = require("sharp");
+const { readSettings, getCustomImage } = require("../lib/botSettings");
 
-const pendingSearch = {};
-const pendingQuality = {};
-const pendingTargetSelection = {};
+const BRAND_BASE = "MALIYA-MD";
+const DEFAULT_BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
+const CHANNEL_JID = "120363427174988449@newsletter";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽Ｄ 🍁";
+const DEFAULT_SEARCH_IMAGE =
+  "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
 
-// ── Storage for Target Groups (shared with csend) ─────────────
+const SESSION_TIMEOUT = 5 * 60 * 1000;
+const LOOP_COOLDOWN = 2000;
+const MAX_RESULTS = 15;
+
+const pendingCineSubz = {};
+const lastProcessedMsg = {};
+
+// ── Target Groups Storage (Shared with csend / csong) ─────────────
 const STORE_PATH = path.join(__dirname, "csong_targets.json");
 
 function readStore() {
@@ -23,39 +34,9 @@ function readStore() {
   }
 }
 
-// ── Context Info (Forwarded & Channel Details) ─────────────
-const channelContext = {
-    forwardingScore: 999,
-    isForwarded: true,
-    forwardedNewsletterMessageInfo: {
-        newsletterJid: "120363427174988449@newsletter",
-        newsletterName: "🍁 ＭＡＬＩＹＡ－ 〽️Ｄ 🍁",
-        serverMessageId: -1,
-    }
-};
-
-const SEARCH_IMAGE = "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg?raw=true";
-
-// ── Helper Functions ─────────────
-function toSmallCaps(str = "") {
-    const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
-    return String(str)
-        .split("")
-        .map((char) => {
-            const idx = normal.indexOf(char);
-            return idx !== -1 ? small[idx] : char;
-        })
-        .join("");
-}
-
-function makePendingKey(sender, from) {
-    return `${from || ""}::${(sender || "").split(":")[0]}`;
-}
-
-async function getGroupName(bot, jid) {
+async function getGroupName(sock, jid) {
   try {
-    const meta = await bot.groupMetadata(jid);
+    const meta = await sock.groupMetadata(jid);
     return meta?.subject || jid;
   } catch {
     return jid;
@@ -63,254 +44,871 @@ async function getGroupName(bot, jid) {
 }
 
 function sanitizeFileName(name = "movie") {
-    return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "movie";
+  return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "movie";
 }
 
-// ── Auto-Server Hopper & Decryption Function ─────────────
-async function getCineSubzLinks(originalUrl) {
-    let baseServerMatch = originalUrl.match(/server(\d+)/);
-    let serversToTry = [];
-    if (baseServerMatch) serversToTry.push(baseServerMatch[1]);
-    
-    ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'].forEach(s => {
-        if (!serversToTry.includes(s)) serversToTry.push(s);
+const sslAgent = new https.Agent({
+  rejectUnauthorized: false,
+  keepAlive: true,
+  secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+});
+
+const defaultHeaders = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  Connection: "keep-alive",
+  "Upgrade-Insecure-Requests": "1",
+};
+
+function keyFor(sender, from) {
+  return `${from || ""}::${(sender || "").split(":")[0]}`;
+}
+
+function clearUserSession(k) {
+  delete pendingCineSubz[k];
+}
+
+function toSmallCaps(str = "") {
+  const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const small = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+  return String(str)
+    .split("")
+    .map((char) => {
+      const idx = normal.indexOf(char);
+      return idx !== -1 ? small[idx] : char;
+    })
+    .join("");
+}
+
+function decodeHtmlEntities(str = "") {
+  return String(str)
+    .replace(/&#8211;|&#8212;|&ndash;|&mdash;/g, "-")
+    .replace(/&#8217;|&#8216;|&apos;/g, "'")
+    .replace(/&#8220;|&#8221;|&quot;/g, '"')
+    .replace(/&#038;|&amp;/g, "&")
+    .replace(/<[^>]*>/g, "")
+    .trim();
+}
+
+function channelContextInfo() {
+  return {
+    forwardingScore: 999,
+    isForwarded: true,
+    forwardedNewsletterMessageInfo: {
+      newsletterJid: CHANNEL_JID,
+      newsletterName: CHANNEL_NAME,
+      serverMessageId: -1,
+    },
+  };
+}
+
+function getQuotedId(m, mek) {
+  return (
+    m?.quoted?.id ||
+    mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.imageMessage?.contextInfo?.stanzaId ||
+    mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+    m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    null
+  );
+}
+
+function extractTexts(body, mek, m) {
+  const texts = [];
+  const direct = [
+    body,
+    m?.body,
+    m?.text,
+    m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text,
+    m?.message?.buttonsResponseMessage?.selectedButtonId,
+    m?.message?.buttonsResponseMessage?.selectedDisplayText,
+    m?.message?.listResponseMessage?.title,
+    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.interactiveResponseMessage?.body?.text,
+    mek?.message?.conversation,
+    mek?.message?.extendedTextMessage?.text,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+  ];
+  for (const item of direct) {
+    if (item) texts.push(String(item).trim());
+  }
+
+  const p1 =
+    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage
+      ?.paramsJson;
+  const p2 =
+    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage
+      ?.paramsJson;
+  for (const raw of [p1, p2]) {
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.id) texts.push(String(parsed.id).trim());
+      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+      if (parsed.title) texts.push(String(parsed.title).trim());
+    } catch {}
+  }
+  return [...new Set(texts.filter(Boolean))];
+}
+
+async function getThumbnailBuffer(url) {
+  const tryUrl = url || DEFAULT_SEARCH_IMAGE;
+  try {
+    const res = await axios.get(tryUrl, {
+      responseType: "arraybuffer",
+      timeout: 8000,
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    return await sharp(Buffer.from(res.data))
+      .resize(250, 250, { fit: "cover" })
+      .jpeg({ quality: 60 })
+      .toBuffer();
+  } catch (e) {
+    return null;
+  }
+}
+
+async function sendErrorMsg(sock, from, mek, text) {
+  await sock.sendMessage(
+    from,
+    {
+      text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`,
+      contextInfo: channelContextInfo(),
+    },
+    { quoted: mek }
+  );
+}
+
+/* ================= 1. CINESUBZ SEARCH ================= */
+async function customSearchCineSubz(query) {
+  const formattedQuery = encodeURIComponent(query.trim()).replace(/%20/g, "+");
+  const searchUrl = `https://cinesubz.co/?s=${formattedQuery}`;
+
+  try {
+    const res = await axios.get(searchUrl, {
+      httpsAgent: sslAgent,
+      timeout: 15000,
+      headers: { ...defaultHeaders, Referer: "https://cinesubz.co/" },
     });
 
-    for (let serverNum of serversToTry) {
-        let movieUrl = originalUrl;
-        if (baseServerMatch) movieUrl = movieUrl.replace(/server\d+/, `server${serverNum}`);
-        
-        try {
-            const parsedUrl = new URL(movieUrl);
-            const domain = parsedUrl.origin;
-            const currentPath = parsedUrl.pathname + parsedUrl.search;
-            
-            const agent = new https.Agent({ 
-                rejectUnauthorized: false,
-                keepAlive: true,
-                secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT
-            });
+    const html = String(res.data || "");
+    const results = [];
+    const seenUrls = new Set();
 
-            const baseHeaders = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
-            };
+    const parts = html
+      .split(/<div id="item-\d+"\s+class="display-item">/i)
+      .slice(1);
 
-            const initialRes = await axios.get(movieUrl, { httpsAgent: agent, headers: baseHeaders });
-            let cookieHeader = '';
-            if (initialRes.headers['set-cookie']) {
-                cookieHeader = initialRes.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
-            }
+    for (const block of parts) {
+      const linkMatch = block.match(
+        /<a\s+href="([^"]+)"[^>]*?(?:title="([^"]*)")?/i
+      );
+      const h3Match =
+        block.match(/<div class="item-desc-title">\s*<h3>([\s\S]*?)<\/h3>/i) ||
+        block.match(/<h3>([\s\S]*?)<\/h3>/i);
+      const imgMatch = block.match(
+        /<img[^>]+(?:data-original|src)="([^"]+)"/i
+      );
+      const imdbMatch = block.match(
+        /<span class="imdb-score">([^<]+)<\/span>/i
+      );
+      const qualityMatch = block.match(
+        /<span class="badge-(?:quality|season)-corner">([^<]+)<\/span>/i
+      );
 
-            let html = initialRes.data;
-            let realPageUrl = movieUrl;
-            let payloads = html.match(/[0-9a-fA-F]{200,}/g) || [];
+      const url = linkMatch ? linkMatch[1].trim() : null;
+      const rawTitle =
+        (h3Match && h3Match[1]) || (linkMatch && linkMatch[2]) || "";
+      const title = decodeHtmlEntities(rawTitle);
+      const image = imgMatch ? imgMatch[1].trim() : DEFAULT_SEARCH_IMAGE;
+      const imdb = imdbMatch ? imdbMatch[1].trim() : null;
+      const quality = qualityMatch ? qualityMatch[1].trim() : null;
 
-            if (payloads.length === 0) {
-                const apiUrl = `${domain}/api/download-data${currentPath}`;
-                const apiResponse = await axios.get(apiUrl, {
-                    httpsAgent: agent,
-                    headers: { ...baseHeaders, 'Accept': 'application/json', 'Referer': movieUrl, 'Cookie': cookieHeader }
-                });
-
-                if (apiResponse.headers['set-cookie']) {
-                    cookieHeader = apiResponse.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
-                }
-
-                if (!apiResponse.data || !apiResponse.data.redirect) throw new Error('API Session Error');
-
-                realPageUrl = apiResponse.data.redirect;
-                if (!realPageUrl.startsWith('http')) realPageUrl = domain + realPageUrl;
-
-                const pageResponse = await axios.get(realPageUrl, {
-                    httpsAgent: agent,
-                    headers: { ...baseHeaders, 'Referer': movieUrl, 'Cookie': cookieHeader }
-                });
-
-                html = pageResponse.data;
-                payloads = html.match(/[0-9a-fA-F]{200,}/g) || [];
-            }
-
-            if (payloads.length === 0) throw new Error('No Payloads');
-
-            const allStrings = [...html.matchAll(/(["'])(.*?)\1/g)].map(m => m[2]);
-            const uniqueStrings = [...new Set(allStrings)];
-            const results = [];
-
-            for (let hexPayload of payloads) {
-                try {
-                    const payloadBytes = Buffer.from(hexPayload, 'hex');
-                    const dlResponse = await axios.post(realPageUrl, payloadBytes, {
-                        httpsAgent: agent,
-                        headers: {
-                            'Content-Type': 'application/octet-stream',
-                            'Referer': realPageUrl,
-                            'Cookie': cookieHeader,
-                            'User-Agent': baseHeaders['User-Agent']
-                        },
-                        responseType: 'arraybuffer'
-                    });
-
-                    const binaryString = dlResponse.data.toString('utf8');
-                    const aesStringMatch = binaryString.match(/U2FsdGVkX1[a-zA-Z0-9+/=]+/);
-
-                    if (aesStringMatch) {
-                        const encryptedUrl = aesStringMatch[0];
-                        for (let key of uniqueStrings) {
-                            try {
-                                const decryptedBytes = CryptoJS.AES.decrypt(encryptedUrl, key);
-                                const decodedStr = decryptedBytes.toString(CryptoJS.enc.Utf8);
-                                if (decodedStr) {
-                                    const finalUrl = Buffer.from(decodedStr, 'base64').toString('utf8');
-                                    if (finalUrl.startsWith('http')) {
-                                        results.push(finalUrl);
-                                        break; 
-                                    }
-                                }
-                            } catch (e) {}
-                        }
-                    }
-                } catch (err) {}
-            }
-
-            const finalLinks = [...new Set(results)];
-            if (finalLinks.length > 0) return { success: true, links: finalLinks };
-            
-            throw new Error('Links decrypt fail');
-
-        } catch (error) {
-            continue; 
-        }
+      if (url && title && !seenUrls.has(url)) {
+        seenUrls.add(url);
+        results.push({ title, url, image, imdb, quality });
+      }
     }
-    return { error: `File not found on any server.` };
+
+    return results;
+  } catch (err) {
+    console.error("CineSubz Search Error:", err?.message || err);
+    return [];
+  }
 }
 
-// ==========================================
-// Movie Sender Command (.cmovie / .cfilm)
-// ==========================================
-cmd({
+/* ================= 2. MOVIE SCRAPING ================= */
+async function scrapeMoviePage(movieUrl, fallbackTitle = "Movie", fallbackImage = DEFAULT_SEARCH_IMAGE) {
+  try {
+    const res = await axios.get(movieUrl, {
+      httpsAgent: sslAgent,
+      timeout: 15000,
+      headers: { ...defaultHeaders, Referer: "https://cinesubz.co/" },
+    });
+
+    const html = String(res.data || "");
+    const titleMatch = html.match(/<title>([\s\S]*?)<\/title>/i);
+    const title = titleMatch
+      ? decodeHtmlEntities(titleMatch[1].replace(/- CineSubz.*$/i, ""))
+      : fallbackTitle;
+
+    const imdbMatch = html.match(/class=['"][^'"]*imdb-rate[^'"]*['"][^>]*>([\s\S]*?)<\/span>/i);
+    const durationMatch = html.match(/class=['"][^'"]*duration[^'"]*['"][^>]*>([\s\S]*?)<\/span>/i);
+
+    const downloadLinks = [];
+    const seenUrls = new Set();
+
+    const btnRegex =
+      /<a[^>]+href=['"]([^'"]+)['"][^>]*class=['"][^'"]*movie-download-button[^'"]*['"][^>]*>([\s\S]*?)<\/a>/gi;
+    let match;
+    while ((match = btnRegex.exec(html)) !== null) {
+      const rawLink = match[1].trim();
+      const innerHtml = match[2];
+      const metaMatch = innerHtml.match(
+        /class=['"][^'"]*movie-download-meta[^'"]*['"][^>]*>([\s\S]*?)<\/span>/i
+      );
+      const typeMatch = innerHtml.match(
+        /class=['"][^'"]*movie-download-type[^'"]*['"][^>]*>([\s\S]*?)<\/span>/i
+      );
+
+      const qualityLabel = metaMatch
+        ? decodeHtmlEntities(metaMatch[1])
+        : (typeMatch ? decodeHtmlEntities(typeMatch[1]) : "Quality");
+
+      let directCsLink = "";
+
+      try {
+        const pageRes = await axios.get(rawLink, {
+          httpsAgent: sslAgent,
+          headers: { ...defaultHeaders, Referer: movieUrl },
+          timeout: 10000,
+        });
+        const pData = String(pageRes.data || "");
+
+        const pathMatch = pData.match(
+          /(?:https?:\/\/(?:google\.com|sonic-cloud\.online|drive\.csplayer2\.space))?\/(server\d+\/[^\s'"<>]+\.mp4)/i
+        );
+
+        if (pathMatch) {
+          let cleanPath = pathMatch[1].replace(/(server\d+\/)\d+:\//, "$1");
+          directCsLink = `https://drive.csplayer2.space/${cleanPath}`;
+        }
+      } catch (e) {}
+
+      if (directCsLink && !seenUrls.has(directCsLink)) {
+        seenUrls.add(directCsLink);
+        downloadLinks.push({
+          quality: qualityLabel,
+          pageUrl: rawLink,
+          directUrl: directCsLink,
+        });
+      }
+    }
+
+    return { 
+      title, 
+      poster: fallbackImage, 
+      image: fallbackImage, 
+      imdb_rate: imdbMatch ? decodeHtmlEntities(imdbMatch[1]) : null,
+      duration: durationMatch ? decodeHtmlEntities(durationMatch[1]) : null,
+      downloadLinks 
+    };
+  } catch (e) {
+    console.error("CineSubz Scrape Error:", e?.message || e);
+    return null;
+  }
+}
+
+/* ================= 3. DIRECT DOWNLOAD RESOLVER ================= */
+async function getCineSubzLinks(originalUrl) {
+  let targetLink = originalUrl.replace(/^https:\/\/[^\/]+/, "https://drive.csplayer2.space");
+  targetLink = targetLink.replace(/(server\d+\/)\d+:\//, "$1");
+  targetLink = targetLink.replace(/\?ext=mp4/gi, "");
+
+  let baseServerMatch = targetLink.match(/server(\d+)/);
+  let serversToTry = [];
+  if (baseServerMatch) serversToTry.push(baseServerMatch[1]);
+  ["1", "2", "3", "4", "5", "6", "8", "9", "7", "11"].forEach((s) => {
+    if (!serversToTry.includes(s)) serversToTry.push(s);
+  });
+
+  for (let serverNum of serversToTry) {
+    let movieUrl = targetLink;
+    if (baseServerMatch) {
+      movieUrl = movieUrl.replace(/server\d+/, `server${serverNum}`);
+    }
+
+    try {
+      const parsedUrl = new URL(movieUrl);
+      const domain = parsedUrl.origin;
+      const currentPath = parsedUrl.pathname + parsedUrl.search;
+
+      const initialRes = await axios.get(movieUrl, {
+        httpsAgent: sslAgent,
+        headers: defaultHeaders,
+        timeout: 12000,
+      });
+      let cookieHeader = "";
+      if (initialRes.headers["set-cookie"]) {
+        cookieHeader = initialRes.headers["set-cookie"]
+          .map((c) => c.split(";")[0])
+          .join("; ");
+      }
+
+      let html = String(initialRes.data || "");
+      let realPageUrl = movieUrl;
+      const hexRegex = /[0-9a-fA-F]{200,}/g;
+      let payloads = html.match(hexRegex) || [];
+
+      if (payloads.length === 0) {
+        const apiUrl = `${domain}/api/download-data${currentPath}`;
+        const apiResponse = await axios.get(apiUrl, {
+          httpsAgent: sslAgent,
+          timeout: 12000,
+          headers: {
+            ...defaultHeaders,
+            Accept: "application/json",
+            Referer: movieUrl,
+            Cookie: cookieHeader,
+          },
+        });
+
+        if (apiResponse.headers["set-cookie"]) {
+          cookieHeader = apiResponse.headers["set-cookie"]
+            .map((c) => c.split(";")[0])
+            .join("; ");
+        }
+
+        if (apiResponse.data && apiResponse.data.redirect) {
+          realPageUrl = apiResponse.data.redirect;
+          if (!realPageUrl.startsWith("http"))
+            realPageUrl = domain + realPageUrl;
+
+          const pageResponse = await axios.get(realPageUrl, {
+            httpsAgent: sslAgent,
+            timeout: 12000,
+            headers: {
+              ...defaultHeaders,
+              Referer: movieUrl,
+              Cookie: cookieHeader,
+            },
+          });
+          html = String(pageResponse.data || "");
+          payloads = html.match(hexRegex) || [];
+        }
+      }
+
+      if (payloads.length === 0) continue;
+
+      const allStrings = [...html.matchAll(/(["'])(.*?)\1/g)].map((m) => m[2]);
+      const keysToTry = [...new Set(allStrings)];
+      keysToTry.push("kasun", "cinesubz.lk", "CSPlayer", "ravindu01manoj");
+
+      const results = [];
+
+      for (let hexPayload of payloads) {
+        try {
+          const payloadBytes = Buffer.from(hexPayload, "hex");
+          const postHeaders = {
+            "User-Agent": defaultHeaders["User-Agent"],
+            Accept: "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            Connection: "keep-alive",
+            "Content-Type": "application/octet-stream",
+            Cookie: cookieHeader,
+            Origin: domain,
+            Referer: realPageUrl,
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+          };
+
+          const dlResponse = await axios.post(realPageUrl, payloadBytes, {
+            httpsAgent: sslAgent,
+            timeout: 12000,
+            headers: postHeaders,
+            responseType: "arraybuffer",
+          });
+
+          const responseText = Buffer.from(dlResponse.data).toString("utf8");
+          const encryptedUrlMatch = responseText.match(
+            /U2FsdGVkX1[a-zA-Z0-9+/=]+/
+          );
+
+          if (encryptedUrlMatch) {
+            const encryptedUrl = encryptedUrlMatch[0];
+            for (let key of keysToTry) {
+              if (!key || key.length < 3) continue;
+              try {
+                const decryptedBytes = CryptoJS.AES.decrypt(encryptedUrl, key);
+                let decodedStr = decryptedBytes.toString(CryptoJS.enc.Utf8);
+
+                if (decodedStr && !decodedStr.startsWith("http")) {
+                  try {
+                    decodedStr = Buffer.from(decodedStr, "base64").toString(
+                      "utf8"
+                    );
+                  } catch (e) {}
+                }
+
+                if (decodedStr && decodedStr.startsWith("http")) {
+                  results.push(decodedStr);
+                  break;
+                }
+              } catch (e) {}
+            }
+          }
+        } catch (err) {}
+      }
+
+      const finalLinks = [...new Set(results)];
+      if (finalLinks.length > 0) return { success: true, links: finalLinks };
+    } catch (error) {
+      continue;
+    }
+  }
+  return { error: "File not found on any server." };
+}
+
+/* ================= MOVIE SENDER FUNCTION ================= */
+async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedLink, movie) {
+  await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
+
+  const targetName = await getGroupName(sock, targetJid);
+  const correctPosterUrl = movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE;
+  const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
+
+  // 1. Send Beautiful Movie Info Card before uploading movie
+  let infoCard = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${toSmallCaps(movie.metadata.title)}*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+  if (movie.metadata.imdb_rate) infoCard += `⭐ *IMDb :* ${movie.metadata.imdb_rate}\n`;
+  if (movie.metadata.duration) infoCard += `⏳ *Duration :* ${movie.metadata.duration}\n`;
+  infoCard += `📊 *Quality :* ${selectedLink.quality}\n`;
+  infoCard += `🎯 *Sending to :* ${targetName}\n\n`;
+  infoCard += `_Please wait while the bot uploads the file..._\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
+
+  if (thumbBuffer) {
+    await sock.sendMessage(targetJid, {
+      image: thumbBuffer,
+      caption: infoCard,
+      contextInfo: channelContextInfo(),
+    });
+  } else {
+    await sock.sendMessage(targetJid, {
+      text: infoCard,
+      contextInfo: channelContextInfo(),
+    });
+  }
+
+  // 2. Resolve Direct Stream Link
+  await sock.sendMessage(from, { react: { text: "⬇️", key: m.key } });
+  let targetServerLink = selectedLink.directUrl;
+
+  try {
+    const finalResult = await getCineSubzLinks(targetServerLink);
+
+    if (!finalResult.success || !finalResult.links || finalResult.links.length === 0) {
+      await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+      return await sendErrorMsg(
+        sock,
+        from,
+        originalMek,
+        `Link Extract Fail: ${finalResult.error || "Encrypted link resolver error."}`
+      );
+    }
+
+    const allLinks = finalResult.links;
+    const skylinesLinks = allLinks.filter((link) => link.includes("skylines") || link.includes("terracloud"));
+    const pixeldrainLinks = allLinks.filter((link) => link.includes("pixeldrain"));
+    const supercloudLinks = allLinks.filter((link) => link.includes("supercloud"));
+    const directDownloadUrl = skylinesLinks[0] || pixeldrainLinks[0] || supercloudLinks[0] || allLinks[0];
+
+    const cleanTitle = sanitizeFileName(movie.metadata.title);
+    const finalFileName = `${sanitizeFileName(targetName)}_${cleanTitle}.mp4`;
+
+    let captionText = `🎬 *${toSmallCaps(movie.metadata.title)}*\n\n📊 *Quality :* ${selectedLink.quality}\n`;
+    if (skylinesLinks[0]) captionText += `🌟 *Direct Link :* ${skylinesLinks[0]}\n`;
+    if (pixeldrainLinks[0]) captionText += `⚡ *Pixeldrain :* ${pixeldrainLinks[0]}\n`;
+    captionText += `\n🍿 *Enjoy Your Movie!*\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
+
+    await sock.sendMessage(from, { react: { text: "⬆️", key: m.key } });
+
+    if (directDownloadUrl) {
+      const docPayload = {
+        document: { url: directDownloadUrl },
+        mimetype: "video/mp4",
+        fileName: finalFileName,
+        caption: captionText,
+        contextInfo: channelContextInfo(),
+      };
+      if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
+
+      await sock.sendMessage(targetJid, docPayload);
+
+      await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+      await sock.sendMessage(
+        from,
+        {
+          text: `╭─[ ✅ *𝗦𝗨𝗖𝗖𝗘𝗦𝗦* ]\n│\n├ 📌 _Movie sent to: *${targetName}*_ \n╰──────────────⮞`,
+          contextInfo: channelContextInfo(),
+        },
+        { quoted: originalMek }
+      );
+    } else {
+      await sock.sendMessage(targetJid, {
+        text: captionText,
+        contextInfo: channelContextInfo(),
+      });
+      await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
+    }
+  } catch (error) {
+    console.error("Movie Send Error:", error);
+    await sock.sendMessage(from, { react: { text: "❌", key: m.key } });
+    await sendErrorMsg(sock, from, originalMek, `Failed to send movie: ${error.message}`);
+  }
+}
+
+/* ================= COMMAND: .cmovie / .cfilm ================= */
+cmd(
+  {
     pattern: "cmovie",
-    alias: ["cfilm", "cfilms"],
-    react: "🔍",
-    desc: "Search and send movies to target groups",
+    alias: ["cfilm", "cfilms", "cinesubz"],
+    react: "🎬",
+    desc: "Search and send movies from CineSubz to target groups",
     category: "download",
-    filename: __filename
-}, async (danuwa, mek, m, { from, q, sender }) => {
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, q, sender, sessionId }) => {
     const store = readStore();
     const groups = store.groups || [];
 
     if (!groups.length) {
-        await danuwa.sendMessage(from, { react: { text: "❌", key: mek.key } });
-        return await danuwa.sendMessage(from, { 
-            text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _No target groups saved. Use .ctarget inside a group first._\n╰──────────────⮞`, 
-            contextInfo: channelContext 
-        }, { quoted: mek });
+      await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+      return await sock.sendMessage(
+        from,
+        {
+          text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _No target groups saved. Use .ctarget inside a group first._\n╰──────────────⮞`,
+          contextInfo: channelContextInfo(),
+        },
+        { quoted: mek }
+      );
     }
 
     if (!q) {
-        return await danuwa.sendMessage(from, { 
-            text: `╭─[ 🎬 *MOVIE SENDER* ]\n│\n├ 📌 *Usage:* \`.cmovie <movie_name>\`\n├ 💡 *Example:* \`.cmovie avengers\`\n╰──────────────⮞`, 
-            contextInfo: channelContext 
-        }, { quoted: mek });
+      return await sock.sendMessage(
+        from,
+        {
+          text: `╭─[ 🎬 *MOVIE SENDER* ]\n│\n├ 📌 *Usage:* \`.cmovie <movie_name>\`\n├ 💡 *Example:* \`.cmovie avengers\`\n╰──────────────⮞`,
+          contextInfo: channelContextInfo(),
+        },
+        { quoted: mek }
+      );
     }
 
     try {
-        const results = await searchCineSubz(q.trim());
+      await sock.sendMessage(from, { react: { text: "🔍", key: mek.key } });
 
-        if (!results || results.length === 0) {
-            await danuwa.sendMessage(from, { react: { text: "❌", key: m.key } });
-            return await danuwa.sendMessage(from, { 
-                text: `╭─[ 😞 *𝗡𝗢 𝗥𝗘𝗦𝗨𝗟𝗧𝗦* ]\n│\n├ 🎬 *Query:* _${q}_\n╰──────────────⮞`, 
-                contextInfo: channelContext 
-            }, { quoted: mek });
+      const results = await customSearchCineSubz(q.trim());
+      if (!results || results.length === 0) {
+        await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+        return await sock.sendMessage(
+          from,
+          {
+            text: `╭─[ 😞 *𝗡𝗢 𝗥𝗘𝗦𝗨𝗟𝗧𝗦* ]\n│\n├ 🎬 *Query:* _${q}_\n╰──────────────⮞`,
+            contextInfo: channelContextInfo(),
+          },
+          { quoted: mek }
+        );
+      }
+
+      const topResults = results.slice(0, MAX_RESULTS);
+      const k = keyFor(sender, from);
+      clearUserSession(k);
+
+      const settings = await readSettings(sessionId);
+      const btnsOn = !!settings.btns_enabled;
+      const botDisplayName = settings?.bot_name?.trim() || DEFAULT_BOT_NAME;
+
+      let searchImg = DEFAULT_SEARCH_IMAGE;
+      if (sessionId) {
+        try {
+          const custom = await getCustomImage(sessionId, "cinesubz_header");
+          if (custom && custom.data) searchImg = custom.data;
+        } catch (e) {}
+      }
+
+      const bodyText = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${botDisplayName.toUpperCase()} MOVIES*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n© 2026 ${BRAND_BASE} SYSTEM`;
+
+      // ── BUTTONS MODE ──
+      if (btnsOn) {
+        try {
+          const { ButtonV2 } = await import("@vanzxy/baileys");
+
+          const movieRows = topResults.map((item, index) => ({
+            title: `${String(index + 1).padStart(2, "0")}. ${item.title.substring(0, 45)}`,
+            description: "Click to select movie and view qualities",
+            id: `.cm_select ${index + 1}`,
+          }));
+
+          const btn = new ButtonV2(sock)
+            .setBody(bodyText)
+            .setFooter(`WaBot by ${botDisplayName}`)
+            .setThumbnail(searchImg);
+
+          btn.addRawButton({
+            buttonId: "cinesubz_movie_list",
+            buttonText: { displayText: "🎬 Select Movie" },
+            type: 1,
+            nativeFlowInfo: {
+              name: "single_select",
+              paramsJson: JSON.stringify({
+                title: "CineSubz Search Results ↯",
+                sections: [{ title: "🎥 Available Movies", rows: movieRows }],
+              }),
+            },
+          });
+
+          btn.addButton("📜 Bot Menu", ".menu");
+
+          const sentMsg = await btn.send(from, { quoted: mek });
+          if (sentMsg?.key?.id) {
+            pendingCineSubz[k] = {
+              step: 1,
+              results: topResults,
+              groups,
+              timestamp: Date.now(),
+              isProcessing: false,
+              expectedMsgId: sentMsg.key.id,
+              botDisplayName,
+              originalMek: mek,
+            };
+            await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+            return;
+          }
+        } catch (e) {
+          console.error("ButtonV2 Movie List Error:", e);
         }
+      }
 
-        const topResults = results.slice(0, 10);
-        const k = makePendingKey(sender, from);
-        pendingSearch[k] = { results: topResults, timestamp: Date.now() };
+      // ── NUMBERED FALLBACK ──
+      let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${botDisplayName.toUpperCase()} MOVIES*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+      text += `├ 🔎 *Search :* ${toSmallCaps(q)}\n`;
+      text += `├ 📊 *Results :* ${topResults.length}\n`;
+      text += `├ 👇 *Reply with a Number:*\n│\n`;
 
-        let text = `╭─[ 🎬 *𝗠𝗢𝗩𝗜𝗘 𝗦𝗘𝗔𝗥𝗖𝗛* ]\n│\n`;
-        text += `├ 🔎 *Search:* ${toSmallCaps(q)}\n`;
-        text += `├ 📊 *Results:* ${topResults.length}\n`;
-        text += `├ 👇 *Reply with a Number:*\n│\n`;
+      topResults.forEach((item, index) => {
+        text += `├ 📱 *[ ${String(index + 1).padStart(2, "0")} ]* 🎥 ${toSmallCaps(item.title)}\n`;
+      });
+      text += `│\n╰──────────────⮞\n> 💬 *Swipe & Reply this message with a number...*`;
 
-        topResults.forEach((item, index) => {
-            const numStr = String(index + 1).padStart(2, "0");
-            text += `├ 📱 *[ ${numStr} ]* 🎥 ${toSmallCaps(item.title)}\n`;
-        });
+      const sentMsg = await sock.sendMessage(
+        from,
+        {
+          image: { url: searchImg },
+          caption: text,
+          contextInfo: channelContextInfo(),
+        },
+        { quoted: mek }
+      );
 
-        text += `│\n╰──────────────⮞`;
-        
-        await danuwa.sendMessage(from, { 
-            image: { url: SEARCH_IMAGE }, 
-            caption: text,
-            contextInfo: channelContext
-        }, { quoted: mek });
+      pendingCineSubz[k] = {
+        step: 1,
+        results: topResults,
+        groups,
+        timestamp: Date.now(),
+        isProcessing: false,
+        expectedMsgId: sentMsg.key.id,
+        botDisplayName,
+        originalMek: mek,
+      };
 
-        await danuwa.sendMessage(from, { react: { text: "✅", key: m.key } });
-
+      await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
     } catch (error) {
-        console.error("Movie Search Error:", error.message);
-        await danuwa.sendMessage(from, { react: { text: "❌", key: m.key } });
+      console.error("Movie Search Error:", error);
+      await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+      await sendErrorMsg(sock, from, mek, "Failed to connect to movie search.");
     }
-});
+  }
+);
 
+/* ================= UNIFIED REPLY HANDLER ================= */
+const movieReplyHandler = {
+  filter: (text, { sender, from, m, mek }) => {
+    const k = keyFor(sender, from);
+    const pending = pendingCineSubz[k];
+    if (!pending) return false;
 
-// ==========================================
-// Movie Selection Listener (Number Reply)
-// ==========================================
-cmd({
-    filter: (text, { sender, from }) => {
-        const k = makePendingKey(sender, from);
-        if (!text || !pendingSearch[k]) return false;
-        const num = parseInt(String(text).trim(), 10);
-        if (isNaN(num)) return false;
-        if (num < 1 || num > pendingSearch[k].results.length) return false;
+    const texts = extractTexts(text, mek, m);
+    for (const t of texts) {
+      if (
+        t.startsWith(".cm_select ") ||
+        t.startsWith(".cm_qual ") ||
+        t.startsWith(".cm_send") ||
+        t.startsWith(".cm_target ")
+      )
         return true;
     }
-}, async (danuwa, mek, m, { body, sender, from }) => {
-    const k = makePendingKey(sender, from);
-    await danuwa.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
-    const index = parseInt(body.trim()) - 1;
-    const selected = pendingSearch[k].results[index];
-    delete pendingSearch[k];
+    const num = parseInt(String(text || "").trim(), 10);
+    let max = 0;
+    if (pending.step === 1) max = pending.results?.length || 0;
+    else if (pending.step === 2) max = pending.movie?.downloadLinks?.length || 0;
+    else if (pending.step === 3) max = 2; // 1 = Send Movie, 2 = Bot Menu
+    else if (pending.step === 4) max = pending.groups?.length || 0;
 
-    try {
-        const movieInfo = await scrapeCineSubz(selected.url);
+    const isNum = !isNaN(num) && num > 0 && num <= max;
+    const quotedId = getQuotedId(m, mek);
+    const isQuoted = quotedId && quotedId === pending.expectedMsgId;
+
+    return isQuoted || isNum;
+  },
+  function: async (sock, mek, m, { body, sender, from, sessionId }) => {
+    const k = keyFor(sender, from);
+    const pending = pendingCineSubz[k];
+    if (!pending || pending.isProcessing) return;
+
+    const texts = extractTexts(body, mek, m);
+    let choice = null;
+    let customAction = null;
+
+    for (const t of texts) {
+      if (t.startsWith(".cm_select ")) {
+        choice = parseInt(t.replace(".cm_select ", "").trim(), 10);
+        break;
+      }
+      if (t.startsWith(".cm_qual ")) {
+        choice = parseInt(t.replace(".cm_qual ", "").trim(), 10);
+        break;
+      }
+      if (t.startsWith(".cm_target ")) {
+        choice = parseInt(t.replace(".cm_target ", "").trim(), 10);
+        break;
+      }
+      if (t === ".cm_send") {
+        customAction = "send";
+        break;
+      }
+    }
+
+    if (choice === null && customAction === null) {
+      const num = parseInt(String(body || "").trim(), 10);
+      if (!isNaN(num)) choice = num;
+    }
+
+    const now = Date.now();
+    const lastMsg = lastProcessedMsg[k];
+    if (
+      lastMsg &&
+      lastMsg.text === String(choice || customAction) &&
+      now - lastMsg.time < LOOP_COOLDOWN
+    )
+      return;
+    lastProcessedMsg[k] = { text: String(choice || customAction), time: now };
+
+    const botDisplayName = pending.botDisplayName || DEFAULT_BOT_NAME;
+    const settings = await readSettings(sessionId);
+    const btnsOn = !!settings.btns_enabled;
+
+    // ──────────────────────────────────────────
+    // STEP 1: Movie Pick -> Show Qualities
+    // ──────────────────────────────────────────
+    if (pending.step === 1) {
+      if (!choice || choice > pending.results.length) return;
+      pending.isProcessing = true;
+      await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
+
+      const selected = pending.results[choice - 1];
+
+      try {
+        const movieInfo = await scrapeMoviePage(
+          selected.url,
+          selected.title,
+          selected.image
+        );
 
         if (!movieInfo || !movieInfo.downloadLinks || movieInfo.downloadLinks.length === 0) {
-            await danuwa.sendMessage(from, { react: { text: "❌", key: m.key } });
-            return await danuwa.sendMessage(from, { 
-                text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _No download links available!_\n╰──────────────⮞`, 
-                contextInfo: channelContext 
-            }, { quoted: mek });
+          clearUserSession(k);
+          return await sendErrorMsg(sock, from, mek, "No download links available for this movie!");
         }
 
-        const downloadLinks = movieInfo.downloadLinks.filter(d => {
-            const match = d.quality.match(/([\d.]+)\s*(MB|GB)/i);
-            if (match) {
-                const size = parseFloat(match[1]);
-                const unit = match[2].toUpperCase();
-                if (unit === 'GB') return size < 2.0;
-                else if (unit === 'MB') return true;
-            }
-            return true;
+        const downloadLinks = movieInfo.downloadLinks.filter((d) => {
+          const match = d.quality.match(/([\d.]+)\s*(MB|GB)/i);
+          if (match) {
+            const size = parseFloat(match[1]);
+            const unit = match[2].toUpperCase();
+            if (unit === "GB") return size <= 2.0;
+            if (unit === "MB") return true;
+          }
+          return true;
         });
 
         if (downloadLinks.length === 0) {
-            await danuwa.sendMessage(from, { react: { text: "❌", key: m.key } });
-            return await danuwa.sendMessage(from, { 
-                text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _No links under 2GB available!_\n╰──────────────⮞`, 
-                contextInfo: channelContext 
-            }, { quoted: mek });
+          clearUserSession(k);
+          return await sendErrorMsg(sock, from, mek, "No download links under 2GB available!");
         }
 
-        pendingQuality[k] = { movie: { metadata: movieInfo, downloadLinks }, timestamp: Date.now() };
+        const imgToSend = movieInfo.poster || movieInfo.image || selected.image || DEFAULT_SEARCH_IMAGE;
 
+        // Button Layout
+        if (btnsOn) {
+          try {
+            const { ButtonV2 } = await import("@vanzxy/baileys");
+
+            const qualityRows = downloadLinks.map((d, i) => ({
+              title: `${String(i + 1).padStart(2, "0")}. ${d.quality}`,
+              description: `Select ${d.quality}`,
+              id: `.cm_qual ${i + 1}`,
+            }));
+
+            let qualityBody = `⊱━━━━━ • ✿ • ━━━━━⊰\n📥 *${botDisplayName.toUpperCase()} QUALITIES*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+            qualityBody += `🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
+            if (movieInfo.imdb_rate) qualityBody += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
+            if (movieInfo.duration) qualityBody += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
+            qualityBody += `Choose your desired quality below 2GB.\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
+
+            const btn = new ButtonV2(sock)
+              .setBody(qualityBody)
+              .setFooter(`WaBot by ${botDisplayName}`)
+              .setThumbnail(imgToSend);
+
+            btn.addRawButton({
+              buttonId: "cinesubz_quality_list",
+              buttonText: { displayText: "📥 Select Quality" },
+              type: 1,
+              nativeFlowInfo: {
+                name: "single_select",
+                paramsJson: JSON.stringify({
+                  title: "Available Qualities ↯",
+                  sections: [{ title: "📊 Qualities", rows: qualityRows }],
+                }),
+              },
+            });
+
+            btn.addButton("📜 Bot Menu", ".menu");
+
+            const sentQualityMsg = await btn.send(from, { quoted: mek });
+            if (sentQualityMsg?.key?.id) {
+              pending.step = 2;
+              pending.movie = { metadata: movieInfo, downloadLinks };
+              pending.timestamp = Date.now();
+              pending.isProcessing = false;
+              pending.expectedMsgId = sentQualityMsg.key.id;
+              await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+              return;
+            }
+          } catch (e) {
+            console.error("ButtonV2 Quality Error:", e);
+          }
+        }
+
+        // Numbered Fallback Layout
         let qualityMsg = `╭─[ 📥 *𝗦𝗘𝗟𝗘𝗖𝗧 𝗤𝗨𝗔𝗟𝗜𝗧𝗬* ]\n│\n`;
         qualityMsg += `├ 🎬 *${toSmallCaps(movieInfo.title)}*\n`;
         if (movieInfo.imdb_rate) qualityMsg += `├ ⭐ *IMDb:* ${movieInfo.imdb_rate}\n`;
@@ -318,184 +916,228 @@ cmd({
         qualityMsg += `├ 👇 *Reply with Quality Number:*\n│\n`;
 
         downloadLinks.forEach((d, i) => {
-            const numStr = String(i + 1).padStart(2, "0");
-            qualityMsg += `├ 📱 *[ ${numStr} ]* 📊 ${d.quality}\n`;
+          qualityMsg += `├ 📱 *[ ${String(i + 1).padStart(2, "0")} ]* 📊 ${d.quality}\n`;
         });
+        qualityMsg += `│\n╰──────────────⮞\n> 💬 *Swipe & Reply this message with a quality number...*`;
 
-        qualityMsg += `│\n╰──────────────⮞`;
+        const sentQualityMsg = await sock.sendMessage(
+          from,
+          {
+            image: { url: imgToSend },
+            caption: qualityMsg,
+            contextInfo: channelContextInfo(),
+          },
+          { quoted: mek }
+        );
 
-        if (movieInfo.poster) {
-            await danuwa.sendMessage(from, { 
-                image: { url: movieInfo.poster }, 
-                caption: qualityMsg,
-                contextInfo: channelContext
-            }, { quoted: mek });
-        } else {
-            await danuwa.sendMessage(from, { 
-                text: qualityMsg,
-                contextInfo: channelContext
-            }, { quoted: mek });
+        pending.step = 2;
+        pending.movie = { metadata: movieInfo, downloadLinks };
+        pending.timestamp = Date.now();
+        pending.isProcessing = false;
+        pending.expectedMsgId = sentQualityMsg.key.id;
+
+        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+      } catch (error) {
+        clearUserSession(k);
+        await sendErrorMsg(sock, from, mek, "Failed to scrape movie details.");
+      }
+    }
+
+    // ──────────────────────────────────────────
+    // STEP 2: Quality Selected -> Action Menu ("Send Movie" & "Bot Menu")
+    // ──────────────────────────────────────────
+    else if (pending.step === 2) {
+      if (!choice || choice > pending.movie.downloadLinks.length) return;
+      pending.isProcessing = true;
+      await sock.sendMessage(from, { react: { text: "⚡", key: mek.key } });
+
+      const selectedLink = pending.movie.downloadLinks[choice - 1];
+      pending.selectedLink = selectedLink;
+
+      const imgToSend =
+        pending.movie.metadata.poster ||
+        pending.movie.metadata.image ||
+        DEFAULT_SEARCH_IMAGE;
+
+      let confirmBody = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${toSmallCaps(pending.movie.metadata.title)}*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+      confirmBody += `📊 *Selected Quality :* ${selectedLink.quality}\n\n`;
+      confirmBody += `Click *Send Movie* to dispatch the movie file to your saved target group(s).\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
+
+      // Button Mode
+      if (btnsOn) {
+        try {
+          const { ButtonV2 } = await import("@vanzxy/baileys");
+
+          const btn = new ButtonV2(sock)
+            .setBody(confirmBody)
+            .setFooter(`WaBot by ${botDisplayName}`)
+            .setThumbnail(imgToSend);
+
+          btn.addButton("🚀 Send Movie", ".cm_send");
+          btn.addButton("📜 Bot Menu", ".menu");
+
+          const sentActionMsg = await btn.send(from, { quoted: mek });
+          if (sentActionMsg?.key?.id) {
+            pending.step = 3;
+            pending.timestamp = Date.now();
+            pending.isProcessing = false;
+            pending.expectedMsgId = sentActionMsg.key.id;
+            await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+            return;
+          }
+        } catch (e) {
+          console.error("ButtonV2 Action Error:", e);
+        }
+      }
+
+      // Numbered Fallback Mode
+      let actionMsg = `╭─[ 🚀 *𝗔𝗖𝗧𝗜𝗢𝗡 𝗠𝗘𝗡𝗨* ]\n│\n`;
+      actionMsg += `├ 🎬 *${toSmallCaps(pending.movie.metadata.title)}*\n`;
+      actionMsg += `├ 📊 *Quality:* ${selectedLink.quality}\n│\n`;
+      actionMsg += `├ 📱 *[ 01 ]* 🚀 Send Movie\n`;
+      actionMsg += `├ 📱 *[ 02 ]* 📜 Bot Menu\n│\n`;
+      actionMsg += `╰──────────────⮞\n> 💬 *Reply with 1 to Send or 2 for Menu...*`;
+
+      const sentActionMsg = await sock.sendMessage(
+        from,
+        {
+          image: { url: imgToSend },
+          caption: actionMsg,
+          contextInfo: channelContextInfo(),
+        },
+        { quoted: mek }
+      );
+
+      pending.step = 3;
+      pending.timestamp = Date.now();
+      pending.isProcessing = false;
+      pending.expectedMsgId = sentActionMsg.key.id;
+
+      await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+    }
+
+    // ──────────────────────────────────────────
+    // STEP 3: Action Selected -> Target Group Routing
+    // ──────────────────────────────────────────
+    else if (pending.step === 3) {
+      if (customAction === "send" || choice === 1) {
+        pending.isProcessing = true;
+        const { movie, selectedLink, groups, originalMek } = pending;
+
+        // If only 1 target group, send immediately
+        if (groups.length === 1) {
+          clearUserSession(k);
+          await sendMovieToGroup(sock, originalMek, m, from, groups[0], selectedLink, movie);
+          return;
         }
 
-        await danuwa.sendMessage(from, { react: { text: "✅", key: m.key } });
+        // Multiple target groups -> Ask user to choose
+        const groupNames = await Promise.all(groups.map((g) => getGroupName(sock, g)));
 
-    } catch (error) {
-        console.error("Fetch Details Error:", error.message);
-        await danuwa.sendMessage(from, { react: { text: "❌", key: m.key } });
-    }
-});
+        if (btnsOn) {
+          try {
+            const { ButtonV2 } = await import("@vanzxy/baileys");
 
+            const groupRows = groupNames.map((n, i) => ({
+              title: `${String(i + 1).padStart(2, "0")}. ${n.substring(0, 45)}`,
+              description: `Send to ${n}`,
+              id: `.cm_target ${i + 1}`,
+            }));
 
-// ==========================================
-// Quality Selection & Target Group Send
-// ==========================================
-cmd({
-    filter: (text, { sender, from }) => {
-        const k = makePendingKey(sender, from);
-        if (!text || !pendingQuality[k]) return false;
-        const num = parseInt(String(text).trim(), 10);
-        if (isNaN(num)) return false;
-        if (num < 1 || num > pendingQuality[k].movie.downloadLinks.length) return false;
-        return true;
-    }
-}, async (danuwa, mek, m, { body, sender, from }) => {
-    const k = makePendingKey(sender, from);
-    const index = parseInt(body.trim()) - 1;
-    const { movie } = pendingQuality[k];
-    delete pendingQuality[k];
+            const btn = new ButtonV2(sock)
+              .setBody(`⊱━━━━━ • ✿ • ━━━━━⊰\n🎯 *SELECT TARGET GROUP*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\nChoose the destination group:`)
+              .setFooter(`WaBot by ${botDisplayName}`);
 
-    const selectedLink = movie.downloadLinks[index];
-    const store = readStore();
-    const groups = store.groups || [];
+            btn.addRawButton({
+              buttonId: "cinesubz_target_group_list",
+              buttonText: { displayText: "👥 Select Group" },
+              type: 1,
+              nativeFlowInfo: {
+                name: "single_select",
+                paramsJson: JSON.stringify({
+                  title: "Target Groups ↯",
+                  sections: [{ title: "Available Groups", rows: groupRows }],
+                }),
+              },
+            });
 
-    if (groups.length === 1) {
-        await sendMovieToGroup(danuwa, mek, m, from, groups[0], selectedLink, movie);
-    } else {
-        pendingTargetSelection[k] = {
-            selectedLink,
-            movie,
-            groups,
-            originalMek: m,
-            timestamp: Date.now()
-        };
+            const sentGrpMsg = await btn.send(from, { quoted: mek });
+            if (sentGrpMsg?.key?.id) {
+              pending.step = 4;
+              pending.timestamp = Date.now();
+              pending.isProcessing = false;
+              pending.expectedMsgId = sentGrpMsg.key.id;
+              return;
+            }
+          } catch (e) {
+            console.error("ButtonV2 Target Selection Error:", e);
+          }
+        }
 
-        const names = await Promise.all(groups.map((g) => getGroupName(danuwa, g)));
+        // Numbered Fallback Target Select
         let groupMsg = `╭─[ 🎯 *𝗦𝗘𝗟𝗘𝗖𝗧 𝗧𝗔𝗥𝗚𝗘𝗧 𝗚𝗥𝗢𝗨𝗣* ]\n│\n`;
-        names.forEach((n, i) => {
-            groupMsg += `├ 📱 *[ ${String(i + 1).padStart(2, "0")} ]* 👥 ${n}\n`;
+        groupNames.forEach((n, i) => {
+          groupMsg += `├ 📱 *[ ${String(i + 1).padStart(2, "0")} ]* 👥 ${n}\n`;
         });
-        groupMsg += `│\n╰──────────────⮞`;
+        groupMsg += `│\n╰──────────────⮞\n> 💬 *Reply with the group number...*`;
 
-        await danuwa.sendMessage(from, { text: groupMsg, contextInfo: channelContext }, { quoted: mek });
-    }
-});
+        const sentGrpMsg = await sock.sendMessage(
+          from,
+          { text: groupMsg, contextInfo: channelContextInfo() },
+          { quoted: mek }
+        );
 
-
-// ==========================================
-// Group Selection Listener (If multiple targets)
-// ==========================================
-cmd({
-    filter: (text, { sender, from }) => {
-        const k = makePendingKey(sender, from);
-        if (!text || !pendingTargetSelection[k]) return false;
-        const num = parseInt(String(text).trim(), 10);
-        if (isNaN(num)) return false;
-        if (num < 1 || num > pendingTargetSelection[k].groups.length) return false;
-        return true;
-    }
-}, async (danuwa, mek, m, { body, sender, from }) => {
-    const k = makePendingKey(sender, from);
-    const num = parseInt(body.trim(), 10);
-    const session = pendingTargetSelection[k];
-    delete pendingTargetSelection[k];
-
-    const targetGroup = session.groups[num - 1];
-    await sendMovieToGroup(danuwa, session.originalMek, m, from, targetGroup, session.selectedLink, session.movie);
-});
-
-
-// ==========================================
-// Core Sender Function
-// ==========================================
-async function sendMovieToGroup(danuwa, originalMek, m, from, targetJid, selectedLink, movie) {
-    await danuwa.sendMessage(from, { react: { text: "⬇️", key: m.key } });
-    let targetServerLink = selectedLink.directUrl;
-
-    try {
-        targetServerLink = targetServerLink.replace(/^https:\/\/[^\/]+/, 'https://drive.csplayer2.space');
-        targetServerLink = targetServerLink.replace(/(server\d+\/)\d+:\//, '$1');
-        if (targetServerLink.endsWith('.mp4') && !targetServerLink.includes('?ext=')) {
-            targetServerLink = targetServerLink.replace('.mp4', '?ext=mp4');
-        }
-
-        const finalResult = await getCineSubzLinks(targetServerLink);
-
-        if (!finalResult.success) {
-            await danuwa.sendMessage(from, { react: { text: "❌", key: m.key } });
-            return await danuwa.sendMessage(from, { 
-                text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Link Extract Fail: ${finalResult.error}_\n╰──────────────⮞`,
-                contextInfo: channelContext
-            }, { quoted: originalMek });
-        }
-
-        const allLinks = finalResult.links;
-        const skylineLinks = allLinks.filter(link => link.includes('skylines'));
-        const pixeldrainLinks = allLinks.filter(link => link.includes('pixeldrain'));
-
-        let directDownloadUrl = skylineLinks[0] || pixeldrainLinks[0] || allLinks[0];
-
-        // Group නම File Name එකට දැමීම
-        const targetName = await getGroupName(danuwa, targetJid);
-        const cleanTitle = sanitizeFileName(movie.metadata.title);
-        const finalFileName = `${targetName}_${cleanTitle}.mp4`;
-
-        let captionText = `🎬 *${movie.metadata.title}*\n\n📊 *Quality:* ${selectedLink.quality}\n\n`;
-        if (skylineLinks.length > 0) captionText += `🌟 *Direct Link:* ${skylineLinks[0]}\n\n`;
-        if (pixeldrainLinks.length > 0) captionText += `⚡ *Pixeldrain:* ${pixeldrainLinks[0]}\n\n`;
-        captionText += `🍿 *Enjoy Your Movie!*`;
-
-        await danuwa.sendMessage(from, { react: { text: "⬆️", key: m.key } });
-
-        if (directDownloadUrl) {
-            await danuwa.sendMessage(targetJid, {
-                document: { url: directDownloadUrl },
-                mimetype: "video/mp4",
-                fileName: finalFileName,
-                caption: captionText,
-                contextInfo: channelContext
-            });
-            
-            await danuwa.sendMessage(from, { react: { text: "✅", key: m.key } });
-            await danuwa.sendMessage(from, { text: `╭─[ ✅ *𝗦𝗨𝗖𝗖𝗘𝗦𝗦* ]\n│\n├ 📌 _Movie sent to: *${targetName}*_ \n╰──────────────⮞`, contextInfo: channelContext }, { quoted: originalMek });
+        pending.step = 4;
+        pending.timestamp = Date.now();
+        pending.isProcessing = false;
+        pending.expectedMsgId = sentGrpMsg.key.id;
+      } else if (choice === 2) {
+        clearUserSession(k);
+        // Bot Menu redirect
+        const menuCmd = cmd.commands?.find((c) => c.pattern === "menu");
+        if (menuCmd && typeof menuCmd.function === "function") {
+          return await menuCmd.function(sock, mek, m, { from, sender, sessionId });
         } else {
-            await danuwa.sendMessage(targetJid, { 
-                text: captionText,
-                contextInfo: channelContext
-            });
-            await danuwa.sendMessage(from, { react: { text: "✅", key: m.key } });
+          return await sock.sendMessage(
+            from,
+            { text: "Type `.menu` to view main bot menu.", contextInfo: channelContextInfo() },
+            { quoted: mek }
+          );
         }
-
-    } catch (error) {
-        console.error("Send Error:", error.message);
-        await danuwa.sendMessage(from, { react: { text: "❌", key: m.key } });
-        await sendErrorMsg(danuwa, from, originalMek, `Failed to send movie: ${error.message}`);
+      }
     }
-}
 
-async function sendErrorMsg(sock, from, mek, text) {
-    await sock.sendMessage(from, { 
-        text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _${text}_\n╰──────────────⮞`,
-        contextInfo: channelContext
-    }, { quoted: mek });
-}
+    // ──────────────────────────────────────────
+    // STEP 4: Target Group Chosen -> Send Movie
+    // ──────────────────────────────────────────
+    else if (pending.step === 4) {
+      if (!choice || choice > pending.groups.length) return;
+      pending.isProcessing = true;
 
-// Auto Cleanup for Expired Sessions (10 mins)
+      const { movie, selectedLink, groups, originalMek } = pending;
+      const targetGroup = groups[choice - 1];
+      clearUserSession(k);
+
+      await sendMovieToGroup(sock, originalMek, m, from, targetGroup, selectedLink, movie);
+    }
+  },
+};
+
+if (Array.isArray(replyHandlers)) replyHandlers.push(movieReplyHandler);
+
+// Clean up idle sessions (Every 2.5 minutes)
 setInterval(() => {
-    const now = Date.now();
-    const timeout = 10 * 60 * 1000;
-    for (const s in pendingSearch) if (now - pendingSearch[s].timestamp > timeout) delete pendingSearch[s];
-    for (const s in pendingQuality) if (now - pendingQuality[s].timestamp > timeout) delete pendingQuality[s];
-    for (const s in pendingTargetSelection) if (now - pendingTargetSelection[s].timestamp > timeout) delete pendingTargetSelection[s];
-}, 5 * 60 * 1000);
+  const now = Date.now();
+  for (const k in pendingCineSubz) {
+    if (now - pendingCineSubz[k].timestamp > SESSION_TIMEOUT) {
+      delete pendingCineSubz[k];
+    }
+  }
+  for (const k in lastProcessedMsg) {
+    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) {
+      delete lastProcessedMsg[k];
+    }
+  }
+}, 2.5 * 60 * 1000);
 
-module.exports = { pendingSearch, pendingQuality };
+module.exports = {};
