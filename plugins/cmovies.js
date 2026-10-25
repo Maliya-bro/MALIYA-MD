@@ -16,7 +16,7 @@ const DEFAULT_SEARCH_IMAGE =
   "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
-const LOOP_COOLDOWN = 2000;
+const LOOP_COOLDOWN = 1500;
 const MAX_RESULTS = 15;
 
 const pendingCineSubz = {};
@@ -73,7 +73,7 @@ function clearUserSession(k) {
 
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const small = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+  const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
   return String(str)
     .split("")
     .map((char) => {
@@ -478,7 +478,7 @@ async function getCineSubzLinks(originalUrl) {
   return { error: "File not found on any server." };
 }
 
-/* ================= MOVIE SENDER FUNCTION ================= */
+/* ================= MOVIE SENDER CORE ================= */
 async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedLink, movie) {
   await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
@@ -486,7 +486,7 @@ async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedL
   const correctPosterUrl = movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE;
   const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
 
-  // 1. Send Beautiful Movie Info Card before uploading movie
+  // 1. Movie Details Card Send
   let infoCard = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${toSmallCaps(movie.metadata.title)}*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
   if (movie.metadata.imdb_rate) infoCard += `⭐ *IMDb :* ${movie.metadata.imdb_rate}\n`;
   if (movie.metadata.duration) infoCard += `⏳ *Duration :* ${movie.metadata.duration}\n`;
@@ -507,7 +507,7 @@ async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedL
     });
   }
 
-  // 2. Resolve Direct Stream Link
+  // 2. Direct Video Download & Dispatch
   await sock.sendMessage(from, { react: { text: "⬇️", key: m.key } });
   let targetServerLink = selectedLink.directUrl;
 
@@ -575,7 +575,346 @@ async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedL
   }
 }
 
-/* ================= COMMAND: .cmovie / .cfilm ================= */
+/* ================= CENTRAL FLOW CONTROLLER ================= */
+async function handleFlowInput(sock, mek, m, { body, sender, from, sessionId }) {
+  const k = keyFor(sender, from);
+  const pending = pendingCineSubz[k];
+  if (!pending || pending.isProcessing) return;
+
+  const texts = extractTexts(body, mek, m);
+  let choice = null;
+  let customAction = null;
+
+  for (const t of texts) {
+    if (t.startsWith(".cm_select ")) {
+      choice = parseInt(t.replace(".cm_select ", "").trim(), 10);
+      break;
+    }
+    if (t.startsWith(".cm_qual ")) {
+      choice = parseInt(t.replace(".cm_qual ", "").trim(), 10);
+      break;
+    }
+    if (t.startsWith(".cm_target ")) {
+      choice = parseInt(t.replace(".cm_target ", "").trim(), 10);
+      break;
+    }
+    if (t === ".cm_send") {
+      customAction = "send";
+      break;
+    }
+  }
+
+  if (choice === null && customAction === null) {
+    const num = parseInt(String(body || "").trim(), 10);
+    if (!isNaN(num)) choice = num;
+  }
+
+  const now = Date.now();
+  const lastMsg = lastProcessedMsg[k];
+  if (
+    lastMsg &&
+    lastMsg.text === String(choice || customAction) &&
+    now - lastMsg.time < LOOP_COOLDOWN
+  ) {
+    return;
+  }
+  lastProcessedMsg[k] = { text: String(choice || customAction), time: now };
+
+  const botDisplayName = pending.botDisplayName || DEFAULT_BOT_NAME;
+  const settings = await readSettings(sessionId);
+  const btnsOn = !!settings.btns_enabled;
+
+  // ── Step 1: Movie Chosen -> Get Qualities ──
+  if (pending.step === 1) {
+    if (!choice || choice > pending.results.length) return;
+    pending.isProcessing = true;
+    await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
+
+    const selected = pending.results[choice - 1];
+
+    try {
+      const movieInfo = await scrapeMoviePage(
+        selected.url,
+        selected.title,
+        selected.image
+      );
+
+      if (!movieInfo || !movieInfo.downloadLinks || movieInfo.downloadLinks.length === 0) {
+        clearUserSession(k);
+        return await sendErrorMsg(sock, from, mek, "No download links available for this movie!");
+      }
+
+      const downloadLinks = movieInfo.downloadLinks.filter((d) => {
+        const match = d.quality.match(/([\d.]+)\s*(MB|GB)/i);
+        if (match) {
+          const size = parseFloat(match[1]);
+          const unit = match[2].toUpperCase();
+          if (unit === "GB") return size <= 2.0;
+          if (unit === "MB") return true;
+        }
+        return true;
+      });
+
+      if (downloadLinks.length === 0) {
+        clearUserSession(k);
+        return await sendErrorMsg(sock, from, mek, "No download links under 2GB available!");
+      }
+
+      const imgToSend = movieInfo.poster || movieInfo.image || selected.image || DEFAULT_SEARCH_IMAGE;
+
+      if (btnsOn) {
+        try {
+          const { ButtonV2 } = await import("@vanzxy/baileys");
+
+          const qualityRows = downloadLinks.map((d, i) => ({
+            title: `${String(i + 1).padStart(2, "0")}. ${d.quality}`,
+            description: `Select ${d.quality}`,
+            id: `.cm_qual ${i + 1}`,
+          }));
+
+          let qualityBody = `⊱━━━━━ • ✿ • ━━━━━⊰\n📥 *${botDisplayName.toUpperCase()} QUALITIES*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+          qualityBody += `🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
+          if (movieInfo.imdb_rate) qualityBody += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
+          if (movieInfo.duration) qualityBody += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
+          qualityBody += `Choose your desired quality below 2GB.\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
+
+          const btn = new ButtonV2(sock)
+            .setBody(qualityBody)
+            .setFooter(`WaBot by ${botDisplayName}`)
+            .setThumbnail(imgToSend);
+
+          btn.addRawButton({
+            buttonId: "cinesubz_quality_list",
+            buttonText: { displayText: "📥 Select Quality" },
+            type: 1,
+            nativeFlowInfo: {
+              name: "single_select",
+              paramsJson: JSON.stringify({
+                title: "Available Qualities ↯",
+                sections: [{ title: "📊 Qualities", rows: qualityRows }],
+              }),
+            },
+          });
+
+          btn.addButton("📜 Bot Menu", ".menu");
+
+          const sentQualityMsg = await btn.send(from, { quoted: mek });
+          if (sentQualityMsg?.key?.id) {
+            pending.step = 2;
+            pending.movie = { metadata: movieInfo, downloadLinks };
+            pending.timestamp = Date.now();
+            pending.isProcessing = false;
+            pending.expectedMsgId = sentQualityMsg.key.id;
+            await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+            return;
+          }
+        } catch (e) {
+          console.error("ButtonV2 Quality Error:", e);
+        }
+      }
+
+      let qualityMsg = `╭─[ 📥 *𝗦𝗘𝗟𝗘𝗖𝗧 𝗤𝗨𝗔𝗟𝗜𝗧𝗬* ]\n│\n`;
+      qualityMsg += `├ 🎬 *${toSmallCaps(movieInfo.title)}*\n`;
+      if (movieInfo.imdb_rate) qualityMsg += `├ ⭐ *IMDb:* ${movieInfo.imdb_rate}\n`;
+      if (movieInfo.duration) qualityMsg += `├ ⏳ *Duration:* ${movieInfo.duration}\n`;
+      qualityMsg += `├ 👇 *Reply with Quality Number:*\n│\n`;
+
+      downloadLinks.forEach((d, i) => {
+        qualityMsg += `├ 📱 *[ ${String(i + 1).padStart(2, "0")} ]* 📊 ${d.quality}\n`;
+      });
+      qualityMsg += `│\n╰──────────────⮞\n> 💬 *Swipe & Reply this message with a quality number...*`;
+
+      const sentQualityMsg = await sock.sendMessage(
+        from,
+        {
+          image: { url: imgToSend },
+          caption: qualityMsg,
+          contextInfo: channelContextInfo(),
+        },
+        { quoted: mek }
+      );
+
+      pending.step = 2;
+      pending.movie = { metadata: movieInfo, downloadLinks };
+      pending.timestamp = Date.now();
+      pending.isProcessing = false;
+      pending.expectedMsgId = sentQualityMsg.key.id;
+
+      await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+    } catch (error) {
+      clearUserSession(k);
+      await sendErrorMsg(sock, from, mek, "Failed to scrape movie details.");
+    }
+  }
+
+  // ── Step 2: Quality Picked -> Action Menu ──
+  else if (pending.step === 2) {
+    if (!choice || choice > pending.movie.downloadLinks.length) return;
+    pending.isProcessing = true;
+    await sock.sendMessage(from, { react: { text: "⚡", key: mek.key } });
+
+    const selectedLink = pending.movie.downloadLinks[choice - 1];
+    pending.selectedLink = selectedLink;
+
+    const imgToSend =
+      pending.movie.metadata.poster ||
+      pending.movie.metadata.image ||
+      DEFAULT_SEARCH_IMAGE;
+
+    let confirmBody = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${toSmallCaps(pending.movie.metadata.title)}*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
+    confirmBody += `📊 *Selected Quality :* ${selectedLink.quality}\n\n`;
+    confirmBody += `Click *Send Movie* to dispatch the movie file to your saved target group(s).\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
+
+    if (btnsOn) {
+      try {
+        const { ButtonV2 } = await import("@vanzxy/baileys");
+
+        const btn = new ButtonV2(sock)
+          .setBody(confirmBody)
+          .setFooter(`WaBot by ${botDisplayName}`)
+          .setThumbnail(imgToSend);
+
+        btn.addButton("🚀 Send Movie", ".cm_send");
+        btn.addButton("📜 Bot Menu", ".menu");
+
+        const sentActionMsg = await btn.send(from, { quoted: mek });
+        if (sentActionMsg?.key?.id) {
+          pending.step = 3;
+          pending.timestamp = Date.now();
+          pending.isProcessing = false;
+          pending.expectedMsgId = sentActionMsg.key.id;
+          await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+          return;
+        }
+      } catch (e) {
+        console.error("ButtonV2 Action Error:", e);
+      }
+    }
+
+    let actionMsg = `╭─[ 🚀 *𝗔𝗖𝗧𝗜𝗢𝗡 𝗠𝗘𝗡𝗨* ]\n│\n`;
+    actionMsg += `├ 🎬 *${toSmallCaps(pending.movie.metadata.title)}*\n`;
+    actionMsg += `├ 📊 *Quality:* ${selectedLink.quality}\n│\n`;
+    actionMsg += `├ 📱 *[ 01 ]* 🚀 Send Movie\n`;
+    actionMsg += `├ 📱 *[ 02 ]* 📜 Bot Menu\n│\n`;
+    actionMsg += `╰──────────────⮞\n> 💬 *Reply with 1 to Send or 2 for Menu...*`;
+
+    const sentActionMsg = await sock.sendMessage(
+      from,
+      {
+        image: { url: imgToSend },
+        caption: actionMsg,
+        contextInfo: channelContextInfo(),
+      },
+      { quoted: mek }
+    );
+
+    pending.step = 3;
+    pending.timestamp = Date.now();
+    pending.isProcessing = false;
+    pending.expectedMsgId = sentActionMsg.key.id;
+
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+  }
+
+  // ── Step 3: Trigger Movie Send ──
+  else if (pending.step === 3) {
+    if (customAction === "send" || choice === 1) {
+      pending.isProcessing = true;
+      const { movie, selectedLink, groups, originalMek } = pending;
+
+      if (groups.length === 1) {
+        clearUserSession(k);
+        await sendMovieToGroup(sock, originalMek, m, from, groups[0], selectedLink, movie);
+        return;
+      }
+
+      const groupNames = await Promise.all(groups.map((g) => getGroupName(sock, g)));
+
+      if (btnsOn) {
+        try {
+          const { ButtonV2 } = await import("@vanzxy/baileys");
+
+          const groupRows = groupNames.map((n, i) => ({
+            title: `${String(i + 1).padStart(2, "0")}. ${n.substring(0, 45)}`,
+            description: `Send to ${n}`,
+            id: `.cm_target ${i + 1}`,
+          }));
+
+          const btn = new ButtonV2(sock)
+            .setBody(`⊱━━━━━ • ✿ • ━━━━━⊰\n🎯 *SELECT TARGET GROUP*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\nChoose the destination group:`)
+            .setFooter(`WaBot by ${botDisplayName}`);
+
+          btn.addRawButton({
+            buttonId: "cinesubz_target_group_list",
+            buttonText: { displayText: "👥 Select Group" },
+            type: 1,
+            nativeFlowInfo: {
+              name: "single_select",
+              paramsJson: JSON.stringify({
+                title: "Target Groups ↯",
+                sections: [{ title: "Available Groups", rows: groupRows }],
+              }),
+            },
+          });
+
+          const sentGrpMsg = await btn.send(from, { quoted: mek });
+          if (sentGrpMsg?.key?.id) {
+            pending.step = 4;
+            pending.timestamp = Date.now();
+            pending.isProcessing = false;
+            pending.expectedMsgId = sentGrpMsg.key.id;
+            return;
+          }
+        } catch (e) {
+          console.error("ButtonV2 Target Selection Error:", e);
+        }
+      }
+
+      let groupMsg = `╭─[ 🎯 *𝗦𝗘𝗟𝗘𝗖𝗧 𝗧𝗔𝗥𝗚𝗘𝗧 𝗚𝗥𝗢𝗨𝗣* ]\n│\n`;
+      groupNames.forEach((n, i) => {
+        groupMsg += `├ 📱 *[ ${String(i + 1).padStart(2, "0")} ]* 👥 ${n}\n`;
+      });
+      groupMsg += `│\n╰──────────────⮞\n> 💬 *Reply with the group number...*`;
+
+      const sentGrpMsg = await sock.sendMessage(
+        from,
+        { text: groupMsg, contextInfo: channelContextInfo() },
+        { quoted: mek }
+      );
+
+      pending.step = 4;
+      pending.timestamp = Date.now();
+      pending.isProcessing = false;
+      pending.expectedMsgId = sentGrpMsg.key.id;
+    } else if (choice === 2) {
+      clearUserSession(k);
+      const menuCmd = cmd.commands?.find((c) => c.pattern === "menu");
+      if (menuCmd && typeof menuCmd.function === "function") {
+        return await menuCmd.function(sock, mek, m, { from, sender, sessionId });
+      } else {
+        return await sock.sendMessage(
+          from,
+          { text: "Type `.menu` to view main bot menu.", contextInfo: channelContextInfo() },
+          { quoted: mek }
+        );
+      }
+    }
+  }
+
+  // ── Step 4: Target Picked -> Dispatch ──
+  else if (pending.step === 4) {
+    if (!choice || choice > pending.groups.length) return;
+    pending.isProcessing = true;
+
+    const { movie, selectedLink, groups, originalMek } = pending;
+    const targetGroup = groups[choice - 1];
+    clearUserSession(k);
+
+    await sendMovieToGroup(sock, originalMek, m, from, targetGroup, selectedLink, movie);
+  }
+}
+
+/* ================= COMMAND DEFINITIONS ================= */
 cmd(
   {
     pattern: "cmovie",
@@ -646,7 +985,6 @@ cmd(
 
       const bodyText = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${botDisplayName.toUpperCase()} MOVIES*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n© 2026 ${BRAND_BASE} SYSTEM`;
 
-      // ── BUTTONS MODE ──
       if (btnsOn) {
         try {
           const { ButtonV2 } = await import("@vanzxy/baileys");
@@ -697,7 +1035,6 @@ cmd(
         }
       }
 
-      // ── NUMBERED FALLBACK ──
       let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${botDisplayName.toUpperCase()} MOVIES*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
       text += `├ 🔎 *Search :* ${toSmallCaps(q)}\n`;
       text += `├ 📊 *Results :* ${topResults.length}\n`;
@@ -738,29 +1075,63 @@ cmd(
   }
 );
 
-/* ================= UNIFIED REPLY HANDLER ================= */
+// ── DIRECT COMMAND HANDLERS FOR BUTTON RESPONSES ──
+cmd(
+  {
+    pattern: "cm_send",
+    dontAddCommandList: true,
+    filename: __filename,
+  },
+  async (sock, mek, m, { body, sender, from, sessionId }) => {
+    await handleFlowInput(sock, mek, m, { body: ".cm_send", sender, from, sessionId });
+  }
+);
+
+cmd(
+  {
+    pattern: "cm_select",
+    dontAddCommandList: true,
+    filename: __filename,
+  },
+  async (sock, mek, m, { body, sender, from, sessionId, q }) => {
+    await handleFlowInput(sock, mek, m, { body: `.cm_select ${q || ""}`, sender, from, sessionId });
+  }
+);
+
+cmd(
+  {
+    pattern: "cm_qual",
+    dontAddCommandList: true,
+    filename: __filename,
+  },
+  async (sock, mek, m, { body, sender, from, sessionId, q }) => {
+    await handleFlowInput(sock, mek, m, { body: `.cm_qual ${q || ""}`, sender, from, sessionId });
+  }
+);
+
+cmd(
+  {
+    pattern: "cm_target",
+    dontAddCommandList: true,
+    filename: __filename,
+  },
+  async (sock, mek, m, { body, sender, from, sessionId, q }) => {
+    await handleFlowInput(sock, mek, m, { body: `.cm_target ${q || ""}`, sender, from, sessionId });
+  }
+);
+
+/* ================= NUMBER REPLY LISTENER ================= */
 const movieReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
     const pending = pendingCineSubz[k];
     if (!pending) return false;
 
-    const texts = extractTexts(text, mek, m);
-    for (const t of texts) {
-      if (
-        t.startsWith(".cm_select ") ||
-        t.startsWith(".cm_qual ") ||
-        t.startsWith(".cm_send") ||
-        t.startsWith(".cm_target ")
-      )
-        return true;
-    }
-
     const num = parseInt(String(text || "").trim(), 10);
     let max = 0;
     if (pending.step === 1) max = pending.results?.length || 0;
     else if (pending.step === 2) max = pending.movie?.downloadLinks?.length || 0;
-    else if (pending.step === 3) max = 2; // 1 = Send Movie, 2 = Bot Menu
+    else if (pending.step === 3) max = 2;
     else if (pending.step === 4) max = pending.groups?.length || 0;
 
     const isNum = !isNaN(num) && num > 0 && num <= max;
@@ -770,356 +1141,7 @@ const movieReplyHandler = {
     return isQuoted || isNum;
   },
   function: async (sock, mek, m, { body, sender, from, sessionId }) => {
-    const k = keyFor(sender, from);
-    const pending = pendingCineSubz[k];
-    if (!pending || pending.isProcessing) return;
-
-    const texts = extractTexts(body, mek, m);
-    let choice = null;
-    let customAction = null;
-
-    for (const t of texts) {
-      if (t.startsWith(".cm_select ")) {
-        choice = parseInt(t.replace(".cm_select ", "").trim(), 10);
-        break;
-      }
-      if (t.startsWith(".cm_qual ")) {
-        choice = parseInt(t.replace(".cm_qual ", "").trim(), 10);
-        break;
-      }
-      if (t.startsWith(".cm_target ")) {
-        choice = parseInt(t.replace(".cm_target ", "").trim(), 10);
-        break;
-      }
-      if (t === ".cm_send") {
-        customAction = "send";
-        break;
-      }
-    }
-
-    if (choice === null && customAction === null) {
-      const num = parseInt(String(body || "").trim(), 10);
-      if (!isNaN(num)) choice = num;
-    }
-
-    const now = Date.now();
-    const lastMsg = lastProcessedMsg[k];
-    if (
-      lastMsg &&
-      lastMsg.text === String(choice || customAction) &&
-      now - lastMsg.time < LOOP_COOLDOWN
-    )
-      return;
-    lastProcessedMsg[k] = { text: String(choice || customAction), time: now };
-
-    const botDisplayName = pending.botDisplayName || DEFAULT_BOT_NAME;
-    const settings = await readSettings(sessionId);
-    const btnsOn = !!settings.btns_enabled;
-
-    // ──────────────────────────────────────────
-    // STEP 1: Movie Pick -> Show Qualities
-    // ──────────────────────────────────────────
-    if (pending.step === 1) {
-      if (!choice || choice > pending.results.length) return;
-      pending.isProcessing = true;
-      await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
-
-      const selected = pending.results[choice - 1];
-
-      try {
-        const movieInfo = await scrapeMoviePage(
-          selected.url,
-          selected.title,
-          selected.image
-        );
-
-        if (!movieInfo || !movieInfo.downloadLinks || movieInfo.downloadLinks.length === 0) {
-          clearUserSession(k);
-          return await sendErrorMsg(sock, from, mek, "No download links available for this movie!");
-        }
-
-        const downloadLinks = movieInfo.downloadLinks.filter((d) => {
-          const match = d.quality.match(/([\d.]+)\s*(MB|GB)/i);
-          if (match) {
-            const size = parseFloat(match[1]);
-            const unit = match[2].toUpperCase();
-            if (unit === "GB") return size <= 2.0;
-            if (unit === "MB") return true;
-          }
-          return true;
-        });
-
-        if (downloadLinks.length === 0) {
-          clearUserSession(k);
-          return await sendErrorMsg(sock, from, mek, "No download links under 2GB available!");
-        }
-
-        const imgToSend = movieInfo.poster || movieInfo.image || selected.image || DEFAULT_SEARCH_IMAGE;
-
-        // Button Layout
-        if (btnsOn) {
-          try {
-            const { ButtonV2 } = await import("@vanzxy/baileys");
-
-            const qualityRows = downloadLinks.map((d, i) => ({
-              title: `${String(i + 1).padStart(2, "0")}. ${d.quality}`,
-              description: `Select ${d.quality}`,
-              id: `.cm_qual ${i + 1}`,
-            }));
-
-            let qualityBody = `⊱━━━━━ • ✿ • ━━━━━⊰\n📥 *${botDisplayName.toUpperCase()} QUALITIES*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
-            qualityBody += `🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
-            if (movieInfo.imdb_rate) qualityBody += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
-            if (movieInfo.duration) qualityBody += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
-            qualityBody += `Choose your desired quality below 2GB.\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
-
-            const btn = new ButtonV2(sock)
-              .setBody(qualityBody)
-              .setFooter(`WaBot by ${botDisplayName}`)
-              .setThumbnail(imgToSend);
-
-            btn.addRawButton({
-              buttonId: "cinesubz_quality_list",
-              buttonText: { displayText: "📥 Select Quality" },
-              type: 1,
-              nativeFlowInfo: {
-                name: "single_select",
-                paramsJson: JSON.stringify({
-                  title: "Available Qualities ↯",
-                  sections: [{ title: "📊 Qualities", rows: qualityRows }],
-                }),
-              },
-            });
-
-            btn.addButton("📜 Bot Menu", ".menu");
-
-            const sentQualityMsg = await btn.send(from, { quoted: mek });
-            if (sentQualityMsg?.key?.id) {
-              pending.step = 2;
-              pending.movie = { metadata: movieInfo, downloadLinks };
-              pending.timestamp = Date.now();
-              pending.isProcessing = false;
-              pending.expectedMsgId = sentQualityMsg.key.id;
-              await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-              return;
-            }
-          } catch (e) {
-            console.error("ButtonV2 Quality Error:", e);
-          }
-        }
-
-        // Numbered Fallback Layout
-        let qualityMsg = `╭─[ 📥 *𝗦𝗘𝗟𝗘𝗖𝗧 𝗤𝗨𝗔𝗟𝗜𝗧𝗬* ]\n│\n`;
-        qualityMsg += `├ 🎬 *${toSmallCaps(movieInfo.title)}*\n`;
-        if (movieInfo.imdb_rate) qualityMsg += `├ ⭐ *IMDb:* ${movieInfo.imdb_rate}\n`;
-        if (movieInfo.duration) qualityMsg += `├ ⏳ *Duration:* ${movieInfo.duration}\n`;
-        qualityMsg += `├ 👇 *Reply with Quality Number:*\n│\n`;
-
-        downloadLinks.forEach((d, i) => {
-          qualityMsg += `├ 📱 *[ ${String(i + 1).padStart(2, "0")} ]* 📊 ${d.quality}\n`;
-        });
-        qualityMsg += `│\n╰──────────────⮞\n> 💬 *Swipe & Reply this message with a quality number...*`;
-
-        const sentQualityMsg = await sock.sendMessage(
-          from,
-          {
-            image: { url: imgToSend },
-            caption: qualityMsg,
-            contextInfo: channelContextInfo(),
-          },
-          { quoted: mek }
-        );
-
-        pending.step = 2;
-        pending.movie = { metadata: movieInfo, downloadLinks };
-        pending.timestamp = Date.now();
-        pending.isProcessing = false;
-        pending.expectedMsgId = sentQualityMsg.key.id;
-
-        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-      } catch (error) {
-        clearUserSession(k);
-        await sendErrorMsg(sock, from, mek, "Failed to scrape movie details.");
-      }
-    }
-
-    // ──────────────────────────────────────────
-    // STEP 2: Quality Selected -> Action Menu ("Send Movie" & "Bot Menu")
-    // ──────────────────────────────────────────
-    else if (pending.step === 2) {
-      if (!choice || choice > pending.movie.downloadLinks.length) return;
-      pending.isProcessing = true;
-      await sock.sendMessage(from, { react: { text: "⚡", key: mek.key } });
-
-      const selectedLink = pending.movie.downloadLinks[choice - 1];
-      pending.selectedLink = selectedLink;
-
-      const imgToSend =
-        pending.movie.metadata.poster ||
-        pending.movie.metadata.image ||
-        DEFAULT_SEARCH_IMAGE;
-
-      let confirmBody = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${toSmallCaps(pending.movie.metadata.title)}*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
-      confirmBody += `📊 *Selected Quality :* ${selectedLink.quality}\n\n`;
-      confirmBody += `Click *Send Movie* to dispatch the movie file to your saved target group(s).\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
-
-      // Button Mode
-      if (btnsOn) {
-        try {
-          const { ButtonV2 } = await import("@vanzxy/baileys");
-
-          const btn = new ButtonV2(sock)
-            .setBody(confirmBody)
-            .setFooter(`WaBot by ${botDisplayName}`)
-            .setThumbnail(imgToSend);
-
-          btn.addButton("🚀 Send Movie", ".cm_send");
-          btn.addButton("📜 Bot Menu", ".menu");
-
-          const sentActionMsg = await btn.send(from, { quoted: mek });
-          if (sentActionMsg?.key?.id) {
-            pending.step = 3;
-            pending.timestamp = Date.now();
-            pending.isProcessing = false;
-            pending.expectedMsgId = sentActionMsg.key.id;
-            await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-            return;
-          }
-        } catch (e) {
-          console.error("ButtonV2 Action Error:", e);
-        }
-      }
-
-      // Numbered Fallback Mode
-      let actionMsg = `╭─[ 🚀 *𝗔𝗖𝗧𝗜𝗢𝗡 𝗠𝗘𝗡𝗨* ]\n│\n`;
-      actionMsg += `├ 🎬 *${toSmallCaps(pending.movie.metadata.title)}*\n`;
-      actionMsg += `├ 📊 *Quality:* ${selectedLink.quality}\n│\n`;
-      actionMsg += `├ 📱 *[ 01 ]* 🚀 Send Movie\n`;
-      actionMsg += `├ 📱 *[ 02 ]* 📜 Bot Menu\n│\n`;
-      actionMsg += `╰──────────────⮞\n> 💬 *Reply with 1 to Send or 2 for Menu...*`;
-
-      const sentActionMsg = await sock.sendMessage(
-        from,
-        {
-          image: { url: imgToSend },
-          caption: actionMsg,
-          contextInfo: channelContextInfo(),
-        },
-        { quoted: mek }
-      );
-
-      pending.step = 3;
-      pending.timestamp = Date.now();
-      pending.isProcessing = false;
-      pending.expectedMsgId = sentActionMsg.key.id;
-
-      await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-    }
-
-    // ──────────────────────────────────────────
-    // STEP 3: Action Selected -> Target Group Routing
-    // ──────────────────────────────────────────
-    else if (pending.step === 3) {
-      if (customAction === "send" || choice === 1) {
-        pending.isProcessing = true;
-        const { movie, selectedLink, groups, originalMek } = pending;
-
-        // If only 1 target group, send immediately
-        if (groups.length === 1) {
-          clearUserSession(k);
-          await sendMovieToGroup(sock, originalMek, m, from, groups[0], selectedLink, movie);
-          return;
-        }
-
-        // Multiple target groups -> Ask user to choose
-        const groupNames = await Promise.all(groups.map((g) => getGroupName(sock, g)));
-
-        if (btnsOn) {
-          try {
-            const { ButtonV2 } = await import("@vanzxy/baileys");
-
-            const groupRows = groupNames.map((n, i) => ({
-              title: `${String(i + 1).padStart(2, "0")}. ${n.substring(0, 45)}`,
-              description: `Send to ${n}`,
-              id: `.cm_target ${i + 1}`,
-            }));
-
-            const btn = new ButtonV2(sock)
-              .setBody(`⊱━━━━━ • ✿ • ━━━━━⊰\n🎯 *SELECT TARGET GROUP*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\nChoose the destination group:`)
-              .setFooter(`WaBot by ${botDisplayName}`);
-
-            btn.addRawButton({
-              buttonId: "cinesubz_target_group_list",
-              buttonText: { displayText: "👥 Select Group" },
-              type: 1,
-              nativeFlowInfo: {
-                name: "single_select",
-                paramsJson: JSON.stringify({
-                  title: "Target Groups ↯",
-                  sections: [{ title: "Available Groups", rows: groupRows }],
-                }),
-              },
-            });
-
-            const sentGrpMsg = await btn.send(from, { quoted: mek });
-            if (sentGrpMsg?.key?.id) {
-              pending.step = 4;
-              pending.timestamp = Date.now();
-              pending.isProcessing = false;
-              pending.expectedMsgId = sentGrpMsg.key.id;
-              return;
-            }
-          } catch (e) {
-            console.error("ButtonV2 Target Selection Error:", e);
-          }
-        }
-
-        // Numbered Fallback Target Select
-        let groupMsg = `╭─[ 🎯 *𝗦𝗘𝗟𝗘𝗖𝗧 𝗧𝗔𝗥𝗚𝗘𝗧 𝗚𝗥𝗢𝗨𝗣* ]\n│\n`;
-        groupNames.forEach((n, i) => {
-          groupMsg += `├ 📱 *[ ${String(i + 1).padStart(2, "0")} ]* 👥 ${n}\n`;
-        });
-        groupMsg += `│\n╰──────────────⮞\n> 💬 *Reply with the group number...*`;
-
-        const sentGrpMsg = await sock.sendMessage(
-          from,
-          { text: groupMsg, contextInfo: channelContextInfo() },
-          { quoted: mek }
-        );
-
-        pending.step = 4;
-        pending.timestamp = Date.now();
-        pending.isProcessing = false;
-        pending.expectedMsgId = sentGrpMsg.key.id;
-      } else if (choice === 2) {
-        clearUserSession(k);
-        // Bot Menu redirect
-        const menuCmd = cmd.commands?.find((c) => c.pattern === "menu");
-        if (menuCmd && typeof menuCmd.function === "function") {
-          return await menuCmd.function(sock, mek, m, { from, sender, sessionId });
-        } else {
-          return await sock.sendMessage(
-            from,
-            { text: "Type `.menu` to view main bot menu.", contextInfo: channelContextInfo() },
-            { quoted: mek }
-          );
-        }
-      }
-    }
-
-    // ──────────────────────────────────────────
-    // STEP 4: Target Group Chosen -> Send Movie
-    // ──────────────────────────────────────────
-    else if (pending.step === 4) {
-      if (!choice || choice > pending.groups.length) return;
-      pending.isProcessing = true;
-
-      const { movie, selectedLink, groups, originalMek } = pending;
-      const targetGroup = groups[choice - 1];
-      clearUserSession(k);
-
-      await sendMovieToGroup(sock, originalMek, m, from, targetGroup, selectedLink, movie);
-    }
+    await handleFlowInput(sock, mek, m, { body, sender, from, sessionId });
   },
 };
 
