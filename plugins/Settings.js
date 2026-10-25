@@ -5,7 +5,7 @@ const {
   readSettings,
   setSetting,
   toggleSetting,
-  getCustomImage // 🔥 Web Image එක ගන්න මේක අනිවාර්යයි
+  getCustomImage
 } = require("../lib/botSettings");
 
 const SETTINGS_IMAGE =
@@ -15,18 +15,14 @@ const pendingSettingsMenu = Object.create(null);
 const lastProcessedMsg = {};
 const LOOP_COOLDOWN = 2500;
 
-// 🔥 Menu State එක User සහ Chat එක අනුව වෙන් කිරීම
 function keyFor(sender, from) {
   return `${sender || "unknown"}_${from || "unknown"}`;
 }
 
-// 🔥 Multi-Device Owner Check
 function checkOwner(conn, sender, isOwner) {
   if (isOwner) return true; 
-  
   let botNumber = conn?.user?.id?.split(':')[0]?.split('@')[0];
   let senderNumber = sender?.split('@')[0];
-  
   if (botNumber && senderNumber && botNumber === senderNumber) {
     return true;
   }
@@ -34,44 +30,29 @@ function checkOwner(conn, sender, isOwner) {
 }
 
 function onOff(val) {
-  if (val) {
-    return "🟢 ON";
-  }
-  return "🔴 OFF";
+  return val ? "🟢 ON" : "🔴 OFF";
 }
 
 function presenceText(val) {
-  if (val === "typing") {
-    return "⌨️ Typing";
-  } else if (val === "recording") {
-    return "🎙️ Recording";
-  }
+  if (val === "typing") return "⌨️ Typing";
+  if (val === "recording") return "🎙️ Recording";
   return "🔴 OFF";
 }
 
 function reactModeText(val) {
-  if (val === "private") {
-    return "🔒 Private Only";
-  } else if (val === "group") {
-    return "👥 Group Only";
-  }
+  if (val === "private") return "🔒 Private Only";
+  if (val === "group") return "👥 Group Only";
   return "🌍 All Chats";
 }
 
 function workScopeText(val) {
-  if (val === "private") {
-    return "🔒 Private Only";
-  } else if (val === "group") {
-    return "👥 Group Only";
-  }
+  if (val === "private") return "🔒 Private Only";
+  if (val === "group") return "👥 Group Only";
   return "All Chats";
 }
 
 function btnsModeText(val) {
-  if (val) {
-    return "🔘 Buttons";
-  }
-  return "🔢 Number Reply";
+  return val ? "🔘 Buttons" : "🔢 Number Reply";
 }
 
 async function getFittedImageBuffer(url) {
@@ -91,25 +72,10 @@ async function getFittedImageBuffer(url) {
 
 async function getStatusCard(sessionId) {
   const s = await readSettings(sessionId);
-  let modeStr = "PUBLIC";
-  if (s.mode) {
-    modeStr = String(s.mode).toUpperCase();
-  }
-
-  let workScopeStr = "private";
-  if (s.work_scope) {
-    workScopeStr = String(s.work_scope);
-  }
-
-  let presStr = "off";
-  if (s.always_presence) {
-    presStr = String(s.always_presence);
-  }
-
-  let reactModeStr = "all";
-  if (s.auto_react_mode) {
-    reactModeStr = String(s.auto_react_mode);
-  }
+  let modeStr = s.mode ? String(s.mode).toUpperCase() : "PUBLIC";
+  let workScopeStr = s.work_scope ? String(s.work_scope) : "private";
+  let presStr = s.always_presence ? String(s.always_presence) : "off";
+  let reactModeStr = s.auto_react_mode ? String(s.auto_react_mode) : "all";
 
   return `╭「 *BOT SETTINGS* 」─◆
 │ 👑 *Main Access:* ${modeStr}
@@ -120,8 +86,9 @@ async function getStatusCard(sessionId) {
 │ 👁️ *Seen Msg:* ${onOff(Boolean(s.seen_all_msg))}
 │ 💖 *Auto React:* ${onOff(Boolean(s.auto_react_msg))}
 │ 🔮 *React Scope:* ${reactModeText(reactModeStr)}
-│ 🤫 *Silent Automation:* ${onOff(Boolean(s.silent_automation))}
+│ 🤫 *Silent Auto:* ${onOff(Boolean(s.silent_automation))}
 │ 💬 *Custom Reply:* ${onOff(Boolean(s.custom_auto_reply))}
+│ 👥 *Group Management:* ${onOff(Boolean(s.group_management))}
 │ 🛡️ *Anti Delete:* ${onOff(Boolean(s.anti_delete))}
 │ 🛡️ *Anti Spam:* ${onOff(Boolean(s.anti_spam))}
 │ 🚫 *Reject Calls:* ${onOff(Boolean(s.auto_reject_calls))}
@@ -132,49 +99,35 @@ async function getStatusCard(sessionId) {
 }
 
 function mapKey(name) {
-  let k = "";
-  if (name) {
-    k = String(name).toLowerCase().trim();
-  }
+  let k = name ? String(name).toLowerCase().trim() : "";
 
   if (k === "autoseen" || k === "auto_seen" || k === "statusseen" || k === "auto_status_seen") return "auto_status_seen";
-  else if (k === "autoreact" || k === "auto_react" || k === "statusreact" || k === "auto_status_react") return "auto_status_react";
-  else if (k === "autodownloadstatus" || k === "auto_download_status" || k === "statusdownload" || k === "downloadstatus") return "auto_download_status";
-  else if (k === "lovelychat" || k === "lovely_chat" || k === "lovely" || k === "aichat" || k === "automsg" || k === "auto_msg") return "lovely_chat";
-  else if (k === "seenallmsg" || k === "seen_all_msg" || k === "seenall" || k === "allmsgseen") return "seen_all_msg";
-  else if (k === "silentautomation" || k === "silent_automation" || k === "silent") return "silent_automation";
-  else if (k === "customautoreply" || k === "custom_auto_reply" || k === "customreply") return "custom_auto_reply";
-  else if (k === "antidelete" || k === "anti_delete") return "anti_delete";
-  else if (k === "antispam" || k === "anti_spam") return "anti_spam";
-  else if (k === "rejectcalls" || k === "auto_reject_calls" || k === "anticall") return "auto_reject_calls";
-  else if (k === "mode" || k === "botmode") return "mode";
-  else if (k === "autoreactmsg" || k === "auto_react_msg") return "auto_react_msg";
-  else if (k === "reactmode" || k === "auto_react_mode") return "auto_react_mode";
-  else if (k === "workscope" || k === "work_scope") return "work_scope";
-  else if (k === "btns" || k === "buttons" || k === "btns_enabled") return "btns_enabled";
+  if (k === "autoreact" || k === "auto_react" || k === "statusreact" || k === "auto_status_react") return "auto_status_react";
+  if (k === "autodownloadstatus" || k === "auto_download_status" || k === "statusdownload" || k === "downloadstatus") return "auto_download_status";
+  if (k === "lovelychat" || k === "lovely_chat" || k === "lovely" || k === "aichat" || k === "automsg" || k === "auto_msg") return "lovely_chat";
+  if (k === "seenallmsg" || k === "seen_all_msg" || k === "seenall" || k === "allmsgseen") return "seen_all_msg";
+  if (k === "silentautomation" || k === "silent_automation" || k === "silent") return "silent_automation";
+  if (k === "customautoreply" || k === "custom_auto_reply" || k === "customreply") return "custom_auto_reply";
+  if (k === "groupmanagement" || k === "group_management" || k === "groupmgmt" || k === "groupauto") return "group_management";
+  if (k === "antidelete" || k === "anti_delete") return "anti_delete";
+  if (k === "antispam" || k === "anti_spam") return "anti_spam";
+  if (k === "rejectcalls" || k === "auto_reject_calls" || k === "anticall") return "auto_reject_calls";
+  if (k === "mode" || k === "botmode") return "mode";
+  if (k === "autoreactmsg" || k === "auto_react_msg") return "auto_react_msg";
+  if (k === "reactmode" || k === "auto_react_mode") return "auto_react_mode";
+  if (k === "workscope" || k === "work_scope") return "work_scope";
+  if (k === "btns" || k === "buttons" || k === "btns_enabled") return "btns_enabled";
   return null;
 }
 
 function getQuotedId(m, mek) {
   if (m?.quoted?.id) return m.quoted.id;
-  if (mek?.message?.extendedTextMessage?.contextInfo?.stanzaId) {
-    return mek.message.extendedTextMessage.contextInfo.stanzaId;
-  }
-  if (m?.message?.extendedTextMessage?.contextInfo?.stanzaId) {
-    return m.message.extendedTextMessage.contextInfo.stanzaId;
-  }
-  if (m?.message?.imageMessage?.contextInfo?.stanzaId) {
-    return m.message.imageMessage.contextInfo.stanzaId;
-  }
-  if (m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId) {
-    return m.message.interactiveResponseMessage.contextInfo.stanzaId;
-  }
-  if (mek?.message?.imageMessage?.contextInfo?.stanzaId) {
-    return mek.message.imageMessage.contextInfo.stanzaId;
-  }
-  if (mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId) {
-    return mek.message.interactiveResponseMessage.contextInfo.stanzaId;
-  }
+  if (mek?.message?.extendedTextMessage?.contextInfo?.stanzaId) return mek.message.extendedTextMessage.contextInfo.stanzaId;
+  if (m?.message?.extendedTextMessage?.contextInfo?.stanzaId) return m.message.extendedTextMessage.contextInfo.stanzaId;
+  if (m?.message?.imageMessage?.contextInfo?.stanzaId) return m.message.imageMessage.contextInfo.stanzaId;
+  if (m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId) return m.message.interactiveResponseMessage.contextInfo.stanzaId;
+  if (mek?.message?.imageMessage?.contextInfo?.stanzaId) return mek.message.imageMessage.contextInfo.stanzaId;
+  if (mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId) return mek.message.interactiveResponseMessage.contextInfo.stanzaId;
   return null;
 }
 
@@ -191,9 +144,7 @@ function extractTexts(body, mek, m) {
     mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
   ];
   direct.forEach(item => {
-    if (item) {
-      texts.push(String(item).trim());
-    }
+    if (item) texts.push(String(item).trim());
   });
 
   const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
@@ -215,10 +166,7 @@ function extractTexts(body, mek, m) {
 }
 
 function resolveSettingsActionFromText(text) {
-  let t = "";
-  if (text) {
-    t = String(text).trim().toLowerCase();
-  }
+  let t = text ? String(text).trim().toLowerCase() : "";
   if (!t) return null;
 
   if (t.startsWith(".setting ")) {
@@ -244,38 +192,25 @@ async function applySettingAction(sessionId, action, value) {
   }
   if (action === "reactmode") {
     const validModes = ["private", "group", "all"];
-    if (!validModes.includes(value)) {
-      return "❌ *Invalid React Scope*";
-    }
+    if (!validModes.includes(value)) return "❌ *Invalid React Scope*";
     await setSetting(sessionId, "auto_react_mode", value);
     return `✅ *Auto React Scope:* ${reactModeText(value)}`;
   }
   if (action === "workscope") {
     const validScopes = ["private", "group", "all"];
-    if (!validScopes.includes(value)) {
-      return "❌ *Invalid Work Scope*";
-    }
+    if (!validScopes.includes(value)) return "❌ *Invalid Work Scope*";
     await setSetting(sessionId, "work_scope", value);
     return `✅ *Work Scope:* ${workScopeText(value)}`;
   }
   if (action === "presence") {
     const validPres = ["off", "typing", "recording"];
-    if (!validPres.includes(value)) {
-      return "❌ *Invalid Presence Mode*";
-    }
+    if (!validPres.includes(value)) return "❌ *Invalid Presence Mode*";
     await setSetting(sessionId, "always_presence", value);
     return `✅ *Presence Mode:* ${presenceText(value)}`;
   }
 
-  let isToggle = false;
-  let isStateChange = false;
-  if (action === "toggle") {
-    isToggle = true;
-  } else if (action === "on") {
-    isStateChange = true;
-  } else if (action === "off") {
-    isStateChange = true;
-  }
+  let isToggle = action === "toggle";
+  let isStateChange = action === "on" || action === "off";
 
   if (isToggle) {
     const key = mapKey(value);
@@ -285,10 +220,7 @@ async function applySettingAction(sessionId, action, value) {
   } else if (isStateChange) {
     const key = mapKey(value);
     if (!key) return "❌ *Invalid Setting Name*";
-    let boolVal = false;
-    if (action === "on") {
-      boolVal = true;
-    }
+    let boolVal = action === "on";
     const updated = await setSetting(sessionId, key, boolVal);
     return formatSettingReply(key, updated, action);
   }
@@ -297,31 +229,19 @@ async function applySettingAction(sessionId, action, value) {
 }
 
 function formatSettingReply(key, updated, action) {
-  if (key === "auto_status_seen") {
-    return `✅ *Status Auto Seen:* ${onOff(updated.auto_status_seen)}`;
-  } else if (key === "auto_status_react") {
-    return `✅ *Status Auto React:* ${onOff(updated.auto_status_react)}`;
-  } else if (key === "auto_download_status") {
-    return `✅ *Status Download & Save:* ${onOff(updated.auto_download_status)}`;
-  } else if (key === "lovely_chat") {
-    return `✅ *Lovely Romantic Chat:* ${onOff(updated.lovely_chat)}`;
-  } else if (key === "seen_all_msg") {
-    return `✅ *Blue Ticks (Seen All Messages):* ${onOff(updated.seen_all_msg)}`;
-  } else if (key === "anti_delete") {
-    return `✅ *Anti Delete Guard:* ${onOff(updated.anti_delete)}`;
-  } else if (key === "silent_automation") {
-    return `✅ *Silent Automation Suite:* ${onOff(updated.silent_automation)}`;
-  } else if (key === "custom_auto_reply") {
-    return `✅ *Custom Auto Reply:* ${onOff(updated.custom_auto_reply)}`;
-  } else if (key === "anti_spam") {
-    return `✅ *Anti Spam Guard:* ${onOff(updated.anti_spam)}`;
-  } else if (key === "auto_reject_calls") {
-    return `✅ *Auto Reject Calls:* ${onOff(updated.auto_reject_calls)}`;
-  } else if (key === "auto_react_msg") {
-    return `✅ *Incoming Message Auto React:* ${onOff(updated.auto_react_msg)}`;
-  } else if (key === "btns_enabled") {
-    return `✅ *Menu UI System:* ${btnsModeText(Boolean(updated.btns_enabled))}`;
-  }
+  if (key === "auto_status_seen") return `✅ *Status Auto Seen:* ${onOff(updated.auto_status_seen)}`;
+  if (key === "auto_status_react") return `✅ *Status Auto React:* ${onOff(updated.auto_status_react)}`;
+  if (key === "auto_download_status") return `✅ *Status Download & Save:* ${onOff(updated.auto_download_status)}`;
+  if (key === "lovely_chat") return `✅ *Lovely Romantic Chat:* ${onOff(updated.lovely_chat)}`;
+  if (key === "seen_all_msg") return `✅ *Blue Ticks (Seen All Messages):* ${onOff(updated.seen_all_msg)}`;
+  if (key === "anti_delete") return `✅ *Anti Delete Guard:* ${onOff(updated.anti_delete)}`;
+  if (key === "silent_automation") return `✅ *Silent Automation Suite:* ${onOff(updated.silent_automation)}`;
+  if (key === "custom_auto_reply") return `✅ *Custom Auto Reply:* ${onOff(updated.custom_auto_reply)}`;
+  if (key === "group_management") return `✅ *Group Management Automation:* ${onOff(updated.group_management)}`;
+  if (key === "anti_spam") return `✅ *Anti Spam Guard:* ${onOff(updated.anti_spam)}`;
+  if (key === "auto_reject_calls") return `✅ *Auto Reject Calls:* ${onOff(updated.auto_reject_calls)}`;
+  if (key === "auto_react_msg") return `✅ *Incoming Message Auto React:* ${onOff(updated.auto_react_msg)}`;
+  if (key === "btns_enabled") return `✅ *Menu UI System:* ${btnsModeText(Boolean(updated.btns_enabled))}`;
   return `✅ *Set ${key.toUpperCase()} to ${action.toUpperCase()}*`;
 }
 
@@ -340,6 +260,13 @@ function getSections() {
         { title: "👤 Scope: Private Only", description: "Bot operates only in Private PM / DMs", id: ".setting workscope private" },
         { title: "👥 Scope: Group Only", description: "Bot operates only in WhatsApp Groups", id: ".setting workscope group" },
         { title: "🌍 Scope: All Chats", description: "Bot operates in both Groups and Private chats", id: ".setting workscope all" },
+      ]
+    },
+    {
+      title: "👥 Group Management & Security",
+      rows: [
+        { title: "🛡️ Group Automation ON", description: "Enable Anti-Link, Anti-Badwords, Anti-Spam & Auto-Welcome", id: ".setting on groupmanagement" },
+        { title: "🛑 Group Automation OFF", description: "Disable background group security automation", id: ".setting off groupmanagement" },
       ]
     },
     {
@@ -423,7 +350,6 @@ async function sendSettingsHome(conn, from, mek, reply, sender, sessionId) {
     options: flatOpts,
   };
 
-  // 🔥 Web එකෙන් Settings Image එක ගන්නවා
   let finalSettingsImage = SETTINGS_IMAGE; 
   if (sessionId) {
     try {
@@ -524,15 +450,8 @@ cmd(
       return reply("❌ *`[ THIS COMMAND IS OWNER ONLY. ]`*");
     }
 
-    let action = "menu";
-    if (args && args[0]) {
-      action = String(args[0]).toLowerCase().trim();
-    }
-
-    let value = "";
-    if (args && args.length > 1) {
-      value = String(args.slice(1).join(" ")).toLowerCase().trim();
-    }
+    let action = args && args[0] ? String(args[0]).toLowerCase().trim() : "menu";
+    let value = args && args.length > 1 ? String(args.slice(1).join(" ")).toLowerCase().trim() : "";
 
     try {
       if (action === "menu" || action === "menuopen") {
@@ -601,9 +520,7 @@ const settingsReplyHandler = {
 
     const texts = extractTexts(text, mek, m);
     for (const t of texts) {
-      if (resolveSettingsActionFromText(t)) {
-        return true;
-      }
+      if (resolveSettingsActionFromText(t)) return true;
     }
 
     const num = parseInt(String(text || "").trim(), 10);
@@ -662,11 +579,9 @@ const settingsReplyHandler = {
   },
 };
 
-// 🔵 Blue Ticks Middleware: Marks incoming messages as read when `seen_all_msg` is enabled
 async function handleSeenAllMessages(conn, mek, sessionId) {
   try {
     if (!conn || !mek?.key || mek.key.fromMe) return;
-
     const s = await readSettings(sessionId);
     if (s?.seen_all_msg) {
       await conn.readMessages([mek.key]);
