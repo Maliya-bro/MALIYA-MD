@@ -3,9 +3,9 @@ const axios = require("axios");
 const CryptoJS = require("crypto-js");
 const https = require("https");
 const crypto = require("crypto");
-const fs = require("fs");
-const path = require("path");
 const sharp = require("sharp");
+const { MongoClient } = require("mongodb");
+const config = require("../config");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 const BRAND_BASE = "MALIYA-MD";
@@ -22,15 +22,94 @@ const MAX_RESULTS = 15;
 const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
-// ── Target Groups Storage (Shared with csend / csong) ─────────────
-const STORE_PATH = path.join(__dirname, "csong_targets.json");
+// ── Inline MongoDB Connection for Isolated Target Groups ─────────
+const MONGODB_URI =
+  process.env.MONGODB_URI ||
+  "mongodb+srv://maliya-md:279221@maliya-md.tzrnzrj.mongodb.net/?appName=MALIYA-MD";
+const MONGODB_DB = process.env.MONGODB_DB || "maliya_md";
+const TARGETS_COLLECTION = "user_movie_targets";
 
-function readStore() {
+let cachedDb = null;
+let cachedClient = null;
+
+async function getMongoDb() {
+  if (cachedDb) return cachedDb;
   try {
-    if (!fs.existsSync(STORE_PATH)) return { groups: [] };
-    return JSON.parse(fs.readFileSync(STORE_PATH, "utf8") || '{"groups":[]}');
-  } catch {
-    return { groups: [] };
+    cachedClient = new MongoClient(MONGODB_URI, { maxPoolSize: 10 });
+    await cachedClient.connect();
+    cachedDb = cachedClient.db(MONGODB_DB);
+    return cachedDb;
+  } catch (err) {
+    console.error("MongoDB Connection Error:", err?.message || err);
+    throw err;
+  }
+}
+
+// ── Session Phone Extractor (User A / User B Isolation) ─────────
+async function resolveUserKey(sessionId) {
+  const rawId = String(sessionId || "default").trim() || "default";
+  if (rawId === "default") return "default";
+  if (rawId.startsWith("PHONE::")) return rawId;
+
+  try {
+    const db = await getMongoDb();
+    const doc = await db.collection("wa_sessions").findOne({ sessionId: rawId });
+    if (doc) {
+      if (doc.phone) {
+        return `PHONE::${String(doc.phone).replace(/\D/g, "")}`;
+      }
+      if (doc.botJid) {
+        const phone = String(doc.botJid).split(":")[0].split("@")[0].replace(/\D/g, "");
+        if (phone) return `PHONE::${phone}`;
+      }
+    }
+  } catch (e) {}
+
+  return rawId;
+}
+
+async function getUserTargetGroups(sessionId) {
+  const userKey = await resolveUserKey(sessionId);
+  try {
+    const db = await getMongoDb();
+    const doc = await db.collection(TARGETS_COLLECTION).findOne({ sessionId: userKey });
+    return doc?.groups || [];
+  } catch (e) {
+    console.error("getTargetGroups Error:", e?.message || e);
+    return [];
+  }
+}
+
+async function addUserTargetGroup(sessionId, jid) {
+  if (!jid) return false;
+  const userKey = await resolveUserKey(sessionId);
+  try {
+    const db = await getMongoDb();
+    await db.collection(TARGETS_COLLECTION).updateOne(
+      { sessionId: userKey },
+      { $addToSet: { groups: jid }, $set: { updatedAt: new Date() } },
+      { upsert: true }
+    );
+    return true;
+  } catch (e) {
+    console.error("addTargetGroup Error:", e?.message || e);
+    return false;
+  }
+}
+
+async function removeUserTargetGroup(sessionId, jid) {
+  if (!jid) return false;
+  const userKey = await resolveUserKey(sessionId);
+  try {
+    const db = await getMongoDb();
+    await db.collection(TARGETS_COLLECTION).updateOne(
+      { sessionId: userKey },
+      { $pull: { groups: jid }, $set: { updatedAt: new Date() } }
+    );
+    return true;
+  } catch (e) {
+    console.error("removeTargetGroup Error:", e?.message || e);
+    return false;
   }
 }
 
@@ -486,7 +565,7 @@ async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedL
   const correctPosterUrl = movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE;
   const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
 
-  // 1. Group එකට යන Card එක: Bot / Channel තොරතුරු කිසිවක් නැත. චිත්‍රපටයේ විස්තර පමණි.
+  // Group Info Card: Pure movie details only
   let infoCard = `╭─[ 🎬 *𝗠𝗢𝗩𝗜𝗘 𝗜𝗡𝗙𝗢* ]\n│\n`;
   infoCard += `├ 🎬 *Title :* ${movie.metadata.title}\n`;
   if (movie.metadata.imdb_rate) infoCard += `├ ⭐ *IMDb :* ${movie.metadata.imdb_rate}\n`;
@@ -505,7 +584,6 @@ async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedL
     });
   }
 
-  // 2. Direct Video Download & File Dispatch
   await sock.sendMessage(from, { react: { text: "⬇️", key: m.key } });
   let targetServerLink = selectedLink.directUrl;
 
@@ -531,7 +609,6 @@ async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedL
     const cleanTitle = sanitizeFileName(movie.metadata.title);
     const finalFileName = `${cleanTitle}.mp4`;
 
-    // Group එකට යන Video Document එක: Pure Movie details පමණි
     let captionText = `╭─[ 🎬 *${movie.metadata.title}* ]\n│\n`;
     captionText += `├ 📊 *Quality :* ${selectedLink.quality}\n`;
     if (movie.metadata.imdb_rate) captionText += `├ ⭐ *IMDb :* ${movie.metadata.imdb_rate}\n`;
@@ -549,10 +626,8 @@ async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedL
       };
       if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
 
-      // Group එකට Document එක යැවීම (No channelContextInfo)
       await sock.sendMessage(targetJid, docPayload);
 
-      // Bot එක run කරන user ට Confirmation එක යැවීම
       await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
       await sock.sendMessage(
         from,
@@ -576,7 +651,9 @@ async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedL
 }
 
 /* ================= CENTRAL FLOW CONTROLLER ================= */
-async function handleFlowInput(sock, mek, m, { body, sender, from, sessionId }) {
+async function handleFlowInput(sock, mek, m, { body, sender, from, sessionId, isOwner }) {
+  if (!m.key.fromMe && !isOwner) return;
+
   const k = keyFor(sender, from);
   const pending = pendingCineSubz[k];
   if (!pending || pending.isProcessing) return;
@@ -624,7 +701,7 @@ async function handleFlowInput(sock, mek, m, { body, sender, from, sessionId }) 
   const settings = await readSettings(sessionId);
   const btnsOn = !!settings.btns_enabled;
 
-  // ── Step 1: Movie Chosen -> Get Qualities ──
+  // ── Step 1: Movie Picked -> List Qualities ──
   if (pending.step === 1) {
     if (!choice || choice > pending.results.length) return;
     pending.isProcessing = true;
@@ -914,26 +991,105 @@ async function handleFlowInput(sock, mek, m, { body, sender, from, sessionId }) 
   }
 }
 
-/* ================= COMMAND DEFINITIONS ================= */
+/* ================= TARGET GROUP COMMANDS (PER-USER MONGODB) ================= */
+
+cmd(
+  {
+    pattern: "ctarget",
+    alias: ["addtarget"],
+    react: "📌",
+    desc: "Add current group to target list (MongoDB)",
+    category: "owner",
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, isGroup, isOwner, sessionId }) => {
+    if (!m.key.fromMe && !isOwner) return;
+
+    if (!isGroup) {
+      return await sock.sendMessage(
+        from,
+        { text: "⚠️ _This command can only be used inside a group._" },
+        { quoted: mek }
+      );
+    }
+
+    const currentGroups = await getUserTargetGroups(sessionId);
+    if (currentGroups.includes(from)) {
+      return await sock.sendMessage(
+        from,
+        { text: "ℹ️ _This group is already in your target list._" },
+        { quoted: mek }
+      );
+    }
+
+    await addUserTargetGroup(sessionId, from);
+    const grpName = await getGroupName(sock, from);
+    await sock.sendMessage(
+      from,
+      { text: `✅ *Target Saved Permanently!*\n\n👥 Group: *${grpName}*\n📁 Stored under your unique account.` },
+      { quoted: mek }
+    );
+  }
+);
+
+cmd(
+  {
+    pattern: "deltarget",
+    alias: ["removetarget"],
+    react: "🗑️",
+    desc: "Remove current group from target list",
+    category: "owner",
+    filename: __filename,
+  },
+  async (sock, mek, m, { from, isGroup, isOwner, sessionId }) => {
+    if (!m.key.fromMe && !isOwner) return;
+
+    if (!isGroup) {
+      return await sock.sendMessage(
+        from,
+        { text: "⚠️ _This command can only be used inside a group._" },
+        { quoted: mek }
+      );
+    }
+
+    await removeUserTargetGroup(sessionId, from);
+    const grpName = await getGroupName(sock, from);
+    await sock.sendMessage(
+      from,
+      { text: `🗑️ *Target Removed!*\n\n👥 Group: *${grpName}* has been removed from your list.` },
+      { quoted: mek }
+    );
+  }
+);
+
+/* ================= MAIN COMMAND: .cmovie (OWNER ONLY) ================= */
 cmd(
   {
     pattern: "cmovie",
-    alias: ["cfilm", "cfilms", "cinesubz"],
+    alias: ["cfilm", "cfilms"],
     react: "🎬",
     desc: "Search and send movies from CineSubz to target groups",
     category: "download",
     filename: __filename,
   },
-  async (sock, mek, m, { from, q, sender, sessionId }) => {
-    const store = readStore();
-    const groups = store.groups || [];
+  async (sock, mek, m, { from, q, sender, sessionId, isOwner }) => {
+    // 🔒 OWNER CHECK (User A/B Isolation & Anti-Abuse)
+    if (!m.key.fromMe && !isOwner) {
+      return await sock.sendMessage(
+        from,
+        { text: "🚫 *Only the bot owner can use this command!*" },
+        { quoted: mek }
+      );
+    }
 
-    if (!groups.length) {
+    const groups = await getUserTargetGroups(sessionId);
+
+    if (!groups || groups.length === 0) {
       await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
       return await sock.sendMessage(
         from,
         {
-          text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _No target groups saved. Use .ctarget inside a group first._\n╰──────────────⮞`,
+          text: `╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _No target groups saved for your account._\n├ 💡 _Go to your group and type .ctarget to save it permanently._\n╰──────────────⮞`,
           contextInfo: channelContextInfo(),
         },
         { quoted: mek }
@@ -1075,48 +1231,32 @@ cmd(
   }
 );
 
-// ── DIRECT COMMAND HANDLERS FOR BUTTON RESPONSES ──
+// ── DIRECT BUTTON LISTENERS (OWNER PROTECTED) ──
 cmd(
-  {
-    pattern: "cm_send",
-    dontAddCommandList: true,
-    filename: __filename,
-  },
-  async (sock, mek, m, { body, sender, from, sessionId }) => {
-    await handleFlowInput(sock, mek, m, { body: ".cm_send", sender, from, sessionId });
+  { pattern: "cm_send", dontAddCommandList: true, filename: __filename },
+  async (sock, mek, m, { sender, from, sessionId, isOwner }) => {
+    await handleFlowInput(sock, mek, m, { body: ".cm_send", sender, from, sessionId, isOwner });
   }
 );
 
 cmd(
-  {
-    pattern: "cm_select",
-    dontAddCommandList: true,
-    filename: __filename,
-  },
-  async (sock, mek, m, { body, sender, from, sessionId, q }) => {
-    await handleFlowInput(sock, mek, m, { body: `.cm_select ${q || ""}`, sender, from, sessionId });
+  { pattern: "cm_select", dontAddCommandList: true, filename: __filename },
+  async (sock, mek, m, { sender, from, sessionId, q, isOwner }) => {
+    await handleFlowInput(sock, mek, m, { body: `.cm_select ${q || ""}`, sender, from, sessionId, isOwner });
   }
 );
 
 cmd(
-  {
-    pattern: "cm_qual",
-    dontAddCommandList: true,
-    filename: __filename,
-  },
-  async (sock, mek, m, { body, sender, from, sessionId, q }) => {
-    await handleFlowInput(sock, mek, m, { body: `.cm_qual ${q || ""}`, sender, from, sessionId });
+  { pattern: "cm_qual", dontAddCommandList: true, filename: __filename },
+  async (sock, mek, m, { sender, from, sessionId, q, isOwner }) => {
+    await handleFlowInput(sock, mek, m, { body: `.cm_qual ${q || ""}`, sender, from, sessionId, isOwner });
   }
 );
 
 cmd(
-  {
-    pattern: "cm_target",
-    dontAddCommandList: true,
-    filename: __filename,
-  },
-  async (sock, mek, m, { body, sender, from, sessionId, q }) => {
-    await handleFlowInput(sock, mek, m, { body: `.cm_target ${q || ""}`, sender, from, sessionId });
+  { pattern: "cm_target", dontAddCommandList: true, filename: __filename },
+  async (sock, mek, m, { sender, from, sessionId, q, isOwner }) => {
+    await handleFlowInput(sock, mek, m, { body: `.cm_target ${q || ""}`, sender, from, sessionId, isOwner });
   }
 );
 
@@ -1140,14 +1280,13 @@ const movieReplyHandler = {
 
     return isQuoted || isNum;
   },
-  function: async (sock, mek, m, { body, sender, from, sessionId }) => {
-    await handleFlowInput(sock, mek, m, { body, sender, from, sessionId });
+  function: async (sock, mek, m, { body, sender, from, sessionId, isOwner }) => {
+    await handleFlowInput(sock, mek, m, { body, sender, from, sessionId, isOwner });
   },
 };
 
 if (Array.isArray(replyHandlers)) replyHandlers.push(movieReplyHandler);
 
-// Clean up idle sessions (Every 2.5 minutes)
 setInterval(() => {
   const now = Date.now();
   for (const k in pendingCineSubz) {
