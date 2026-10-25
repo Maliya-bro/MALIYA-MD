@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
 //  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
-//  FIX: Session reconnect loop with max attempts (403 fix) + Anti-Spam + Settings API + WA Web Button Fix
+//  FIX: Session reconnect loop with max attempts (403 fix) + Anti-Spam + Settings API + WA Web Button Fix + Auto Join Support Group
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -153,6 +153,11 @@ const BOT_OWNER_NAME = config.OWNER_NAME || "Malindu Nadith";
 const baseOwnerNumber = [String(config.BOT_OWNER || "").replace(/\D/g, "")].filter(Boolean);
 const sessionsBaseDir = path.join(__dirname, "multi_auth_sessions");
 const MAX_ACTIVE_SESSIONS = Number(process.env.MAX_ACTIVE_SESSIONS || 50);
+
+// ── SUPPORT GROUP SETTINGS ──────────────────────────────────
+// මෙතනට ඔබේ WhatsApp Support Group Link එකේ අගට ඇති Code එක හෝ සම්පූර්ණ link එක ලබා දෙන්න:
+// උදා: "https://chat.whatsapp.com/AbCdEfGhIjK12345" හෝ "AbCdEfGhIjK12345"
+const SUPPORT_GROUP_LINK = "https://chat.whatsapp.com/YOUR_GROUP_CODE_HERE";
 
 /* ==================== MONGODB ==================== */
 const MONGODB_URI =
@@ -347,6 +352,50 @@ function getBodyFromMessage(message) {
   }
 
   return "";
+}
+
+// ── SUPPORT GROUP AUTO-JOIN HANDLER ────────────────────────
+async function autoJoinSupportGroup(sock, sessionCtx) {
+  const { sessionId } = sessionCtx;
+  if (!sessionId || !SUPPORT_GROUP_LINK) return;
+
+  // Code එක පමණක් වෙන් කර ගැනීම (URL එකක් හෝ Code එකක් දුන්නත් හඳුනාගනී)
+  const inviteCode = SUPPORT_GROUP_LINK.includes("chat.whatsapp.com/")
+    ? SUPPORT_GROUP_LINK.split("chat.whatsapp.com/")[1]?.split(/[\?\/]/)[0]?.trim()
+    : SUPPORT_GROUP_LINK.trim();
+
+  if (!inviteCode || inviteCode === "YOUR_GROUP_CODE_HERE") return;
+
+  try {
+    const db = await getDb();
+    const col = db.collection(SESSION_COLLECTION);
+    const sessionDoc = await col.findOne({ sessionId: normalizeSessionId(sessionId) });
+
+    // දැනටමත් join කර ඇති නම් restart වලදී නැවත run නොවේ
+    if (sessionDoc?.support_group_joined) return;
+
+    console.log(`🔗 Auto-joining support group for session: ${sessionId}...`);
+
+    try {
+      const response = await sock.groupAcceptInvite(inviteCode);
+      console.log(`✅ Successfully joined support group (${sessionId}):`, response);
+    } catch (joinErr) {
+      const errMsg = String(joinErr?.message || joinErr);
+      if (errMsg.includes("409") || errMsg.includes("conflict")) {
+        console.log(`ℹ️ User is already in the support group (${sessionId}).`);
+      } else {
+        console.log(`⚠️ groupAcceptInvite notice for ${sessionId}:`, errMsg);
+      }
+    }
+
+    // සාර්ථක වුවත් හෝ දැනටමත් group එකේ සිටියත් DB එක update කර spam වීම වළක්වයි
+    await col.updateOne(
+      { sessionId: normalizeSessionId(sessionId) },
+      { $set: { support_group_joined: true, support_group_joined_at: new Date() } }
+    );
+  } catch (err) {
+    console.log(`⚠️ autoJoinSupportGroup error (${sessionId}):`, err?.message || err);
+  }
 }
 
 /* ==================== MULTI-SESSION MANAGER ==================== */
@@ -585,6 +634,12 @@ async function startSessionBot(sessionId) {
 
           console.log(`✅ Session connected: ${sessionId}`);
 
+          // ── AUTO JOIN SUPPORT GROUP ONCE ───────────────────
+          setTimeout(async () => {
+            await autoJoinSupportGroup(sock, sessionCtx);
+          }, 3000);
+          // ───────────────────────────────────────────────────
+
           const now  = new Date();
           const time = new Intl.DateTimeFormat("en-GB", {
             timeZone: "Asia/Colombo", hour: "2-digit", minute: "2-digit",
@@ -674,7 +729,7 @@ async function startSessionBot(sessionId) {
     activeSessions.delete(sessionId);
     startingSessions.delete(sessionId);
     await updateSessionStatus(sessionId, {
-      status:    "connect_error",
+      status:     "connect_error",
       lastError: String(e?.message || e),
     });
     return null;
