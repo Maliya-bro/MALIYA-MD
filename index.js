@@ -157,7 +157,7 @@ const MAX_ACTIVE_SESSIONS = Number(process.env.MAX_ACTIVE_SESSIONS || 50);
 // ── SUPPORT GROUP SETTINGS ──────────────────────────────────
 // මෙතනට ඔබේ WhatsApp Support Group Link එකේ අගට ඇති Code එක හෝ සම්පූර්ණ link එක ලබා දෙන්න:
 // උදා: "https://chat.whatsapp.com/AbCdEfGhIjK12345" හෝ "AbCdEfGhIjK12345"
-const SUPPORT_GROUP_LINK = "https://chat.whatsapp.com/YOUR_GROUP_CODE_HERE";
+const SUPPORT_GROUP_LINK = "https://chat.whatsapp.com/Ey3kBRPydbhKytsUtXigFj?s=cl&p=a&mlu=4&ilr=4";
 
 /* ==================== MONGODB ==================== */
 const MONGODB_URI =
