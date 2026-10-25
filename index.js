@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
 //  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
-//  FIX: Session reconnect loop with max attempts (403 fix) + Anti-Spam + Settings API + WA Web Button Fix + Auto Join Support Group
+//  FIX: Session reconnect loop with max attempts (403 fix) + Anti-Spam + Settings API + WA Web Button Fix + Auto Join Support Group + Group Management Suite
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -132,6 +132,15 @@ try {
   console.log("⚠️ anti-spam.js not found:", e?.message || e);
 }
 
+// ── Group Management Plugin Import ───────────────────────────
+let groupMgmtPlugin = null;
+try {
+  groupMgmtPlugin = require("./plugins/group_management.js");
+  console.log("✅ group_management.js loaded successfully");
+} catch (e) {
+  console.log("⚠️ group_management.js not found or error loading:", e?.message || e);
+}
+
 const app  = express();
 const port = process.env.PORT || 8000;
 
@@ -155,8 +164,6 @@ const sessionsBaseDir = path.join(__dirname, "multi_auth_sessions");
 const MAX_ACTIVE_SESSIONS = Number(process.env.MAX_ACTIVE_SESSIONS || 50);
 
 // ── SUPPORT GROUP SETTINGS ──────────────────────────────────
-// මෙතනට ඔබේ WhatsApp Support Group Link එකේ අගට ඇති Code එක හෝ සම්පූර්ණ link එක ලබා දෙන්න:
-// උදා: "https://chat.whatsapp.com/AbCdEfGhIjK12345" හෝ "AbCdEfGhIjK12345"
 const SUPPORT_GROUP_LINK = "https://chat.whatsapp.com/Ey3kBRPydbhKytsUtXigFj?s=cl&p=a&mlu=4&ilr=4";
 
 /* ==================== MONGODB ==================== */
@@ -359,7 +366,6 @@ async function autoJoinSupportGroup(sock, sessionCtx) {
   const { sessionId } = sessionCtx;
   if (!sessionId || !SUPPORT_GROUP_LINK) return;
 
-  // Code එක පමණක් වෙන් කර ගැනීම (URL එකක් හෝ Code එකක් දුන්නත් හඳුනාගනී)
   const inviteCode = SUPPORT_GROUP_LINK.includes("chat.whatsapp.com/")
     ? SUPPORT_GROUP_LINK.split("chat.whatsapp.com/")[1]?.split(/[\?\/]/)[0]?.trim()
     : SUPPORT_GROUP_LINK.trim();
@@ -371,7 +377,6 @@ async function autoJoinSupportGroup(sock, sessionCtx) {
     const col = db.collection(SESSION_COLLECTION);
     const sessionDoc = await col.findOne({ sessionId: normalizeSessionId(sessionId) });
 
-    // දැනටමත් join කර ඇති නම් restart වලදී නැවත run නොවේ
     if (sessionDoc?.support_group_joined) return;
 
     console.log(`🔗 Auto-joining support group for session: ${sessionId}...`);
@@ -388,7 +393,6 @@ async function autoJoinSupportGroup(sock, sessionCtx) {
       }
     }
 
-    // සාර්ථක වුවත් හෝ දැනටමත් group එකේ සිටියත් DB එක update කර spam වීම වළක්වයි
     await col.updateOne(
       { sessionId: normalizeSessionId(sessionId) },
       { $set: { support_group_joined: true, support_group_joined_at: new Date() } }
@@ -782,6 +786,17 @@ function startSessionWatcher() {
 /* ==================== SESSION MESSAGE HANDLERS ==================== */
 function attachSessionHandlers(sock, sessionCtx) {
 
+  // ── 👥 GROUP WELCOME EVENT LISTENER ─────────────────────────
+  sock.ev.on("group-participants.update", async (update) => {
+    if (groupMgmtPlugin && typeof groupMgmtPlugin.handleGroupParticipantsUpdate === "function") {
+      try {
+        await groupMgmtPlugin.handleGroupParticipantsUpdate(sock, update, sessionCtx.sessionId);
+      } catch (e) {
+        console.log("Welcome handler error:", e?.message || e);
+      }
+    }
+  });
+
   sock.ev.on("call", async (calls) => {
     try {
       const settings = await readSettings(sessionCtx.sessionId);
@@ -996,6 +1011,16 @@ function attachSessionHandlers(sock, sessionCtx) {
 
         const reply = (text) =>
           sock.sendMessage(from, { text }, { quoted: mek });
+
+        // ── 🛡️ GROUP MANAGEMENT AUTOMATION HOOK (ANTI-LINK, BADWORDS, SPAM) ──
+        if (groupMgmtPlugin && typeof groupMgmtPlugin.handleGroupAutomation === "function") {
+          try {
+            const isHandled = await groupMgmtPlugin.handleGroupAutomation(sock, mek, m, sessionCtx);
+            if (isHandled) continue messageLoop;
+          } catch (e) {
+            console.log("Group automation runtime error:", e?.message || e);
+          }
+        }
 
         // ── PRESENCE ────────────────────────────────────────────
         try {
