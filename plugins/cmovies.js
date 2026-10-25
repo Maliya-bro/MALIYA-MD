@@ -478,7 +478,7 @@ async function getCineSubzLinks(originalUrl) {
   return { error: "File not found on any server." };
 }
 
-/* ================= MOVIE SENDER CORE ================= */
+/* ================= MOVIE SENDER CORE (CLEAN DETAILS ONLY) ================= */
 async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedLink, movie) {
   await sock.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
@@ -486,28 +486,26 @@ async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedL
   const correctPosterUrl = movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE;
   const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
 
-  // 1. Movie Details Card Send
-  let infoCard = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${toSmallCaps(movie.metadata.title)}*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n`;
-  if (movie.metadata.imdb_rate) infoCard += `⭐ *IMDb :* ${movie.metadata.imdb_rate}\n`;
-  if (movie.metadata.duration) infoCard += `⏳ *Duration :* ${movie.metadata.duration}\n`;
-  infoCard += `📊 *Quality :* ${selectedLink.quality}\n`;
-  infoCard += `🎯 *Sending to :* ${targetName}\n\n`;
-  infoCard += `_Please wait while the bot uploads the file..._\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
+  // 1. Group එකට යන Card එක: Bot / Channel තොරතුරු කිසිවක් නැත. චිත්‍රපටයේ විස්තර පමණි.
+  let infoCard = `╭─[ 🎬 *𝗠𝗢𝗩𝗜𝗘 𝗜𝗡𝗙𝗢* ]\n│\n`;
+  infoCard += `├ 🎬 *Title :* ${movie.metadata.title}\n`;
+  if (movie.metadata.imdb_rate) infoCard += `├ ⭐ *IMDb :* ${movie.metadata.imdb_rate}\n`;
+  if (movie.metadata.duration) infoCard += `├ ⏳ *Duration :* ${movie.metadata.duration}\n`;
+  infoCard += `├ 📊 *Quality :* ${selectedLink.quality}\n│\n`;
+  infoCard += `╰──────────────⮞\n> ⏳ _Uploading movie file, please wait..._`;
 
   if (thumbBuffer) {
     await sock.sendMessage(targetJid, {
       image: thumbBuffer,
       caption: infoCard,
-      contextInfo: channelContextInfo(),
     });
   } else {
     await sock.sendMessage(targetJid, {
       text: infoCard,
-      contextInfo: channelContextInfo(),
     });
   }
 
-  // 2. Direct Video Download & Dispatch
+  // 2. Direct Video Download & File Dispatch
   await sock.sendMessage(from, { react: { text: "⬇️", key: m.key } });
   let targetServerLink = selectedLink.directUrl;
 
@@ -531,12 +529,14 @@ async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedL
     const directDownloadUrl = skylinesLinks[0] || pixeldrainLinks[0] || supercloudLinks[0] || allLinks[0];
 
     const cleanTitle = sanitizeFileName(movie.metadata.title);
-    const finalFileName = `${sanitizeFileName(targetName)}_${cleanTitle}.mp4`;
+    const finalFileName = `${cleanTitle}.mp4`;
 
-    let captionText = `🎬 *${toSmallCaps(movie.metadata.title)}*\n\n📊 *Quality :* ${selectedLink.quality}\n`;
-    if (skylinesLinks[0]) captionText += `🌟 *Direct Link :* ${skylinesLinks[0]}\n`;
-    if (pixeldrainLinks[0]) captionText += `⚡ *Pixeldrain :* ${pixeldrainLinks[0]}\n`;
-    captionText += `\n🍿 *Enjoy Your Movie!*\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${BRAND_BASE}`;
+    // Group එකට යන Video Document එක: Pure Movie details පමණි
+    let captionText = `╭─[ 🎬 *${movie.metadata.title}* ]\n│\n`;
+    captionText += `├ 📊 *Quality :* ${selectedLink.quality}\n`;
+    if (movie.metadata.imdb_rate) captionText += `├ ⭐ *IMDb :* ${movie.metadata.imdb_rate}\n`;
+    if (movie.metadata.duration) captionText += `├ ⏳ *Duration :* ${movie.metadata.duration}\n│\n`;
+    captionText += `╰──────────────⮞\n🍿 *Enjoy Your Movie!*`;
 
     await sock.sendMessage(from, { react: { text: "⬆️", key: m.key } });
 
@@ -546,17 +546,18 @@ async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedL
         mimetype: "video/mp4",
         fileName: finalFileName,
         caption: captionText,
-        contextInfo: channelContextInfo(),
       };
       if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
 
+      // Group එකට Document එක යැවීම (No channelContextInfo)
       await sock.sendMessage(targetJid, docPayload);
 
+      // Bot එක run කරන user ට Confirmation එක යැවීම
       await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
       await sock.sendMessage(
         from,
         {
-          text: `╭─[ ✅ *𝗦𝗨𝗖𝗖𝗘𝗦𝗦* ]\n│\n├ 📌 _Movie sent to: *${targetName}*_ \n╰──────────────⮞`,
+          text: `╭─[ ✅ *𝗦𝗨𝗖𝗖𝗘𝗦𝗦* ]\n│\n├ 📌 _Movie successfully sent to: *${targetName}*_ \n╰──────────────⮞`,
           contextInfo: channelContextInfo(),
         },
         { quoted: originalMek }
@@ -564,7 +565,6 @@ async function sendMovieToGroup(sock, originalMek, m, from, targetJid, selectedL
     } else {
       await sock.sendMessage(targetJid, {
         text: captionText,
-        contextInfo: channelContextInfo(),
       });
       await sock.sendMessage(from, { react: { text: "✅", key: m.key } });
     }
