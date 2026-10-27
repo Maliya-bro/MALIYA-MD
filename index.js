@@ -176,6 +176,15 @@ try {
 
 const app = express();
 const port = process.env.PORT || 8000;
+// ── 🚨 EMERGENCY MEMORY GUARD (RAM 420MB පනිද්දි Auto-Clean කිරීම) ──
+setInterval(() => {
+  const mem = process.memoryUsage();
+  const rssMB = mem.rss / 1024 / 1024;
+  if (rssMB > 420 && global.gc) {
+    global.gc();
+  }
+}, 15000);
+// ─────────────────────────────────────────────────────────────────
 
 /* ==================== MIDDLEWARES ==================== */
 app.use(
