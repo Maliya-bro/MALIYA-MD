@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
-//  MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
-//  FIX: Session reconnect loop with max attempts (403 fix) + Anti-Spam + Settings API + WA Web Button Fix + Auto Join Support Group + Group Management Suite
+//   MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
+//   FIX: Session reconnect loop with max attempts (403 fix) + Anti-Spam + Settings API + WA Web Button Fix + Auto Join Support Group + Group Management Suite
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD ==================== */
@@ -39,7 +39,7 @@ process.on("uncaughtException", (err) => {
 // Suppress libsignal Bad MAC spam to prevent Railway rate limit flooding
 const originalConsoleError = console.error;
 console.error = (...args) => {
-  const errStr = args.map(a => String(a?.message || a || "")).join(" ");
+  const errStr = args.map((a) => String(a?.message || a || "")).join(" ");
   if (
     errStr.includes("Bad MAC") ||
     errStr.includes("Session error") ||
@@ -63,18 +63,18 @@ const {
   Browsers,
 } = baileysPkg;
 
-const fs      = require("fs");
-const P       = require("pino");
+const fs = require("fs");
+const P = require("pino");
 const express = require("express");
-const path    = require("path");
+const path = require("path");
 const NodeCache = require("node-cache");
 const { MongoClient } = require("mongodb");
 
-const cors                = require("cors");
-const os                  = require("os");
-const config              = require("./config");
+const cors = require("cors");
+const os = require("os");
+const config = require("./config");
 const { readSettings, isWorkAllowed } = require("./lib/botSettings");
-const { sms }             = require("./lib/msg");
+const { sms } = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 const { handleSilentAutomation } = require("./plugins/silent_automation.js");
 
@@ -101,7 +101,7 @@ try {
 
 // ── Plugins ──────────────────────────────────────────────────
 const { handleAutoMsg } = require("./plugins/auto_msg.js");
-const autoReactPlugin   = require("./plugins/auto-react.js");
+const autoReactPlugin = require("./plugins/auto-react.js");
 
 let pdfScannerPlugin = null;
 try {
@@ -141,23 +141,25 @@ try {
   console.log("⚠️ group_management.js not found or error loading:", e?.message || e);
 }
 
-const app  = express();
+const app = express();
 const port = process.env.PORT || 8000;
 
 /* ==================== MIDDLEWARES ==================== */
-app.use(cors({ 
-  origin: function(origin, callback) {
-    callback(null, true);
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "x-settings-token"]
-}));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      callback(null, true);
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-settings-token"],
+  })
+);
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-const prefix          = ".";
+const prefix = ".";
 const BOT_OWNER_NAME = config.OWNER_NAME || "Malindu Nadith";
 const baseOwnerNumber = [String(config.BOT_OWNER || "").replace(/\D/g, "")].filter(Boolean);
 const sessionsBaseDir = path.join(__dirname, "multi_auth_sessions");
@@ -173,11 +175,11 @@ const MONGODB_URI =
 
 console.log("🔗 MongoDB URI in use:", MONGODB_URI.replace(/:([^@]+)@/, ":****@"));
 
-const MONGODB_DB         = process.env.MONGODB_DB         || "maliya_md";
+const MONGODB_DB = process.env.MONGODB_DB || "maliya_md";
 const SESSION_COLLECTION = process.env.SESSION_COLLECTION || "wa_sessions";
 
 let cachedClient = null;
-let cachedDb     = null;
+let cachedDb = null;
 
 async function getDb() {
   if (cachedDb) return cachedDb;
@@ -199,18 +201,18 @@ function safeSessionFolderName(sessionId) {
 }
 
 async function getSessionById(sessionId) {
-  const db  = await getDb();
+  const db = await getDb();
   const col = db.collection(SESSION_COLLECTION);
   return col.findOne({ sessionId: normalizeSessionId(sessionId) });
 }
 
 async function getConnectableSessions(limit = MAX_ACTIVE_SESSIONS) {
-  const db  = await getDb();
+  const db = await getDb();
   const col = db.collection(SESSION_COLLECTION);
   return col
     .find({
-      connectBot:  true,
-      status:      { $nin: ["logged_out", "deleted", "disabled", "invalid"] },
+      connectBot: true,
+      status: { $nin: ["logged_out", "deleted", "disabled", "invalid", "banned"] },
       primaryFile: { $exists: true },
     })
     .sort({ updatedAt: -1, createdAt: -1 })
@@ -221,7 +223,7 @@ async function getConnectableSessions(limit = MAX_ACTIVE_SESSIONS) {
 async function updateSessionStatus(sessionId, data = {}) {
   if (!sessionId) return;
   try {
-    const db  = await getDb();
+    const db = await getDb();
     const col = db.collection(SESSION_COLLECTION);
     await col.updateOne(
       { sessionId: normalizeSessionId(sessionId) },
@@ -232,9 +234,43 @@ async function updateSessionStatus(sessionId, data = {}) {
   }
 }
 
+// ── BAN / DISABLE INVALID SESSION (METHOD A) ─────────────────
+async function markSessionBanned(sessionId, reason = "banned_403") {
+  if (!sessionId) return;
+  const cleanId = normalizeSessionId(sessionId);
+
+  activeSessions.delete(cleanId);
+  startingSessions.delete(cleanId);
+  if (reconnectTimers.has(cleanId)) {
+    clearTimeout(reconnectTimers.get(cleanId));
+    reconnectTimers.delete(cleanId);
+  }
+
+  await cleanupSessionFolder(cleanId);
+
+  try {
+    const db = await getDb();
+    const col = db.collection(SESSION_COLLECTION);
+    await col.updateOne(
+      { sessionId: cleanId },
+      {
+        $set: {
+          connectBot: false,
+          status: "banned",
+          banReason: reason,
+          updatedAt: new Date(),
+        },
+      }
+    );
+    console.log(`🚫 [SESSION BANNED/DISABLED] ${cleanId} marked as banned (Reason: ${reason})`);
+  } catch (e) {
+    console.log(`⚠️ Error disabling session in DB (${cleanId}):`, e?.message || e);
+  }
+}
+
 async function restoreCredsToFile(sessionId, targetFilePath) {
   const doc = await getSessionById(sessionId);
-  if (!doc)                        throw new Error(`Session not found in MongoDB: ${sessionId}`);
+  if (!doc) throw new Error(`Session not found in MongoDB: ${sessionId}`);
   if (!doc.primaryFile?.data) throw new Error(`No primaryFile.data for session: ${sessionId}`);
   fs.mkdirSync(path.dirname(targetFilePath), { recursive: true });
   fs.writeFileSync(targetFilePath, Buffer.from(doc.primaryFile.data, "base64"));
@@ -253,16 +289,16 @@ function scheduleCredsSync(sessionId, credsPath, delayMs = 2000) {
     try {
       if (!fs.existsSync(credsPath)) return;
       const data = fs.readFileSync(credsPath).toString("base64");
-      const db   = await getDb();
-      const col  = db.collection(SESSION_COLLECTION);
+      const db = await getDb();
+      const col = db.collection(SESSION_COLLECTION);
       await col.updateOne(
         { sessionId: normalizeSessionId(sessionId) },
         {
           $set: {
-            "primaryFile.name":     "creds.json",
+            "primaryFile.name": "creds.json",
             "primaryFile.mimeType": "application/json",
-            "primaryFile.data":     data,
-            updatedAt:              new Date(),
+            "primaryFile.data": data,
+            updatedAt: new Date(),
           },
         }
       );
@@ -284,16 +320,16 @@ let pluginsLoaded = false;
 function loadCommandPluginsOnce() {
   if (pluginsLoaded) return;
   pluginsLoaded = true;
-  
+
   let successCount = 0;
   let errorCount = 0;
 
   try {
     fs.readdirSync("./plugins/").forEach((plugin) => {
-      if (plugin === "auto_msg.js")   return;
+      if (plugin === "auto_msg.js") return;
       if (plugin === "antidelete.js") return;
-      if (plugin === "anti-spam.js")  return;
-      
+      if (plugin === "anti-spam.js") return;
+
       if (plugin.endsWith(".js")) {
         try {
           require(`./plugins/${plugin}`);
@@ -320,7 +356,11 @@ loadCommandPluginsOnce();
 
 /* ==================== HELPERS ==================== */
 function safeJsonParse(str) {
-  try { return JSON.parse(str); } catch { return null; }
+  try {
+    return JSON.parse(str);
+  } catch {
+    return null;
+  }
 }
 
 function getBodyFromMessage(message) {
@@ -350,9 +390,14 @@ function getBodyFromMessage(message) {
     const parsed = safeJsonParse(paramsJson);
     if (parsed) {
       return String(
-        parsed.id || parsed.selectedId || parsed.selectedRowId ||
-        parsed.title || parsed.display_text || parsed.text ||
-        parsed.name || paramsJson
+        parsed.id ||
+          parsed.selectedId ||
+          parsed.selectedRowId ||
+          parsed.title ||
+          parsed.display_text ||
+          parsed.text ||
+          parsed.name ||
+          paramsJson
       ).trim();
     }
     return String(paramsJson).trim();
@@ -403,22 +448,22 @@ async function autoJoinSupportGroup(sock, sessionCtx) {
 }
 
 /* ==================== MULTI-SESSION MANAGER ==================== */
-const activeSessions   = new Map();
+const activeSessions = new Map();
 const reconnectTimers = new Map();
 const startingSessions = new Set();
-let   watcherStarted   = false;
+let watcherStarted = false;
 
 global.__maliya_active_sessions = activeSessions;
 
 function getSessionPaths(sessionId) {
-  const safeId    = safeSessionFolderName(sessionId);
-  const authDir   = path.join(sessionsBaseDir, safeId);
+  const safeId = safeSessionFolderName(sessionId);
+  const authDir = path.join(sessionsBaseDir, safeId);
   const credsPath = path.join(authDir, "creds.json");
   return { authDir, credsPath, safeId };
 }
 
 function getOwnerNumberForSock(sock) {
-  const jid    = sock.user?.id || "";
+  const jid = sock.user?.id || "";
   const number = String(jid).split("@")[0].split(":")[0].replace(/\D/g, "");
   return number ? [number] : [...baseOwnerNumber];
 }
@@ -431,18 +476,15 @@ async function cleanupSessionFolder(sessionId) {
 }
 
 async function scheduleReconnect(sessionId, delayMs = 5000) {
-  if (!sessionId)                       return;
+  if (!sessionId) return;
   if (reconnectTimers.has(sessionId)) return;
 
   const session = activeSessions.get(sessionId);
   const attempts = session?.reconnectAttempts || 0;
+
   if (attempts >= 3) {
-    console.log(`⛔ Max reconnect attempts (${attempts}) reached for ${sessionId}. Marking as invalid.`);
-    await updateSessionStatus(sessionId, {
-      status: "invalid",
-      connectBot: false,
-    });
-    activeSessions.delete(sessionId);
+    console.log(`⛔ Max reconnect attempts (${attempts}) reached for ${sessionId}. Disabling bot.`);
+    await markSessionBanned(sessionId, "Max Reconnect Attempts Exceeded");
     return;
   }
 
@@ -484,29 +526,29 @@ async function startSessionBot(sessionId) {
     }
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
-    const { version }          = await fetchLatestBaileysVersion();
+    const { version } = await fetchLatestBaileysVersion();
 
     const sessionCtx = {
       sessionId,
       authDir,
       credsPath,
       ownerNumber: [...baseOwnerNumber],
-      connected:   false,
-      connecting:  true,
-      sock:        null,
+      connected: false,
+      connecting: true,
+      sock: null,
       reconnectAttempts: 0,
     };
 
     const sock = makeWASocket({
-      logger:                         P({ level: "fatal" }),
-      printQRInTerminal:              false,
-      browser:                        Browsers.macOS("Desktop"),
-      auth:                           state,
+      logger: P({ level: "fatal" }),
+      printQRInTerminal: false,
+      browser: Browsers.macOS("Desktop"),
+      auth: state,
       version,
       msgRetryCounterCache,
-      syncFullHistory:                false,
-      markOnlineOnConnect:            false,
-      fireInitQueries:                false,
+      syncFullHistory: false,
+      markOnlineOnConnect: false,
+      fireInitQueries: false,
       generateHighQualityLinkPreview: false,
       getMessage: async () => undefined,
       patchMessageBeforeSending: (message) => {
@@ -625,15 +667,15 @@ async function startSessionBot(sessionId) {
         const { connection, lastDisconnect } = update;
 
         if (connection === "open") {
-          sessionCtx.connected   = true;
-          sessionCtx.connecting  = false;
+          sessionCtx.connected = true;
+          sessionCtx.connecting = false;
           sessionCtx.ownerNumber = getOwnerNumberForSock(sock);
           sessionCtx.reconnectAttempts = 0;
 
           await updateSessionStatus(sessionId, {
-            status:     "connected",
+            status: "connected",
             connectBot: true,
-            botJid:     sock.user?.id || null,
+            botJid: sock.user?.id || null,
           });
 
           console.log(`✅ Session connected: ${sessionId}`);
@@ -644,14 +686,19 @@ async function startSessionBot(sessionId) {
           }, 3000);
           // ───────────────────────────────────────────────────
 
-          const now  = new Date();
+          const now = new Date();
           const time = new Intl.DateTimeFormat("en-GB", {
-            timeZone: "Asia/Colombo", hour: "2-digit", minute: "2-digit",
-            second: "2-digit", hour12: true,
+            timeZone: "Asia/Colombo",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: true,
           }).format(now);
           const date = new Intl.DateTimeFormat("en-GB", {
-            timeZone: "Asia/Colombo", year: "numeric",
-            month: "2-digit", day: "2-digit",
+            timeZone: "Asia/Colombo",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
           }).format(now);
 
           const settings = await readSettings(sessionCtx.sessionId);
@@ -692,28 +739,43 @@ async function startSessionBot(sessionId) {
         }
 
         if (connection === "close") {
-          sessionCtx.connected  = false;
+          sessionCtx.connected = false;
           sessionCtx.connecting = false;
 
           const code = lastDisconnect?.error?.output?.statusCode;
           activeSessions.delete(sessionId);
 
-          if (code !== DisconnectReason.loggedOut) {
-            sessionCtx.reconnectAttempts = (sessionCtx.reconnectAttempts || 0) + 1;
-            console.log(`🔁 Session disconnected, reconnecting: ${sessionId} (code: ${code}, attempt: ${sessionCtx.reconnectAttempts})`);
-            await updateSessionStatus(sessionId, {
-              status:     "disconnected",
-              connectBot: true,
-            });
-            await scheduleReconnect(sessionId, 5000);
-          } else {
+          // WhatsApp 403 (Forbidden) හෝ 401 (Unauthorized) ආවොත් කෙලින්ම Banned/False කරන්න
+          if (code === 403 || code === 401) {
+            console.log(`⛔ WhatsApp Session Revoked/Banned (${code}) for: ${sessionId}`);
+            await markSessionBanned(sessionId, `WhatsApp Revoked (Code ${code})`);
+            return;
+          }
+
+          if (code === DisconnectReason.loggedOut) {
             console.log(`❌ Session logged out: ${sessionId}`);
             await updateSessionStatus(sessionId, {
-              status:     "logged_out",
+              status: "logged_out",
               connectBot: false,
             });
             await cleanupSessionFolder(sessionId);
+            return;
           }
+
+          // සාමාන්‍ය network drop එකක් නම් reconnect attempts 3ක් බලා ඊට වැඩි නම් Ban කර නවත්වන්න
+          sessionCtx.reconnectAttempts = (sessionCtx.reconnectAttempts || 0) + 1;
+          if (sessionCtx.reconnectAttempts >= 3) {
+            console.log(`⛔ Max reconnect attempts reached for ${sessionId}. Disabling bot.`);
+            await markSessionBanned(sessionId, "Max Reconnect Failed");
+            return;
+          }
+
+          console.log(`🔁 Session disconnected, reconnecting: ${sessionId} (code: ${code}, attempt: ${sessionCtx.reconnectAttempts})`);
+          await updateSessionStatus(sessionId, {
+            status: "disconnected",
+            connectBot: true,
+          });
+          await scheduleReconnect(sessionId, 5000);
         }
       } catch (e) {
         console.log("⚠️ connection.update handler error:", e?.message || e);
@@ -723,7 +785,7 @@ async function startSessionBot(sessionId) {
     attachSessionHandlers(sock, sessionCtx);
 
     await updateSessionStatus(sessionId, {
-      status:     "connecting",
+      status: "connecting",
       connectBot: true,
     });
 
@@ -733,7 +795,7 @@ async function startSessionBot(sessionId) {
     activeSessions.delete(sessionId);
     startingSessions.delete(sessionId);
     await updateSessionStatus(sessionId, {
-      status:     "connect_error",
+      status: "connect_error",
       lastError: String(e?.message || e),
     });
     return null;
@@ -755,19 +817,21 @@ function startSessionWatcher() {
     if (tickRunning) return;
     tickRunning = true;
     try {
-      const db  = await getDb();
+      const db = await getDb();
       const col = db.collection(SESSION_COLLECTION);
 
-      const docs = await col.find({
-        connectBot:  true,
-        primaryFile: { $exists: true },
-        status:      { $nin: ["logged_out", "deleted", "disabled", "invalid"] },
-      }).toArray();
+      const docs = await col
+        .find({
+          connectBot: true,
+          primaryFile: { $exists: true },
+          status: { $nin: ["logged_out", "deleted", "disabled", "invalid", "banned"] },
+        })
+        .toArray();
 
       for (const doc of docs) {
         const id = doc.sessionId;
-        if (!id)                        continue;
-        if (activeSessions.has(id))   continue;
+        if (!id) continue;
+        if (activeSessions.has(id)) continue;
         if (startingSessions.has(id)) continue;
         console.log("🔌 Connecting NEW session:", id);
         await startSessionBot(id);
@@ -785,7 +849,6 @@ function startSessionWatcher() {
 
 /* ==================== SESSION MESSAGE HANDLERS ==================== */
 function attachSessionHandlers(sock, sessionCtx) {
-
   // ── 👥 GROUP WELCOME EVENT LISTENER ─────────────────────────
   sock.ev.on("group-participants.update", async (update) => {
     if (groupMgmtPlugin && typeof groupMgmtPlugin.handleGroupParticipantsUpdate === "function") {
@@ -803,7 +866,7 @@ function attachSessionHandlers(sock, sessionCtx) {
       if (!settings.auto_reject_calls) return;
 
       for (const call of calls) {
-        const callId   = call.id;
+        const callId = call.id;
         const callerId = call.from;
         if (!callId || !callerId) continue;
         try {
@@ -828,7 +891,7 @@ function attachSessionHandlers(sock, sessionCtx) {
         if (!mek?.message) continue messageLoop;
 
         const msgTime = mek.messageTimestamp;
-        if (msgTime && (Math.floor(Date.now() / 1000) - msgTime) > 60) {
+        if (msgTime && Math.floor(Date.now() / 1000) - msgTime > 60) {
           continue messageLoop;
         }
 
@@ -840,7 +903,9 @@ function attachSessionHandlers(sock, sessionCtx) {
         if (global.pluginHooks) {
           for (const plugin of global.pluginHooks) {
             if (plugin.onMessage) {
-              try { await plugin.onMessage(sock, mek); } catch (_) {}
+              try {
+                await plugin.onMessage(sock, mek);
+              } catch (_) {}
             }
           }
         }
@@ -854,7 +919,7 @@ function attachSessionHandlers(sock, sessionCtx) {
           !mek.message?.reactionMessage
         ) {
           const participantRaw = mek.key.participant;
-          const id             = mek.key.id;
+          const id = mek.key.id;
           if (!participantRaw || !id) continue messageLoop;
           const participant = participantRaw;
           if (mek.key.fromMe) continue messageLoop;
@@ -891,7 +956,7 @@ function attachSessionHandlers(sock, sessionCtx) {
                 "🙏", "💅", "✨", "⭐", "🌟", "💫", "⚡", "🎉", "🎊", "🥳",
                 "🎈", "🎯", "🏆", "💯", "🔞", "❓", "❗", "💢", "🐱", "🐶",
                 "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐸", "🍿", "🍕",
-                "🍔", "🌮", "🍩", "🍪", "☕", "🍺", "👀", "👁️", "💩", "👽"
+                "🍔", "🌮", "🍩", "🍪", "☕", "🍺", "👀", "👁️", "💩", "👽",
               ];
               const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
               await new Promise((r) => setTimeout(r, 1500));
@@ -918,14 +983,15 @@ function attachSessionHandlers(sock, sessionCtx) {
             (mek.message?.imageMessage || mek.message?.videoMessage)
           ) {
             try {
-              const msgType  = mek.message.imageMessage ? "imageMessage" : "videoMessage";
+              const msgType = mek.message.imageMessage ? "imageMessage" : "videoMessage";
               const mediaMsg = mek.message[msgType];
-              const stream   = await downloadContentFromMessage(
-                mediaMsg, msgType === "imageMessage" ? "image" : "video"
+              const stream = await downloadContentFromMessage(
+                mediaMsg,
+                msgType === "imageMessage" ? "image" : "video"
               );
               let buffer = Buffer.from([]);
               for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-              
+
               const mimetype =
                 mediaMsg.mimetype ||
                 (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
@@ -940,23 +1006,17 @@ function attachSessionHandlers(sock, sessionCtx) {
               const ownerJid = ownerNumber + "@s.whatsapp.net";
 
               if (msgType === "imageMessage") {
-                await sock.sendMessage(
-                  ownerJid,
-                  {
-                    image: buffer,
-                    mimetype,
-                    caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
-                  }
-                );
+                await sock.sendMessage(ownerJid, {
+                  image: buffer,
+                  mimetype,
+                  caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`,
+                });
               } else {
-                await sock.sendMessage(
-                  ownerJid,
-                  {
-                    video: buffer,
-                    mimetype,
-                    caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`
-                  }
-                );
+                await sock.sendMessage(ownerJid, {
+                  video: buffer,
+                  mimetype,
+                  caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`,
+                });
               }
 
               console.log(`✅ Status downloaded and sent to owner: ${participant}`);
@@ -1009,8 +1069,7 @@ function attachSessionHandlers(sock, sessionCtx) {
 
         const pushName = mek.pushName || m?.pushName || senderNumber;
 
-        const reply = (text) =>
-          sock.sendMessage(from, { text }, { quoted: mek });
+        const reply = (text) => sock.sendMessage(from, { text }, { quoted: mek });
 
         // ── 🛡️ GROUP MANAGEMENT AUTOMATION HOOK (ANTI-LINK, BADWORDS, SPAM) ──
         if (groupMgmtPlugin && typeof groupMgmtPlugin.handleGroupAutomation === "function") {
@@ -1025,8 +1084,8 @@ function attachSessionHandlers(sock, sessionCtx) {
         // ── PRESENCE ────────────────────────────────────────────
         try {
           const presenceMode = (await readSettings(sessionCtx.sessionId)).always_presence;
-          if (presenceMode === "typing")          await sock.sendPresenceUpdate("composing",  from);
-          else if (presenceMode === "recording") await sock.sendPresenceUpdate("recording",  from);
+          if (presenceMode === "typing") await sock.sendPresenceUpdate("composing", from);
+          else if (presenceMode === "recording") await sock.sendPresenceUpdate("recording", from);
         } catch (_) {}
 
         // ── WORK SCOPE CHECK ────────────────────────────────────
@@ -1051,7 +1110,7 @@ function attachSessionHandlers(sock, sessionCtx) {
           try {
             const isAllowed = await antiSpamPlugin.handleAntiSpam(sock, mek, m, {
               from, sender, senderNumber, isOwner, reply,
-              sessionId: sessionCtx.sessionId
+              sessionId: sessionCtx.sessionId,
             });
             if (!isAllowed) continue messageLoop;
           } catch (e) {
@@ -1069,16 +1128,16 @@ function attachSessionHandlers(sock, sessionCtx) {
         if (!isCmd) {
           try {
             const handled = await handleAutoMsg({
-              conn:               sock,
+              conn: sock,
               mek,
               m,
               sender,
               pushName,
               body,
               isGroup,
-              sessionOwnerPhone:  sessionCtx.ownerNumber[0] || "",
-              sessionOwnerName:   BOT_OWNER_NAME,
-              sessionId:          sessionCtx.sessionId,
+              sessionOwnerPhone: sessionCtx.ownerNumber[0] || "",
+              sessionOwnerName: BOT_OWNER_NAME,
+              sessionId: sessionCtx.sessionId,
             });
             if (handled) continue messageLoop;
           } catch (e) {
@@ -1095,11 +1154,11 @@ function attachSessionHandlers(sock, sessionCtx) {
             });
             if (res?.handled && !res?.newBody) continue messageLoop;
             if (res?.handled && res?.newBody) {
-              body        = String(res.newBody || "");
-              isCmd       = body.startsWith(prefix);
+              body = String(res.newBody || "");
+              isCmd = body.startsWith(prefix);
               commandName = isCmd ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase() : "";
-              args        = body.trim().split(/ +/).slice(1);
-              q           = args.join(" ");
+              args = body.trim().split(/ +/).slice(1);
+              q = args.join(" ");
             }
           }
         } catch (e) {
@@ -1124,13 +1183,13 @@ function attachSessionHandlers(sock, sessionCtx) {
             if (typeof h.filter !== "function") continue;
             let ok = false;
             try {
-              ok = h.filter(body, { 
-                sender, 
-                from, 
-                isGroup, 
-                senderNumber, 
-                key: mek.key, 
-                mek: mek
+              ok = h.filter(body, {
+                sender,
+                from,
+                isGroup,
+                senderNumber,
+                key: mek.key,
+                mek: mek,
               });
             } catch (e) {
               console.log("Filter error:", e?.message);
@@ -1138,18 +1197,20 @@ function attachSessionHandlers(sock, sessionCtx) {
             }
             if (ok) {
               if (h.react) {
-                try { await sock.sendMessage(from, { react: { text: h.react, key: mek.key } }); } catch (_) {}
+                try {
+                  await sock.sendMessage(from, { react: { text: h.react, key: mek.key } });
+                } catch (_) {}
               }
               try {
                 await h.function(sock, mek, m, {
-                  from, 
-                  body, 
-                  args, 
-                  q, 
-                  sender, 
-                  senderNumber, 
-                  isGroup, 
-                  isOwner, 
+                  from,
+                  body,
+                  args,
+                  q,
+                  sender,
+                  senderNumber,
+                  isGroup,
+                  isOwner,
                   reply,
                   sessionId: sessionCtx.sessionId,
                   pushname: pushName,
@@ -1174,9 +1235,17 @@ function attachSessionHandlers(sock, sessionCtx) {
           if (cmd) {
             if (cmd.react) sock.sendMessage(from, { react: { text: cmd.react, key: mek.key } });
             await cmd.function(sock, mek, m, {
-              from, body, args, q, sender, senderNumber, isGroup, isOwner, reply,
+              from,
+              body,
+              args,
+              q,
+              sender,
+              senderNumber,
+              isGroup,
+              isOwner,
+              reply,
               sessionOwnerPhone: sessionCtx.ownerNumber[0] || "",
-              sessionOwnerName:  BOT_OWNER_NAME,
+              sessionOwnerName: BOT_OWNER_NAME,
               sessionId: sessionCtx.sessionId,
             });
           }
@@ -1191,7 +1260,9 @@ function attachSessionHandlers(sock, sessionCtx) {
     if (global.pluginHooks) {
       for (const plugin of global.pluginHooks) {
         if (typeof plugin.onDelete === "function") {
-          try { await plugin.onDelete(sock, updates); } catch (e) {
+          try {
+            await plugin.onDelete(sock, updates);
+          } catch (e) {
             console.log("AntiDelete onDelete error:", e?.message);
           }
         }
@@ -1207,16 +1278,16 @@ function attachSessionHandlers(sock, sessionCtx) {
           if (pollName) {
             try {
               await handleAutoMsg({
-                conn:              sock,
-                mek:               { key, message: {} },
-                m:                 {},
-                sender:            key.participant || key.remoteJid,
-                pushName:          "",
-                body:              pollName,
-                isGroup:           key.remoteJid.endsWith("@g.us"),
+                conn: sock,
+                mek: { key, message: {} },
+                m: {},
+                sender: key.participant || key.remoteJid,
+                pushName: "",
+                body: pollName,
+                isGroup: key.remoteJid.endsWith("@g.us"),
                 sessionOwnerPhone: sessionCtx.ownerNumber[0] || "",
-                sessionOwnerName:  BOT_OWNER_NAME,
-                sessionId:         sessionCtx.sessionId,
+                sessionOwnerName: BOT_OWNER_NAME,
+                sessionId: sessionCtx.sessionId,
               });
             } catch (_) {}
           }
@@ -1243,12 +1314,12 @@ app.get("/sessions", async (req, res) => {
   try {
     const docs = await getConnectableSessions(200);
     res.json({
-      active:   activeSessions.size,
-      max:      MAX_ACTIVE_SESSIONS,
+      active: activeSessions.size,
+      max: MAX_ACTIVE_SESSIONS,
       sessions: docs.map((d) => ({
         sessionId: d.sessionId,
-        phone:     d.phone     || null,
-        status:    d.status    || null,
+        phone: d.phone || null,
+        status: d.status || null,
         updatedAt: d.updatedAt || null,
       })),
     });
