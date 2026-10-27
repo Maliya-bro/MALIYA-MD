@@ -27,7 +27,6 @@ async function getDb() {
   return cachedDb;
 }
 
-// Phone Number එකෙන් Permanent Target ID එකක් හදා ගැනීම (Bot reconnect කලත් නැති නොවේ)
 async function resolvePermanentTargetId(sessionId, sender) {
   const cleanSenderPhone = sender ? String(sender).split("@")[0].replace(/\D/g, "") : null;
   const id = String(sessionId || "default").trim() || "default";
@@ -50,12 +49,10 @@ async function resolvePermanentTargetId(sessionId, sender) {
     console.log("Session lookup error:", e?.message || e);
   }
 
-  // Session ID එකක් සොයාගත නොහැකි නම් sender ගේ Phone එක භාවිත කරයි
   if (cleanSenderPhone) return `PHONE::${cleanSenderPhone}`;
   return id;
 }
 
-// සීමා පරීක්ෂා කිරීම (විනාඩි 5ට 3යි, දිනකට 700MB)
 async function verifyUploadLimits(targetId, newSizeBytes) {
   const db = await getDb();
   const col = db.collection(UPLOADS_COLLECTION);
@@ -64,7 +61,6 @@ async function verifyUploadLimits(targetId, newSizeBytes) {
   const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000);
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  // 1. විනාඩි 5 තුළ ගොනු 3 සීමාව
   const recentCount = await col.countDocuments({
     sessionId: targetId,
     uploadedAt: { $gte: fiveMinAgo }
@@ -77,9 +73,8 @@ async function verifyUploadLimits(targetId, newSizeBytes) {
     };
   }
 
-  // 2. දිනකට 700 MB සීමාව
   const dailyUploads = await col.aggregate([
-    { $match: { sessionId: targetId, uploadedAt: {$gte: startOfDay } } },
+    { $match: { sessionId: targetId, uploadedAt: { $gte: startOfDay } } },
     { $group: { _id: null, totalBytes: { $sum: "$sizeBytes" } } }
   ]).toArray();
 
@@ -95,7 +90,6 @@ async function verifyUploadLimits(targetId, newSizeBytes) {
   return { allowed: true };
 }
 
-// Upload විස්තර සේව් කිරීම (Permanent target ID එක යටතේ)
 async function saveUploadRecord(targetId, data) {
   const db = await getDb();
   await db.collection(UPLOADS_COLLECTION).insertOne({
@@ -105,7 +99,6 @@ async function saveUploadRecord(targetId, data) {
   });
 }
 
-// Helpers
 function channelContextInfo() {
   return {
     forwardingScore: 999,
@@ -216,9 +209,30 @@ cmd(
         const fileId = fileInfo.metadata.id;
         const readableSize = fileInfo.metadata.size?.readable || formatBytes(fileSizeBytes);
 
+        // Images සඳහා Direct View/Image Address URL එක සකස් කිරීම
+        const isImage = mime.startsWith("image/");
+        let viewLink = null;
+
+        if (isImage) {
+          if (fileInfo.url.raw) {
+            viewLink = fileInfo.url.raw;
+          } else if (fileInfo.url.download) {
+            viewLink = fileInfo.url.download;
+          } else {
+            // API එකෙන් කෙලින්ම නොලැබුණහොත් info endpoint එකෙන් direct download link එක ලබා ගැනීම
+            try {
+              const info = await axios.get(`https://api.onlyfiles.com/v1/file/${fileId}/info`, { timeout: 10000 });
+              viewLink = info.data?.data?.file?.url?.raw || info.data?.data?.file?.url?.download || null;
+            } catch (err) {
+              viewLink = null;
+            }
+          }
+        }
+
         await saveUploadRecord(permanentTargetId, {
           url: fullUrl,
           shortUrl: shortUrl,
+          viewLink: viewLink,
           fileId: fileId,
           fileName: fileInfo.metadata?.name || fileName,
           sizeBytes: fileSizeBytes,
@@ -227,6 +241,11 @@ cmd(
         });
 
         await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+
+        // Image එකක් නම් පමණක් View Link කොටස output එකට එක් කරයි
+        const viewLinkSection = isImage && viewLink
+          ? `├ 🖼️ *${toSmallCaps("View Link:")}*\n│  ${viewLink}\n│\n`
+          : "";
 
         const outputMsg = 
 `╭[ 🚀 *${toSmallCaps("FILE UPLOADED")}* ]┈➤
@@ -241,7 +260,7 @@ cmd(
 ├ 🌐 *${toSmallCaps("Short URL:")}*
 │  ${shortUrl}
 │
-├ 🆔 *${toSmallCaps("File ID:")}* \`${fileId}\`
+${viewLinkSection}├ 🆔 *${toSmallCaps("File ID:")}* \`${fileId}\`
 │
 ╰[ 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ ]┈➤`;
 
@@ -350,7 +369,6 @@ cmd(
 
       await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
-      // 1. Info API එකෙන් Metadata ලබා ගැනීම
       const infoRes = await axios.get(`https://api.onlyfiles.com/v1/file/${fileId}/info`, { timeout: 20000 });
       if (!infoRes.data || !infoRes.data.status || !infoRes.data.data?.file) {
         await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
@@ -362,7 +380,6 @@ cmd(
       const fileName = fileInfo.metadata.name || `file_${fileId}`;
       const fileSize = fileInfo.metadata.size.readable || "Unknown";
 
-      // 2. ගොනුව බාගත කර WhatsApp එකට යැවීම
       const resStream = await axios.get(downloadUrl, {
         responseType: "arraybuffer",
         maxContentLength: Infinity,
@@ -432,15 +449,14 @@ cmd(
       const db = await getDb();
       const col = db.collection(UPLOADS_COLLECTION);
 
-      // Search query: ID එකෙන්, full URL එකෙන් හෝ short URL එකෙන්
       const deleteQuery = {
         sessionId: permanentTargetId,
         $or: [
           { fileId: fileId },
           { url: input },
           { shortUrl: input },
-          { url: { $regex: fileId,$options: "i" } },
-          { shortUrl: { $regex: fileId,$options: "i" } }
+          { url: { $regex: fileId, $options: "i" } },
+          { shortUrl: { $regex: fileId, $options: "i" } }
         ]
       };
 
