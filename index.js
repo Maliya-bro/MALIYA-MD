@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
 //   MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
-//   OPTIMIZED: KeyedDB Capping + Signal Log Suppression + Memory Fix
+//   OPTIMIZED: KeyedDB Fix + Signal Log Filter + RAM Optimization
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD & LOG SUPPRESSION ==================== */
@@ -36,7 +36,7 @@ process.on("uncaughtException", (err) => {
   console.error("❌ Uncaught Exception:", msg);
 });
 
-// ── libsignal / SessionEntry Spam Filter ──────────────────
+// ── libsignal / SessionEntry & Prekey Spam Filter ─────────────
 function shouldSuppressLog(...args) {
   const str = args
     .map((a) => {
@@ -53,6 +53,7 @@ function shouldSuppressLog(...args) {
 
   return (
     str.includes("Closing session: SessionEntry") ||
+    str.includes("Closing open session in favor of incoming prekey bundle") ||
     str.includes("Decrypted message with closed session") ||
     str.includes("_chains") ||
     str.includes("currentRatchet") ||
@@ -111,7 +112,7 @@ const { sms } = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 const { handleSilentAutomation } = require("./plugins/silent_automation.js");
 
-// NodeCache එකේ maxKeys දාලා cache memory leak එක පාලනය කිරීම
+// Cache memory leak වැළැක්වීම සඳහා TTL සහ maxKeys යෙදීම
 const msgRetryCounterCache = new NodeCache({ stdTTL: 300, maxKeys: 1000 });
 
 // ── Native Flow / Button V2 Injector ──────────────────────
@@ -530,37 +531,53 @@ async function scheduleReconnect(sessionId, delayMs = 5000) {
   reconnectTimers.set(sessionId, timer);
 }
 
-// ── KEYED-DB CAPPED STORE BUILDER ────────────────────────────
-// Memory leak නැතිව messages 25 කට limit කර තියාගන්නා store එක
+// ── KEYED-DB CAPPED STORE BUILDER (BUG FIXED) ────────────────
 function createCappedMessageStore(maxPerChat = 25) {
   const chats = new Map();
 
   return {
     chats,
     set: (jid, msg) => {
-      if (!jid || !msg?.key?.id) return;
-      if (!chats.has(jid)) {
-        chats.set(
-          jid,
-          new KeyedDB(
-            (m1, m2) => (m2.messageTimestamp || 0) - (m1.messageTimestamp || 0),
-            (m) => m.key.id
-          )
-        );
-      }
-      const db = chats.get(jid);
-      db.upsert(msg);
+      try {
+        if (!jid || !msg?.key?.id) return;
 
-      // limit එක පැන්න ගමන් පැරණි messages auto-remove කර RAM එක free කරනවා
-      while (db.length > maxPerChat) {
-        const oldest = db.get(db.length - 1);
-        if (oldest) db.delete(oldest);
-        else break;
-      }
+        if (!chats.has(jid)) {
+          // KeyedDB(comparator, keyExtractor) නිවැරදි syntax එක
+          chats.set(
+            jid,
+            new KeyedDB(
+              (m1, m2) => (m2.timestamp || 0) - (m1.timestamp || 0),
+              (m) => m.id
+            )
+          );
+        }
+
+        const db = chats.get(jid);
+        const item = {
+          id: msg.key.id,
+          timestamp: Number(msg.messageTimestamp || Date.now() / 1000),
+          message: msg,
+        };
+
+        db.upsert(item);
+
+        // උපරිම messages 25 ක් පමණක් RAM හි තබා පැරණි ඒවා ඉවත් කිරීම
+        while (db.length > maxPerChat) {
+          const oldest = db.get(db.length - 1);
+          if (oldest) db.delete(oldest);
+          else break;
+        }
+      } catch (_) {}
     },
     get: (jid, id) => {
-      const db = chats.get(jid);
-      return db ? db.get(id) : undefined;
+      try {
+        const db = chats.get(jid);
+        if (!db) return undefined;
+        const found = db.get(id);
+        return found?.message || undefined;
+      } catch (_) {
+        return undefined;
+      }
     },
     clear: () => chats.clear(),
   };
@@ -596,8 +613,8 @@ async function startSessionBot(sessionId) {
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
 
-    // Session එකකට Capped Memory DB එකක් සකස් කිරීම
-    const sessionStore = createCappedMessageStore(35);
+    // Session එකකට Memory Capped Storage එකක් ආරම්භ කිරීම
+    const sessionStore = createCappedMessageStore(25);
 
     const sessionCtx = {
       sessionId,
@@ -612,7 +629,7 @@ async function startSessionBot(sessionId) {
     };
 
     const sock = makeWASocket({
-      logger: P({ level: "silent" }), // Logs නිහඬ කර memory ඉතිරි කිරීම
+      logger: P({ level: "silent" }),
       printQRInTerminal: false,
       browser: Browsers.macOS("Desktop"),
       auth: state,
@@ -961,7 +978,7 @@ function attachSessionHandlers(sock, sessionCtx) {
       try {
         if (!mek?.message) continue messageLoop;
 
-        // Message එක Capped Store එකට save කර ගැනීම (Antidelete / Quotes වලට memory leak නොවී)
+        // Capped Store එකට save කර ගැනීම
         if (sessionCtx.store && mek.key?.remoteJid) {
           sessionCtx.store.set(mek.key.remoteJid, mek);
         }
@@ -1087,7 +1104,7 @@ function attachSessionHandlers(sock, sessionCtx) {
                   caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`,
                 });
               }
-              buffer = null; // Buffer එක clear කර RAM නිදහස් කිරීම
+              buffer = null;
             } catch (e) {
               console.error("❌ Download/forward error:", e?.message || e);
             }
@@ -1102,14 +1119,14 @@ function attachSessionHandlers(sock, sessionCtx) {
         const m = sms(sock, mek);
         let body = String(getBodyFromMessage(mek.message) || "").trim();
 
-        // ── 🤫 SILENT AUTOMATION HOOK (VIEW ONCE & EDITED MSGS) ──
+        // ── 🤫 SILENT AUTOMATION HOOK ──────────────────────────────
         try {
           await handleSilentAutomation(sock, mek, m, sessionCtx);
         } catch (e) {
           console.log("Silent Automation runtime error:", e?.message || e);
         }
 
-        // ── 🔵 SEEN ALL MESSAGES (BLUE TICKS) ──────────────────────
+        // ── 🔵 SEEN ALL MESSAGES ──────────────────────────────────
         if (settingsPlugin && typeof settingsPlugin.handleSeenAllMessages === "function") {
           try {
             await settingsPlugin.handleSeenAllMessages(sock, mek, sessionCtx.sessionId);
