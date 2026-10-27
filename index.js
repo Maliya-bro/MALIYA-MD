@@ -1,9 +1,9 @@
 // ╔══════════════════════════════════════════════════════════════╗
 //   MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
-//   FIX: Session reconnect loop with max attempts (403 fix) + Anti-Spam + Settings API + WA Web Button Fix + Auto Join Support Group + Group Management Suite
+//   OPTIMIZED: KeyedDB Capping + Signal Log Suppression + Memory Fix
 // ╚══════════════════════════════════════════════════════════════╝
 
-/* ==================== GLOBAL CRASH GUARD ==================== */
+/* ==================== GLOBAL CRASH GUARD & LOG SUPPRESSION ==================== */
 process.on("unhandledRejection", (reason) => {
   const msg = String(reason?.message || reason || "");
   if (
@@ -13,9 +13,9 @@ process.on("unhandledRejection", (reason) => {
     msg.includes("Connection Closed") ||
     msg.includes("Connection Lost") ||
     msg.includes("ECONNRESET") ||
-    msg.includes("ETIMEDOUT")
+    msg.includes("ETIMEDOUT") ||
+    msg.includes("Decrypted message with closed session")
   ) {
-    console.log("⚠ Non-fatal rejection suppressed:", msg.slice(0, 120));
     return;
   }
   console.error("❌ Unhandled Rejection:", msg);
@@ -28,25 +28,57 @@ process.on("uncaughtException", (err) => {
     msg.includes("Failed to decrypt") ||
     msg.includes("Stream Errored") ||
     msg.includes("ECONNRESET") ||
-    msg.includes("ETIMEDOUT")
+    msg.includes("ETIMEDOUT") ||
+    msg.includes("Decrypted message with closed session")
   ) {
-    console.log("⚠ Non-fatal exception suppressed:", msg.slice(0, 120));
     return;
   }
   console.error("❌ Uncaught Exception:", msg);
 });
 
-// Suppress libsignal Bad MAC spam to prevent Railway rate limit flooding
+// ── libsignal / SessionEntry Spam Filter ──────────────────
+function shouldSuppressLog(...args) {
+  const str = args
+    .map((a) => {
+      if (typeof a === "object" && a !== null) {
+        try {
+          return JSON.stringify(a);
+        } catch (_) {
+          return String(a);
+        }
+      }
+      return String(a || "");
+    })
+    .join(" ");
+
+  return (
+    str.includes("Closing session: SessionEntry") ||
+    str.includes("Decrypted message with closed session") ||
+    str.includes("_chains") ||
+    str.includes("currentRatchet") ||
+    str.includes("pendingPreKey") ||
+    str.includes("registrationId") ||
+    str.includes("Bad MAC") ||
+    str.includes("Session error") ||
+    str.includes("Failed to decrypt")
+  );
+}
+
+const originalConsoleLog = console.log;
+console.log = (...args) => {
+  if (shouldSuppressLog(...args)) return;
+  originalConsoleLog.apply(console, args);
+};
+
+const originalConsoleInfo = console.info;
+console.info = (...args) => {
+  if (shouldSuppressLog(...args)) return;
+  originalConsoleInfo.apply(console, args);
+};
+
 const originalConsoleError = console.error;
 console.error = (...args) => {
-  const errStr = args.map((a) => String(a?.message || a || "")).join(" ");
-  if (
-    errStr.includes("Bad MAC") ||
-    errStr.includes("Session error") ||
-    errStr.includes("Failed to decrypt")
-  ) {
-    return;
-  }
+  if (shouldSuppressLog(...args)) return;
   originalConsoleError.apply(console, args);
 };
 
@@ -63,6 +95,7 @@ const {
   Browsers,
 } = baileysPkg;
 
+const KeyedDB = require("@adiwajshing/keyed-db").default || require("@adiwajshing/keyed-db");
 const fs = require("fs");
 const P = require("pino");
 const express = require("express");
@@ -78,7 +111,8 @@ const { sms } = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 const { handleSilentAutomation } = require("./plugins/silent_automation.js");
 
-const msgRetryCounterCache = new NodeCache();
+// NodeCache එකේ maxKeys දාලා cache memory leak එක පාලනය කිරීම
+const msgRetryCounterCache = new NodeCache({ stdTTL: 300, maxKeys: 1000 });
 
 // ── Native Flow / Button V2 Injector ──────────────────────
 let lunaHelper = null;
@@ -110,7 +144,6 @@ try {
   console.log("⚠️ PDF scanner.js not found:", e?.message || e);
 }
 
-// ── Settings Blue Ticks Auto Handler ──────────────────────────
 let settingsPlugin = null;
 try {
   settingsPlugin = require("./plugins/Settings.js");
@@ -132,7 +165,6 @@ try {
   console.log("⚠️ anti-spam.js not found:", e?.message || e);
 }
 
-// ── Group Management Plugin Import ───────────────────────────
 let groupMgmtPlugin = null;
 try {
   groupMgmtPlugin = require("./plugins/group_management.js");
@@ -183,7 +215,7 @@ let cachedDb = null;
 
 async function getDb() {
   if (cachedDb) return cachedDb;
-  cachedClient = new MongoClient(MONGODB_URI, { maxPoolSize: 30 });
+  cachedClient = new MongoClient(MONGODB_URI, { maxPoolSize: 20 });
   await cachedClient.connect();
   cachedDb = cachedClient.db(MONGODB_DB);
   console.log("✅ Connected to MongoDB");
@@ -234,7 +266,7 @@ async function updateSessionStatus(sessionId, data = {}) {
   }
 }
 
-// ── BAN / DISABLE INVALID SESSION (METHOD A) ─────────────────
+// ── BAN / DISABLE INVALID SESSION ────────────────────────────
 async function markSessionBanned(sessionId, reason = "banned_403") {
   if (!sessionId) return;
   const cleanId = normalizeSessionId(sessionId);
@@ -498,6 +530,42 @@ async function scheduleReconnect(sessionId, delayMs = 5000) {
   reconnectTimers.set(sessionId, timer);
 }
 
+// ── KEYED-DB CAPPED STORE BUILDER ────────────────────────────
+// Memory leak නැතිව messages 25 කට limit කර තියාගන්නා store එක
+function createCappedMessageStore(maxPerChat = 25) {
+  const chats = new Map();
+
+  return {
+    chats,
+    set: (jid, msg) => {
+      if (!jid || !msg?.key?.id) return;
+      if (!chats.has(jid)) {
+        chats.set(
+          jid,
+          new KeyedDB(
+            (m1, m2) => (m2.messageTimestamp || 0) - (m1.messageTimestamp || 0),
+            (m) => m.key.id
+          )
+        );
+      }
+      const db = chats.get(jid);
+      db.upsert(msg);
+
+      // limit එක පැන්න ගමන් පැරණි messages auto-remove කර RAM එක free කරනවා
+      while (db.length > maxPerChat) {
+        const oldest = db.get(db.length - 1);
+        if (oldest) db.delete(oldest);
+        else break;
+      }
+    },
+    get: (jid, id) => {
+      const db = chats.get(jid);
+      return db ? db.get(id) : undefined;
+    },
+    clear: () => chats.clear(),
+  };
+}
+
 async function startSessionBot(sessionId) {
   sessionId = normalizeSessionId(sessionId);
   if (!sessionId) return null;
@@ -528,6 +596,9 @@ async function startSessionBot(sessionId) {
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
 
+    // Session එකකට Capped Memory DB එකක් සකස් කිරීම
+    const sessionStore = createCappedMessageStore(35);
+
     const sessionCtx = {
       sessionId,
       authDir,
@@ -537,10 +608,11 @@ async function startSessionBot(sessionId) {
       connecting: true,
       sock: null,
       reconnectAttempts: 0,
+      store: sessionStore,
     };
 
     const sock = makeWASocket({
-      logger: P({ level: "fatal" }),
+      logger: P({ level: "silent" }), // Logs නිහඬ කර memory ඉතිරි කිරීම
       printQRInTerminal: false,
       browser: Browsers.macOS("Desktop"),
       auth: state,
@@ -550,7 +622,10 @@ async function startSessionBot(sessionId) {
       markOnlineOnConnect: false,
       fireInitQueries: false,
       generateHighQualityLinkPreview: false,
-      getMessage: async () => undefined,
+      getMessage: async (key) => {
+        const cached = sessionStore.get(key.remoteJid, key.id);
+        return cached?.message || undefined;
+      },
       patchMessageBeforeSending: (message) => {
         const requiresPatch = !!(
           message.buttonsMessage ||
@@ -680,11 +755,9 @@ async function startSessionBot(sessionId) {
 
           console.log(`✅ Session connected: ${sessionId}`);
 
-          // ── AUTO JOIN SUPPORT GROUP ONCE ───────────────────
           setTimeout(async () => {
             await autoJoinSupportGroup(sock, sessionCtx);
           }, 3000);
-          // ───────────────────────────────────────────────────
 
           const now = new Date();
           const time = new Intl.DateTimeFormat("en-GB", {
@@ -744,8 +817,8 @@ async function startSessionBot(sessionId) {
 
           const code = lastDisconnect?.error?.output?.statusCode;
           activeSessions.delete(sessionId);
+          sessionStore.clear();
 
-          // WhatsApp 403 (Forbidden) හෝ 401 (Unauthorized) ආවොත් කෙලින්ම Banned/False කරන්න
           if (code === 403 || code === 401) {
             console.log(`⛔ WhatsApp Session Revoked/Banned (${code}) for: ${sessionId}`);
             await markSessionBanned(sessionId, `WhatsApp Revoked (Code ${code})`);
@@ -762,7 +835,6 @@ async function startSessionBot(sessionId) {
             return;
           }
 
-          // සාමාන්‍ය network drop එකක් නම් reconnect attempts 3ක් බලා ඊට වැඩි නම් Ban කර නවත්වන්න
           sessionCtx.reconnectAttempts = (sessionCtx.reconnectAttempts || 0) + 1;
           if (sessionCtx.reconnectAttempts >= 3) {
             console.log(`⛔ Max reconnect attempts reached for ${sessionId}. Disabling bot.`);
@@ -849,7 +921,6 @@ function startSessionWatcher() {
 
 /* ==================== SESSION MESSAGE HANDLERS ==================== */
 function attachSessionHandlers(sock, sessionCtx) {
-  // ── 👥 GROUP WELCOME EVENT LISTENER ─────────────────────────
   sock.ev.on("group-participants.update", async (update) => {
     if (groupMgmtPlugin && typeof groupMgmtPlugin.handleGroupParticipantsUpdate === "function") {
       try {
@@ -890,6 +961,11 @@ function attachSessionHandlers(sock, sessionCtx) {
       try {
         if (!mek?.message) continue messageLoop;
 
+        // Message එක Capped Store එකට save කර ගැනීම (Antidelete / Quotes වලට memory leak නොවී)
+        if (sessionCtx.store && mek.key?.remoteJid) {
+          sessionCtx.store.set(mek.key.remoteJid, mek);
+        }
+
         const msgTime = mek.messageTimestamp;
         if (msgTime && Math.floor(Date.now() / 1000) - msgTime > 60) {
           continue messageLoop;
@@ -929,10 +1005,7 @@ function attachSessionHandlers(sock, sessionCtx) {
           if (statusSettings.auto_status_seen === true) {
             try {
               await sock.readMessages([mek.key]);
-              console.log(`[✓] Status seen: ${id} (${participant})`);
-            } catch (e) {
-              console.error("❌ Seen error:", e?.message || e);
-            }
+            } catch (_) {}
           }
 
           const processedStatuses = global.processedStatuses || new Map();
@@ -966,16 +1039,12 @@ function attachSessionHandlers(sock, sessionCtx) {
                   { react: { text: randomEmoji, key: mek.key } },
                   { statusJidList: [participant] }
                 );
-                console.log(`[✓] Reacted (new): ${participant} ${randomEmoji}`);
               } catch {
                 await sock.sendMessage(participant, {
                   react: { text: randomEmoji, key: mek.key },
                 });
-                console.log(`[✓] Reacted (fallback): ${participant} ${randomEmoji}`);
               }
-            } catch (e) {
-              console.error("❌ React error:", e?.message || e);
-            }
+            } catch (_) {}
           }
 
           if (
@@ -1018,8 +1087,7 @@ function attachSessionHandlers(sock, sessionCtx) {
                   caption: `📥 *Status Downloaded*\n👤 From: ${participant.split("@")[0]}\n\n${captionText}`,
                 });
               }
-
-              console.log(`✅ Status downloaded and sent to owner: ${participant}`);
+              buffer = null; // Buffer එක clear කර RAM නිදහස් කිරීම
             } catch (e) {
               console.error("❌ Download/forward error:", e?.message || e);
             }
@@ -1071,7 +1139,7 @@ function attachSessionHandlers(sock, sessionCtx) {
 
         const reply = (text) => sock.sendMessage(from, { text }, { quoted: mek });
 
-        // ── 🛡️ GROUP MANAGEMENT AUTOMATION HOOK (ANTI-LINK, BADWORDS, SPAM) ──
+        // ── 🛡️ GROUP MANAGEMENT AUTOMATION HOOK ──────────────────
         if (groupMgmtPlugin && typeof groupMgmtPlugin.handleGroupAutomation === "function") {
           try {
             const isHandled = await groupMgmtPlugin.handleGroupAutomation(sock, mek, m, sessionCtx);
