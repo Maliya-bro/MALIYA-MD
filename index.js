@@ -939,7 +939,7 @@ function startSessionWatcher() {
   };
 
   tick();
-  setInterval(tick, 120000);
+  setInterval(tick, 60000);
 }
 
 /* ==================== SESSION MESSAGE HANDLERS ==================== */
