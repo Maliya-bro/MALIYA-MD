@@ -27,6 +27,7 @@ async function getDb() {
   return cachedDb;
 }
 
+// Phone Number එකෙන් Permanent Target ID එකක් සාදා ගැනීම
 async function resolvePermanentTargetId(sessionId, sender) {
   const cleanSenderPhone = sender ? String(sender).split("@")[0].replace(/\D/g, "") : null;
   const id = String(sessionId || "default").trim() || "default";
@@ -53,6 +54,7 @@ async function resolvePermanentTargetId(sessionId, sender) {
   return id;
 }
 
+// සීමා පරීක්ෂා කිරීම (විනාඩි 5ට 3යි, දිනකට 700MB)
 async function verifyUploadLimits(targetId, newSizeBytes) {
   const db = await getDb();
   const col = db.collection(UPLOADS_COLLECTION);
@@ -61,6 +63,7 @@ async function verifyUploadLimits(targetId, newSizeBytes) {
   const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000);
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
+  // 1. විනාඩි 5 තුළ ගොනු 3 සීමාව
   const recentCount = await col.countDocuments({
     sessionId: targetId,
     uploadedAt: { $gte: fiveMinAgo }
@@ -73,6 +76,7 @@ async function verifyUploadLimits(targetId, newSizeBytes) {
     };
   }
 
+  // 2. දිනකට 700 MB සීමාව
   const dailyUploads = await col.aggregate([
     { $match: { sessionId: targetId, uploadedAt: { $gte: startOfDay } } },
     { $group: { _id: null, totalBytes: { $sum: "$sizeBytes" } } }
@@ -90,6 +94,7 @@ async function verifyUploadLimits(targetId, newSizeBytes) {
   return { allowed: true };
 }
 
+// Upload විස්තර සේව් කිරීම
 async function saveUploadRecord(targetId, data) {
   const db = await getDb();
   await db.collection(UPLOADS_COLLECTION).insertOne({
@@ -99,6 +104,7 @@ async function saveUploadRecord(targetId, data) {
   });
 }
 
+// Helpers
 function channelContextInfo() {
   return {
     forwardingScore: 999,
@@ -209,23 +215,40 @@ cmd(
         const fileId = fileInfo.metadata.id;
         const readableSize = fileInfo.metadata.size?.readable || formatBytes(fileSizeBytes);
 
-        // Images සඳහා Direct View/Image Address URL එක සකස් කිරීම
+        // Images සඳහා img_preview tag එකෙන් සැබෑ Direct View Link (/dl/...) එක ලබා ගැනීම
         const isImage = mime.startsWith("image/");
         let viewLink = null;
 
         if (isImage) {
-          if (fileInfo.url.raw) {
-            viewLink = fileInfo.url.raw;
-          } else if (fileInfo.url.download) {
-            viewLink = fileInfo.url.download;
-          } else {
-            // API එකෙන් කෙලින්ම නොලැබුණහොත් info endpoint එකෙන් direct download link එක ලබා ගැනීම
-            try {
-              const info = await axios.get(`https://api.onlyfiles.com/v1/file/${fileId}/info`, { timeout: 10000 });
-              viewLink = info.data?.data?.file?.url?.raw || info.data?.data?.file?.url?.download || null;
-            } catch (err) {
-              viewLink = null;
+          try {
+            const pageRes = await axios.get(fullUrl, {
+              timeout: 15000,
+              headers: {
+                "User-Agent":
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+              },
+            });
+
+            const html = String(pageRes.data);
+            const imgMatch =
+              html.match(/<img[^>]+id=["']img_preview["'][^>]+src=["']([^"']+)["']/i) ||
+              html.match(/<img[^>]+src=["']([^"']+)["'][^>]+id=["']img_preview["']/i) ||
+              html.match(/https?:\/\/onlyfiles\.com\/dl\/[^\s"'>]+/i);
+
+            if (imgMatch) {
+              viewLink = imgMatch[1] || imgMatch[0];
+              if (!viewLink.startsWith("http")) {
+                viewLink = `https://onlyfiles.com${viewLink}`;
+              }
             }
+          } catch (e) {
+            console.log("View Link parse error:", e?.message || e);
+          }
+
+          // Fallback: Page එකෙන් නොලැබුණහොත් API download link එක
+          if (!viewLink) {
+            viewLink = fileInfo.url?.download || null;
           }
         }
 
@@ -242,7 +265,7 @@ cmd(
 
         await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
-        // Image එකක් නම් පමණක් View Link කොටස output එකට එක් කරයි
+        // Image එකක් නම් පමණක් View Link කොටස පෙන්වයි
         const viewLinkSection = isImage && viewLink
           ? `├ 🖼️ *${toSmallCaps("View Link:")}*\n│  ${viewLink}\n│\n`
           : "";
