@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
 //   MALIYA-MD — Multi-User WhatsApp Bot  (index.js)
-//   OPTIMIZED: KeyedDB Fix + Signal Log Filter + RAM Optimization
+//   OPTIMIZED: KeyedDB Fix + Signal Log Filter + RAM Optimization + Live RAM Profiler
 // ╚══════════════════════════════════════════════════════════════╝
 
 /* ==================== GLOBAL CRASH GUARD & LOG SUPPRESSION ==================== */
@@ -542,7 +542,6 @@ function createCappedMessageStore(maxPerChat = 25) {
         if (!jid || !msg?.key?.id) return;
 
         if (!chats.has(jid)) {
-          // KeyedDB(comparator, keyExtractor) නිවැරදි syntax එක
           chats.set(
             jid,
             new KeyedDB(
@@ -561,7 +560,6 @@ function createCappedMessageStore(maxPerChat = 25) {
 
         db.upsert(item);
 
-        // උපරිම messages 25 ක් පමණක් RAM හි තබා පැරණි ඒවා ඉවත් කිරීම
         while (db.length > maxPerChat) {
           const oldest = db.get(db.length - 1);
           if (oldest) db.delete(oldest);
@@ -613,7 +611,6 @@ async function startSessionBot(sessionId) {
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
 
-    // Session එකකට Memory Capped Storage එකක් ආරම්භ කිරීම
     const sessionStore = createCappedMessageStore(25);
 
     const sessionCtx = {
@@ -978,7 +975,6 @@ function attachSessionHandlers(sock, sessionCtx) {
       try {
         if (!mek?.message) continue messageLoop;
 
-        // Capped Store එකට save කර ගැනීම
         if (sessionCtx.store && mek.key?.remoteJid) {
           sessionCtx.store.set(mek.key.remoteJid, mek);
         }
@@ -1389,10 +1385,88 @@ if (settingsApiRouter) {
   app.use("/api/settings", settingsApiRouter);
 }
 
+/* ==================== 🛠️ LIVE RAM & FILE PROFILER ROUTE ==================== */
 app.get("/", (req, res) => {
-  res.send(
-    `Hey There, MALIYA-MD started ✅ | Active Sessions: ${activeSessions.size}/${MAX_ACTIVE_SESSIONS}`
-  );
+  const mem = process.memoryUsage();
+  const formatMB = (bytes) => (bytes / 1024 / 1024).toFixed(2);
+
+  // Loaded project files වල approximate memory footprint එක scan කිරීම
+  const moduleSizes = [];
+  for (const [modPath, modObj] of Object.entries(require.cache)) {
+    if (!modPath.includes("node_modules")) {
+      try {
+        const str = JSON.stringify(modObj.exports || {});
+        moduleSizes.push({
+          file: modPath.split(process.cwd())[1] || modPath,
+          sizeKB: (Buffer.byteLength(str, "utf8") / 1024).toFixed(2),
+        });
+      } catch (_) {}
+    }
+  }
+
+  moduleSizes.sort((a, b) => b.sizeKB - a.sizeKB);
+  const topFiles = moduleSizes.slice(0, 10);
+
+  const rssMB = formatMB(mem.rss);
+  const heapUsedMB = formatMB(mem.heapUsed);
+  const heapTotalMB = formatMB(mem.heapTotal);
+  const externalMB = formatMB(mem.external);
+
+  const statusColor = rssMB > 450 ? "#ef4444" : rssMB > 350 ? "#f59e0b" : "#10b981";
+
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <title>MALIYA-MD Live RAM Dashboard</title>
+      <meta http-equiv="refresh" content="10">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; background: #0b0f19; color: #f1f5f9; padding: 20px; line-height: 1.5; margin: 0; }
+        .container { background: #131b2e; padding: 24px; border-radius: 12px; max-width: 650px; margin: 30px auto; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6); border: 1px solid #1e293b; }
+        h2 { color: #38bdf8; margin-top: 0; font-size: 22px; display: flex; align-items: center; justify-content: space-between; }
+        .badge { background: ${statusColor}; color: #000; padding: 4px 12px; border-radius: 20px; font-weight: bold; font-size: 14px; }
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 18px 0; }
+        .stat-box { background: #1e293b; padding: 12px; border-radius: 8px; border: 1px solid #334155; }
+        .stat-box span { font-size: 12px; color: #94a3b8; display: block; }
+        .stat-box b { font-size: 17px; color: #f8fafc; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #1e293b; }
+        th { color: #94a3b8; background: #1a233a; }
+        tr:hover { background: #162038; }
+        .footer { text-align: center; font-size: 12px; color: #64748b; margin-top: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h2>
+          <span>⚡ MALIYA-MD Health Monitor</span>
+          <span class="badge">${rssMB} MB</span>
+        </h2>
+        
+        <div class="stat-grid">
+          <div class="stat-box"><span>Status</span><b>ONLINE ✅</b></div>
+          <div class="stat-box"><span>Active Sessions</span><b>${activeSessions.size} / ${MAX_ACTIVE_SESSIONS}</b></div>
+          <div class="stat-box"><span>V8 Heap Used / Total</span><b>${heapUsedMB} MB / ${heapTotalMB} MB</b></div>
+          <div class="stat-box"><span>C++ Native Memory (Buffers)</span><b>${externalMB} MB</b></div>
+        </div>
+
+        <h3 style="color: #cbd5e1; margin-top: 25px; margin-bottom: 5px; font-size: 15px;">📁 Top Memory Consuming Files</h3>
+        <table>
+          <thead>
+            <tr><th>Project File</th><th>Approx Exports Heap</th></tr>
+          </thead>
+          <tbody>
+            ${topFiles.length ? topFiles.map(f => `<tr><td><code>${f.file}</code></td><td><b>${f.sizeKB} KB</b></td></tr>`).join("") : "<tr><td colspan='2'>Scanning modules...</td></tr>"}
+          </tbody>
+        </table>
+
+        <div class="footer">⟳ Auto-refreshing every 10 seconds | Heroku Eco Dyno Safe Mode</div>
+      </div>
+    </body>
+    </html>
+  `);
 });
 
 app.get("/sessions", async (req, res) => {
