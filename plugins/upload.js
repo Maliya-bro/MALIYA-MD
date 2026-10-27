@@ -12,10 +12,14 @@ const MONGODB_URI =
 const MONGODB_DB = process.env.MONGODB_DB || "maliya_md";
 const UPLOADS_COLLECTION = "session_uploads";
 
+// Catbox Anonymous upload limit: 200MB (Heroku dyno RAM එකට ආරක්ෂිත සීමාව: 70MB)
 const MAX_SINGLE_FILE_SIZE = 70 * 1024 * 1024; // 70 MB
 const MAX_DAILY_BYTES = 700 * 1024 * 1024;      // 700 MB
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+
+// Optional: Catbox user account එකක් ඇත්නම් මෙතැනට userhash එක යෙදිය හැක (නැතහොත් හිස්ව තබන්න)
+const CATBOX_USERHASH = process.env.CATBOX_USERHASH || "";
 
 let cachedDb = null;
 
@@ -141,20 +145,20 @@ function formatBytes(bytes, decimals = 2) {
 function extractFileId(query = "") {
   let q = String(query).trim();
   if (!q) return null;
-  const match = q.match(/onlyfiles\.com\/([a-zA-Z0-9_-]+)/i);
+  const match = q.match(/files\.catbox\.moe\/([a-zA-Z0-9_.-]+)/i);
   if (match && match[1]) return match[1];
-  return q.replace(/^https?:\/\//i, "").split("/")[0];
+  return q.replace(/^https?:\/\//i, "").split("/").pop();
 }
 
 /* ============================================================================
-   Command 1: .upload (Image/Video/Audio/Doc -> OnlyFiles)
+   Command 1: .upload / .catbox (Direct File Stream Upload)
    ============================================================================ */
 cmd(
   {
     pattern: "upload",
-    alias: ["tourl", "up", "onlyfiles"],
+    alias: ["tourl", "up", "catbox"],
     react: "📤",
-    desc: "Upload media/doc to OnlyFiles (Max 70MB)",
+    desc: "Upload media/doc to Catbox.moe (Direct CDN URL)",
     category: "tools",
     filename: __filename,
   },
@@ -194,96 +198,54 @@ cmd(
         );
       }
 
-      const ext = mime.split("/")[1] ? mime.split("/")[1].split(";")[0] : "bin";
+      let ext = mime.split("/")[1] ? mime.split("/")[1].split(";")[0] : "bin";
+      if (ext === "jpeg") ext = "jpg";
       const fileName = `maliya_${Date.now()}.${ext}`;
 
+      // Catbox API FormData Payload
       const form = new FormData();
-      form.append("file", buffer, { filename: fileName, contentType: mime });
-      form.append("expire", "0");
+      form.append("reqtype", "fileupload");
+      if (CATBOX_USERHASH) {
+        form.append("userhash", CATBOX_USERHASH);
+      }
+      form.append("fileToUpload", buffer, { filename: fileName, contentType: mime });
 
-      const response = await axios.post("https://api.onlyfiles.com/v1/upload", form, {
+      const response = await axios.post("https://catbox.moe/user/api.php", form, {
         headers: { ...form.getHeaders() },
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
         timeout: 180000,
       });
 
-      if (response.data && response.data.status && response.data.data?.file) {
-        const fileInfo = response.data.data.file;
-        const fullUrl = fileInfo.url.full;
-        const shortUrl = fileInfo.url.short;
-        const fileId = fileInfo.metadata.id;
-        const readableSize = fileInfo.metadata.size?.readable || formatBytes(fileSizeBytes);
+      const catboxUrl = String(response.data || "").trim();
 
-        // Images සඳහා img_preview tag එකෙන් සැබෑ Direct View Link (/dl/...) එක ලබා ගැනීම
-        const isImage = mime.startsWith("image/");
-        let viewLink = null;
-
-        if (isImage) {
-          try {
-            const pageRes = await axios.get(fullUrl, {
-              timeout: 15000,
-              headers: {
-                "User-Agent":
-                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-              },
-            });
-
-            const html = String(pageRes.data);
-            const imgMatch =
-              html.match(/<img[^>]+id=["']img_preview["'][^>]+src=["']([^"']+)["']/i) ||
-              html.match(/<img[^>]+src=["']([^"']+)["'][^>]+id=["']img_preview["']/i) ||
-              html.match(/https?:\/\/onlyfiles\.com\/dl\/[^\s"'>]+/i);
-
-            if (imgMatch) {
-              viewLink = imgMatch[1] || imgMatch[0];
-              if (!viewLink.startsWith("http")) {
-                viewLink = `https://onlyfiles.com${viewLink}`;
-              }
-            }
-          } catch (e) {
-            console.log("View Link parse error:", e?.message || e);
-          }
-
-          // Fallback: Page එකෙන් නොලැබුණහොත් API download link එක
-          if (!viewLink) {
-            viewLink = fileInfo.url?.download || null;
-          }
-        }
+      if (catboxUrl.startsWith("http://") || catboxUrl.startsWith("https://")) {
+        const fileId = catboxUrl.split("/").pop();
+        const readableSize = formatBytes(fileSizeBytes);
 
         await saveUploadRecord(permanentTargetId, {
-          url: fullUrl,
-          shortUrl: shortUrl,
-          viewLink: viewLink,
+          url: catboxUrl,
           fileId: fileId,
-          fileName: fileInfo.metadata?.name || fileName,
+          fileName: fileName,
           sizeBytes: fileSizeBytes,
           readableSize: readableSize,
           mimeType: mime,
+          host: "catbox.moe",
         });
 
         await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
-        // Image එකක් නම් පමණක් View Link කොටස පෙන්වයි
-        const viewLinkSection = isImage && viewLink
-          ? `├ 🖼️ *${toSmallCaps("View Link:")}*\n│  ${viewLink}\n│\n`
-          : "";
-
         const outputMsg = 
-`╭[ 🚀 *${toSmallCaps("FILE UPLOADED")}* ]┈➤
+`╭[ 🚀 *${toSmallCaps("FILE UPLOADED TO CATBOX")}* ]┈➤
 │
 ├ 🎬 *${toSmallCaps("Name:")}* ${fileName}
 ├ 📦 *${toSmallCaps("Size:")}* ${readableSize}
 ├ 📂 *${toSmallCaps("Mime:")}* ${mime}
 │
-├ 🔗 *${toSmallCaps("Direct URL:")}*
-│  ${fullUrl}
+├ 🔗 *${toSmallCaps("Direct CDN URL:")}*
+│  ${catboxUrl}
 │
-├ 🌐 *${toSmallCaps("Short URL:")}*
-│  ${shortUrl}
-│
-${viewLinkSection}├ 🆔 *${toSmallCaps("File ID:")}* \`${fileId}\`
+├ 🆔 *${toSmallCaps("File ID:")}* \`${fileId}\`
 │
 ╰[ 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴍᴀʟɪʏᴀ-ᴍᴅ ]┈➤`;
 
@@ -296,12 +258,12 @@ ${viewLinkSection}├ 🆔 *${toSmallCaps("File ID:")}* \`${fileId}\`
           { quoted: mek }
         );
       } else {
-        throw new Error(response.data?.error?.message || "Invalid API response");
+        throw new Error(catboxUrl || "Invalid API response from Catbox");
       }
     } catch (e) {
-      console.log("Upload Error:", e);
+      console.log("Catbox Upload Error:", e);
       await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-      const errMsg = e.response?.data?.error?.message || e.message || "Failed to upload file.";
+      const errMsg = e.response?.data || e.message || "Failed to upload file to Catbox.";
       return await reply(`╭─[ ❌ *UPLOAD ERROR* ]\n│\n├ 🚫 ${errMsg}\n╰─────────────┈➤`);
     }
   }
@@ -343,7 +305,7 @@ cmd(
         text += `├ 🏷️ *[${num}]* ${item.fileName || "File"}\n`;
         text += `│  📦 *${toSmallCaps("Size:")}* ${item.readableSize || "Unknown"} | 📅 ${dateStr}\n`;
         text += `│  🆔 \`${item.fileId || "N/A"}\`\n`;
-        text += `│  🔗 ${item.shortUrl || item.url}\n│\n`;
+        text += `│  🔗 ${item.url}\n│\n`;
       });
 
       if (files.length > 15) {
@@ -373,9 +335,9 @@ cmd(
 cmd(
   {
     pattern: "dlfile",
-    alias: ["getfile", "onlydl"],
+    alias: ["getfile", "catboxdl"],
     react: "📥",
-    desc: "Download file from OnlyFiles link or ID",
+    desc: "Download file from Catbox link or ID",
     category: "tools",
     filename: __filename,
   },
@@ -383,35 +345,33 @@ cmd(
     try {
       if (!q) {
         return await reply(
-          `╭─[ ⚠️ *${toSmallCaps("USAGE")}* ]\n│\n├ 💡 *.dlfile <OnlyFiles URL or File ID>*\n╰────────────┈➤`
+          `╭─[ ⚠️ *${toSmallCaps("USAGE")}* ]\n│\n├ 💡 *.dlfile <Catbox URL or File ID>*\n╰────────────┈➤`
         );
       }
 
-      const fileId = extractFileId(q);
-      if (!fileId) return await reply("❌ වලංගු Link එකක් හෝ File ID එකක් ලබා දෙන්න.");
+      let downloadUrl = String(q).trim();
+      let fileId = extractFileId(downloadUrl);
 
-      await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
-
-      const infoRes = await axios.get(`https://api.onlyfiles.com/v1/file/${fileId}/info`, { timeout: 20000 });
-      if (!infoRes.data || !infoRes.data.status || !infoRes.data.data?.file) {
-        await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-        return await reply("❌ මෙම File එක OnlyFiles සර්වර් වල සොයාගත නොහැකි විය.");
+      if (!downloadUrl.startsWith("http://") && !downloadUrl.startsWith("https://")) {
+        downloadUrl = `https://files.catbox.moe/${fileId}`;
       }
 
-      const fileInfo = infoRes.data.data.file;
-      const downloadUrl = fileInfo.url.full;
-      const fileName = fileInfo.metadata.name || `file_${fileId}`;
-      const fileSize = fileInfo.metadata.size.readable || "Unknown";
+      await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
       const resStream = await axios.get(downloadUrl, {
         responseType: "arraybuffer",
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
         timeout: 180000,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
       });
 
       const buffer = Buffer.from(resStream.data);
       const mime = resStream.headers["content-type"] || "application/octet-stream";
+      const fileName = fileId || `file_${Date.now()}`;
+      const fileSize = formatBytes(buffer.length);
 
       await sock.sendMessage(from, { react: { text: "⬆", key: mek.key } });
 
@@ -437,9 +397,9 @@ cmd(
 
       await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
     } catch (e) {
-      console.log("Dlfile Error:", e);
+      console.log("Catbox Dlfile Error:", e);
       await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-      const err = e.response?.data?.error?.message || e.message || "Failed to download file.";
+      const err = e.message || "Failed to download file.";
       return await reply(`╭─[ ❌ *DOWNLOAD ERROR* ]\n│\n├ 🚫 ${err}\n╰────────────┈➤`);
     }
   }
@@ -477,9 +437,7 @@ cmd(
         $or: [
           { fileId: fileId },
           { url: input },
-          { shortUrl: input },
-          { url: { $regex: fileId, $options: "i" } },
-          { shortUrl: { $regex: fileId, $options: "i" } }
+          { url: { $regex: fileId, $options: "i" } }
         ]
       };
 
