@@ -1,11 +1,16 @@
 const { cmd, replyHandlers } = require('../command');
 const axios = require('axios');
 const cheerio = require('cheerio');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const { mkdtemp, rm, stat } = require('fs/promises');
 const { createWriteStream } = require('fs');
 const { join } = require('path');
 const { tmpdir } = require('os');
 const { readSettings, getCustomImage } = require("../lib/botSettings");
+const ffmpegPath = require('ffmpeg-static');
+
+const execFileAsync = promisify(execFile);
 
 // State Management
 const pendingPhSearch = {};
@@ -192,7 +197,7 @@ async function phSearch(query, limit = 100) {
   return allResults;
 }
 
-// 2. DIRECT MP4 STREAM EXTRACTOR (ප්‍රතිචාරයේ ඇති MP4 CDN Link එකම ලබාගැනීම)
+// 2. VIDEO STREAM RESOLVER
 async function getPhDirectStream(url) {
   const { data } = await axios.get(url, {
     headers: { 
@@ -204,80 +209,131 @@ async function getPhDirectStream(url) {
   });
   
   const $ = cheerio.load(data);
-  let directMp4Url = null;
+  let resolvedStreamUrl = null;
+  let detectedDuration = null;
 
-  // Flashvars හෝ media_0 JSON block එක ලබාගැනීම
   let flashvarsMatch = data.match(/flashvars_\d+\s*=\s*({.+?});/s) || data.match(/var\s+media_0\s*=\s*({.+?});/s);
 
   if (flashvarsMatch) {
     try {
       const flashvars = JSON.parse(flashvarsMatch[1]);
+      
+      if (flashvars.video_duration) {
+        const sec = parseInt(flashvars.video_duration, 10);
+        if (!isNaN(sec)) {
+          const m = Math.floor(sec / 60);
+          const s = sec % 60;
+          detectedDuration = `${m}:${s < 10 ? '0' : ''}${s}`;
+        }
+      }
+
       if (flashvars.mediaDefinitions && Array.isArray(flashvars.mediaDefinitions)) {
-        // 1. මුලින්ම කෙළින්ම .mp4 format එකේ definitions සොයයි
-        const mp4Defs = flashvars.mediaDefinitions.filter(m => (m.format === 'mp4' || (m.videoUrl && m.videoUrl.includes('.mp4') && !m.videoUrl.includes('.m3u8'))) && m.videoUrl);
-        
-        if (mp4Defs.length > 0) {
-          // Quality එක අනුව හොඳම එක තෝරයි
-          mp4Defs.sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
-          directMp4Url = mp4Defs[0].videoUrl;
+        const validMp4s = flashvars.mediaDefinitions.filter(m => 
+          m.format === 'mp4' && 
+          m.videoUrl && 
+          !m.videoUrl.includes('/gifs/') && 
+          !m.videoUrl.includes('/pics/')
+        );
+
+        if (validMp4s.length > 0) {
+          validMp4s.sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
+          resolvedStreamUrl = validMp4s[0].videoUrl;
+        } else {
+          const hlsDefs = flashvars.mediaDefinitions.filter(m => (m.format === 'hls' || (m.videoUrl && m.videoUrl.includes('.m3u8'))) && m.videoUrl);
+          if (hlsDefs.length > 0) {
+            resolvedStreamUrl = hlsDefs[0].videoUrl;
+          }
         }
       }
     } catch (e) {}
   }
 
-  // 2. Regex මගින් direct phncdn .mp4 link එකක් තිබේදැයි බැලීම (Response එකේ ලැබුණු link ආකෘතිය)
-  if (!directMp4Url) {
-    const rawMp4Match = data.match(/https?:\/\/[a-zA-Z0-9\-_.]*?phncdn\.com\/[^"'\s\\]+?\.mp4\?[^"'\s\\]+/i);
-    if (rawMp4Match) {
-      directMp4Url = rawMp4Match[0].replace(/\\/g, '');
+  if (!detectedDuration) {
+    detectedDuration = $('span.duration').first().text().trim() || 
+                       $('meta[property="video:duration"]').attr('content') || 
+                       'N/A';
+    if (!isNaN(Number(detectedDuration)) && detectedDuration !== 'N/A') {
+      const sec = parseInt(detectedDuration, 10);
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      detectedDuration = `${m}:${s < 10 ? '0' : ''}${s}`;
     }
   }
 
-  if (!directMp4Url) {
-    throw new Error('Direct MP4 video URL could not be extracted.');
+  if (!resolvedStreamUrl) {
+    throw new Error('Full video stream URL could not be extracted.');
   }
 
   let title = $('h1.inlineFree').first().text().trim() || $('title').text().replace('- Pornhub.com', '').trim() || 'Pornhub Video';
-  const duration = $('span.duration').first().text().trim() || 'N/A';
 
-  return { title, duration, streamUrl: directMp4Url };
+  return { title, duration: detectedDuration, streamUrl: resolvedStreamUrl };
 }
 
-// 3. DIRECT FILE DOWNLOAD (FFMPEG අවශ්‍ය නොවේ - Zero Memory Spike)
+// 3. FFMPEG DOWNLOAD & RE-MUX
 async function phDownloadToFile(streamUrl) {
   const tmpDir = await mkdtemp(join(tmpdir(), 'phdl-'));
-  const outPath = join(tmpDir, 'video.mp4');
+  const rawPath = join(tmpDir, 'raw.mp4');
+  const finalPath = join(tmpDir, 'video.mp4');
+
+  const headersPayload = "Referer: https://www.pornhub.com/\r\nOrigin: https://www.pornhub.com\r\nCookie: hasVisited=1; age_verified=1\r\n";
 
   try {
-    const response = await axios({
-      method: 'GET',
-      url: streamUrl,
-      responseType: 'stream',
-      headers: {
-        'User-Agent': UA,
-        'Referer': 'https://www.pornhub.com/',
-        'Origin': 'https://www.pornhub.com',
-        'Cookie': 'hasVisited=1; age_verified=1'
-      },
-      timeout: 600000
-    });
+    if (streamUrl.includes('.m3u8')) {
+      const ffmpegArgs = [
+        '-v', 'error',
+        '-y',
+        '-user_agent', UA,
+        '-headers', headersPayload,
+        '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
+        '-i', streamUrl,
+        '-c', 'copy',
+        '-bsf:a', 'aac_adtstoasc',
+        '-movflags', '+faststart',
+        finalPath
+      ];
+      await execFileAsync(ffmpegPath, ffmpegArgs, { timeout: 600000 });
+    } else {
+      const response = await axios({
+        method: 'GET',
+        url: streamUrl,
+        responseType: 'stream',
+        headers: {
+          'User-Agent': UA,
+          'Referer': 'https://www.pornhub.com/',
+          'Origin': 'https://www.pornhub.com',
+          'Cookie': 'hasVisited=1; age_verified=1'
+        },
+        timeout: 600000
+      });
 
-    const writer = createWriteStream(outPath);
-    response.data.pipe(writer);
+      const writer = createWriteStream(rawPath);
+      response.data.pipe(writer);
 
-    await new Promise((resolve, reject) => {
-      writer.on('finish', resolve);
-      writer.on('error', reject);
-    });
+      await new Promise((resolve, reject) => {
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+      });
 
-    const fileStats = await stat(outPath);
+      const fixArgs = [
+        '-v', 'error',
+        '-y',
+        '-i', rawPath,
+        '-c', 'copy',
+        '-movflags', '+faststart',
+        finalPath
+      ];
+      await execFileAsync(ffmpegPath, fixArgs, { timeout: 60000 });
+      await rm(rawPath).catch(() => {});
+    }
+
+    const fileStats = await stat(finalPath);
     
-    if (fileStats.size < 5000) {
-      throw new Error('Downloaded stream returned empty file.');
+    if (fileStats.size < 50000) {
+      throw new Error('Downloaded stream is too small or invalid preview.');
     }
 
     return { 
-      filePath: outPath, 
+      filePath: finalPath, 
       tmpDir: tmpDir, 
       sizeMB: fileStats.size / (1024 * 1024) 
     };
@@ -299,7 +355,7 @@ function generateResultText(results, startIndex = 0, botDisplayName = DEFAULT_BO
     const numStr = String(i + 1).padStart(2, "0");
     const shortTitle = toSmallCaps(v.title.slice(0, 36));
     let durationText = "";
-    if (v.duration) {
+    if (v.duration && v.duration !== 'N/A') {
       durationText = " _(" + v.duration + ")_";
     }
     text += "├ 📱 *[ " + numStr + " ]* 🎬 " + shortTitle + durationText + "\n";
@@ -312,7 +368,7 @@ function generateResultText(results, startIndex = 0, botDisplayName = DEFAULT_BO
   return text;
 }
 
-// 4. SEND DOWNLOADED VIDEO (DIRECT FILE UPLOAD)
+// 4. SEND DOWNLOADED VIDEO (CAPTION WITH DIRECT STREAM LINK)
 async function processDownload(bot, mek, m, reply, from, selected, streamUrl, botDisplayName = DEFAULT_BOT_NAME) {
   await bot.sendMessage(from, { react: { text: "⬇️", key: m.key } });
   
@@ -330,6 +386,7 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, bo
     captionText += "├ 🎬 *𝗧𝗶𝘁𝗹𝗲:* " + toSmallCaps(cleanTitle) + "\n";
     captionText += "├ ⏱️ *𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻:* " + finalDuration + "\n";
     captionText += "├ 💾 *𝗦𝗶𝘇𝗲:* " + sizeMB.toFixed(2) + " MB\n";
+    captionText += "├ 🔗 *𝗦𝘁𝗿𝗲𝗮𝗺 𝗟𝗶𝗻𝗸:* " + streamUrl + "\n";
     captionText += "│\n╰───────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
 
     const fileName = "MALIYA-MD " + cleanTitle + ".mp4";
@@ -357,7 +414,15 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, bo
   } catch (e) {
     console.error("Pornhub Download Error:", e);
     await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-    reply("╭─[ ❌ *𝗙𝗔𝗜𝗟𝗘𝗗* ]\n│\n├ 🚫 _" + (e.message || "Unknown Download Error") + "_\n╰───────────────⮞");
+    
+    // Download එක fail වුවහොත් link එක කෙළින්ම chat එකට යැවීම
+    let failMsg = "╭─[ ❌ *𝗙𝗔𝗜𝗟𝗘𝗗* ]\n│\n";
+    failMsg += "├ 🚫 _" + (e.message || "Unknown Download Error") + "_\n";
+    if (streamUrl) {
+      failMsg += "│\n├ 🔗 *Direct Stream Link:*\n├ " + streamUrl + "\n";
+    }
+    failMsg += "╰───────────────⮞";
+    reply(failMsg);
   } finally {
     if (downloadedFile && downloadedFile.tmpDir) {
       await rm(downloadedFile.tmpDir, { recursive: true, force: true }).catch(() => {});
@@ -534,7 +599,7 @@ const phReplyHandler = {
         const streamData = await getPhDirectStream(selected.url);
         
         const finalTitle = streamData.title || selected.title;
-        const finalDuration = streamData.duration || selected.duration;
+        const finalDuration = (streamData.duration && streamData.duration !== 'N/A') ? streamData.duration : (selected.duration || 'N/A');
 
         return processDownload(bot, mek, m, reply, from, { ...selected, title: finalTitle, duration: finalDuration }, streamData.streamUrl, botDisplayName);
       } catch (err) {
