@@ -3,11 +3,11 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
-const { mkdtemp, rm, stat } = require('fs/promises'); // 'stat' added, 'readFile' removed
+const { mkdtemp, rm, stat } = require('fs/promises');
 const { join } = require('path');
 const { tmpdir } = require('os');
 const { readSettings, getCustomImage } = require("../lib/botSettings");
-const ffmpegPath = require('ffmpeg-static'); // 👈 FFmpeg-static එකතු කර ඇත
+const ffmpegPath = require('ffmpeg-static');
 
 const execFileAsync = promisify(execFile);
 
@@ -196,7 +196,7 @@ async function phSearch(query, limit = 100) {
   return allResults;
 }
 
-// 2. DIRECT STREAM & VARIANT RESOLVER (FIXES 4XX CDN ERROR)
+// 2. DIRECT STREAM & VARIANT RESOLVER (FIXES 4XX CDN ERROR & TOKENS)
 async function getPhDirectStream(url) {
   const { data } = await axios.get(url, {
     headers: { 
@@ -239,7 +239,13 @@ async function getPhDirectStream(url) {
   const duration = $('span.duration').first().text().trim() || 'N/A';
 
   let finalStreamUrl = masterM3u8Url;
+  
+  // CDN Token Fix
   try {
+    const parsedUrl = new URL(masterM3u8Url);
+    const searchParams = parsedUrl.search;
+    const basePath = parsedUrl.origin + parsedUrl.pathname.substring(0, parsedUrl.pathname.lastIndexOf('/') + 1);
+
     const m3u8Res = await axios.get(masterM3u8Url, {
       headers: {
         'User-Agent': UA,
@@ -261,8 +267,7 @@ async function getPhDirectStream(url) {
           if (line.startsWith('http')) {
             subPlaylists.push(line);
           } else {
-            const baseUrl = masterM3u8Url.substring(0, masterM3u8Url.lastIndexOf('/') + 1);
-            subPlaylists.push(baseUrl + line);
+            subPlaylists.push(basePath + line + searchParams);
           }
         }
       }
@@ -272,6 +277,7 @@ async function getPhDirectStream(url) {
       }
     }
   } catch (e) {
+    console.log("M3U8 Parse Warning:", e.message);
     finalStreamUrl = masterM3u8Url;
   }
 
@@ -301,18 +307,15 @@ async function phDownloadToFile(streamUrl) {
     outPath
   ];
 
-  // 👈 'ffmpeg' වෙනුවට 'ffmpegPath' ලබා දී ඇත
   await execFileAsync(ffmpegPath, ffmpegArgs, { timeout: 600000 });
   
   const fileStats = await stat(outPath);
   
   if (fileStats.size < 5000) {
-    // ගොනුව හිස් නම් මෙතනින්ම delete කර දමයි
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     throw new Error('Downloaded stream returned empty file.');
   }
 
-  // ගොනුවේ path එක සහ size එක return කරයි (Buffer එකට ගන්නේ නැත)
   return { 
     filePath: outPath, 
     tmpDir: tmpDir, 
@@ -325,7 +328,6 @@ function generateResultText(results, startIndex = 0, botDisplayName = DEFAULT_BO
   let text = "╭─[ 🔞 *" + botDisplayName.toUpperCase() + " 𝟭𝟴+* ]\n│\n";
   text += "├ 📊 *𝗥𝗲𝘀𝘂𝗹𝘁𝘀:* " + (startIndex + 1) + " - " + endIndex + " of " + results.length + "\n";
   text += "├ 👇 *Reply with a Number:*\n│\n";
-  text += "├ 👇 *thanks for using:*\n│\n";
 
   for (let i = startIndex; i < endIndex; i++) {
     const v = results[i];
@@ -367,7 +369,6 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, bo
 
     const fileName = "MALIYA-MD " + cleanTitle + ".mp4";
 
-    // 👈 Buffer එක වෙනුවට { url: filePath } භාවිතයෙන් කෙලින්ම upload කරවයි
     if (sizeMB > 60) {
       await bot.sendMessage(from, {
         document: { url: filePath },
@@ -393,7 +394,6 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, bo
     await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
     reply("╭─[ ❌ *𝗙𝗔𝗜𝗟𝗘𝗗* ]\n│\n├ 🚫 _" + (e.message || "Unknown Download Error") + "_\n╰───────────────⮞");
   } finally {
-    // 👈 Upload වීම අවසන් වූ පසු පමණක් Temp File එක මකා දමයි (RAM/Disk ඉතිරි කිරීම)
     if (downloadedFile && downloadedFile.tmpDir) {
       await rm(downloadedFile.tmpDir, { recursive: true, force: true }).catch(() => {});
     }
