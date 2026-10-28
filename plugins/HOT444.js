@@ -3,10 +3,11 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
-const { mkdtemp, readFile, rm } = require('fs/promises');
+const { mkdtemp, rm, stat } = require('fs/promises'); // 'stat' added, 'readFile' removed
 const { join } = require('path');
 const { tmpdir } = require('os');
 const { readSettings, getCustomImage } = require("../lib/botSettings");
+const ffmpegPath = require('ffmpeg-static'); // 👈 FFmpeg-static එකතු කර ඇත
 
 const execFileAsync = promisify(execFile);
 
@@ -237,7 +238,6 @@ async function getPhDirectStream(url) {
   let title = $('h1.inlineFree').first().text().trim() || $('title').text().replace('- Pornhub.com', '').trim() || 'Pornhub Video';
   const duration = $('span.duration').first().text().trim() || 'N/A';
 
-  // Variant Playlist Fetching via Axios (Master to Direct Stream Resolver)
   let finalStreamUrl = masterM3u8Url;
   try {
     const m3u8Res = await axios.get(masterM3u8Url, {
@@ -268,7 +268,6 @@ async function getPhDirectStream(url) {
       }
 
       if (subPlaylists.length > 0) {
-        // High quality variant stream URL තෝරාගනී
         finalStreamUrl = subPlaylists[0];
       }
     }
@@ -279,12 +278,11 @@ async function getPhDirectStream(url) {
   return { title: title, duration: duration, streamUrl: finalStreamUrl };
 }
 
-// 3. FFMPEG BUFFER DOWNLOAD
-async function phDownloadBuffer(streamUrl) {
+// 3. FFMPEG FILE DOWNLOAD (RAM OPTIMIZED)
+async function phDownloadToFile(streamUrl) {
   const tmpDir = await mkdtemp(join(tmpdir(), 'phdl-'));
   const outPath = join(tmpDir, 'video.mp4');
 
-  // Single safe header string with CRLF
   const headersPayload = "Referer: https://www.pornhub.com/\r\nOrigin: https://www.pornhub.com\r\nCookie: hasVisited=1; age_verified=1\r\n";
 
   const ffmpegArgs = [
@@ -303,18 +301,23 @@ async function phDownloadBuffer(streamUrl) {
     outPath
   ];
 
-  try {
-    await execFileAsync('ffmpeg', ffmpegArgs, { timeout: 600000 });
-    const buffer = await readFile(outPath);
-    
-    if (buffer.length < 5000) {
-      throw new Error('Downloaded stream returned empty file.');
-    }
-
-    return buffer;
-  } finally {
+  // 👈 'ffmpeg' වෙනුවට 'ffmpegPath' ලබා දී ඇත
+  await execFileAsync(ffmpegPath, ffmpegArgs, { timeout: 600000 });
+  
+  const fileStats = await stat(outPath);
+  
+  if (fileStats.size < 5000) {
+    // ගොනුව හිස් නම් මෙතනින්ම delete කර දමයි
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    throw new Error('Downloaded stream returned empty file.');
   }
+
+  // ගොනුවේ path එක සහ size එක return කරයි (Buffer එකට ගන්නේ නැත)
+  return { 
+    filePath: outPath, 
+    tmpDir: tmpDir, 
+    sizeMB: fileStats.size / (1024 * 1024) 
+  };
 }
 
 function generateResultText(results, startIndex = 0, botDisplayName = DEFAULT_BOT_NAME) {
@@ -322,6 +325,7 @@ function generateResultText(results, startIndex = 0, botDisplayName = DEFAULT_BO
   let text = "╭─[ 🔞 *" + botDisplayName.toUpperCase() + " 𝟭𝟴+* ]\n│\n";
   text += "├ 📊 *𝗥𝗲𝘀𝘂𝗹𝘁𝘀:* " + (startIndex + 1) + " - " + endIndex + " of " + results.length + "\n";
   text += "├ 👇 *Reply with a Number:*\n│\n";
+  text += "├ 👇 *thanks for using:*\n│\n";
 
   for (let i = startIndex; i < endIndex; i++) {
     const v = results[i];
@@ -341,18 +345,16 @@ function generateResultText(results, startIndex = 0, botDisplayName = DEFAULT_BO
   return text;
 }
 
-// 4. SEND DOWNLOADED VIDEO
+// 4. SEND DOWNLOADED VIDEO (DIRECT FILE UPLOAD)
 async function processDownload(bot, mek, m, reply, from, selected, streamUrl, botDisplayName = DEFAULT_BOT_NAME) {
   await bot.sendMessage(from, { react: { text: "⬇️", key: m.key } });
+  
+  let downloadedFile = null;
 
   try {
-    const buffer = await phDownloadBuffer(streamUrl);
+    downloadedFile = await phDownloadToFile(streamUrl);
+    const { filePath, sizeMB } = downloadedFile;
 
-    if (!buffer || buffer.length < 5000) {
-      return reply("╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Could not process video stream!_\n╰───────────────⮞");
-    }
-
-    const sizeMB = buffer.length / (1024 * 1024);
     const title = selected.title || "Pornhub Video";
     const cleanTitle = title.replace(/[^\w\s.-]/gi, '_').substring(0, 50);
     const finalDuration = selected.duration || 'N/A';
@@ -365,9 +367,10 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, bo
 
     const fileName = "MALIYA-MD " + cleanTitle + ".mp4";
 
+    // 👈 Buffer එක වෙනුවට { url: filePath } භාවිතයෙන් කෙලින්ම upload කරවයි
     if (sizeMB > 60) {
       await bot.sendMessage(from, {
-        document: buffer,
+        document: { url: filePath },
         mimetype: "video/mp4",
         fileName: fileName,
         caption: captionText + "\n\n_📄 Video sent as document due to size limit._",
@@ -375,7 +378,7 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, bo
       }, { quoted: mek });
     } else {
       await bot.sendMessage(from, {
-        video: buffer,
+        video: { url: filePath },
         mimetype: "video/mp4",
         fileName: fileName,
         caption: captionText,
@@ -389,6 +392,11 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, bo
     console.error("Pornhub Download Error:", e);
     await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
     reply("╭─[ ❌ *𝗙𝗔𝗜𝗟𝗘𝗗* ]\n│\n├ 🚫 _" + (e.message || "Unknown Download Error") + "_\n╰───────────────⮞");
+  } finally {
+    // 👈 Upload වීම අවසන් වූ පසු පමණක් Temp File එක මකා දමයි (RAM/Disk ඉතිරි කිරීම)
+    if (downloadedFile && downloadedFile.tmpDir) {
+      await rm(downloadedFile.tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 }
 
