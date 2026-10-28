@@ -4,7 +4,6 @@ const cheerio = require('cheerio');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { mkdtemp, rm, stat } = require('fs/promises');
-const { createWriteStream } = require('fs');
 const { join } = require('path');
 const { tmpdir } = require('os');
 const { readSettings, getCustomImage } = require("../lib/botSettings");
@@ -269,67 +268,38 @@ async function getPhDirectStream(url) {
   return { title, duration: detectedDuration, streamUrl: resolvedStreamUrl };
 }
 
-// 3. FFMPEG DOWNLOAD & RE-MUX
+// 3. FFMPEG DOWNLOAD & RE-ENCODE (WHATSAPP 100% COMPLIANT)
 async function phDownloadToFile(streamUrl) {
   const tmpDir = await mkdtemp(join(tmpdir(), 'phdl-'));
-  const rawPath = join(tmpDir, 'raw.mp4');
   const finalPath = join(tmpDir, 'video.mp4');
 
   const headersPayload = "Referer: https://www.pornhub.com/\r\nOrigin: https://www.pornhub.com\r\nCookie: hasVisited=1; age_verified=1\r\n";
 
+  // WhatsApp mobile player එකට ගැළපෙන පරිදි yuv420p සහ aac codec මගින් optimize කිරීම
+  const ffmpegArgs = [
+    '-v', 'error',
+    '-y',
+    '-user_agent', UA,
+    '-headers', headersPayload,
+    '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
+    '-i', streamUrl,
+    '-c:v', 'libx264',
+    '-preset', 'ultrafast',
+    '-crf', '26',
+    '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac',
+    '-b:a', '128k',
+    '-movflags', '+faststart',
+    finalPath
+  ];
+
   try {
-    if (streamUrl.includes('.m3u8')) {
-      const ffmpegArgs = [
-        '-v', 'error',
-        '-y',
-        '-user_agent', UA,
-        '-headers', headersPayload,
-        '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
-        '-i', streamUrl,
-        '-c', 'copy',
-        '-bsf:a', 'aac_adtstoasc',
-        '-movflags', '+faststart',
-        finalPath
-      ];
-      await execFileAsync(ffmpegPath, ffmpegArgs, { timeout: 600000 });
-    } else {
-      const response = await axios({
-        method: 'GET',
-        url: streamUrl,
-        responseType: 'stream',
-        headers: {
-          'User-Agent': UA,
-          'Referer': 'https://www.pornhub.com/',
-          'Origin': 'https://www.pornhub.com',
-          'Cookie': 'hasVisited=1; age_verified=1'
-        },
-        timeout: 600000
-      });
-
-      const writer = createWriteStream(rawPath);
-      response.data.pipe(writer);
-
-      await new Promise((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-      });
-
-      const fixArgs = [
-        '-v', 'error',
-        '-y',
-        '-i', rawPath,
-        '-c', 'copy',
-        '-movflags', '+faststart',
-        finalPath
-      ];
-      await execFileAsync(ffmpegPath, fixArgs, { timeout: 60000 });
-      await rm(rawPath).catch(() => {});
-    }
+    await execFileAsync(ffmpegPath, ffmpegArgs, { timeout: 600000 });
 
     const fileStats = await stat(finalPath);
     
     if (fileStats.size < 50000) {
-      throw new Error('Downloaded stream is too small or invalid preview.');
+      throw new Error('Downloaded stream is too small or invalid.');
     }
 
     return { 
@@ -368,7 +338,7 @@ function generateResultText(results, startIndex = 0, botDisplayName = DEFAULT_BO
   return text;
 }
 
-// 4. SEND DOWNLOADED VIDEO (CAPTION WITH DIRECT STREAM LINK)
+// 4. SEND DOWNLOADED VIDEO (INCLUDES DIRECT STREAM LINK)
 async function processDownload(bot, mek, m, reply, from, selected, streamUrl, botDisplayName = DEFAULT_BOT_NAME) {
   await bot.sendMessage(from, { react: { text: "⬇️", key: m.key } });
   
@@ -415,7 +385,6 @@ async function processDownload(bot, mek, m, reply, from, selected, streamUrl, bo
     console.error("Pornhub Download Error:", e);
     await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
     
-    // Download එක fail වුවහොත් link එක කෙළින්ම chat එකට යැවීම
     let failMsg = "╭─[ ❌ *𝗙𝗔𝗜𝗟𝗘𝗗* ]\n│\n";
     failMsg += "├ 🚫 _" + (e.message || "Unknown Download Error") + "_\n";
     if (streamUrl) {
@@ -520,7 +489,6 @@ cmd({
       }
     }
 
-    // Numbered List Fallback
     const sentMsg = await bot.sendMessage(from, { 
       image: { url: searchImg },
       caption: generateResultText(results, 0, botDisplayName),
