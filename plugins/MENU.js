@@ -10,7 +10,7 @@ const LOOP_COOLDOWN = 2500;
 
 /* ============ PERMANENT BRANDING (DO NOT CHANGE) ============ */
 const BRAND_BASE = "MALIYA-MD";
-const DEFAULT_BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
+const DEFAULT_BOT_NAME = "—͟͞͞★ᴵ𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗 𝗠𝗜𝗡𝗜—͟͞͞★";
 const PREFIX = ".";
 const TZ = "Asia/Colombo";
 
