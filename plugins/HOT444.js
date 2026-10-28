@@ -1,31 +1,48 @@
-const { cmd, replyHandlers } = require('../command');
-const axios = require('axios');
-const cheerio = require('cheerio');
-const { execFile } = require('child_process');
-const { promisify } = require('util');
-const { mkdtemp, rm, stat } = require('fs/promises');
-const { join } = require('path');
-const { tmpdir } = require('os');
+const { cmd, replyHandlers } = require("../command");
+const axios = require("axios");
+const cheerio = require("cheerio");
+const sharp = require("sharp");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
-const ffmpegPath = require('ffmpeg-static');
-
-const execFileAsync = promisify(execFile);
-
-// State Management
-const pendingPhSearch = {};
-const lastProcessedMsg = {};
-
-const SESSION_TIMEOUT = 5 * 60 * 1000;
-const LOOP_COOLDOWN = 3000;
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
 const BRAND_BASE = "MALIYA-MD";
 const DEFAULT_BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
 const CHANNEL_JID = "120363427174988449@newsletter";
 const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
-const DEFAULT_SEARCH_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
+const DEFAULT_SEARCH_IMAGE =
+  "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
 
-// ===== HELPER FUNCTIONS =====
+const SESSION_TIMEOUT = 5 * 60 * 1000;
+const LOOP_COOLDOWN = 2500;
+const MAX_RESULTS = 15;
+const pendingPhSearch = {};
+const lastProcessedMsg = {};
+
+const UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+// External Chamindu API Config
+const CHAMA_API_BASE = "https://api.chamindu.site/api/adult/pornhub/dl";
+const CHAMA_API_KEY = "chama_api_c18d54f734c23ea0c333d33b7494b3b2";
+
+function keyFor(sender, from) {
+  return `${from || ""}`;
+}
+
+function clearUserSession(k) {
+  delete pendingPhSearch[k];
+}
+
+function toSmallCaps(str = "") {
+  const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const small = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+  return String(str)
+    .split("")
+    .map((char) => {
+      const idx = normal.indexOf(char);
+      return idx !== -1 ? small[idx] : char;
+    })
+    .join("");
+}
 
 function channelContextInfo() {
   return {
@@ -34,157 +51,158 @@ function channelContextInfo() {
     forwardedNewsletterMessageInfo: {
       newsletterJid: CHANNEL_JID,
       newsletterName: CHANNEL_NAME,
-      serverMessageId: -1
-    }
+      serverMessageId: -1,
+    },
   };
 }
 
-function keyFor(sender, from) {
-  let fromPart = "";
-  if (from) {
-    fromPart = String(from);
-  }
-  let senderPart = "";
-  if (sender) {
-    senderPart = String(sender).split(":")[0];
-  }
-  return fromPart + "::" + senderPart;
+function getQuotedId(m, mek) {
+  return (
+    m?.quoted?.id ||
+    mek?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+    m?.message?.imageMessage?.contextInfo?.stanzaId ||
+    mek?.message?.imageMessage?.contextInfo?.stanzaId ||
+    m?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    mek?.message?.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    null
+  );
 }
 
-function toSmallCaps(str) {
-  let text = "";
-  if (str) {
-    text = String(str);
+function extractTexts(body, mek, m) {
+  const texts = [];
+  const direct = [
+    body,
+    m?.body,
+    m?.text,
+    m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text,
+    m?.message?.buttonsResponseMessage?.selectedButtonId,
+    m?.message?.buttonsResponseMessage?.selectedDisplayText,
+    m?.message?.listResponseMessage?.title,
+    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.interactiveResponseMessage?.body?.text,
+    mek?.message?.conversation,
+    mek?.message?.extendedTextMessage?.text,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+  ];
+  for (const item of direct) {
+    if (item) texts.push(String(item).trim());
   }
-  const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
-  return text
-    .split("")
-    .map((char) => {
-      const idx = normal.indexOf(char);
-      if (idx !== -1) {
-        return small[idx];
-      } else {
-        return char;
-      }
-    })
-    .join("");
+
+  const p1 =
+    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage
+      ?.paramsJson;
+  const p2 =
+    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage
+      ?.paramsJson;
+  for (const raw of [p1, p2]) {
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.id) texts.push(String(parsed.id).trim());
+      if (parsed.selectedId) texts.push(String(parsed.selectedId).trim());
+      if (parsed.selectedRowId) texts.push(String(parsed.selectedRowId).trim());
+      if (parsed.title) texts.push(String(parsed.title).trim());
+    } catch {}
+  }
+  return [...new Set(texts.filter(Boolean))];
 }
 
-function clearUserSession(k) {
-  delete pendingPhSearch[k];
-}
-
-function safeJsonParse(str) {
+async function getThumbnailBuffer(url) {
+  const tryUrl = url || DEFAULT_SEARCH_IMAGE;
   try {
-    return JSON.parse(str);
+    const res = await axios.get(tryUrl, {
+      responseType: "arraybuffer",
+      timeout: 8000,
+      headers: { "User-Agent": UA },
+    });
+    return await sharp(Buffer.from(res.data))
+      .resize(200, 200, { fit: "cover" })
+      .jpeg({ quality: 50 })
+      .toBuffer();
   } catch (e) {
     return null;
   }
 }
 
-function getQuotedStanzaId(mek) {
-  if (mek && mek.message) {
-    const types = ['extendedTextMessage', 'imageMessage', 'videoMessage', 'interactiveResponseMessage'];
-    for (let t of types) {
-      if (mek.message[t] && mek.message[t].contextInfo && mek.message[t].contextInfo.stanzaId) {
-        return mek.message[t].contextInfo.stanzaId;
-      }
+// Download නොකර Video එකේ ප්‍රමාණය (MB) සොයාගැනීම
+async function getRemoteFileSizeMB(url) {
+  try {
+    const headRes = await axios.head(url, {
+      headers: { "User-Agent": UA },
+      timeout: 10000,
+    });
+    const bytes = parseInt(headRes.headers["content-length"], 10);
+    if (!isNaN(bytes) && bytes > 0) {
+      return bytes / (1024 * 1024);
     }
-  }
+  } catch (e) {}
   return null;
 }
 
-function extractIncomingPayload(body, mek, m) {
-  let paramsJson = null;
-  if (m && m.message && m.message.interactiveResponseMessage && m.message.interactiveResponseMessage.nativeFlowResponseMessage) {
-    paramsJson = m.message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson;
-  }
-  if (!paramsJson && mek && mek.message && mek.message.interactiveResponseMessage && mek.message.interactiveResponseMessage.nativeFlowResponseMessage) {
-    paramsJson = mek.message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson;
-  }
-
-  if (paramsJson) {
-    const parsed = safeJsonParse(paramsJson);
-    if (parsed) {
-      const btnId = parsed.id || parsed.selectedId || parsed.selectedRowId || parsed.name;
-      if (btnId) return String(btnId).trim();
-    }
-  }
-
-  let directId = null;
-  if (m && m.message) {
-    if (m.message.listResponseMessage && m.message.listResponseMessage.singleSelectReply) {
-      directId = m.message.listResponseMessage.singleSelectReply.selectedRowId;
-    } else if (m.message.buttonsResponseMessage) {
-      directId = m.message.buttonsResponseMessage.selectedButtonId;
-    }
-  }
-  if (!directId && mek && mek.message) {
-    if (mek.message.listResponseMessage && mek.message.listResponseMessage.singleSelectReply) {
-      directId = mek.message.listResponseMessage.singleSelectReply.selectedRowId;
-    } else if (mek.message.buttonsResponseMessage) {
-      directId = mek.message.buttonsResponseMessage.selectedButtonId;
-    }
-  }
-
-  if (directId) return String(directId).trim();
-
-  let text = "";
-  if (m && m.message) {
-    text = (m.message.interactiveResponseMessage && m.message.interactiveResponseMessage.body && m.message.interactiveResponseMessage.body.text) ||
-           m.message.conversation ||
-           (m.message.extendedTextMessage && m.message.extendedTextMessage.text);
-  }
-  if (!text && mek && mek.message) {
-    text = (mek.message.interactiveResponseMessage && mek.message.interactiveResponseMessage.body && mek.message.interactiveResponseMessage.body.text) ||
-           mek.message.conversation ||
-           (mek.message.extendedTextMessage && mek.message.extendedTextMessage.text);
-  }
-  if (!text && body) {
-    text = body;
-  }
-
-  return String(text || "").trim();
+async function sendErrorMsg(sock, from, mek, text) {
+  await sock.sendMessage(
+    from,
+    {
+      text:
+        "⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _" +
+        text +
+        "_",
+      contextInfo: channelContextInfo(),
+    },
+    { quoted: mek }
+  );
 }
 
-// 1. SEARCH LOGIC
-async function phSearch(query, limit = 100) {
+/* ================= 1. PORNHUB SEARCH ================= */
+async function phSearch(query, limit = 15) {
   let allResults = [];
   let page = 1;
 
-  while (allResults.length < limit && page <= 5) {
-    const url = "https://www.pornhub.com/video/search?search=" + encodeURIComponent(query) + "&page=" + page;
+  while (allResults.length < limit && page <= 3) {
+    const url =
+      "https://www.pornhub.com/video/search?search=" +
+      encodeURIComponent(query) +
+      "&page=" +
+      page;
 
     try {
       const { data } = await axios.get(url, {
-        headers: { 
-          'User-Agent': UA, 
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Cookie': 'hasVisited=1; age_verified=1'
+        headers: {
+          "User-Agent": UA,
+          "Accept-Language": "en-US,en;q=0.9",
+          Cookie: "hasVisited=1; age_verified=1",
         },
-        timeout: 12000
+        timeout: 12000,
       });
       const $ = cheerio.load(data);
-      
-      $('li.pcVideoListItem, li.videoBox').each((_, el) => {
-        if (allResults.length >= limit) return false;
-        const anchor = $(el).find('a').first();
-        const img = $(el).find('img').first();
-        
-        let title = $(el).find('.title a, span.title').first().text().trim() || anchor.attr('title') || '';
-        let href = anchor.attr('href') || '';
-        const duration = $(el).find('var.duration, .duration').first().text().trim() || 'N/A';
 
-        if (title && href && href.includes('viewkey=')) {
-          const fullUrl = href.startsWith('http') ? href : "https://www.pornhub.com" + href;
-          const thumb = img.attr('data-mediumhint') || img.attr('src') || '';
+      $("li.pcVideoListItem, li.videoBox").each((_, el) => {
+        if (allResults.length >= limit) return false;
+        const anchor = $(el).find("a").first();
+        const img = $(el).find("img").first();
+
+        let title =
+          $(el).find(".title a, span.title").first().text().trim() ||
+          anchor.attr("title") ||
+          "";
+        let href = anchor.attr("href") || "";
+        const duration =
+          $(el).find("var.duration, .duration").first().text().trim() || "N/A";
+
+        if (title && href && href.includes("viewkey=")) {
+          const fullUrl = href.startsWith("http")
+            ? href
+            : "https://www.pornhub.com" + href;
+          const thumb = img.attr("data-mediumhint") || img.attr("src") || "";
 
           allResults.push({
             title: title,
             url: fullUrl,
             thumb: thumb,
-            duration: duration
+            duration: duration,
           });
         }
       });
@@ -196,406 +214,321 @@ async function phSearch(query, limit = 100) {
   return allResults;
 }
 
-// 2. VIDEO STREAM RESOLVER
-async function getPhDirectStream(url) {
-  const { data } = await axios.get(url, {
-    headers: { 
-      'User-Agent': UA, 
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Cookie': 'hasVisited=1; age_verified=1'
-    },
-    timeout: 15000
-  });
-  
-  const $ = cheerio.load(data);
-  let resolvedStreamUrl = null;
-  let detectedDuration = null;
+/* ================= 2. FETCH FROM CHAMA API ================= */
+async function getChamaStreamData(targetUrl) {
+  const apiUrl = `${CHAMA_API_BASE}?url=${encodeURIComponent(
+    targetUrl
+  )}&api_key=${CHAMA_API_KEY}`;
 
-  let flashvarsMatch = data.match(/flashvars_\d+\s*=\s*({.+?});/s) || data.match(/var\s+media_0\s*=\s*({.+?});/s);
+  const { data } = await axios.get(apiUrl, { timeout: 20000 });
 
-  if (flashvarsMatch) {
-    try {
-      const flashvars = JSON.parse(flashvarsMatch[1]);
-      
-      if (flashvars.video_duration) {
-        const sec = parseInt(flashvars.video_duration, 10);
-        if (!isNaN(sec)) {
-          const m = Math.floor(sec / 60);
-          const s = sec % 60;
-          detectedDuration = `${m}:${s < 10 ? '0' : ''}${s}`;
-        }
-      }
-
-      if (flashvars.mediaDefinitions && Array.isArray(flashvars.mediaDefinitions)) {
-        const validMp4s = flashvars.mediaDefinitions.filter(m => 
-          m.format === 'mp4' && 
-          m.videoUrl && 
-          !m.videoUrl.includes('/gifs/') && 
-          !m.videoUrl.includes('/pics/')
-        );
-
-        if (validMp4s.length > 0) {
-          validMp4s.sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
-          resolvedStreamUrl = validMp4s[0].videoUrl;
-        } else {
-          const hlsDefs = flashvars.mediaDefinitions.filter(m => (m.format === 'hls' || (m.videoUrl && m.videoUrl.includes('.m3u8'))) && m.videoUrl);
-          if (hlsDefs.length > 0) {
-            resolvedStreamUrl = hlsDefs[0].videoUrl;
-          }
-        }
-      }
-    } catch (e) {}
+  if (!data || !data.success) {
+    throw new Error("API request failed or video is unavailable.");
   }
 
-  if (!detectedDuration) {
-    detectedDuration = $('span.duration').first().text().trim() || 
-                       $('meta[property="video:duration"]').attr('content') || 
-                       'N/A';
-    if (!isNaN(Number(detectedDuration)) && detectedDuration !== 'N/A') {
-      const sec = parseInt(detectedDuration, 10);
-      const m = Math.floor(sec / 60);
-      const s = sec % 60;
-      detectedDuration = `${m}:${s < 10 ? '0' : ''}${s}`;
-    }
+  const streamUrl =
+    data.download_proxy ||
+    data.download_url ||
+    data.stream_proxy ||
+    data.stream_url ||
+    data.direct_link ||
+    data.raw_link;
+
+  if (!streamUrl) {
+    throw new Error("Direct stream link could not be retrieved from API.");
   }
 
-  if (!resolvedStreamUrl) {
-    throw new Error('Full video stream URL could not be extracted.');
-  }
-
-  let title = $('h1.inlineFree').first().text().trim() || $('title').text().replace('- Pornhub.com', '').trim() || 'Pornhub Video';
-
-  return { title, duration: detectedDuration, streamUrl: resolvedStreamUrl };
+  return { streamUrl };
 }
 
-// 3. FFMPEG DOWNLOAD & RE-ENCODE (WHATSAPP 100% COMPLIANT)
-async function phDownloadToFile(streamUrl) {
-  const tmpDir = await mkdtemp(join(tmpdir(), 'phdl-'));
-  const finalPath = join(tmpDir, 'video.mp4');
-
-  const headersPayload = "Referer: https://www.pornhub.com/\r\nOrigin: https://www.pornhub.com\r\nCookie: hasVisited=1; age_verified=1\r\n";
-
-  // WhatsApp mobile player එකට ගැළපෙන පරිදි yuv420p සහ aac codec මගින් optimize කිරීම
-  const ffmpegArgs = [
-    '-v', 'error',
-    '-y',
-    '-user_agent', UA,
-    '-headers', headersPayload,
-    '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
-    '-i', streamUrl,
-    '-c:v', 'libx264',
-    '-preset', 'ultrafast',
-    '-crf', '26',
-    '-pix_fmt', 'yuv420p',
-    '-c:a', 'aac',
-    '-b:a', '128k',
-    '-movflags', '+faststart',
-    finalPath
-  ];
-
-  try {
-    await execFileAsync(ffmpegPath, ffmpegArgs, { timeout: 600000 });
-
-    const fileStats = await stat(finalPath);
-    
-    if (fileStats.size < 50000) {
-      throw new Error('Downloaded stream is too small or invalid.');
-    }
-
-    return { 
-      filePath: finalPath, 
-      tmpDir: tmpDir, 
-      sizeMB: fileStats.size / (1024 * 1024) 
-    };
-
-  } catch (error) {
-    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-    throw error;
-  }
-}
-
-function generateResultText(results, startIndex = 0, botDisplayName = DEFAULT_BOT_NAME) {
-  const endIndex = Math.min(startIndex + 10, results.length);
-  let text = "╭─[ 🔞 *" + botDisplayName.toUpperCase() + " 𝟭𝟴+* ]\n│\n";
-  text += "├ 📊 *𝗥𝗲𝘀𝘂𝗹𝘁𝘀:* " + (startIndex + 1) + " - " + endIndex + " of " + results.length + "\n";
-  text += "├ 👇 *Reply with a Number:*\n│\n";
-
-  for (let i = startIndex; i < endIndex; i++) {
-    const v = results[i];
-    const numStr = String(i + 1).padStart(2, "0");
-    const shortTitle = toSmallCaps(v.title.slice(0, 36));
-    let durationText = "";
-    if (v.duration && v.duration !== 'N/A') {
-      durationText = " _(" + v.duration + ")_";
-    }
-    text += "├ 📱 *[ " + numStr + " ]* 🎬 " + shortTitle + durationText + "\n";
-  }
-
-  text += "│\n╰───────────────⮞\n";
-  if (endIndex < results.length && endIndex <= 90) {
-    text += '\n> ➡️ *Reply with "' + (endIndex + 1) + '" for next 10 results*';
-  }
-  return text;
-}
-
-// 4. SEND DOWNLOADED VIDEO (INCLUDES DIRECT STREAM LINK)
-async function processDownload(bot, mek, m, reply, from, selected, streamUrl, botDisplayName = DEFAULT_BOT_NAME) {
-  await bot.sendMessage(from, { react: { text: "⬇️", key: m.key } });
-  
-  let downloadedFile = null;
-
-  try {
-    downloadedFile = await phDownloadToFile(streamUrl);
-    const { filePath, sizeMB } = downloadedFile;
-
-    const title = selected.title || "Pornhub Video";
-    const cleanTitle = title.replace(/[^\w\s.-]/gi, '_').substring(0, 50);
-    const finalDuration = selected.duration || 'N/A';
-
-    let captionText = "╭─[ 🔞 *" + botDisplayName.toUpperCase() + " 𝟭𝟴+* ]\n│\n";
-    captionText += "├ 🎬 *𝗧𝗶𝘁𝗹𝗲:* " + toSmallCaps(cleanTitle) + "\n";
-    captionText += "├ ⏱️ *𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻:* " + finalDuration + "\n";
-    captionText += "├ 💾 *𝗦𝗶𝘇𝗲:* " + sizeMB.toFixed(2) + " MB\n";
-    captionText += "├ 🔗 *𝗦𝘁𝗿𝗲𝗮𝗺 𝗟𝗶𝗻𝗸:* " + streamUrl + "\n";
-    captionText += "│\n╰───────────────⮞\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗";
-
-    const fileName = "MALIYA-MD " + cleanTitle + ".mp4";
-
-    if (sizeMB > 60) {
-      await bot.sendMessage(from, {
-        document: { url: filePath },
-        mimetype: "video/mp4",
-        fileName: fileName,
-        caption: captionText + "\n\n_📄 Video sent as document due to size limit._",
-        contextInfo: channelContextInfo()
-      }, { quoted: mek });
-    } else {
-      await bot.sendMessage(from, {
-        video: { url: filePath },
-        mimetype: "video/mp4",
-        fileName: fileName,
-        caption: captionText,
-        contextInfo: channelContextInfo()
-      }, { quoted: mek });
-    }
-
-    await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-
-  } catch (e) {
-    console.error("Pornhub Download Error:", e);
-    await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-    
-    let failMsg = "╭─[ ❌ *𝗙𝗔𝗜𝗟𝗘𝗗* ]\n│\n";
-    failMsg += "├ 🚫 _" + (e.message || "Unknown Download Error") + "_\n";
-    if (streamUrl) {
-      failMsg += "│\n├ 🔗 *Direct Stream Link:*\n├ " + streamUrl + "\n";
-    }
-    failMsg += "╰───────────────⮞";
-    reply(failMsg);
-  } finally {
-    if (downloadedFile && downloadedFile.tmpDir) {
-      await rm(downloadedFile.tmpDir, { recursive: true, force: true }).catch(() => {});
-    }
-  }
-}
-
-// ===== 1. MAIN SEARCH COMMAND =====
-cmd({
-  pattern: "ph",
-  alias: ["pornhub", "phub"],
-  desc: "Search and download videos from Pornhub",
-  category: "download",
-  react: "🔞",
-  filename: __filename
-}, async (bot, mek, m, { from, q, sender, reply, sessionId }) => {
-  if (!q) {
-    return reply("╭─[ ⚠️ *𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗨𝗦𝗔𝗚𝗘* ]\n│\n├ 📌 *Usage:* .ph [search_term]\n├ 💡 *Example:* .ph hot\n╰───────────────⮞");
-  }
-
-  await bot.sendMessage(from, { react: { text: "🔍", key: m.key } });
-
-  try {
-    const results = await phSearch(q.trim(), 100);
-
-    if (!results || !Array.isArray(results) || results.length === 0) {
-      await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-      return reply("╭─[ 😞 *𝗡𝗢 𝗥𝗘𝗦𝗨𝗟𝗧𝗦* ]\n│\n├ 🎬 *Query:* _" + q + "_\n╰───────────────⮞");
-    }
-
-    const k = keyFor(sender, from);
-    clearUserSession(k);
-
-    const settings = await readSettings(sessionId);
-    let btnsOn = Boolean(settings && settings.btns_enabled);
-    let botDisplayName = (settings && settings.bot_name && settings.bot_name.trim()) || DEFAULT_BOT_NAME;
-
-    let searchImg = DEFAULT_SEARCH_IMAGE;
-    if (sessionId) {
-      try {
-        const custom = await getCustomImage(sessionId, "ph_header");
-        if (custom && custom.data) {
-          searchImg = custom.data;
-        }
-      } catch (e) {}
-    }
-
-    if (btnsOn) {
-      try {
-        const { ButtonV2 } = await import("@vanzxy/baileys");
-
-        const topResults = results.slice(0, 20);
-        const videoRows = topResults.map((v, index) => ({
-          title: String(index + 1).padStart(2, "0") + ". " + v.title.substring(0, 45),
-          description: "Duration: " + (v.duration || 'N/A'),
-          id: ".ph_select " + (index + 1)
-        }));
-
-        const bodyText = "╭─[ 🔞 *" + botDisplayName.toUpperCase() + " 𝟭𝟴+* ]\n│\n├ 🔍 *Search :* " + q + "\n├ 📊 *Total Results :* " + results.length + "\n│\n╰───────────────⮞\n\n© 2026 " + BRAND_BASE + " SYSTEM";
-
-        const btn = new ButtonV2(bot)
-          .setBody(bodyText)
-          .setFooter("WaBot by " + botDisplayName)
-          .setThumbnail(searchImg);
-
-        btn.addRawButton({
-          buttonId: "ph_search_list",
-          buttonText: { displayText: "🎬 Select Video" },
-          type: 1,
-          nativeFlowInfo: {
-            name: "single_select",
-            paramsJson: JSON.stringify({
-              title: "Search Results ↯",
-              sections: [{ title: "🎥 Available Videos", rows: videoRows }]
-            }),
-          },
-        });
-
-        btn.addButton("📜 Bot Menu", ".menu");
-
-        const sentMsg = await btn.send(from, { quoted: mek });
-
-        if (sentMsg && sentMsg.key && sentMsg.key.id) {
-          pendingPhSearch[k] = { 
-            results: results, 
-            timestamp: Date.now(), 
-            expectedMsgId: sentMsg.key.id,
-            botDisplayName: botDisplayName
-          };
-          await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-          return;
-        }
-      } catch (err) {
-        console.log("PH BUTTON ERROR:", err.message || err);
-      }
-    }
-
-    const sentMsg = await bot.sendMessage(from, { 
-      image: { url: searchImg },
-      caption: generateResultText(results, 0, botDisplayName),
-      contextInfo: channelContextInfo()
-    }, { quoted: mek });
-
-    const sentId = sentMsg && sentMsg.key ? sentMsg.key.id : null;
-
-    pendingPhSearch[k] = { 
-      results: results, 
-      timestamp: Date.now(), 
-      expectedMsgId: sentId,
-      botDisplayName: botDisplayName
-    };
-
-    await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-
-  } catch (error) {
-    console.error("Pornhub Search Error:", error);
-    await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-    reply("╭─[ ❌ *𝗦𝗬𝗦𝗧𝗘𝗠 𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _Error occurred while searching Pornhub!_\n╰───────────────⮞");
-  }
-});
-
-// ===== 2. SELECTION REPLY HANDLER =====
-const phReplyHandler = {
-  filter: (text, { sender, from }) => {
-    const k = keyFor(sender, from);
-    return Boolean(pendingPhSearch[k]);
+/* ================= COMMAND: .ph ================= */
+cmd(
+  {
+    pattern: "ph",
+    alias: ["pornhub", "phub", "phsearch"],
+    react: "🔞",
+    desc: "Search and stream videos from Pornhub",
+    category: "download",
+    filename: __filename,
   },
-  function: async (bot, mek, m, { body, sender, reply, from }) => {
-    const payload = extractIncomingPayload(body, mek, m);
-    if (!payload) return;
+  async (sock, mek, m, { from, q, sender, sessionId }) => {
+    try {
+      if (!q) {
+        return await sock.sendMessage(
+          from,
+          {
+            text: "⊱━━━━━ • ✿ • ━━━━━⊰\n🔞 *𝐏𝐎𝐑𝐍𝐇𝐔𝐁 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* `.ph <search_term>`\n💡 *Example:* `.ph hot`",
+            contextInfo: channelContextInfo(),
+          },
+          { quoted: mek }
+        );
+      }
 
+      await sock.sendMessage(from, { react: { text: "🔍", key: mek.key } });
+
+      const results = await phSearch(q.trim(), MAX_RESULTS);
+      if (!results || results.length === 0) {
+        await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+        return await sendErrorMsg(
+          sock,
+          from,
+          mek,
+          `No results found on Pornhub for "${q}".`
+        );
+      }
+
+      const topResults = results.slice(0, MAX_RESULTS);
+      const k = keyFor(sender, from);
+      clearUserSession(k);
+
+      const settings = await readSettings(sessionId);
+      const btnsOn = !!settings.btns_enabled;
+      const botDisplayName = settings?.bot_name?.trim() || DEFAULT_BOT_NAME;
+
+      let searchImg = DEFAULT_SEARCH_IMAGE;
+      if (sessionId) {
+        try {
+          const custom = await getCustomImage(sessionId, "ph_header");
+          if (custom && custom.data) searchImg = custom.data;
+        } catch (e) {}
+      }
+
+      const bodyText = `⊱━━━━━ • ✿ • ━━━━━⊰\n🔞 *${botDisplayName.toUpperCase()} 18+*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n© 2026 ${BRAND_BASE} SYSTEM`;
+
+      if (btnsOn) {
+        try {
+          const { ButtonV2 } = await import("@vanzxy/baileys");
+
+          const videoRows = topResults.map((item, index) => ({
+            title: `${String(index + 1).padStart(2, "0")}. ${item.title.substring(0, 45)}`,
+            description: `Duration: ${item.duration || "N/A"}`,
+            id: `.ph_select ${index + 1}`,
+          }));
+
+          const btn = new ButtonV2(sock)
+            .setBody(bodyText)
+            .setFooter(`WaBot by ${botDisplayName}`)
+            .setThumbnail(searchImg);
+
+          btn.addRawButton({
+            buttonId: "ph_videos_list",
+            buttonText: { displayText: "🎬 Select Video" },
+            type: 1,
+            nativeFlowInfo: {
+              name: "single_select",
+              paramsJson: JSON.stringify({
+                title: "Pornhub Search Results ↯",
+                sections: [{ title: "🎥 Available Videos", rows: videoRows }],
+              }),
+            },
+          });
+
+          btn.addButton("📜 Bot Menu", ".menu");
+
+          const sentMsg = await btn.send(from, { quoted: mek });
+
+          if (sentMsg?.key?.id) {
+            pendingPhSearch[k] = {
+              results: topResults,
+              timestamp: Date.now(),
+              isProcessing: false,
+              expectedMsgId: sentMsg.key.id,
+              botDisplayName,
+            };
+            await sock.sendMessage(from, {
+              react: { text: "✅", key: mek.key },
+            });
+            return;
+          }
+        } catch (e) {
+          console.log("PH BUTTONV2 ERROR:", e?.message || e);
+        }
+      }
+
+      // Numbered Fallback List
+      let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n🔞 *${botDisplayName.toUpperCase()} 18+*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n`;
+      topResults.forEach((item, index) => {
+        text += `*[ ${String(index + 1).padStart(2, "0")} ]* ➔ *${toSmallCaps(
+          item.title.substring(0, 40)
+        )}* _(${item.duration})_\n`;
+      });
+      text +=
+        "\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 💬 *Swipe & Reply this message with a number...*";
+
+      const sentMsg = await sock.sendMessage(
+        from,
+        {
+          image: { url: searchImg },
+          caption: text,
+          contextInfo: channelContextInfo(),
+        },
+        { quoted: mek }
+      );
+
+      pendingPhSearch[k] = {
+        results: topResults,
+        timestamp: Date.now(),
+        isProcessing: false,
+        expectedMsgId: sentMsg.key.id,
+        botDisplayName,
+      };
+
+      await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+    } catch (error) {
+      await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+      await sendErrorMsg(sock, from, mek, "Failed to connect to Pornhub search.");
+    }
+  }
+);
+
+/* ================= REPLY HANDLER ================= */
+const phReplyHandler = {
+  filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
+    const pending = pendingPhSearch[k];
+    if (!pending) return false;
+
+    const texts = extractTexts(text, mek, m);
+    for (const t of texts) {
+      if (t.startsWith(".ph_select ")) return true;
+    }
+
+    const num = parseInt(String(text || "").trim(), 10);
+    const max = pending.results?.length || 0;
+    const isNum = !isNaN(num) && num > 0 && num <= max;
+
+    const quotedId = getQuotedId(m, mek);
+    const isQuoted = quotedId && quotedId === pending.expectedMsgId;
+
+    return isQuoted || isNum;
+  },
+  function: async (sock, mek, m, { body, sender, from }) => {
+    const k = keyFor(sender, from);
+    const pending = pendingPhSearch[k];
+    if (!pending || pending.isProcessing) return;
+
+    const texts = extractTexts(body, mek, m);
+    let choice = null;
+
+    for (const t of texts) {
+      if (t.startsWith(".ph_select ")) {
+        choice = parseInt(t.replace(".ph_select ", "").trim(), 10);
+        break;
+      }
+    }
+
+    if (choice === null) {
+      const num = parseInt(String(body || "").trim(), 10);
+      if (!isNaN(num)) choice = num;
+    }
+
+    if (!choice || choice < 1 || choice > pending.results.length) return;
 
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
-    if (lastMsg && lastMsg.text === payload && (now - lastMsg.time) < LOOP_COOLDOWN) {
+    if (
+      lastMsg &&
+      lastMsg.text === String(choice) &&
+      now - lastMsg.time < LOOP_COOLDOWN
+    )
       return;
+    lastProcessedMsg[k] = { text: String(choice), time: now };
+
+    const botDisplayName = pending.botDisplayName || DEFAULT_BOT_NAME;
+    const selected = pending.results[choice - 1];
+
+    pending.isProcessing = true;
+    clearUserSession(k);
+
+    await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
+
+    try {
+      const streamData = await getChamaStreamData(selected.url);
+      const streamUrl = streamData.streamUrl;
+
+      const cleanTitle = (selected.title || "Video")
+        .replace(/[^\w\s.-]/gi, "")
+        .substring(0, 50)
+        .trim();
+
+      const fileName = `MALIYA-MD ${cleanTitle}.mp4`;
+      const thumbBuffer = await getThumbnailBuffer(selected.thumb);
+
+      // Download නොකර Remote URL එකෙන් Size එක (MB) පරීක්ෂා කිරීම
+      const sizeMB = await getRemoteFileSizeMB(streamUrl);
+      const sizeText = sizeMB ? `${sizeMB.toFixed(2)} MB` : "Unknown";
+
+      let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n🔞 *${botDisplayName.toUpperCase()} 18+*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Title :* ${toSmallCaps(
+        cleanTitle
+      )}\n⏱️ *Duration :* ${selected.duration || "N/A"}\n💾 *Size :* ${sizeText}\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+
+      // 80MB ට වඩා වැඩි නම් Document ලෙසද, 80MB හෝ ඊට අඩු නම් Video ලෙසද Stream කරයි
+      if (sizeMB && sizeMB > 80) {
+        const docPayload = {
+          document: { url: streamUrl },
+          mimetype: "video/mp4",
+          fileName: fileName,
+          caption:
+            captionText + "\n\n_📄 Video sent as document stream (Size > 80MB)._",
+          contextInfo: channelContextInfo(),
+        };
+        if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
+
+        await sock.sendMessage(from, docPayload, { quoted: mek });
+      } else {
+        try {
+          const videoPayload = {
+            video: { url: streamUrl },
+            mimetype: "video/mp4",
+            fileName: fileName,
+            caption: captionText,
+            contextInfo: channelContextInfo(),
+          };
+          if (thumbBuffer) videoPayload.jpegThumbnail = thumbBuffer;
+
+          await sock.sendMessage(from, videoPayload, { quoted: mek });
+        } catch (videoErr) {
+          // Video payload එක fail වුවහොත් document එකක් ලෙස fallback stream කිරීම
+          const fallbackDocPayload = {
+            document: { url: streamUrl },
+            mimetype: "video/mp4",
+            fileName: fileName,
+            caption:
+              captionText +
+              "\n\n_📄 Video sent as document stream due to stream format._",
+            contextInfo: channelContextInfo(),
+          };
+          if (thumbBuffer) fallbackDocPayload.jpegThumbnail = thumbBuffer;
+
+          await sock.sendMessage(from, fallbackDocPayload, { quoted: mek });
+        }
+      }
+
+      await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+    } catch (error) {
+      await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+      await sendErrorMsg(
+        sock,
+        from,
+        mek,
+        `Streaming download failed: ${error.message || "Unknown Error"}`
+      );
     }
-    lastProcessedMsg[k] = { text: payload, time: now };
-
-    const quotedId = getQuotedStanzaId(mek);
-
-    if (pendingPhSearch[k]) {
-      const session = pendingPhSearch[k];
-      if (quotedId && session.expectedMsgId && quotedId !== session.expectedMsgId) {
-        return;
-      }
-
-      let num = null;
-      if (payload.startsWith(".ph_select ")) {
-        num = parseInt(payload.replace(".ph_select ", "").trim(), 10);
-      } else if (/^\d+$/.test(payload)) {
-        num = parseInt(payload, 10);
-      }
-
-      if (num === null || isNaN(num) || num <= 0 || num > session.results.length) {
-        return;
-      }
-
-      const botDisplayName = session.botDisplayName || DEFAULT_BOT_NAME;
-
-      if ([11, 21, 31, 41, 51, 61, 71, 81, 91].includes(num)) {
-        session.timestamp = Date.now();
-        return reply(generateResultText(session.results, num - 1, botDisplayName));
-      }
-
-      const selected = session.results[num - 1];
-      delete pendingPhSearch[k];
-
-      await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
-
-      try {
-        const streamData = await getPhDirectStream(selected.url);
-        
-        const finalTitle = streamData.title || selected.title;
-        const finalDuration = (streamData.duration && streamData.duration !== 'N/A') ? streamData.duration : (selected.duration || 'N/A');
-
-        return processDownload(bot, mek, m, reply, from, { ...selected, title: finalTitle, duration: finalDuration }, streamData.streamUrl, botDisplayName);
-      } catch (err) {
-        console.error("Direct Download Fetch Error:", err);
-        await bot.sendMessage(from, { react: { text: "❌", key: m.key } }).catch(() => {});
-        return reply("╭─[ ❌ *𝗘𝗥𝗥𝗢𝗥* ]\n│\n├ 🚫 _" + (err.message || "Failed to extract video stream!") + "_\n╰───────────────⮞");
-      }
-    }
-  }
+  },
 };
 
-if (Array.isArray(replyHandlers)) {
-  replyHandlers.push(phReplyHandler);
-}
+if (Array.isArray(replyHandlers)) replyHandlers.push(phReplyHandler);
 
-// Cleanup expired sessions
 setInterval(() => {
   const now = Date.now();
-  for (const s in pendingPhSearch) {
-    if ((now - pendingPhSearch[s].timestamp) > SESSION_TIMEOUT) {
-      delete pendingPhSearch[s];
-    }
+  for (const k in pendingPhSearch) {
+    if (now - pendingPhSearch[k].timestamp > SESSION_TIMEOUT)
+      delete pendingPhSearch[k];
   }
-  for (const s in lastProcessedMsg) {
-    if ((now - lastProcessedMsg[s].time) > LOOP_COOLDOWN) {
-      delete lastProcessedMsg[s];
-    }
+  for (const k in lastProcessedMsg) {
+    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN)
+      delete lastProcessedMsg[k];
   }
 }, 2.5 * 60 * 1000);
 
-module.exports = { pendingPhSearch };
+module.exports = {};
