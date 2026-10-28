@@ -20,10 +20,6 @@ const lastProcessedMsg = {};
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-// External Chamindu API Config
-const CHAMA_API_BASE = "https://api.chamindu.site/api/adult/pornhub/dl";
-const CHAMA_API_KEY = "chama_api_c18d54f734c23ea0c333d33b7494b3b2";
-
 function keyFor(sender, from) {
   return `${from || ""}`;
 }
@@ -127,12 +123,11 @@ async function getThumbnailBuffer(url) {
   }
 }
 
-// Download නොකර Video එකේ ප්‍රමාණය (MB) සොයාගැනීම
 async function getRemoteFileSizeMB(url) {
   try {
     const headRes = await axios.head(url, {
-      headers: { "User-Agent": UA },
-      timeout: 10000,
+      headers: { "User-Agent": UA, Referer: "https://www.pornhub.com/" },
+      timeout: 8000,
     });
     const bytes = parseInt(headRes.headers["content-length"], 10);
     if (!isNaN(bytes) && bytes > 0) {
@@ -156,7 +151,7 @@ async function sendErrorMsg(sock, from, mek, text) {
   );
 }
 
-/* ================= 1. PORNHUB SEARCH ================= */
+/* ================= 1. SEARCH LOGIC ================= */
 async function phSearch(query, limit = 15) {
   let allResults = [];
   let page = 1;
@@ -214,31 +209,40 @@ async function phSearch(query, limit = 15) {
   return allResults;
 }
 
-/* ================= 2. FETCH FROM CHAMA API ================= */
-async function getChamaStreamData(targetUrl) {
-  const apiUrl = `${CHAMA_API_BASE}?url=${encodeURIComponent(
+/* ================= 2. CHAMA API DIRECT FETCH (ALL LINKS ARRAY) ================= */
+async function getChamaStreamLinks(targetUrl) {
+  const apiUrl = `https://api.chamindu.site/api/adult/pornhub/dl?url=${encodeURIComponent(
     targetUrl
-  )}&api_key=${CHAMA_API_KEY}`;
+  )}&api_key=chama_api_c18d54f734c23ea0c333d33b7494b3b2`;
 
-  const { data } = await axios.get(apiUrl, { timeout: 20000 });
+  const response = await axios.get(apiUrl, { timeout: 20000 });
+  const data = response.data;
 
   if (!data || !data.success) {
-    throw new Error("API request failed or video is unavailable.");
+    throw new Error("API එකෙන් වීඩියෝව ලබාගැනීමට නොහැකි විය.");
   }
 
-  const streamUrl =
-    data.download_proxy ||
-    data.download_url ||
-    data.stream_proxy ||
-    data.stream_url ||
-    data.direct_link ||
-    data.raw_link;
+  // ලැබෙන සියලුම download streams priority එක අනුව පිළිවෙළට එකතු කිරීම
+  const rawList = [
+    data.download_proxy,
+    data.direct_link,
+    data.stream_proxy,
+    data.download_url,
+    data.stream_url,
+    data.vps_download,
+    data.vps_stream,
+    data.raw_link,
+    data.raw_cdn,
+  ];
 
-  if (!streamUrl) {
-    throw new Error("Direct stream link could not be retrieved from API.");
+  // අගයක් ඇති සහ එකිනෙකට වෙනස් links පමණක් තෝරාගැනීම
+  const uniqueLinks = [...new Set(rawList.filter((l) => typeof l === "string" && l.startsWith("http")))];
+
+  if (uniqueLinks.length === 0) {
+    throw new Error("API එකෙන් වලංගු කිසිදු Stream Link එකක් ලැබුණේ නැත.");
   }
 
-  return { streamUrl };
+  return uniqueLinks;
 }
 
 /* ================= COMMAND: .ph ================= */
@@ -345,7 +349,7 @@ cmd(
         }
       }
 
-      // Numbered Fallback List
+      // Numbered List Fallback
       let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n🔞 *${botDisplayName.toUpperCase()} 18+*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n`;
       topResults.forEach((item, index) => {
         text += `*[ ${String(index + 1).padStart(2, "0")} ]* ➔ *${toSmallCaps(
@@ -443,8 +447,7 @@ const phReplyHandler = {
     await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
 
     try {
-      const streamData = await getChamaStreamData(selected.url);
-      const streamUrl = streamData.streamUrl;
+      const streamLinks = await getChamaStreamLinks(selected.url);
 
       const cleanTitle = (selected.title || "Video")
         .replace(/[^\w\s.-]/gi, "")
@@ -454,57 +457,83 @@ const phReplyHandler = {
       const fileName = `MALIYA-MD ${cleanTitle}.mp4`;
       const thumbBuffer = await getThumbnailBuffer(selected.thumb);
 
-      // Download නොකර Remote URL එකෙන් Size එක (MB) පරීක්ෂා කිරීම
-      const sizeMB = await getRemoteFileSizeMB(streamUrl);
-      const sizeText = sizeMB ? `${sizeMB.toFixed(2)} MB` : "Unknown";
+      let sendSuccess = false;
+      let lastStreamError = null;
 
-      let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n🔞 *${botDisplayName.toUpperCase()} 18+*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Title :* ${toSmallCaps(
-        cleanTitle
-      )}\n⏱️ *Duration :* ${selected.duration || "N/A"}\n💾 *Size :* ${sizeText}\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+      // ලබාගත් links එකින් එක ක්‍රියාත්මක කර බැලීම (Sequential Fallback)
+      for (let i = 0; i < streamLinks.length; i++) {
+        const streamUrl = streamLinks[i];
 
-      // 80MB ට වඩා වැඩි නම් Document ලෙසද, 80MB හෝ ඊට අඩු නම් Video ලෙසද Stream කරයි
-      if (sizeMB && sizeMB > 80) {
-        const docPayload = {
-          document: { url: streamUrl },
-          mimetype: "video/mp4",
-          fileName: fileName,
-          caption:
-            captionText + "\n\n_📄 Video sent as document stream (Size > 80MB)._",
-          contextInfo: channelContextInfo(),
-        };
-        if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
-
-        await sock.sendMessage(from, docPayload, { quoted: mek });
-      } else {
         try {
-          const videoPayload = {
-            video: { url: streamUrl },
-            mimetype: "video/mp4",
-            fileName: fileName,
-            caption: captionText,
-            contextInfo: channelContextInfo(),
-          };
-          if (thumbBuffer) videoPayload.jpegThumbnail = thumbBuffer;
+          const sizeMB = await getRemoteFileSizeMB(streamUrl);
+          const sizeText = sizeMB ? `${sizeMB.toFixed(2)} MB` : "Unknown";
 
-          await sock.sendMessage(from, videoPayload, { quoted: mek });
-        } catch (videoErr) {
-          // Video payload එක fail වුවහොත් document එකක් ලෙස fallback stream කිරීම
-          const fallbackDocPayload = {
-            document: { url: streamUrl },
-            mimetype: "video/mp4",
-            fileName: fileName,
-            caption:
-              captionText +
-              "\n\n_📄 Video sent as document stream due to stream format._",
-            contextInfo: channelContextInfo(),
-          };
-          if (thumbBuffer) fallbackDocPayload.jpegThumbnail = thumbBuffer;
+          let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n🔞 *${botDisplayName.toUpperCase()} 18+*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Title :* ${toSmallCaps(
+            cleanTitle
+          )}\n⏱️ *Duration :* ${selected.duration || "N/A"}\n💾 *Size :* ${sizeText}\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-          await sock.sendMessage(from, fallbackDocPayload, { quoted: mek });
+          // 80MB ට වඩා වැඩි නම් Document ලෙසද, 80MB හෝ අඩු නම් Video ලෙසද Stream කිරීම
+          if (sizeMB && sizeMB > 80) {
+            const docPayload = {
+              document: { url: streamUrl },
+              mimetype: "video/mp4",
+              fileName: fileName,
+              caption:
+                captionText +
+                "\n\n_📄 Video sent as document stream (Size > 80MB)._",
+              contextInfo: channelContextInfo(),
+            };
+            if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
+
+            await sock.sendMessage(from, docPayload, { quoted: mek });
+            sendSuccess = true;
+            break;
+          } else {
+            try {
+              const videoPayload = {
+                video: { url: streamUrl },
+                mimetype: "video/mp4",
+                fileName: fileName,
+                caption: captionText,
+                contextInfo: channelContextInfo(),
+              };
+              if (thumbBuffer) videoPayload.jpegThumbnail = thumbBuffer;
+
+              await sock.sendMessage(from, videoPayload, { quoted: mek });
+              sendSuccess = true;
+              break;
+            } catch (videoStreamErr) {
+              // Video stream fail වුවහොත් එම link එකෙන්ම Document ලෙසද උත්සාහ කරයි
+              const fallbackDocPayload = {
+                document: { url: streamUrl },
+                mimetype: "video/mp4",
+                fileName: fileName,
+                caption:
+                  captionText +
+                  "\n\n_📄 Video sent as document stream._",
+                contextInfo: channelContextInfo(),
+              };
+              if (thumbBuffer) fallbackDocPayload.jpegThumbnail = thumbBuffer;
+
+              await sock.sendMessage(from, fallbackDocPayload, { quoted: mek });
+              sendSuccess = true;
+              break;
+            }
+          }
+        } catch (linkErr) {
+          lastStreamError = linkErr;
+          // Fail වුවහොත් ඊළඟ link එකට මාරු වේ
+          continue;
         }
       }
 
-      await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+      if (sendSuccess) {
+        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+      } else {
+        throw new Error(
+          lastStreamError?.message || "සියලුම stream links මගින් video එක යැවීම අසාර්ථක විය."
+        );
+      }
     } catch (error) {
       await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
       await sendErrorMsg(
