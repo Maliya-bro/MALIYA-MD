@@ -253,7 +253,7 @@ function menuHeader(userName = "User", latency = "0ms", botDisplayName = DEFAULT
   const styledUser = toSmallCaps(userName);
 
   return `┏━━━━━━◥◣◆◢◤━━━━━━┓
-  ㅤ★彡 *${botDisplayName}* 彡★
+   *${botDisplayName}* 
 ┗━━━━━━◢◤◆◥◣━━━━━━┛
 
 ✨ 👋 *ʜɪ, ${styledUser}!*
@@ -279,7 +279,7 @@ function buildStyledMainMenu(state, userName, latency = "0ms", botDisplayName = 
   const { categories } = state;
   const styledUser = toSmallCaps(userName);
   const { time, date } = nowLK();
-  let msg = `┏━━━━━◥◣◆◢◤━━━━━┓\nㅤ★彡 *${botDisplayName}* 彡★\n┗━━━━━◢◤◆◥◣━━━━━┛\n\n`;
+  let msg = `┏━━━━━◥◣◆◢◤━━━━━┓\n *${botDisplayName}* \n┗━━━━━◢◤◆◥◣━━━━━┛\n\n`;
   msg += `✨ 👋 *ʜɪ, ${styledUser}!*\n\n`;
   msg += `╔═════. .★.════════╗\n`;
   msg += `🤖 *\`ʙᴏᴛ\` :* ${botDisplayName}\n`;
