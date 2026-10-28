@@ -13,7 +13,7 @@ const DEFAULT_SEARCH_IMAGE =
 
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 2500;
-const MAX_RESULTS = 15;
+const MAX_RESULTS = 30;
 const pendingPhSearch = {};
 const lastProcessedMsg = {};
 
