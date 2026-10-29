@@ -4,64 +4,37 @@ const CryptoJS = require("crypto-js");
 const https = require("https");
 const crypto = require("crypto");
 const sharp = require("sharp");
+const { HttpsProxyAgent } = require("https-proxy-agent");
+const { searchCineSubz, scrapeCineSubz } = require("cinesubz-scraper");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
-const BRAND_BASE = "MALIYA-MD";
-const DEFAULT_BOT_NAME = "𝙼𝙰𝙻𝙸𝚈𝙰-𝙼𝙳 𝙼𝙸𝙽𝙸";
 const CHANNEL_JID = "120363427174988449@newsletter";
-const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽Ｄ 🍁";
-const DEFAULT_SEARCH_IMAGE =
-  "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
+const CHANNEL_NAME = "🍁 ＭＡＬＩＹＡ-〽️Ｄ 🍁";
+const DEFAULT_SEARCH_IMAGE = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_ljlmxoljlmxoljlm.jpg";
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 2500;
-const MAX_RESULTS = 15;
-const MAX_WHATSAPP_SIZE_GB = 2.0;
-
 const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
-/* ================= 0. TERMINAL LOGGER ================= */
-const logger = {
-  header: (title) => console.log(`\n\x1b[1m\x1b[35m[CS-DEBUG] ═══════ ${title} ═══════\x1b[0m`),
-  info: (msg) => console.log(`\x1b[36m[CS-INFO]\x1b[0m ${msg}`),
-  req: (method, url) => console.log(`\x1b[33m[CS-REQ]\x1b[0m \x1b[1m${method}\x1b[0m ${url}`),
-  res: (status, extra = "") => console.log(`\x1b[32m[CS-RES]\x1b[0m Status: \x1b[1m${status}\x1b[0m ${extra ? `(${extra})` : ""}`),
-  warn: (msg) => console.log(`\x1b[33m[CS-WARN]\x1b[0m ${msg}`),
-  error: (msg) => console.log(`\x1b[31m[CS-ERR]\x1b[0m ${msg}`),
-  success: (msg) => console.log(`\x1b[32m[CS-OK]\x1b[0m \x1b[1m${msg}\x1b[0m`),
-  inspect: (title, data) => {
-    console.log(`\x1b[90m┌── [${title}]`);
-    const str = typeof data === "object" ? JSON.stringify(data, null, 2) : String(data);
-    str.split("\n").forEach((line) => console.log(`\x1b[90m│\x1b[0m ${line}`));
-    console.log(`\x1b[90m└──\x1b[0m`);
-  },
-};
+// =================== WEBSHARE PROXIES ===================
+const proxyList = [
+  "http://lcjzwhpi:wsocdb2iz6bu@45.38.107.97:6014",
+  "http://lcjzwhpi:wsocdb2iz6bu@64.137.96.74:6641",
+  "http://lcjzwhpi:wsocdb2iz6bu@198.23.243.226:6361",
+  "http://lcjzwhpi:wsocdb2iz6bu@38.154.185.97:6370",
+  "http://lcjzwhpi:wsocdb2iz6bu@84.247.60.125:6095",
+  "http://lcjzwhpi:wsocdb2iz6bu@191.96.254.138:6185",
+  "http://lcjzwhpi:wsocdb2iz6bu@198.46.161.42:5092",
+  "http://lcjzwhpi:wsocdb2iz6bu@64.137.10.153:5803",
+  "http://lcjzwhpi:wsocdb2iz6bu@104.164.49.38:7693",
+  "http://lcjzwhpi:wsocdb2iz6bu@23.26.71.145:5628"
+];
 
-/* ================= NATURAL TLS AGENT ================= */
-const sslAgent = new https.Agent({
-  rejectUnauthorized: false,
-  keepAlive: true,
-  secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
-});
-
-/* ================= EXACT STEALTH BROWSER HEADERS ================= */
-const browserHeaders = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-  Accept:
-    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-  "Accept-Language": "en-US,en;q=0.9",
-  "sec-ch-ua":
-    '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-  "sec-ch-ua-mobile": "?0",
-  "sec-ch-ua-platform": '"Windows"',
-  "Sec-Fetch-Dest": "document",
-  "Sec-Fetch-Mode": "navigate",
-  "Sec-Fetch-Site": "same-origin",
-  "Sec-Fetch-User": "?1",
-  "Upgrade-Insecure-Requests": "1",
-  Connection: "keep-alive",
-};
+function getRandomProxyAgent() {
+  const proxyUrl = proxyList[Math.floor(Math.random() * proxyList.length)];
+  return new HttpsProxyAgent(proxyUrl);
+}
+// ========================================================
 
 function keyFor(sender, from) {
   return `${from || ""}`;
@@ -73,24 +46,11 @@ function clearUserSession(k) {
 
 function toSmallCaps(str = "") {
   const normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const small = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
-  return String(str)
-    .split("")
-    .map((char) => {
-      const idx = normal.indexOf(char);
-      return idx !== -1 ? small[idx] : char;
-    })
-    .join("");
-}
-
-function decodeHtmlEntities(str = "") {
-  return String(str)
-    .replace(/&#8211;|&#8212;|&ndash;|&mdash;/g, "-")
-    .replace(/&#8217;|&#8216;|&apos;/g, "'")
-    .replace(/&#8220;|&#8221;|&quot;/g, '"')
-    .replace(/&#038;|&amp;/g, "&")
-    .replace(/<[^>]*>/g, "")
-    .trim();
+  const small  = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ";
+  return String(str).split("").map((char) => {
+    const idx = normal.indexOf(char);
+    return idx !== -1 ? small[idx] : char;
+  }).join("");
 }
 
 function channelContextInfo() {
@@ -100,8 +60,8 @@ function channelContextInfo() {
     forwardedNewsletterMessageInfo: {
       newsletterJid: CHANNEL_JID,
       newsletterName: CHANNEL_NAME,
-      serverMessageId: -1,
-    },
+      serverMessageId: -1
+    }
   };
 }
 
@@ -121,18 +81,12 @@ function getQuotedId(m, mek) {
 function extractTexts(body, mek, m) {
   const texts = [];
   const direct = [
-    body,
-    m?.body,
-    m?.text,
-    m?.message?.conversation,
-    m?.message?.extendedTextMessage?.text,
-    m?.message?.buttonsResponseMessage?.selectedButtonId,
+    body, m?.body, m?.text, m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text, m?.message?.buttonsResponseMessage?.selectedButtonId,
     m?.message?.buttonsResponseMessage?.selectedDisplayText,
-    m?.message?.listResponseMessage?.title,
-    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.listResponseMessage?.title, m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
     m?.message?.interactiveResponseMessage?.body?.text,
-    mek?.message?.conversation,
-    mek?.message?.extendedTextMessage?.text,
+    mek?.message?.conversation, mek?.message?.extendedTextMessage?.text,
     mek?.message?.buttonsResponseMessage?.selectedButtonId,
     mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
   ];
@@ -140,12 +94,8 @@ function extractTexts(body, mek, m) {
     if (item) texts.push(String(item).trim());
   }
 
-  const p1 =
-    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage
-      ?.paramsJson;
-  const p2 =
-    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage
-      ?.paramsJson;
+  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
   for (const raw of [p1, p2]) {
     if (!raw) continue;
     try {
@@ -162,533 +112,272 @@ function extractTexts(body, mek, m) {
 async function getThumbnailBuffer(url) {
   const tryUrl = url || DEFAULT_SEARCH_IMAGE;
   try {
-    const res = await axios.get(tryUrl, {
-      responseType: "arraybuffer",
-      timeout: 8000,
-      headers: browserHeaders,
-      httpsAgent: sslAgent,
-    });
-    return await sharp(Buffer.from(res.data))
-      .resize(200, 200, { fit: "cover" })
-      .jpeg({ quality: 50 })
-      .toBuffer();
+    const res = await axios.get(tryUrl, { responseType: "arraybuffer", timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    return await sharp(Buffer.from(res.data)).resize(200, 200, { fit: 'cover' }).jpeg({ quality: 50 }).toBuffer();
   } catch (e) {
     return null;
   }
 }
 
 async function sendErrorMsg(sock, from, mek, text) {
-  await sock.sendMessage(
-    from,
-    {
-      text:
-        "⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _" +
-        text +
-        "_",
-      contextInfo: channelContextInfo(),
-    },
-    { quoted: mek },
-  );
+  await sock.sendMessage(from, {
+    text: "⊱━━━━━ • ✿ • ━━━━━⊰\n❌ *𝐄𝐑𝐑𝐎𝐑*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🚫 _" + text + "_",
+    contextInfo: channelContextInfo()
+  }, { quoted: mek });
 }
 
-/* ================= 1. CINESUBZ SEARCH ================= */
-async function customSearchCineSubz(query) {
-  const formattedQuery = encodeURIComponent(query.trim()).replace(/%20/g, "+");
-  const searchUrl = `https://cinesubz.co/?s=${formattedQuery}`;
-
-  logger.header("STEP 1: SEARCHING MOVIE");
-  logger.req("GET", searchUrl);
-
-  try {
-    const res = await axios.get(searchUrl, {
-      httpsAgent: sslAgent,
-      timeout: 15000,
-      headers: { ...browserHeaders, Referer: "https://cinesubz.co/" },
-    });
-
-    logger.res(res.status, `${String(res.data || "").length} bytes`);
-
-    const html = String(res.data || "");
-    const results = [];
-    const seenUrls = new Set();
-
-    const parts = html
-      .split(/<div id="item-\d+"\s+class="display-item">/i)
-      .slice(1);
-
-    for (const block of parts) {
-      const linkMatch = block.match(
-        /<a\s+href="([^"]+)"[^>]*?(?:title="([^"]*)")?/i,
-      );
-      const h3Match =
-        block.match(/<div class="item-desc-title">\s*<h3>([\s\S]*?)<\/h3>/i) ||
-        block.match(/<h3>([\s\S]*?)<\/h3>/i);
-      const imgMatch = block.match(
-        /<img[^>]+(?:data-original|src)="([^"]+)"/i,
-      );
-      const imdbMatch = block.match(
-        /<span class="imdb-score">([^<]+)<\/span>/i,
-      );
-      const qualityMatch = block.match(
-        /<span class="badge-(?:quality|season)-corner">([^<]+)<\/span>/i,
-      );
-
-      const url = linkMatch ? linkMatch[1].trim() : null;
-      const rawTitle =
-        (h3Match && h3Match[1]) || (linkMatch && linkMatch[2]) || "";
-      const title = decodeHtmlEntities(rawTitle);
-      const image = imgMatch ? imgMatch[1].trim() : DEFAULT_SEARCH_IMAGE;
-      const imdb = imdbMatch ? imdbMatch[1].trim() : null;
-      const quality = qualityMatch ? qualityMatch[1].trim() : null;
-
-      if (url && title && !seenUrls.has(url)) {
-        seenUrls.add(url);
-        results.push({ title, url, image, imdb, quality });
-      }
-    }
-
-    logger.success(`Extracted ${results.length} movies for query: "${query}"`);
-    return results;
-  } catch (err) {
-    logger.error(`Search failed: ${err.message}`);
-    return [];
-  }
-}
-
-/* ================= 2. MOVIE SCRAPING ================= */
-async function scrapeMoviePage(movieUrl, fallbackTitle = "Movie", fallbackImage = DEFAULT_SEARCH_IMAGE) {
-  logger.header("STEP 2: SCRAPING MOVIE PAGE");
-  logger.req("GET", movieUrl);
-
-  try {
-    const parsed = new URL(movieUrl);
-    const movieHost = parsed.origin;
-
-    const res = await axios.get(movieUrl, {
-      httpsAgent: sslAgent,
-      timeout: 15000,
-      headers: { ...browserHeaders, Referer: `${movieHost}/` },
-    });
-
-    logger.res(res.status, `${String(res.data || "").length} bytes`);
-
-    const html = String(res.data || "");
-    const titleMatch = html.match(/<title>([\s\S]*?)<\/title>/i);
-    const title = titleMatch
-      ? decodeHtmlEntities(titleMatch[1].replace(/- CineSubz.*$/i, ""))
-      : fallbackTitle;
-
-    const downloadLinks = [];
-    const seenUrls = new Set();
-
-    const btnRegex =
-      /<a[^>]+href=['"]([^'"]+)['"][^>]*class=['"][^'"]*movie-download-button[^'"]*['"][^>]*>([\s\S]*?)<\/a>/gi;
-    let match;
-    const buttonJobs = [];
-
-    while ((match = btnRegex.exec(html)) !== null) {
-      const rawLink = match[1].trim();
-      const innerHtml = match[2];
-      const metaMatch = innerHtml.match(
-        /class=['"][^'"]*movie-download-meta[^'"]*['"][^>]*>([\s\S]*?)<\/span>/i,
-      );
-      const typeMatch = innerHtml.match(
-        /class=['"][^'"]*movie-download-type[^'"]*['"][^>]*>([\s\S]*?)<\/span>/i,
-      );
-
-      const qualityLabel = metaMatch
-        ? decodeHtmlEntities(metaMatch[1])
-        : (typeMatch ? decodeHtmlEntities(typeMatch[1]) : "Quality");
-
-      buttonJobs.push(
-        (async () => {
-          try {
-            logger.info(`Resolving button redirect: ${rawLink}`);
-            const pageRes = await axios.get(rawLink, {
-              httpsAgent: sslAgent,
-              headers: {
-                ...browserHeaders,
-                Referer: movieUrl,
-                Host: new URL(rawLink).host,
-              },
-              timeout: 12000,
-            });
-            const pData = String(pageRes.data || "");
-            const pathMatch = pData.match(
-              /(?:https?:\/\/(?:google\.com|sonic-cloud\.online|drive\.csplayer2\.space))?\/(server\d+\/[^\s'"<>]+\.mp4)/i,
-            );
-
-            if (pathMatch) {
-              let cleanPath = pathMatch[1].replace(/(server\d+\/)\d+:\//, "$1");
-              const directCsLink = `https://drive.csplayer2.space/${cleanPath}`;
-              logger.success(`Extracted CS Stream link: [${qualityLabel}] -> ${directCsLink}`);
-              return { quality: qualityLabel, pageUrl: rawLink, directUrl: directCsLink, movieHost };
-            }
-          } catch (e) {
-            logger.warn(`Button resolution failed: ${e.message}`);
-          }
-          return null;
-        })(),
-      );
-    }
-
-    const resolved = await Promise.all(buttonJobs);
-    for (const item of resolved) {
-      if (item && !seenUrls.has(item.directUrl)) {
-        seenUrls.add(item.directUrl);
-        downloadLinks.push(item);
-      }
-    }
-
-    logger.success(`Total qualities extracted: ${downloadLinks.length}`);
-    return { title, poster: fallbackImage, image: fallbackImage, downloadLinks };
-  } catch (e) {
-    logger.error(`Movie Page Scraping Failed: ${e.message}`);
-    return null;
-  }
-}
-
-/* ================= 3. DIRECT DOWNLOAD RESOLVER ================= */
+/* ================= 3. DIRECT DOWNLOAD RESOLVER WITH PROXY ================= */
 async function getCineSubzLinks(originalUrl) {
   let targetLink = originalUrl.replace(/^https:\/\/[^\/]+/, "https://drive.csplayer2.space");
-  targetLink = targetLink.replace(/(server\d+\/)\d+:\//, "$1");
+  let baseServerMatch = targetLink.match(/server(\d+)/);
+  let serversToTry = [];
+  
+  if (baseServerMatch) serversToTry.push(baseServerMatch[1]);
+  ['2', '7', '1', '3', '4', '5', '6', '8', '9', '11'].forEach(s => {
+    if (!serversToTry.includes(s)) serversToTry.push(s);
+  });
 
-  logger.header("STEP 3: DECRYPTING STREAM URL");
-  logger.info(`Original Stream URL: ${originalUrl}`);
+  const debugLogs = [];
 
-  // Server 2 සහ Server 7 ප්‍රමුඛ කර පරීක්ෂා කිරීම (Local inspector data අනුව)
-  const serversToTry = ["2", "7", "1", "3", "4", "5", "6", "8", "9", "11"];
+  for (let serverNum of serversToTry) {
+    let movieUrl = targetLink;
+    if (baseServerMatch) movieUrl = movieUrl.replace(/server\d+/, `server${serverNum}`);
 
-  for (const serverNum of serversToTry) {
-    let movieUrl = targetLink.replace(/\/server\d+\//, `/server${serverNum}/`);
-    logger.info(`\n>>> Testing Server #${serverNum} -> ${movieUrl}`);
+    debugLogs.push(`Testing Server #${serverNum} (${movieUrl})`);
 
     try {
       const parsedUrl = new URL(movieUrl);
       const domain = parsedUrl.origin;
       const currentPath = parsedUrl.pathname + parsedUrl.search;
+      
+      // Get a random Proxy Agent
+      const httpsAgent = getRandomProxyAgent();
 
-      let sessionCookies = "";
+      const baseHeaders = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Connection': 'keep-alive',
+        'Referer': `${domain}/`,
+        'Upgrade-Insecure-Requests': '1'
+      };
 
-      // Step A: Initial Handshake
-      logger.req("GET", movieUrl);
-      const initialRes = await axios.get(movieUrl, {
-        httpsAgent: sslAgent,
-        headers: {
-          "User-Agent": browserHeaders["User-Agent"],
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.9",
-          Host: parsedUrl.host,
-          Referer: `${domain}/`,
-          Connection: "keep-alive",
-        },
-        timeout: 10000,
-      });
-
-      logger.res(initialRes.status, `${String(initialRes.data || "").length} bytes`);
-
-      if (initialRes.headers["set-cookie"]) {
-        sessionCookies = initialRes.headers["set-cookie"]
-          .map((c) => c.split(";")[0])
-          .join("; ");
-        logger.inspect(`Server ${serverNum} Session Cookies`, sessionCookies);
+      const initialRes = await axios.get(movieUrl, { httpsAgent, headers: baseHeaders, timeout: 15000 });
+      let cookieHeader = '';
+      if (initialRes.headers['set-cookie']) {
+        cookieHeader = initialRes.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
       }
 
-      let html = String(initialRes.data || "");
-      let realPostUrl = movieUrl;
+      let html = initialRes.data;
+      let realPageUrl = movieUrl;
       const hexRegex = /[0-9a-fA-F]{200,}/g;
       let payloads = html.match(hexRegex) || [];
 
-      logger.info(`Direct DOM HEX Payloads count: ${payloads.length}`);
-
-      // Step B: API Download Data Fallback
       if (payloads.length === 0) {
         const apiUrl = `${domain}/api/download-data${currentPath}`;
-        logger.req("GET (Download-Data API)", apiUrl);
+        const apiResponse = await axios.get(apiUrl, {
+          httpsAgent,
+          timeout: 15000,
+          headers: { ...baseHeaders, 'Accept': 'application/json', 'Referer': movieUrl, 'Cookie': cookieHeader }
+        });
 
-        try {
-          const apiRes = await axios.get(apiUrl, {
-            httpsAgent: sslAgent,
-            timeout: 10000,
-            headers: {
-              "User-Agent": browserHeaders["User-Agent"],
-              Accept: "application/json, text/plain, */*",
-              "Accept-Language": "en-US,en;q=0.9",
-              Referer: movieUrl,
-              Cookie: sessionCookies,
-              Host: parsedUrl.host,
-              Origin: domain,
-              "Sec-Fetch-Dest": "empty",
-              "Sec-Fetch-Mode": "cors",
-              "Sec-Fetch-Site": "same-origin",
-            },
+        if (apiResponse.headers['set-cookie']) {
+          const apiCookies = apiResponse.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
+          cookieHeader = cookieHeader ? `${cookieHeader}; ${apiCookies}` : apiCookies;
+        }
+
+        if (apiResponse.data && apiResponse.data.redirect) {
+          realPageUrl = apiResponse.data.redirect;
+          if (!realPageUrl.startsWith('http')) realPageUrl = domain + realPageUrl;
+
+          const pageResponse = await axios.get(realPageUrl, {
+            httpsAgent,
+            timeout: 15000,
+            headers: { ...baseHeaders, 'Referer': movieUrl, 'Cookie': cookieHeader }
           });
-
-          logger.res(apiRes.status, `JSON: ${JSON.stringify(apiRes.data)}`);
-
-          if (apiRes.headers["set-cookie"]) {
-            const apiCookies = apiRes.headers["set-cookie"]
-              .map((c) => c.split(";")[0])
-              .join("; ");
-            sessionCookies = sessionCookies ? `${sessionCookies}; ${apiCookies}` : apiCookies;
-          }
-
-          if (apiRes.data && apiRes.data.redirect) {
-            realPostUrl = apiRes.data.redirect;
-            if (!realPostUrl.startsWith("http")) realPostUrl = domain + realPostUrl;
-
-            logger.req("GET (Redirect Page)", realPostUrl);
-            const redRes = await axios.get(realPostUrl, {
-              httpsAgent: sslAgent,
-              timeout: 10000,
-              headers: {
-                "User-Agent": browserHeaders["User-Agent"],
-                Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                Referer: movieUrl,
-                Cookie: sessionCookies,
-                Host: parsedUrl.host,
-              },
-            });
-
-            logger.res(redRes.status, `${String(redRes.data || "").length} bytes`);
-            html = String(redRes.data || "");
-            payloads = html.match(hexRegex) || [];
-            logger.info(`HEX Payloads extracted after redirect: ${payloads.length}`);
-          }
-        } catch (apiErr) {
-          logger.warn(`API call failed for Server ${serverNum}: ${apiErr.response?.status || apiErr.message}`);
-          continue;
+          html = pageResponse.data;
+          payloads = html.match(hexRegex) || [];
         }
       }
 
-      if (payloads.length === 0) {
-        logger.warn(`Server ${serverNum} has 0 payloads. Skipping...`);
-        continue;
-      }
+      if (payloads.length === 0) continue;
 
-      // Collect Keys from DOM
-      const domStrings = [...html.matchAll(/(["'])(.*?)\1/g)].map((m) => m[2]);
-      const keys = [...new Set(domStrings)].filter((k) => k && k.length >= 4 && k.length <= 40);
-      keys.push("kasun", "cinesubz.lk", "CSPlayer", "ravindu01manoj", "jhutmupd", "dgpjjitp");
+      const allStrings = [...html.matchAll(/(["'])(.*?)\1/g)].map(m => m[2]);
+      const keysToTry = [...new Set(allStrings)].filter((k) => k && k.length >= 4 && k.length <= 40);
+      keysToTry.push("kasun", "cinesubz.lk", "CSPlayer", "ravindu01manoj", "jhutmupd", "dgpjjitp");
 
-      logger.info(`Collected ${keys.length} decryption candidate keys.`);
       const results = [];
 
-      for (let i = 0; i < payloads.length; i++) {
-        const hex = payloads[i];
+      for (let hexPayload of payloads) {
         try {
-          const payloadBytes = Buffer.from(hex, "hex");
-          const postRes = await axios.post(realPostUrl, payloadBytes, {
-            httpsAgent: sslAgent,
-            timeout: 10000,
-            headers: {
-              "User-Agent": browserHeaders["User-Agent"],
-              Accept: "*/*",
-              "Accept-Language": "en-US,en;q=0.9",
-              Connection: "keep-alive",
-              "Content-Type": "application/octet-stream",
-              Cookie: sessionCookies,
-              Origin: domain,
-              Referer: realPostUrl,
-              Host: parsedUrl.host,
-              "sec-ch-ua": '"Not:A-Brand";v="8", "Chromium";v="131", "Google Chrome";v="131"',
-              "sec-ch-ua-mobile": "?0",
-              "sec-ch-ua-platform": '"Windows"',
-              "Sec-Fetch-Dest": "empty",
-              "Sec-Fetch-Mode": "cors",
-              "Sec-Fetch-Site": "same-origin",
-            },
-            responseType: "arraybuffer",
+          const payloadBytes = Buffer.from(hexPayload, 'hex');
+          const postHeaders = {
+            'User-Agent': baseHeaders['User-Agent'],
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Connection': 'keep-alive',
+            'Content-Type': 'application/octet-stream',
+            'Cookie': cookieHeader,
+            'Origin': domain,
+            'Referer': realPageUrl
+          };
+
+          const dlResponse = await axios.post(realPageUrl, payloadBytes, {
+            httpsAgent,
+            headers: postHeaders,
+            responseType: 'arraybuffer',
+            timeout: 15000
           });
 
-          const resText = Buffer.from(postRes.data).toString("utf8");
-          const encMatch = resText.match(/U2FsdGVkX1[a-zA-Z0-9+/=]+/);
+          const responseText = Buffer.from(dlResponse.data).toString('utf8');
+          const encryptedUrlMatch = responseText.match(/U2FsdGVkX1[a-zA-Z0-9+/=]+/);
 
-          if (encMatch) {
-            const encryptedStr = encMatch[0];
-            for (const k of keys) {
+          if (encryptedUrlMatch) {
+            const encryptedUrl = encryptedUrlMatch[0];
+            for (let key of keysToTry) {
+              if (!key || key.length < 3) continue;
               try {
-                const dec = CryptoJS.AES.decrypt(encryptedStr, k).toString(CryptoJS.enc.Utf8);
-                let finalStr = dec;
+                const decryptedBytes = CryptoJS.AES.decrypt(encryptedUrl, key);
+                let decodedStr = decryptedBytes.toString(CryptoJS.enc.Utf8);
 
-                if (finalStr && !finalStr.startsWith("http")) {
-                  try {
-                    finalStr = Buffer.from(finalStr, "base64").toString("utf8");
-                  } catch (e) {}
+                if (decodedStr && !decodedStr.startsWith('http')) {
+                  try { decodedStr = Buffer.from(decodedStr, 'base64').toString('utf8'); } catch(e){}
                 }
 
-                if (finalStr && finalStr.startsWith("http")) {
-                  logger.success(`Decrypted using key [ "${k}" ] -> ${finalStr}`);
-                  results.push(finalStr);
+                if (decodedStr && decodedStr.startsWith('http')) {
+                  results.push(decodedStr);
                   break;
                 }
               } catch (e) {}
             }
           }
-        } catch (postErr) {
-          // Ignore individual 404 payloads
-        }
+        } catch (err) {}
       }
 
       const finalLinks = [...new Set(results)];
-      if (finalLinks.length > 0) {
-        logger.inspect(`Final Decrypted URLs on Server ${serverNum}`, finalLinks);
-        return { success: true, links: finalLinks };
-      }
-    } catch (serverErr) {
-      logger.error(`Server #${serverNum} encountered error: ${serverErr.response?.status || serverErr.message}`);
+      if (finalLinks.length > 0) return { success: true, server: `server${serverNum}`, links: finalLinks, logs: debugLogs };
+
+    } catch (error) {
+      debugLogs.push(`Server #${serverNum} Failed: ${error.response?.status || error.message}`);
       continue;
     }
   }
-
-  logger.error("All server attempts exhausted. 0 direct URLs resolved.");
-  return { error: "Unable to decrypt file link from CineSubz servers (403/Forbidden from Host)." };
+  return { error: 'File not found on any server.', logs: debugLogs };
 }
 
 /* ================= COMMAND: .cinesubz ================= */
-cmd(
-  {
-    pattern: "cinesubz",
-    alias: ["cinesub", "cs", "cssearch", "film", "movie"],
-    react: "🎬",
-    desc: "Search and send movies from Cinesubz.co",
-    category: "movie",
-    filename: __filename,
-  },
-  async (sock, mek, m, { from, q, sender, sessionId }) => {
-    try {
-      if (!q) {
-        return await sock.sendMessage(
-          from,
-          {
-            text: "⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* `.cinesubz <name>`\n💡 *Example:* `.cinesubz spider man`",
-            contextInfo: channelContextInfo(),
-          },
-          { quoted: mek },
-        );
-      }
-
-      await sock.sendMessage(from, { react: { text: "📺", key: mek.key } });
-
-      const results = await customSearchCineSubz(q.trim());
-      if (!results || results.length === 0) {
-        await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-        return await sendErrorMsg(
-          sock,
-          from,
-          mek,
-          `No movies found on CineSubz for "${q}".`,
-        );
-      }
-
-      const topResults = results.slice(0, MAX_RESULTS);
-      const k = keyFor(sender, from);
-      clearUserSession(k);
-
-      const settings = await readSettings(sessionId);
-      const btnsOn = !!settings.btns_enabled;
-      const botDisplayName = settings?.bot_name?.trim() || DEFAULT_BOT_NAME;
-
-      let searchImg = DEFAULT_SEARCH_IMAGE;
-      if (sessionId) {
-        try {
-          const custom = await getCustomImage(sessionId, "cinesubz_header");
-          if (custom && custom.data) searchImg = custom.data;
-        } catch (e) {}
-      }
-
-      const bodyText = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${botDisplayName.toUpperCase()} MOVIES*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n© 2026 ${BRAND_BASE} SYSTEM`;
-
-      if (btnsOn) {
-        try {
-          const { ButtonV2 } = await import("@vanzxy/baileys");
-
-          const movieRows = topResults.map((item, index) => ({
-            title: `${String(index + 1).padStart(2, "0")}. ${item.title.substring(0, 45)}`,
-            description: "Click to view movie qualities",
-            id: `.cs_select ${index + 1}`,
-          }));
-
-          const btn = new ButtonV2(sock)
-            .setBody(bodyText)
-            .setFooter(`WaBot by ${botDisplayName}`)
-            .setThumbnail(searchImg);
-
-          btn.addRawButton({
-            buttonId: "cinesubz_movies_list",
-            buttonText: { displayText: "🎬 Select Movie" },
-            type: 1,
-            nativeFlowInfo: {
-              name: "single_select",
-              paramsJson: JSON.stringify({
-                title: "CineSubz Search Results ↯",
-                sections: [{ title: "🎥 Available Movies", rows: movieRows }],
-              }),
-            },
-          });
-
-          btn.addButton("📜 Bot Menu", ".menu");
-
-          const sentMsg = await btn.send(from, { quoted: mek });
-
-          if (sentMsg?.key?.id) {
-            pendingCineSubz[k] = {
-              step: 1,
-              results: topResults,
-              timestamp: Date.now(),
-              isProcessing: false,
-              expectedMsgId: sentMsg.key.id,
-              botDisplayName,
-            };
-            await sock.sendMessage(from, {
-              react: { text: "✅", key: mek.key },
-            });
-            return;
-          }
-        } catch (e) {
-          logger.warn(`ButtonV2 Render Failed: ${e.message}`);
-        }
-      }
-
-      // Numbered Fallback
-      let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${botDisplayName.toUpperCase()} MOVIES*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n`;
-      topResults.forEach((item, index) => {
-        text += `*[ ${String(index + 1).padStart(2, "0")} ]* ➔ *${item.title}*\n`;
-      });
-      text +=
-        "\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 💬 *Swipe & Reply this message with a number...*";
-
-      const sentMsg = await sock.sendMessage(
-        from,
-        {
-          image: { url: searchImg },
-          caption: text,
-          contextInfo: channelContextInfo(),
-        },
-        { quoted: mek },
-      );
-
-      pendingCineSubz[k] = {
-        step: 1,
-        results: topResults,
-        timestamp: Date.now(),
-        isProcessing: false,
-        expectedMsgId: sentMsg.key.id,
-        botDisplayName,
-      };
-
-      await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-    } catch (error) {
-      await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
-      await sendErrorMsg(
-        sock,
-        from,
-        mek,
-        "Failed to connect to CineSubz search server.",
-      );
+cmd({
+  pattern: "cinesubz",
+  alias: ["cinesub", "cs", "cssearch", "film", "movie"],
+  react: "🎬",
+  desc: "Search and send movies from Cinesubz.co",
+  category: "movie",
+  filename: __filename
+}, async (sock, mek, m, { from, q, sender, sessionId }) => {
+  try {
+    if (!q) {
+      return await sock.sendMessage(from, {
+        text: "⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐃𝐋*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n📌 *Usage:* `.cinesubz <name>`\n💡 *Example:* `.cinesubz avengers`",
+        contextInfo: channelContextInfo()
+      }, { quoted: mek });
     }
-  },
-);
+
+    await sock.sendMessage(from, { react: { text: "📺", key: mek.key } });
+
+    const results = await searchCineSubz(q.trim());
+    if (!results || results.length === 0) {
+      await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+      return await sendErrorMsg(sock, from, mek, `No movies found on CineSubz for "${q}".`);
+    }
+
+    const topResults = results.slice(0, 10);
+    const k = keyFor(sender, from);
+    clearUserSession(k);
+
+    let searchImg = DEFAULT_SEARCH_IMAGE;
+    if (sessionId) {
+      try {
+        const custom = await getCustomImage(sessionId, "cinesubz_header");
+        if (custom && custom.data) searchImg = custom.data;
+      } catch (e) {}
+    }
+
+    const bodyText = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n© 2026 MALIYA-MD BOT SYSTEM`;
+
+    const settings = await readSettings(sessionId);
+    const btnsOn = !!settings.btns_enabled;
+
+    if (btnsOn) {
+      try {
+        const { ButtonV2 } = await import("@vanzxy/baileys");
+
+        const movieRows = topResults.map((item, index) => ({
+          title: `${String(index + 1).padStart(2, "0")}. ${item.title.substring(0, 45)}`,
+          description: "Click to view movie qualities",
+          id: `.cs_select ${index + 1}`
+        }));
+
+        const btn = new ButtonV2(sock)
+          .setBody(bodyText)
+          .setFooter("WaBot by MALIYA-MD Team ツ")
+          .setThumbnail(searchImg);
+
+        btn.addRawButton({
+          buttonId: "cinesubz_movies_list",
+          buttonText: { displayText: "🎬 Select Movie" },
+          type: 1,
+          nativeFlowInfo: {
+            name: "single_select",
+            paramsJson: JSON.stringify({
+              title: "CineSubz Search Results ↯",
+              sections: [{ title: "🎥 Available Movies", rows: movieRows }]
+            }),
+          },
+        });
+
+        btn.addButton("📜 Bot Menu", ".menu");
+
+        const sentMsg = await btn.send(from, { quoted: mek });
+
+        if (sentMsg?.key?.id) {
+          pendingCineSubz[k] = { 
+            step: 1, 
+            results: topResults, 
+            timestamp: Date.now(), 
+            isProcessing: false,
+            expectedMsgId: sentMsg.key.id 
+          };
+          await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+          return;
+        }
+      } catch (e) {
+        console.log("CINESUBZ BUTTONV2 ERROR:", e?.message || e);
+      }
+    }
+
+    // Numbered Fallback
+    let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *𝐂𝐈𝐍𝐄𝐒𝐔𝐁𝐙 𝐒𝐄𝐀𝐑𝐂𝐇*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n`;
+    topResults.forEach((item, index) => {
+      text += `*[ ${String(index + 1).padStart(2, "0")} ]* ➔ *${item.title}*\n`;
+    });
+    text += "\n⊱━━━• ✿ •━━━━• ✿ •━━━⊰\n> 💬 *Swipe & Reply this message with a number...*";
+
+    const sentMsg = await sock.sendMessage(from, { image: { url: searchImg }, caption: text, contextInfo: channelContextInfo() }, { quoted: mek });
+    
+    pendingCineSubz[k] = { 
+      step: 1, 
+      results: topResults, 
+      timestamp: Date.now(), 
+      isProcessing: false,
+      expectedMsgId: sentMsg.key.id 
+    };
+
+    await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+  } catch (error) {
+    await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
+    await sendErrorMsg(sock, from, mek, "Failed to connect to CineSubz search server.");
+  }
+});
 
 /* ================= REPLY HANDLER ================= */
 const csReplyHandler = {
@@ -703,10 +392,7 @@ const csReplyHandler = {
     }
 
     const num = parseInt(String(text || "").trim(), 10);
-    const max =
-      pending.step === 1
-        ? pending.results?.length || 0
-        : pending.movie?.downloadLinks?.length || 0;
+    const max = pending.step === 1 ? (pending.results?.length || 0) : (pending.movie?.downloadLinks?.length || 0);
     const isNum = !isNaN(num) && num > 0 && num <= max;
 
     const quotedId = getQuotedId(m, mek);
@@ -742,78 +428,44 @@ const csReplyHandler = {
 
     const now = Date.now();
     const lastMsg = lastProcessedMsg[k];
-    if (
-      lastMsg &&
-      lastMsg.text === String(choice) &&
-      now - lastMsg.time < LOOP_COOLDOWN
-    )
-      return;
+    if (lastMsg && lastMsg.text === String(choice) && (now - lastMsg.time) < LOOP_COOLDOWN) return;
     lastProcessedMsg[k] = { text: String(choice), time: now };
 
-    const botDisplayName = pending.botDisplayName || DEFAULT_BOT_NAME;
-
-    // STEP 1: Movie Pick -> Qualities
+    // STEP 1: Select Movie
     if (pending.step === 1) {
       if (choice > pending.results.length) return;
       pending.isProcessing = true;
       await sock.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
       const selected = pending.results[choice - 1];
-      logger.info(`User Selected Movie #${choice}: "${selected.title}"`);
-
       try {
-        const movieInfo = await scrapeMoviePage(
-          selected.url,
-          selected.title,
-          selected.image,
-        );
-        if (
-          !movieInfo ||
-          !movieInfo.downloadLinks ||
-          movieInfo.downloadLinks.length === 0
-        ) {
+        const movieInfo = await scrapeCineSubz(selected.url);
+        if (!movieInfo || !movieInfo.downloadLinks || movieInfo.downloadLinks.length === 0) {
           clearUserSession(k);
-          return await sendErrorMsg(
-            sock,
-            from,
-            mek,
-            "No download links available for this movie.",
-          );
+          return await sendErrorMsg(sock, from, mek, "No download links available for this movie.");
         }
 
-        // WhatsApp 2GB limit filter
-        const downloadLinks = movieInfo.downloadLinks.filter((d) => {
+        const downloadLinks = movieInfo.downloadLinks.filter(d => {
           const match = d.quality.match(/([\d.]+)\s*(MB|GB)/i);
           if (match) {
             const size = parseFloat(match[1]);
             const unit = match[2].toUpperCase();
-            if (unit === "GB") return size <= MAX_WHATSAPP_SIZE_GB;
-            if (unit === "MB") return true;
+            if (unit === 'GB') return size <= 2.0;
+            if (unit === 'MB') return true;
           }
           return true;
         });
 
         if (downloadLinks.length === 0) {
           clearUserSession(k);
-          return await sendErrorMsg(
-            sock,
-            from,
-            mek,
-            `No download links found below WhatsApp limit (${MAX_WHATSAPP_SIZE_GB}GB).`,
-          );
+          return await sendErrorMsg(sock, from, mek, "No download links found below 2GB.");
         }
 
-        const imgToSend =
-          movieInfo.poster ||
-          movieInfo.image ||
-          selected.image ||
-          DEFAULT_SEARCH_IMAGE;
+        const imgToSend = movieInfo.poster || movieInfo.image || DEFAULT_SEARCH_IMAGE;
         let qualityBody = `⊱━━━━━ • ✿ • ━━━━━⊰\n📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
-        if (movieInfo.imdb_rate || selected.imdb)
-          qualityBody += `⭐ *IMDb :* ${movieInfo.imdb_rate || selected.imdb}\n`;
-        if (movieInfo.duration)
-          qualityBody += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
-        qualityBody += `Available formats below 2GB are listed. Choose one to start direct stream.\n\n© 2026 ${BRAND_BASE} SYSTEM`;
+        if (movieInfo.imdb_rate) qualityBody += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
+        if (movieInfo.duration) qualityBody += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
+        qualityBody += `Available formats below 2GB are listed. Choose one to start download.\n\n© 2026 MALIYA-MD BOT SYSTEM`;
 
         const settings = await readSettings(sessionId);
         const btnsOn = !!settings.btns_enabled;
@@ -825,12 +477,12 @@ const csReplyHandler = {
             const qualityRows = downloadLinks.map((d, i) => ({
               title: `${String(i + 1).padStart(2, "0")}. ${d.quality}`,
               description: `Download ${d.quality}`,
-              id: `.cs_dl ${i + 1}`,
+              id: `.cs_dl ${i + 1}`
             }));
 
             const btn = new ButtonV2(sock)
               .setBody(qualityBody)
-              .setFooter(`WaBot by ${botDisplayName}`)
+              .setFooter("WaBot by MALIYA-MD Team ツ")
               .setThumbnail(imgToSend);
 
             btn.addRawButton({
@@ -841,9 +493,7 @@ const csReplyHandler = {
                 name: "single_select",
                 paramsJson: JSON.stringify({
                   title: "Choose Quality & Size ↯",
-                  sections: [
-                    { title: "📊 Available Qualities", rows: qualityRows },
-                  ],
+                  sections: [{ title: "📊 Available Qualities", rows: qualityRows }]
                 }),
               },
             });
@@ -858,38 +508,25 @@ const csReplyHandler = {
               pending.timestamp = Date.now();
               pending.isProcessing = false;
               pending.expectedMsgId = sentQualityMsg.key.id;
-              await sock.sendMessage(from, {
-                react: { text: "✅", key: mek.key },
-              });
+              await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
               return;
             }
           } catch (e) {
-            logger.warn(`Quality ButtonV2 Error: ${e.message}`);
+            console.log("CINESUBZ QUALITY BUTTONV2 ERROR:", e?.message || e);
           }
         }
 
         // Fallback Quality Numbered Menu
         let qualityMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
-        if (movieInfo.imdb_rate || selected.imdb)
-          qualityMsg += `⭐ *IMDb :* ${movieInfo.imdb_rate || selected.imdb}\n`;
-        if (movieInfo.duration)
-          qualityMsg += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
+        if (movieInfo.imdb_rate) qualityMsg += `⭐ *IMDb :* ${movieInfo.imdb_rate}\n`;
+        if (movieInfo.duration) qualityMsg += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
 
         downloadLinks.forEach((d, i) => {
           qualityMsg += `*[ ${String(i + 1).padStart(2, "0")} ]* 📊 *${d.quality}*\n`;
         });
-        qualityMsg +=
-          "\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Swipe & Reply this message with a quality number...*";
+        qualityMsg += "\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Swipe & Reply this message with a quality number...*";
 
-        const sentQualityMsg = await sock.sendMessage(
-          from,
-          {
-            image: { url: imgToSend },
-            caption: qualityMsg,
-            contextInfo: channelContextInfo(),
-          },
-          { quoted: mek },
-        );
+        const sentQualityMsg = await sock.sendMessage(from, { image: { url: imgToSend }, caption: qualityMsg, contextInfo: channelContextInfo() }, { quoted: mek });
 
         pending.step = 2;
         pending.movie = { metadata: movieInfo, downloadLinks };
@@ -900,187 +537,86 @@ const csReplyHandler = {
         await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
       } catch (error) {
         clearUserSession(k);
-        await sendErrorMsg(
-          sock,
-          from,
-          mek,
-          "Failed to fetch download links for this movie.",
-        );
+        await sendErrorMsg(sock, from, mek, "Failed to fetch download links for this movie.");
       }
     }
-    // STEP 2: Download Link Processing
+    // STEP 2: Process Download
     else if (pending.step === 2) {
       if (choice > pending.movie.downloadLinks.length) return;
       pending.isProcessing = true;
-      await sock.sendMessage(from, { react: { text: "⬆", key: mek.key } });
+      await sock.sendMessage(from, { react: { text: "⬆️", key: mek.key } });
 
       const { movie } = pending;
       const selectedLink = movie.downloadLinks[choice - 1];
       let targetServerLink = selectedLink.directUrl;
 
-      logger.header("STEP 4: USER CHOSE QUALITY");
-      logger.info(`Choice: #${choice} (${selectedLink.quality})`);
-      logger.info(`Target Server Stream Link: ${targetServerLink}`);
-
       clearUserSession(k);
-
-      let directDownloadUrl = null;
-      let telegramUrl = null;
-
       try {
         const finalResult = await getCineSubzLinks(targetServerLink);
-        const correctPosterUrl =
-          movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE;
+        const correctPosterUrl = movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE;
         const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
 
-        if (
-          !finalResult.success ||
-          !finalResult.links ||
-          finalResult.links.length === 0
-        ) {
-          throw new Error("Unable to decrypt file link from CineSubz servers (403 WAF Block).");
+        if (!finalResult.success || !finalResult.links || finalResult.links.length === 0) {
+          
+          console.log("[PROXY TRACE LOGS]:", finalResult.logs?.join('\n'));
+
+          let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\nℹ️ _Cloudflare Server ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය._\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+
+          if (thumbBuffer) {
+             await sock.sendMessage(from, { image: thumbBuffer, caption: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
+          } else {
+             await sock.sendMessage(from, { text: fallbackText, contextInfo: channelContextInfo() }, { quoted: mek });
+          }
+          return await sock.sendMessage(from, { react: { text: "⚠️", key: mek.key } });
         }
 
         const allLinks = finalResult.links;
+        const r2Links = allLinks.filter((link) => link.includes("r2.cloudflarestorage.com") || link.includes("cloudflarestorage") || link.includes(".r2."));
+        const directMp4 = allLinks.filter((link) => link.includes(".mp4"));
+        const terracloudLinks = allLinks.filter(link => link.includes('terracloud') || link.includes('skylines'));
+        const pixeldrainLinks = allLinks.filter(link => link.includes('pixeldrain'));
+        const nonTelegramLinks = allLinks.filter((link) => !link.includes("telegram.me") && !link.includes("t.me"));
 
-        // Telegram link
-        const tgLink = allLinks.find(
-          (link) => link.includes("t.me") || link.includes("telegram.me"),
-        );
-        if (tgLink) telegramUrl = tgLink;
+        let directDownloadUrl = r2Links[0] || directMp4[0] || terracloudLinks[0] || pixeldrainLinks[0] || nonTelegramLinks[0] || null;
 
-        // Priority Link Filter
-        const r2Links = allLinks.filter(
-          (link) =>
-            link.includes("r2.cloudflarestorage.com") ||
-            link.includes("cloudflarestorage") ||
-            link.includes(".r2."),
-        );
-        const mp4Links = allLinks.filter((link) => link.includes(".mp4"));
-        const terracloudLinks = allLinks.filter(
-          (link) => link.includes("terracloud") || link.includes("skylines"),
-        );
-        const pixeldrainLinks = allLinks.filter((link) =>
-          link.includes("pixeldrain"),
-        );
-        const supercloudLinks = allLinks.filter((link) =>
-          link.includes("supercloud"),
-        );
-        const nonTelegramLinks = allLinks.filter(
-          (link) => !link.includes("telegram.me") && !link.includes("t.me"),
-        );
-
-        directDownloadUrl =
-          r2Links[0] ||
-          mp4Links[0] ||
-          terracloudLinks[0] ||
-          pixeldrainLinks[0] ||
-          supercloudLinks[0] ||
-          nonTelegramLinks[0] ||
-          null;
-
-        if (!directDownloadUrl) {
-          throw new Error("Decryption succeeded but no valid direct streaming link found.");
-        }
-
-        const cleanTitle = movie.metadata.title
-          .replace(/[^\w\s.-]/gi, "")
-          .substring(0, 50)
-          .trim();
-
+        const cleanTitle = movie.metadata.title.replace(/[^\w\s.-]/gi, "").substring(0, 50).trim();
         let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-        // Direct Baileys Streaming Object
-        const isR2Url = directDownloadUrl.includes("cloudflarestorage.com");
-        const docPayload = {
-          document: {
-            url: directDownloadUrl,
-            headers: isR2Url
-              ? {
-                  "User-Agent": browserHeaders["User-Agent"],
-                  Accept: "*/*",
-                }
-              : {
-                  "User-Agent": browserHeaders["User-Agent"],
-                  Referer: "https://drive.csplayer2.space/",
-                },
-          },
-          mimetype: "video/mp4",
-          fileName: `MALIYA-MD ${cleanTitle}.mp4`,
-          caption: captionText,
-          contextInfo: channelContextInfo(),
-        };
-
-        if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
-
-        logger.header("STEP 5: DISPATCHING TO BAILEYS SOCKET");
-        logger.info(`Stream URL -> ${directDownloadUrl.substring(0, 100)}...`);
-
-        // Send via Baileys Stream directly
-        await sock.sendMessage(from, docPayload, { quoted: mek });
-        logger.success("Video document stream successfully sent to WhatsApp!");
-        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-
-      } catch (error) {
-        logger.error(`FULL PROCESS ERROR: ${error.stack || error.message}`);
-
-        const realErrorReason = error?.message || "Connection timeout or WhatsApp upload rejected the stream.";
-
-        let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\n❌ *Real Cause / Issue :*\n> _${realErrorReason}_\n\n`;
-
         if (directDownloadUrl) {
-          fallbackText += `📥 *DIRECT HIGH-SPEED DOWNLOAD LINK :*\n${directDownloadUrl}\n\n💡 _Browser එකෙන් Link එක open කර Direct Download කරගන්න._\n\n`;
-        }
-
-        if (telegramUrl) {
-          fallbackText += `✈️ *Telegram Direct Bot :*\n${telegramUrl}\n\n`;
-        }
-
-        fallbackText += `> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
-
-        const correctPosterUrl =
-          movie.metadata?.poster || movie.metadata?.image || DEFAULT_SEARCH_IMAGE;
-        const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
-
-        if (thumbBuffer) {
-          await sock.sendMessage(
-            from,
-            {
-              image: thumbBuffer,
-              caption: fallbackText,
-              contextInfo: channelContextInfo(),
+          const isR2Url = directDownloadUrl.includes("cloudflarestorage.com");
+          const docPayload = {
+            document: { 
+              url: directDownloadUrl,
+              headers: isR2Url ? { "User-Agent": "Mozilla/5.0", "Accept": "*/*" } : { "User-Agent": "Mozilla/5.0", "Referer": "https://drive.csplayer2.space/" }
             },
-            { quoted: mek },
-          );
+            mimetype: "video/mp4",
+            fileName: `MALIYA-MD ${cleanTitle}.mp4`,
+            caption: captionText,
+            contextInfo: channelContextInfo()
+          };
+          if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
+          await sock.sendMessage(from, docPayload, { quoted: mek });
         } else {
-          await sock.sendMessage(
-            from,
-            { text: fallbackText, contextInfo: channelContextInfo() },
-            { quoted: mek },
-          );
+          await sock.sendMessage(from, { text: captionText, contextInfo: channelContextInfo() }, { quoted: mek });
         }
-
-        await sock.sendMessage(from, { react: { text: "⚠️", key: mek.key } });
+        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+      } catch (error) {
+        await sendErrorMsg(sock, from, mek, `Failed to download movie: ${error.message}`);
       }
     }
-  },
+  }
 };
 
 if (Array.isArray(replyHandlers)) replyHandlers.push(csReplyHandler);
 
-setInterval(
-  () => {
-    const now = Date.now();
-    for (const k in pendingCineSubz) {
-      if (now - pendingCineSubz[k].timestamp > SESSION_TIMEOUT)
-        delete pendingCineSubz[k];
-    }
-    for (const k in lastProcessedMsg) {
-      if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN)
-        delete lastProcessedMsg[k];
-    }
-  },
-  2.5 * 60 * 1000,
-);
+setInterval(() => {
+  const now = Date.now();
+  for (const k in pendingCineSubz) {
+    if (now - pendingCineSubz[k].timestamp > SESSION_TIMEOUT) delete pendingCineSubz[k];
+  }
+  for (const k in lastProcessedMsg) {
+    if (now - lastProcessedMsg[k].time > LOOP_COOLDOWN) delete lastProcessedMsg[k];
+  }
+}, 2.5 * 60 * 1000);
 
 module.exports = {};
