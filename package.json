@@ -82,7 +82,8 @@
     "tough-cookie": "latest",
     "@ryuu-reinzz/luna-lib": "latest",
     "node-cache": "latest",
-    "ruhend-scraper": "latest"
+    "ruhend-scraper": "latest",
+    "https-proxy-agent": "latest"
   
     
 
