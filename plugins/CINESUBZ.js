@@ -824,31 +824,21 @@ const csReplyHandler = {
           !finalResult.links ||
           finalResult.links.length === 0
         ) {
-          let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\nℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය._\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
-
-          if (thumbBuffer) {
-            await sock.sendMessage(
-              from,
-              {
-                image: thumbBuffer,
-                caption: fallbackText,
-                contextInfo: channelContextInfo(),
-              },
-              { quoted: mek },
-            );
-          } else {
-            await sock.sendMessage(
-              from,
-              { text: fallbackText, contextInfo: channelContextInfo() },
-              { quoted: mek },
-            );
-          }
-          return await sock.sendMessage(from, {
-            react: { text: "⚠️", key: mek.key },
-          });
+          throw new Error("Link decryption yielded no results.");
         }
 
         const allLinks = finalResult.links;
+
+        // Priority 1: Cloudflare R2 / Storage links
+        const r2Links = allLinks.filter(
+          (link) =>
+            link.includes("r2.cloudflarestorage.com") ||
+            link.includes("cloudflarestorage") ||
+            link.includes(".r2."),
+        );
+        // Priority 2: Direct .mp4 URLs
+        const mp4Links = allLinks.filter((link) => link.includes(".mp4"));
+        // Priority 3: Common storage domains
         const terracloudLinks = allLinks.filter(
           (link) => link.includes("terracloud") || link.includes("skylines"),
         );
@@ -863,11 +853,17 @@ const csReplyHandler = {
         );
 
         let directDownloadUrl =
+          r2Links[0] ||
+          mp4Links[0] ||
           terracloudLinks[0] ||
           pixeldrainLinks[0] ||
           supercloudLinks[0] ||
           nonTelegramLinks[0] ||
           null;
+
+        if (!directDownloadUrl) {
+          throw new Error("No direct streaming URL found.");
+        }
 
         const cleanTitle = movie.metadata.title
           .replace(/[^\w\s.-]/gi, "")
@@ -876,33 +872,48 @@ const csReplyHandler = {
 
         let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-        if (directDownloadUrl) {
-          const docPayload = {
-            document: { url: directDownloadUrl },
-            mimetype: "video/mp4",
-            fileName: `MALIYA-MD ${cleanTitle}.mp4`,
-            caption: captionText,
-            contextInfo: channelContextInfo(),
-          };
+        // Direct Baileys Streaming URL Object
+        const docPayload = {
+          document: {
+            url: directDownloadUrl,
+          },
+          mimetype: "video/mp4",
+          fileName: `MALIYA-MD ${cleanTitle}.mp4`,
+          caption: captionText,
+          contextInfo: channelContextInfo(),
+        };
 
-          if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
+        if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
 
-          await sock.sendMessage(from, docPayload, { quoted: mek });
+        await sock.sendMessage(from, docPayload, { quoted: mek });
+        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
+      } catch (error) {
+        console.log("CINESUBZ DOWNLOAD ERROR:", error?.message || error);
+
+        let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\nℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය._\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+
+        const correctPosterUrl =
+          movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE;
+        const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
+
+        if (thumbBuffer) {
+          await sock.sendMessage(
+            from,
+            {
+              image: thumbBuffer,
+              caption: fallbackText,
+              contextInfo: channelContextInfo(),
+            },
+            { quoted: mek },
+          );
         } else {
           await sock.sendMessage(
             from,
-            { text: captionText, contextInfo: channelContextInfo() },
+            { text: fallbackText, contextInfo: channelContextInfo() },
             { quoted: mek },
           );
         }
-        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-      } catch (error) {
-        await sendErrorMsg(
-          sock,
-          from,
-          mek,
-          `Failed to download movie: ${error.message}`,
-        );
+        await sock.sendMessage(from, { react: { text: "⚠️", key: mek.key } });
       }
     }
   },
