@@ -15,6 +15,8 @@ const DEFAULT_SEARCH_IMAGE =
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 2500;
 const MAX_RESULTS = 15;
+const MAX_WHATSAPP_SIZE_GB = 2.0; // WhatsApp Document Limit (2GB)
+
 const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
@@ -24,73 +26,30 @@ const sslAgent = new https.Agent({
   secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
 });
 
-/* ================= ROTATING REAL BROWSER PROFILES ================= */
+/* ================= 2026 REAL BROWSER PROFILES ================= */
 const BROWSER_PROFILES = [
-  // 1. Chrome 131 - Windows 11
+  {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+    Accept:
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "sec-ch-ua":
+      '"Not:A-Brand";v="8", "Chromium";v="156", "Google Chrome";v="156"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "cross-site",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    Connection: "keep-alive",
+  },
   {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    Accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    Accept: "*/*",
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "sec-ch-ua":
-      '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"Windows"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-    Connection: "keep-alive",
-  },
-  // 2. Edge 131 - Windows 11
-  {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
-    Accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "sec-ch-ua":
-      '"Microsoft Edge";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"Windows"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Upgrade-Insecure-Requests": "1",
-    Connection: "keep-alive",
-  },
-  // 3. Firefox 133 - Windows 11
-  {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
-    Accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-    Connection: "keep-alive",
-  },
-  // 4. Chrome - macOS Sequoia
-  {
-    "User-Agent":
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    Accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-GB,en;q=0.9",
-    "sec-ch-ua":
-      '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"macOS"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Upgrade-Insecure-Requests": "1",
     Connection: "keep-alive",
   },
 ];
@@ -236,7 +195,6 @@ async function customSearchCineSubz(query) {
     try {
       const headers = getBrowserHeaders(profileIdx, {
         Referer: "https://cinesubz.co/",
-        Origin: "https://cinesubz.co",
       });
 
       const res = await axios.get(searchUrl, {
@@ -381,7 +339,7 @@ async function getCineSubzLinks(originalUrl) {
   let baseServerMatch = targetLink.match(/server(\d+)/);
   let serversToTry = [];
   if (baseServerMatch) serversToTry.push(baseServerMatch[1]);
-  ["1", "2", "3", "4", "5", "6", "8", "9", "7", "11", "21"].forEach((s) => {
+  ["7", "2", "1", "3", "4", "5", "6", "8", "9", "11", "21"].forEach((s) => {
     if (!serversToTry.includes(s)) serversToTry.push(s);
   });
 
@@ -484,7 +442,7 @@ async function getCineSubzLinks(originalUrl) {
               Cookie: cookieHeader,
               Origin: domain,
               Referer: realPageUrl,
-              "sec-ch-ua": BROWSER_PROFILES[profileIdx]["sec-ch-ua"] || '"Chromium";v="131"',
+              "sec-ch-ua": BROWSER_PROFILES[profileIdx]["sec-ch-ua"] || '"Chromium";v="156"',
               "sec-ch-ua-mobile": "?0",
               "sec-ch-ua-platform": BROWSER_PROFILES[profileIdx]["sec-ch-ua-platform"] || '"Windows"',
               "Sec-Fetch-Dest": "empty",
@@ -772,12 +730,13 @@ const csReplyHandler = {
           );
         }
 
+        // WhatsApp 2GB Size Filter
         const downloadLinks = movieInfo.downloadLinks.filter((d) => {
           const match = d.quality.match(/([\d.]+)\s*(MB|GB)/i);
           if (match) {
             const size = parseFloat(match[1]);
             const unit = match[2].toUpperCase();
-            if (unit === "GB") return size <= 2.0;
+            if (unit === "GB") return size <= MAX_WHATSAPP_SIZE_GB;
             if (unit === "MB") return true;
           }
           return true;
@@ -789,7 +748,7 @@ const csReplyHandler = {
             sock,
             from,
             mek,
-            "No download links found below 2GB.",
+            `No download links found below WhatsApp limit (${MAX_WHATSAPP_SIZE_GB}GB).`,
           );
         }
 
@@ -803,7 +762,7 @@ const csReplyHandler = {
           qualityBody += `⭐ *IMDb :* ${movieInfo.imdb_rate || selected.imdb}\n`;
         if (movieInfo.duration)
           qualityBody += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
-        qualityBody += `Available formats below 2GB are listed. Choose one to start download.\n\n© 2026 ${BRAND_BASE} SYSTEM`;
+        qualityBody += `Available formats below 2GB are listed. Choose one to start direct stream.\n\n© 2026 ${BRAND_BASE} SYSTEM`;
 
         const settings = await readSettings(sessionId);
         const btnsOn = !!settings.btns_enabled;
@@ -909,6 +868,10 @@ const csReplyHandler = {
       let targetServerLink = selectedLink.directUrl;
 
       clearUserSession(k);
+
+      let directDownloadUrl = null;
+      let telegramUrl = null;
+
       try {
         const finalResult = await getCineSubzLinks(targetServerLink);
         const correctPosterUrl =
@@ -920,21 +883,25 @@ const csReplyHandler = {
           !finalResult.links ||
           finalResult.links.length === 0
         ) {
-          throw new Error("No download links resolved");
+          throw new Error("Unable to decrypt file link from CineSubz servers (404/Invalid Key).");
         }
 
         const allLinks = finalResult.links;
 
-        // Priority 1: Cloudflare R2 / Storage links
+        // Telegram link
+        const tgLink = allLinks.find(
+          (link) => link.includes("t.me") || link.includes("telegram.me"),
+        );
+        if (tgLink) telegramUrl = tgLink;
+
+        // Priority Link Filter
         const r2Links = allLinks.filter(
           (link) =>
             link.includes("r2.cloudflarestorage.com") ||
             link.includes("cloudflarestorage") ||
             link.includes(".r2."),
         );
-        // Priority 2: Direct .mp4 URLs
         const mp4Links = allLinks.filter((link) => link.includes(".mp4"));
-        // Priority 3: Alternative Mirrors
         const terracloudLinks = allLinks.filter(
           (link) => link.includes("terracloud") || link.includes("skylines"),
         );
@@ -948,7 +915,7 @@ const csReplyHandler = {
           (link) => !link.includes("telegram.me") && !link.includes("t.me"),
         );
 
-        let directDownloadUrl =
+        directDownloadUrl =
           r2Links[0] ||
           mp4Links[0] ||
           terracloudLinks[0] ||
@@ -958,7 +925,7 @@ const csReplyHandler = {
           null;
 
         if (!directDownloadUrl) {
-          throw new Error("No suitable video stream link found");
+          throw new Error("Decryption succeeded but no valid direct streaming link found.");
         }
 
         const cleanTitle = movie.metadata.title
@@ -968,16 +935,19 @@ const csReplyHandler = {
 
         let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-        // Baileys Safe Stream Payload
-        // R2 Presigned URLs must NOT include custom referer/auth headers as they trigger 403 Signature Mismatch
+        // Direct Baileys Streaming Object
         const isR2Url = directDownloadUrl.includes("cloudflarestorage.com");
         const docPayload = {
           document: {
             url: directDownloadUrl,
             headers: isR2Url
-              ? { "User-Agent": BROWSER_PROFILES[0]["User-Agent"] }
+              ? {
+                  "User-Agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+                }
               : {
-                  "User-Agent": BROWSER_PROFILES[0]["User-Agent"],
+                  "User-Agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
                   Referer: "https://drive.csplayer2.space/",
                 },
           },
@@ -989,12 +959,28 @@ const csReplyHandler = {
 
         if (thumbBuffer) docPayload.jpegThumbnail = thumbBuffer;
 
+        console.log(`[BOT] Streaming target link to WhatsApp: ${directDownloadUrl.substring(0, 100)}...`);
+
+        // Send via Baileys Stream directly
         await sock.sendMessage(from, docPayload, { quoted: mek });
         await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-      } catch (error) {
-        console.log("CINESUBZ DOWNLOAD FAILED:", error?.message || error);
 
-        let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\nℹ️ _Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය._\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+      } catch (error) {
+        console.log("CINESUBZ DOWNLOAD FAILED REAL CAUSE:", error?.message || error);
+
+        const realErrorReason = error?.message || "Connection timeout or WhatsApp upload rejected the stream.";
+
+        let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\n❌ *Real Cause / Issue :*\n> _${realErrorReason}_\n\n`;
+
+        if (directDownloadUrl) {
+          fallbackText += `📥 *DIRECT HIGH-SPEED DOWNLOAD LINK :*\n${directDownloadUrl}\n\n💡 _Browser එකෙන් Link එක open කර Direct Download කරගන්න._\n\n`;
+        }
+
+        if (telegramUrl) {
+          fallbackText += `✈️ *Telegram Direct Bot :*\n${telegramUrl}\n\n`;
+        }
+
+        fallbackText += `> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
         const correctPosterUrl =
           movie.metadata?.poster || movie.metadata?.image || DEFAULT_SEARCH_IMAGE;
@@ -1017,6 +1003,7 @@ const csReplyHandler = {
             { quoted: mek },
           );
         }
+
         await sock.sendMessage(from, { react: { text: "⚠️", key: mek.key } });
       }
     }
