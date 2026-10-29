@@ -37,13 +37,36 @@ const logger = {
   },
 };
 
+/* ================= CLOUDFLARE WAF EVASION TLS AGENT ================= */
 const sslAgent = new https.Agent({
   rejectUnauthorized: false,
   keepAlive: true,
-  secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+  ciphers: [
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
+    "ECDHE-ECDSA-AES128-GCM-SHA256",
+    "ECDHE-RSA-AES128-GCM-SHA256",
+    "ECDHE-ECDSA-AES256-GCM-SHA384",
+    "ECDHE-RSA-AES256-GCM-SHA384",
+    "ECDHE-ECDSA-CHACHA20-POLY1305",
+    "ECDHE-RSA-CHACHA20-POLY1305",
+    "ECDHE-RSA-AES128-SHA",
+    "ECDHE-RSA-AES256-SHA",
+    "AES128-GCM-SHA256",
+    "AES256-GCM-SHA384",
+    "AES128-SHA",
+    "AES256-SHA",
+  ].join(":"),
+  honorCipherOrder: true,
+  minVersion: "TLSv1.2",
+  maxVersion: "TLSv1.3",
+  secureOptions:
+    crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT |
+    crypto.constants.SSL_OP_NO_TICKET,
 });
 
-/* ================= EXACT REAL BROWSER HEADERS ================= */
+/* ================= EXACT 2026 BROWSER PROFILE ================= */
 const browserHeaders = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
@@ -56,7 +79,7 @@ const browserHeaders = {
   "sec-ch-ua-platform": '"Windows"',
   "Sec-Fetch-Dest": "document",
   "Sec-Fetch-Mode": "navigate",
-  "Sec-Fetch-Site": "none",
+  "Sec-Fetch-Site": "cross-site",
   "Sec-Fetch-User": "?1",
   "Upgrade-Insecure-Requests": "1",
   Connection: "keep-alive",
@@ -165,6 +188,7 @@ async function getThumbnailBuffer(url) {
       responseType: "arraybuffer",
       timeout: 8000,
       headers: browserHeaders,
+      httpsAgent: sslAgent,
     });
     return await sharp(Buffer.from(res.data))
       .resize(200, 200, { fit: "cover" })
@@ -259,10 +283,11 @@ async function scrapeMoviePage(movieUrl, fallbackTitle = "Movie", fallbackImage 
   logger.req("GET", movieUrl);
 
   try {
+    const movieHost = new URL(movieUrl).origin;
     const res = await axios.get(movieUrl, {
       httpsAgent: sslAgent,
       timeout: 15000,
-      headers: { ...browserHeaders, Referer: "https://cinesubz.co/" },
+      headers: { ...browserHeaders, Referer: `${movieHost}/` },
     });
 
     logger.res(res.status, `${String(res.data || "").length} bytes`);
@@ -300,8 +325,12 @@ async function scrapeMoviePage(movieUrl, fallbackTitle = "Movie", fallbackImage 
           logger.info(`Resolving button redirect: ${rawLink}`);
           const pageRes = await axios.get(rawLink, {
             httpsAgent: sslAgent,
-            headers: { ...browserHeaders, Referer: movieUrl },
-            timeout: 10000,
+            headers: {
+              ...browserHeaders,
+              Referer: movieUrl,
+              Host: new URL(rawLink).host,
+            },
+            timeout: 12000,
           });
           const pData = String(pageRes.data || "");
           const pathMatch = pData.match(
@@ -312,7 +341,7 @@ async function scrapeMoviePage(movieUrl, fallbackTitle = "Movie", fallbackImage 
             let cleanPath = pathMatch[1].replace(/(server\d+\/)\d+:\//, "$1");
             const directCsLink = `https://drive.csplayer2.space/${cleanPath}`;
             logger.success(`Extracted CS Stream link: [${qualityLabel}] -> ${directCsLink}`);
-            return { quality: qualityLabel, pageUrl: rawLink, directUrl: directCsLink };
+            return { quality: qualityLabel, pageUrl: rawLink, directUrl: directCsLink, movieHost };
           }
         } catch (e) {
           logger.warn(`Button resolution failed: ${e.message}`);
@@ -337,16 +366,24 @@ async function scrapeMoviePage(movieUrl, fallbackTitle = "Movie", fallbackImage 
   }
 }
 
-/* ================= 3. DIRECT DOWNLOAD RESOLVER (DEEP LOGGED) ================= */
-async function getCineSubzLinks(originalUrl) {
+/* ================= 3. DIRECT DOWNLOAD RESOLVER ================= */
+async function getCineSubzLinks(originalUrl, originDomain = "https://cinesubz.co") {
   let targetLink = originalUrl.replace(/^https:\/\/[^\/]+/, "https://drive.csplayer2.space");
   targetLink = targetLink.replace(/(server\d+\/)\d+:\//, "$1");
 
   logger.header("STEP 3: DECRYPTING STREAM URL");
   logger.info(`Original Stream URL: ${originalUrl}`);
-  logger.info(`Target Cleaned Link: ${targetLink}`);
+  logger.info(`Origin Referer    : ${originDomain}`);
 
-  const serversToTry = ["2", "7", "1", "3", "4", "5", "6", "8", "9", "11", "21"];
+  // Extract initial server from URL
+  const serverMatch = targetLink.match(/\/server(\d+)\//);
+  const detectedServer = serverMatch ? serverMatch[1] : "7";
+
+  // Prioritize detected server first!
+  const serversToTry = [detectedServer];
+  ["7", "2", "1", "3", "4", "5", "6", "8", "9", "11", "21"].forEach((s) => {
+    if (!serversToTry.includes(s)) serversToTry.push(s);
+  });
 
   for (const serverNum of serversToTry) {
     let movieUrl = targetLink.replace(/\/server\d+\//, `/server${serverNum}/`);
@@ -359,14 +396,16 @@ async function getCineSubzLinks(originalUrl) {
 
       let sessionCookies = "";
 
-      // Initial GET
+      // 1. Initial Handshake with Dynamic Referer
       logger.req("GET", movieUrl);
       const initialRes = await axios.get(movieUrl, {
         httpsAgent: sslAgent,
         headers: {
           ...browserHeaders,
           Host: parsedUrl.host,
-          Referer: "https://cinesubz.co/",
+          Referer: `${originDomain}/`,
+          Origin: originDomain,
+          "Sec-Fetch-Site": "cross-site",
         },
         timeout: 10000,
       });
@@ -374,7 +413,9 @@ async function getCineSubzLinks(originalUrl) {
       logger.res(initialRes.status, `${String(initialRes.data || "").length} bytes`);
 
       if (initialRes.headers["set-cookie"]) {
-        sessionCookies = initialRes.headers["set-cookie"].map((c) => c.split(";")[0]).join("; ");
+        sessionCookies = initialRes.headers["set-cookie"]
+          .map((c) => c.split(";")[0])
+          .join("; ");
         logger.inspect(`Server ${serverNum} Session Cookies`, sessionCookies);
       }
 
@@ -385,7 +426,7 @@ async function getCineSubzLinks(originalUrl) {
 
       logger.info(`Direct DOM HEX Payloads count: ${payloads.length}`);
 
-      // API Download Data Check
+      // 2. Download Data API Call
       if (payloads.length === 0) {
         const apiUrl = `${domain}/api/download-data${currentPath}`;
         logger.req("GET (Download-Data API)", apiUrl);
@@ -399,6 +440,8 @@ async function getCineSubzLinks(originalUrl) {
               Accept: "application/json, text/plain, */*",
               Referer: movieUrl,
               Cookie: sessionCookies,
+              Host: parsedUrl.host,
+              Origin: domain,
               "Sec-Fetch-Dest": "empty",
               "Sec-Fetch-Mode": "cors",
               "Sec-Fetch-Site": "same-origin",
@@ -408,7 +451,9 @@ async function getCineSubzLinks(originalUrl) {
           logger.res(apiRes.status, `JSON: ${JSON.stringify(apiRes.data)}`);
 
           if (apiRes.headers["set-cookie"]) {
-            const apiCookies = apiRes.headers["set-cookie"].map((c) => c.split(";")[0]).join("; ");
+            const apiCookies = apiRes.headers["set-cookie"]
+              .map((c) => c.split(";")[0])
+              .join("; ");
             sessionCookies = sessionCookies ? `${sessionCookies}; ${apiCookies}` : apiCookies;
           }
 
@@ -424,6 +469,7 @@ async function getCineSubzLinks(originalUrl) {
                 ...browserHeaders,
                 Referer: movieUrl,
                 Cookie: sessionCookies,
+                Host: parsedUrl.host,
               },
             });
 
@@ -439,7 +485,7 @@ async function getCineSubzLinks(originalUrl) {
       }
 
       if (payloads.length === 0) {
-        logger.warn(`Server ${serverNum} has 0 payloads. Skipping to next...`);
+        logger.warn(`Server ${serverNum} has 0 payloads. Skipping...`);
         continue;
       }
 
@@ -449,13 +495,10 @@ async function getCineSubzLinks(originalUrl) {
       keys.push("kasun", "cinesubz.lk", "CSPlayer", "ravindu01manoj", "jhutmupd", "dgpjjitp");
 
       logger.info(`Collected ${keys.length} decryption candidate keys.`);
-
       const results = [];
 
       for (let i = 0; i < payloads.length; i++) {
         const hex = payloads[i];
-        logger.info(`Sending binary POST for Payload #${i + 1} (${hex.length} chars) to: ${realPostUrl}`);
-
         try {
           const payloadBytes = Buffer.from(hex, "hex");
           const postRes = await axios.post(realPostUrl, payloadBytes, {
@@ -470,6 +513,7 @@ async function getCineSubzLinks(originalUrl) {
               Cookie: sessionCookies,
               Origin: domain,
               Referer: realPostUrl,
+              Host: parsedUrl.host,
               "sec-ch-ua": '"Not:A-Brand";v="8", "Chromium";v="156", "Google Chrome";v="156"',
               "sec-ch-ua-mobile": "?0",
               "sec-ch-ua-platform": '"Windows"',
@@ -480,14 +524,11 @@ async function getCineSubzLinks(originalUrl) {
             responseType: "arraybuffer",
           });
 
-          logger.res(postRes.status, `Payload #${i + 1} returned data`);
           const resText = Buffer.from(postRes.data).toString("utf8");
           const encMatch = resText.match(/U2FsdGVkX1[a-zA-Z0-9+/=]+/);
 
           if (encMatch) {
             const encryptedStr = encMatch[0];
-            logger.info(`Ciphertext detected: ${encryptedStr.substring(0, 30)}...`);
-
             for (const k of keys) {
               try {
                 const dec = CryptoJS.AES.decrypt(encryptedStr, k).toString(CryptoJS.enc.Utf8);
@@ -508,7 +549,7 @@ async function getCineSubzLinks(originalUrl) {
             }
           }
         } catch (postErr) {
-          logger.warn(`Payload #${i + 1} POST failed: ${postErr.response?.status || postErr.message}`);
+          // Individual payload failures are ignored
         }
       }
 
@@ -518,13 +559,13 @@ async function getCineSubzLinks(originalUrl) {
         return { success: true, links: finalLinks };
       }
     } catch (serverErr) {
-      logger.error(`Server #${serverNum} encountered error: ${serverErr.message}`);
+      logger.error(`Server #${serverNum} encountered error: ${serverErr.response?.status || serverErr.message}`);
       continue;
     }
   }
 
   logger.error("All server attempts exhausted. 0 direct URLs resolved.");
-  return { error: "Unable to decrypt file link from CineSubz servers (All attempts failed)." };
+  return { error: "Unable to decrypt file link from CineSubz servers (403/Forbidden from Host)." };
 }
 
 /* ================= COMMAND: .cinesubz ================= */
@@ -763,7 +804,7 @@ const csReplyHandler = {
           );
         }
 
-        // WhatsApp 2GB filter
+        // WhatsApp 2GB limit filter
         const downloadLinks = movieInfo.downloadLinks.filter((d) => {
           const match = d.quality.match(/([\d.]+)\s*(MB|GB)/i);
           if (match) {
@@ -899,6 +940,7 @@ const csReplyHandler = {
       const { movie } = pending;
       const selectedLink = movie.downloadLinks[choice - 1];
       let targetServerLink = selectedLink.directUrl;
+      const originHost = selectedLink.movieHost || "https://cinesubz.net";
 
       logger.header("STEP 4: USER CHOSE QUALITY");
       logger.info(`Choice: #${choice} (${selectedLink.quality})`);
@@ -910,7 +952,7 @@ const csReplyHandler = {
       let telegramUrl = null;
 
       try {
-        const finalResult = await getCineSubzLinks(targetServerLink);
+        const finalResult = await getCineSubzLinks(targetServerLink, originHost);
         const correctPosterUrl =
           movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE;
         const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
@@ -920,7 +962,7 @@ const csReplyHandler = {
           !finalResult.links ||
           finalResult.links.length === 0
         ) {
-          throw new Error("Unable to decrypt file link from CineSubz servers (404/Empty Payloads).");
+          throw new Error("Unable to decrypt file link from CineSubz servers (403 WAF Block).");
         }
 
         const allLinks = finalResult.links;
@@ -972,20 +1014,18 @@ const csReplyHandler = {
 
         let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
-        // Exact Baileys streaming configuration
+        // Direct Baileys Streaming Object
         const isR2Url = directDownloadUrl.includes("cloudflarestorage.com");
         const docPayload = {
           document: {
             url: directDownloadUrl,
             headers: isR2Url
               ? {
-                  "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+                  "User-Agent": browserHeaders["User-Agent"],
                   Accept: "*/*",
                 }
               : {
-                  "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+                  "User-Agent": browserHeaders["User-Agent"],
                   Referer: "https://drive.csplayer2.space/",
                 },
           },
@@ -999,7 +1039,6 @@ const csReplyHandler = {
 
         logger.header("STEP 5: DISPATCHING TO BAILEYS SOCKET");
         logger.info(`Stream URL -> ${directDownloadUrl.substring(0, 100)}...`);
-        logger.info(`Headers -> ${JSON.stringify(docPayload.document.headers)}`);
 
         // Send via Baileys Stream directly
         await sock.sendMessage(from, docPayload, { quoted: mek });
