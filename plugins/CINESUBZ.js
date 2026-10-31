@@ -1,11 +1,12 @@
 const { cmd, replyHandlers } = require("../command");
 const axios = require("axios");
+const https = require("https");
+const crypto = require("crypto");
 const sharp = require("sharp");
 const { readSettings, getCustomImage } = require("../lib/botSettings");
 
 // ============================================================
-// ⚙️  CONFIG — CHANGE THIS URL WHEN TRYCLOUDFLARE URL CHANGES
-// Priority: process.env.CINESUBZ_API_URL > default below
+// ⚙️  API CONFIG — only for /start-resolve & /check-status
 // ============================================================
 const CINESUBZ_API =
   process.env.CINESUBZ_API_URL ||
@@ -20,12 +21,32 @@ const DEFAULT_SEARCH_IMAGE =
 const SESSION_TIMEOUT = 5 * 60 * 1000;
 const LOOP_COOLDOWN = 2500;
 const MAX_RESULTS = 15;
+
+// 🎯 STRICT 2GB LIMIT — files exactly 2GB or bigger are filtered out
+const MAX_SIZE_BYTES = 2 * 1024 * 1024 * 1024; // 2147483648 bytes (2 GiB)
+
 const pendingCineSubz = {};
 const lastProcessedMsg = {};
 
-// ============================================================
-// HELPERS
-// ============================================================
+const sslAgent = new https.Agent({
+  rejectUnauthorized: false,
+  keepAlive: true,
+  secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+});
+
+const defaultHeaders = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  Connection: "keep-alive",
+  "Upgrade-Insecure-Requests": "1",
+};
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
 function keyFor(sender, from) {
   return `${from || ""}`;
 }
@@ -46,7 +67,49 @@ function toSmallCaps(str = "") {
     .join("");
 }
 
+function decodeHtmlEntities(str = "") {
+  return String(str)
+    .replace(/&#8211;|&#8212;|&ndash;|&mdash;/g, "-")
+    .replace(/&#8217;|&#8216;|&apos;/g, "'")
+    .replace(/&#8220;|&#8221;|&quot;/g, '"')
+    .replace(/&#038;|&amp;/g, "&")
+    .replace(/<[^>]*>/g, "")
+    .trim();
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Parse a quality string like "1080p • 1.5GB" and return size in bytes.
+ * Returns null when no size info is present.
+ */
+function parseSizeBytes(qualityStr) {
+  if (!qualityStr) return null;
+  const match = String(qualityStr).match(/([\d.]+)\s*(KB|MB|GB|TB)/i);
+  if (!match) return null;
+  const size = parseFloat(match[1]);
+  if (isNaN(size)) return null;
+  const unit = match[2].toUpperCase();
+  const map = {
+    KB: 1024,
+    MB: 1024 * 1024,
+    GB: 1024 * 1024 * 1024,
+    TB: 1024 * 1024 * 1024 * 1024,
+  };
+  return size * map[unit];
+}
+
+/**
+ * STRICT "under 2GB" checker.
+ * - size < 2 GiB  → keep
+ * - size >= 2 GiB → drop
+ * - no size info  → keep (can't determine)
+ */
+function isUnder2GB(qualityStr) {
+  const bytes = parseSizeBytes(qualityStr);
+  if (bytes === null) return true;
+  return bytes < MAX_SIZE_BYTES;
+}
 
 function channelContextInfo() {
   return {
@@ -143,34 +206,153 @@ async function sendErrorMsg(sock, from, mek, text) {
 }
 
 /* ============================================================
-   API CLIENT — all requests go to CINESUBZ_API server
+   1️⃣  LOCAL SEARCH — original bot scrape (CineSubz.co)
    ============================================================ */
-async function apiSearch(query) {
+async function customSearchCineSubz(query) {
+  const formattedQuery = encodeURIComponent(query.trim()).replace(/%20/g, "+");
+  const searchUrl = `https://cinesubz.co/?s=${formattedQuery}`;
+
   try {
-    const res = await axios.get(`${CINESUBZ_API}/search`, {
-      params: { q: query.trim() },
-      timeout: 25000,
+    const res = await axios.get(searchUrl, {
+      httpsAgent: sslAgent,
+      timeout: 15000,
+      headers: { ...defaultHeaders, Referer: "https://cinesubz.co/" },
     });
-    return res.data?.results || [];
-  } catch (e) {
-    console.log("CINESUBZ API SEARCH ERROR:", e?.message || e);
+
+    const html = String(res.data || "");
+    const results = [];
+    const seenUrls = new Set();
+
+    const parts = html
+      .split(/<div id="item-\d+"\s+class="display-item">/i)
+      .slice(1);
+
+    for (const block of parts) {
+      const linkMatch = block.match(
+        /<a\s+href="([^"]+)"[^>]*?(?:title="([^"]*)")?/i,
+      );
+      const h3Match =
+        block.match(/<div class="item-desc-title">\s*<h3>([\s\S]*?)<\/h3>/i) ||
+        block.match(/<h3>([\s\S]*?)<\/h3>/i);
+      const imgMatch = block.match(
+        /<img[^>]+(?:data-original|src)="([^"]+)"/i,
+      );
+      const imdbMatch = block.match(
+        /<span class="imdb-score">([^<]+)<\/span>/i,
+      );
+      const qualityMatch = block.match(
+        /<span class="badge-(?:quality|season)-corner">([^<]+)<\/span>/i,
+      );
+
+      const url = linkMatch ? linkMatch[1].trim() : null;
+      const rawTitle =
+        (h3Match && h3Match[1]) || (linkMatch && linkMatch[2]) || "";
+      const title = decodeHtmlEntities(rawTitle);
+      const image = imgMatch ? imgMatch[1].trim() : DEFAULT_SEARCH_IMAGE;
+      const imdb = imdbMatch ? imdbMatch[1].trim() : null;
+      const quality = qualityMatch ? qualityMatch[1].trim() : null;
+
+      if (url && title && !seenUrls.has(url)) {
+        seenUrls.add(url);
+        results.push({ title, url, image, imdb, quality });
+      }
+    }
+
+    return results;
+  } catch (err) {
+    console.log("CINESUBZ SEARCH ERROR:", err?.message || err);
     return [];
   }
 }
 
-async function apiMovie(movieUrl) {
+/* ============================================================
+   2️⃣  LOCAL MOVIE SCRAPE — original bot (with inline resolve)
+   ============================================================ */
+async function scrapeMoviePage(
+  movieUrl,
+  fallbackTitle = "Movie",
+  fallbackImage = DEFAULT_SEARCH_IMAGE,
+) {
   try {
-    const res = await axios.get(`${CINESUBZ_API}/movie`, {
-      params: { url: movieUrl },
-      timeout: 40000,
+    const res = await axios.get(movieUrl, {
+      httpsAgent: sslAgent,
+      timeout: 15000,
+      headers: { ...defaultHeaders, Referer: "https://cinesubz.co/" },
     });
-    return res.data?.details || null;
+
+    const html = String(res.data || "");
+    const titleMatch = html.match(/<title>([\s\S]*?)<\/title>/i);
+    const title = titleMatch
+      ? decodeHtmlEntities(titleMatch[1].replace(/- CineSubz.*$/i, ""))
+      : fallbackTitle;
+
+    const downloadLinks = [];
+    const seenUrls = new Set();
+
+    const btnRegex =
+      /<a[^>]+href=['"]([^'"]+)['"][^>]*class=['"][^'"]*movie-download-button[^'"]*['"][^>]*>([\s\S]*?)<\/a>/gi;
+    let match;
+    while ((match = btnRegex.exec(html)) !== null) {
+      const rawLink = match[1].trim();
+      const innerHtml = match[2];
+      const metaMatch = innerHtml.match(
+        /class=['"][^'"]*movie-download-meta[^'"]*['"][^>]*>([\s\S]*?)<\/span>/i,
+      );
+      const typeMatch = innerHtml.match(
+        /class=['"][^'"]*movie-download-type[^'"]*['"][^>]*>([\s\S]*?)<\/span>/i,
+      );
+
+      const qualityLabel = metaMatch
+        ? decodeHtmlEntities(metaMatch[1])
+        : typeMatch
+          ? decodeHtmlEntities(typeMatch[1])
+          : "Quality";
+
+      let directCsLink = "";
+
+      try {
+        const pageRes = await axios.get(rawLink, {
+          httpsAgent: sslAgent,
+          headers: { ...defaultHeaders, Referer: movieUrl },
+          timeout: 10000,
+        });
+        const pData = String(pageRes.data || "");
+
+        const pathMatch = pData.match(
+          /(?:https?:\/\/(?:google\.com|sonic-cloud\.online|drive\.csplayer2\.space))?\/(server\d+\/[^\s'"<>]+\.mp4)/i,
+        );
+
+        if (pathMatch) {
+          let cleanPath = pathMatch[1].replace(/(server\d+\/)\d+:\//, "$1");
+          directCsLink = `https://drive.csplayer2.space/${cleanPath}`;
+        }
+      } catch (e) {}
+
+      if (directCsLink && !seenUrls.has(directCsLink)) {
+        seenUrls.add(directCsLink);
+        downloadLinks.push({
+          quality: qualityLabel,
+          pageUrl: rawLink,
+          directUrl: directCsLink,
+        });
+      }
+    }
+
+    return {
+      title,
+      poster: fallbackImage,
+      image: fallbackImage,
+      downloadLinks,
+    };
   } catch (e) {
-    console.log("CINESUBZ API MOVIE ERROR:", e?.message || e);
+    console.log("CINESUBZ SCRAPE ERROR:", e?.message || e);
     return null;
   }
 }
 
+/* ============================================================
+   3️⃣  API CLIENT — only for resolve + poll
+   ============================================================ */
 async function apiStartResolve(directUrl, pageUrl) {
   try {
     const res = await axios.post(
@@ -203,13 +385,14 @@ async function apiPollStatus(jobId, maxAttempts = 40, intervalMs = 2000) {
       if (e?.response?.status === 404) {
         return { success: false, error: "Job expired or not found" };
       }
-      // network hiccup — keep polling
     }
   }
   return { success: false, error: "Timeout while resolving download link" };
 }
 
-/* ================= COMMAND: .cinesubz ================= */
+/* ============================================================
+   COMMAND: .cinesubz
+   ============================================================ */
 cmd(
   {
     pattern: "cinesubz",
@@ -234,7 +417,8 @@ cmd(
 
       await sock.sendMessage(from, { react: { text: "📺", key: mek.key } });
 
-      const results = await apiSearch(q.trim());
+      // 🔍 Local search
+      const results = await customSearchCineSubz(q.trim());
       if (!results || results.length === 0) {
         await sock.sendMessage(from, { react: { text: "❌", key: mek.key } });
         return await sendErrorMsg(
@@ -245,14 +429,7 @@ cmd(
         );
       }
 
-      const topResults = results.slice(0, MAX_RESULTS).map((r) => ({
-        title: r.title,
-        url: r.url,
-        image: r.image || DEFAULT_SEARCH_IMAGE,
-        imdb: r.imdb,
-        quality: r.quality,
-      }));
-
+      const topResults = results.slice(0, MAX_RESULTS);
       const k = keyFor(sender, from);
       clearUserSession(k);
 
@@ -321,7 +498,7 @@ cmd(
         }
       }
 
-      // Numbered Fallback
+      // Numbered fallback
       let text = `⊱━━━━━ • ✿ • ━━━━━⊰\n🎬 *${botDisplayName.toUpperCase()} MOVIES*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎀 *Search :* ${q}\n🍿 *Results :* ${topResults.length}\n\n`;
       topResults.forEach((item, index) => {
         text += `*[ ${String(index + 1).padStart(2, "0")} ]* ➔ *${item.title}*\n`;
@@ -355,13 +532,15 @@ cmd(
         sock,
         from,
         mek,
-        "Failed to connect to CineSubz API server.",
+        "Failed to connect to CineSubz search server.",
       );
     }
   },
 );
 
-/* ================= REPLY HANDLER ================= */
+/* ============================================================
+   REPLY HANDLER
+   ============================================================ */
 const csReplyHandler = {
   filter: (text, { sender, from, m, mek }) => {
     const k = keyFor(sender, from);
@@ -424,7 +603,7 @@ const csReplyHandler = {
     const botDisplayName = pending.botDisplayName || DEFAULT_BOT_NAME;
 
     // ========================================================
-    // STEP 1: Movie Pick → fetch qualities via API
+    // STEP 1: Movie Pick → 🖥 LOCAL scrape (bot original)
     // ========================================================
     if (pending.step === 1) {
       if (choice > pending.results.length) return;
@@ -433,7 +612,12 @@ const csReplyHandler = {
 
       const selected = pending.results[choice - 1];
       try {
-        const movieInfo = await apiMovie(selected.url);
+        const movieInfo = await scrapeMoviePage(
+          selected.url,
+          selected.title,
+          selected.image,
+        );
+
         if (
           !movieInfo ||
           !movieInfo.downloadLinks ||
@@ -448,16 +632,12 @@ const csReplyHandler = {
           );
         }
 
-        const downloadLinks = movieInfo.downloadLinks.filter((d) => {
-          const match = d.quality.match(/([\d.]+)\s*(MB|GB)/i);
-          if (match) {
-            const size = parseFloat(match[1]);
-            const unit = match[2].toUpperCase();
-            if (unit === "GB") return size <= 2.0;
-            if (unit === "MB") return true;
-          }
-          return true;
-        });
+        // 🎯 STRICT 2GB FILTER — always applied
+        const allLinksCount = movieInfo.downloadLinks.length;
+        const downloadLinks = movieInfo.downloadLinks.filter((d) =>
+          isUnder2GB(d.quality),
+        );
+        const filteredOutCount = allLinksCount - downloadLinks.length;
 
         if (downloadLinks.length === 0) {
           clearUserSession(k);
@@ -465,7 +645,7 @@ const csReplyHandler = {
             sock,
             from,
             mek,
-            "No download links found below 2GB.",
+            `No download links found below 2GB.\n_(${filteredOutCount} files are 2GB or larger — skipped)_`,
           );
         }
 
@@ -480,7 +660,10 @@ const csReplyHandler = {
           qualityBody += `⭐ *IMDb :* ${movieInfo.imdb_rate || selected.imdb}\n`;
         if (movieInfo.duration)
           qualityBody += `⏳ *Duration :* ${movieInfo.duration}\n\n`;
-        qualityBody += `Available formats below 2GB are listed. Choose one to start download.\n\n© 2026 ${BRAND_BASE} SYSTEM`;
+        qualityBody += `Available formats **below 2GB** are listed. Choose one to start download.`;
+        if (filteredOutCount > 0)
+          qualityBody += `\n_(${filteredOutCount} file${filteredOutCount > 1 ? "s" : ""} ≥ 2GB skipped)_`;
+        qualityBody += `\n\n© 2026 ${BRAND_BASE} SYSTEM`;
 
         const settings = await readSettings(sessionId);
         const btnsOn = !!settings.btns_enabled;
@@ -535,7 +718,7 @@ const csReplyHandler = {
           }
         }
 
-        // Fallback Quality Numbered Menu
+        // Numbered fallback qualities
         let qualityMsg = `⊱━━━━━ • ✿ • ━━━━━⊰\n📥 *𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐐𝐔𝐀𝐋𝐈𝐓𝐈𝐄𝐒*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movieInfo.title)}\n`;
         if (movieInfo.imdb_rate || selected.imdb)
           qualityMsg += `⭐ *IMDb :* ${movieInfo.imdb_rate || selected.imdb}\n`;
@@ -545,6 +728,8 @@ const csReplyHandler = {
         downloadLinks.forEach((d, i) => {
           qualityMsg += `*[ ${String(i + 1).padStart(2, "0")} ]* 📊 *${d.quality}*\n`;
         });
+        if (filteredOutCount > 0)
+          qualityMsg += `\n_(${filteredOutCount} file${filteredOutCount > 1 ? "s" : ""} ≥ 2GB skipped)_`;
         qualityMsg +=
           "\n⊱━━━• ✿ •━━━━• ✿ •━━⊰\n> 💬 *Swipe & Reply this message with a quality number...*";
 
@@ -576,7 +761,7 @@ const csReplyHandler = {
       }
     }
     // ========================================================
-    // STEP 2: Quality Pick → resolve via API (start + poll)
+    // STEP 2: Quality Pick → 🌐 API resolve + poll
     // ========================================================
     else if (pending.step === 2) {
       if (choice > pending.movie.downloadLinks.length) return;
@@ -588,15 +773,16 @@ const csReplyHandler = {
 
       clearUserSession(k);
       try {
-        // 1️⃣ Start resolve job
         const directUrl = selectedLink.directUrl || selectedLink.pageUrl;
         const jobId = await apiStartResolve(directUrl, selectedLink.pageUrl);
 
         if (!jobId) {
           const thumbBuffer = await getThumbnailBuffer(
-            movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE,
+            movie.metadata.poster ||
+              movie.metadata.image ||
+              DEFAULT_SEARCH_IMAGE,
           );
-          let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\nℹ️ _Resolve server එකට connect වීමට නොහැකි විය._\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+          const fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\nℹ️ _Resolve server එකට connect වීමට නොහැකි විය._\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
           if (thumbBuffer) {
             await sock.sendMessage(
@@ -620,10 +806,11 @@ const csReplyHandler = {
           });
         }
 
-        // 2️⃣ Poll until done/failed
         const finalResult = await apiPollStatus(jobId);
         const correctPosterUrl =
-          movie.metadata.poster || movie.metadata.image || DEFAULT_SEARCH_IMAGE;
+          movie.metadata.poster ||
+          movie.metadata.image ||
+          DEFAULT_SEARCH_IMAGE;
         const thumbBuffer = await getThumbnailBuffer(correctPosterUrl);
 
         if (
@@ -631,7 +818,7 @@ const csReplyHandler = {
           !finalResult.links ||
           finalResult.links.length === 0
         ) {
-          let fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\nℹ️ _${finalResult.error || "Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය."}_\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+          const fallbackText = `⊱━━━━━ • ✿ • ━━━━━⊰\n⚠️ *𝐃𝐈𝐑𝐄𝐂𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 𝐅𝐀𝐈𝐋𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\nℹ️ _${finalResult.error || "Server එකේ ආරක්ෂක හේතූන් මත Bot ට කෙලින්ම Video එක Download කිරීමට නොහැකි විය."}_\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
           if (thumbBuffer) {
             await sock.sendMessage(
@@ -655,7 +842,7 @@ const csReplyHandler = {
           });
         }
 
-        // 3️⃣ Choose best link
+        // Prefer specific hosts
         const allLinks = finalResult.links;
         const terracloudLinks = allLinks.filter(
           (link) => link.includes("terracloud") || link.includes("skylines"),
@@ -682,7 +869,7 @@ const csReplyHandler = {
           .substring(0, 50)
           .trim();
 
-        let captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
+        const captionText = `⊱━━━━━ • ✿ • ━━━━━⊰\n✅ *𝐌𝐎𝐕𝐈𝐄 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃*\n⊱━━━━━ • ✿ • ━━━━━⊰\n\n🎬 *Movie :* ${toSmallCaps(movie.metadata.title)}\n📊 *Quality :* ${selectedLink.quality}\n\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝗠𝗔𝗟𝗜𝗬𝗔-𝗠𝗗`;
 
         if (directDownloadUrl) {
           const docPayload = {
