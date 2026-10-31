@@ -110,7 +110,7 @@ const config = require("./config");
 const { readSettings, isWorkAllowed } = require("./lib/botSettings");
 const { sms } = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
-const { handleSilentAutomation } = require("./plugins/silent_automation.js");
+const { handleSilentAutomation } = require("./plugins/SILENT_AUTO.js");
 
 // Cache memory leak වැළැක්වීම සඳහා TTL සහ maxKeys යෙදීම
 const msgRetryCounterCache = new NodeCache({ stdTTL: 300, maxKeys: 1000 });
