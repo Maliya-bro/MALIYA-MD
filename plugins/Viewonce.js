@@ -206,7 +206,7 @@ cmd(
     alias: ["viewonce", "vo", "view"],
     desc: "Convert view once media & forward to owner",
     category: "tools",
-    react: "🔍",
+    react: "🔥",
     filename: __filename,
   },
   async (conn, mek, m, { from, isGroup, reply, sender }) => {
